@@ -12,11 +12,12 @@ from sentence_transformers import SentenceTransformer
 
 ROOT = Path(__file__).parent.parent
 CHROMA_DB_PATH = ROOT / "data" / "chroma_db"
-EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
+EMBEDDING_MODEL = "BAAI/bge-m3"   # רב-לשוני (עברית+אנגלית), 1024 מימד
 COLLECTION_NAME = "chavruta_torah"
 
 print("טוען מודל ו-DB...")
 model = SentenceTransformer(EMBEDDING_MODEL, device="cpu")
+model.max_seq_length = 512   # תואם לבנייה
 client = chromadb.PersistentClient(
     path=str(CHROMA_DB_PATH),
     settings=Settings(anonymized_telemetry=False),

@@ -50,8 +50,9 @@ DATA_PROCESSED = ROOT_DIR / "data" / "processed"
 CHROMA_DB_PATH = ROOT_DIR / "data" / "chroma_db"
 
 # ─── הגדרות ──────────────────────────────────────────────────────────────────
-EMBEDDING_MODEL  = "BAAI/bge-small-en-v1.5"
-EMBEDDING_BATCH  = 32          # מותאם ל-16GB RAM + CPU
+EMBEDDING_MODEL  = "BAAI/bge-m3"   # רב-לשוני (עברית+אנגלית), 1024 מימד
+EMBEDDING_BATCH  = 8           # bge-m3 כבד פי ~17 — batch קטן ל-16GB RAM + CPU
+EMBEDDING_MAX_SEQ = 512        # חיתוך אורך — חוסך זמן/RAM משמעותית ב-CPU
 COLLECTION_NAME  = "chavruta_torah"
 CHUNKS_FILE      = DATA_PROCESSED / "all_chunks.json"
 
@@ -120,6 +121,7 @@ def load_model():
     from sentence_transformers import SentenceTransformer
     log.info("טוען מודל: %s ...", EMBEDDING_MODEL)
     model = SentenceTransformer(EMBEDDING_MODEL, device="cpu")
+    model.max_seq_length = EMBEDDING_MAX_SEQ   # bge-m3 default=8192 — מקצר ל-CPU
     log.info("מודל נטען. מימד: %d", model.get_sentence_embedding_dimension())
     return model
 

@@ -2,7 +2,7 @@
 generate_dataset_v4_test.py — Chavruta.AI Dataset Generator v4
 ===============================================================
 מייצר 50 רשומות בדיקה עם RAG מלא (פסוק + רש"י + רמב"ן בקונטקסט).
-הרץ מקומית עם qwen3.5:4b דרך Ollama.
+הרץ מקומית עם qwen3:4b דרך Ollama.
 
 שימוש:
     python scripts/generate_dataset_v4_test.py
@@ -24,7 +24,7 @@ OUT_FILE    = OUT_DIR  / "test_50_samples.jsonl"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── הגדרות ───────────────────────────────────────────────────────────────────
-MODEL        = "qwen3.5:4b"
+MODEL        = "qwen3:4b"
 TARGET       = 50
 TEMPERATURE  = 0.1
 MAX_TOKENS   = 600

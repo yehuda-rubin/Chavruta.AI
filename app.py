@@ -105,7 +105,7 @@ with st.sidebar:
 
     ollama_model = st.selectbox(
         "מודל Ollama",
-        ["qwen3.5:4b", "gemma3:4b", "gemma3:1b", "mistral"],
+        ["granite4.1:3b", "qwen3:4b", "gemma3:4b", "mistral"],
         index=0,
     )
 

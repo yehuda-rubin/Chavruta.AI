@@ -35,12 +35,12 @@ ROOT_DIR       = Path(__file__).resolve().parent.parent
 CHROMA_DB_PATH = ROOT_DIR / "data" / "chroma_db"
 
 # ─── הגדרות ──────────────────────────────────────────────────────────────────
-EMBEDDING_MODEL  = "BAAI/bge-small-en-v1.5"
+EMBEDDING_MODEL  = "BAAI/bge-m3"   # רב-לשוני (עברית+אנגלית), 1024 מימד
 COLLECTION_NAME  = "chavruta_torah"
 OLLAMA_BASE_URL  = "http://127.0.0.1:11434"
-OLLAMA_MODEL     = "qwen3.5:4b"        # ollama pull qwen3.5:4b
+OLLAMA_MODEL     = "granite4.1:3b"     # ollama pull granite4.1:3b (לא-thinking)
 TOP_K            = 3                   # צ'אנקים לשליפה
-MAX_CONTEXT_CHARS = 2000               # מגבלת הקשר בפרומפט
+MAX_CONTEXT_CHARS = 7000               # מגבלת הקשר (Granite 4 — קונטקסט ארוך; מקור מלא לציטוט)
 
 # ─── Logging ─────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -55,25 +55,23 @@ log = logging.getLogger(__name__)
 # Prompt Templates
 # ════════════════════════════════════════════════════════════════════════════════
 
-SYSTEM_PROMPT = """אתה חברותא — עוזר לימוד תורה מסורתי ומלומד.
-תפקידך לענות על שאלות בתורה על בסיס המקורות שסופקו: חומש, רש"י ורמב"ן.
+SYSTEM_PROMPT = """You are Chavruta, a traditional and learned Torah study partner.
+Answer Torah questions based ONLY on the provided sources (Chumash, Rashi, Ramban, and other commentators).
 
-כללים:
-• ענה תמיד בעברית, גם אם השאלה באנגלית.
-• הסתמך אך ורק על המקורות שניתנו — אל תמציא.
-• ציין את המקור (ספר, פרק, פסוק, מפרש) בכל טענה.
-• כשיש מחלוקת בין רש"י לרמב"ן — הצג את שתי הדעות.
-• אם המקורות אינם מכסים את השאלה — אמור זאת בכנות.
-• שמור על טון של לומד תורה — ענייני, מכבד, בהיר.
-• אל תוסיף תגי <think> או חשיבה גלויה — ענה ישירות בלבד."""
+Rules:
+• Respond in the SAME language as the user's question. Hebrew question → answer in Hebrew; English question → answer in English.
+• Quote the relevant Hebrew source text verbatim, then explain it.
+• Rely ONLY on the provided sources — never invent or add outside information.
+• Cite the source (book, chapter, verse, commentator) for every claim.
+• When Rashi and Ramban disagree, present both views.
+• If the sources do not cover the question, say so honestly.
+• Keep a respectful, clear, scholarly tone. Answer directly — do NOT show reasoning or <think> tags."""
 
-CONTEXT_TEMPLATE = """--- מקורות ---
+CONTEXT_TEMPLATE = """--- SOURCES ---
 {context_blocks}
---- סוף מקורות ---"""
+--- END SOURCES ---"""
 
-QUERY_TEMPLATE = """שאלה: {query}
-
-תשובה:"""
+QUERY_TEMPLATE = """Question: {query}"""
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -107,7 +105,7 @@ class ChavrutaPipeline:
             logging.getLogger().setLevel(logging.INFO)
 
         self._model      = None   # lazy-loaded
-        self._collection = None   # lazy-loaded
+        self._store      = None   # lazy-loaded
 
     # ── Lazy loading ──────────────────────────────────────────────────────────
 
@@ -117,22 +115,20 @@ class ChavrutaPipeline:
             log.info("טוען מודל embedding: %s", EMBEDDING_MODEL)
             from sentence_transformers import SentenceTransformer
             self._model = SentenceTransformer(EMBEDDING_MODEL, device="cpu")
+            self._model.max_seq_length = 512   # תואם לבנייה (bge-m3)
             log.info("מודל נטען.")
         return self._model
 
     @property
-    def collection(self):
-        if self._collection is None:
-            log.info("מתחבר ל-ChromaDB: %s", CHROMA_DB_PATH)
-            import chromadb
-            from chromadb.config import Settings
-            client = chromadb.PersistentClient(
-                path=str(CHROMA_DB_PATH),
-                settings=Settings(anonymized_telemetry=False),
-            )
-            self._collection = client.get_collection(COLLECTION_NAME)
-            log.info("חובר. סה\"כ וקטורים: %d", self._collection.count())
-        return self._collection
+    def store(self):
+        if self._store is None:
+            try:
+                from vector_store import get_store      # הרצה כסקריפט מתוך src/
+            except ImportError:
+                from .vector_store import get_store      # ייבוא כחבילה
+            self._store = get_store()
+            log.info("Vector store: %s | וקטורים: %d", self._store.mode, self._store.count())
+        return self._store
 
     # ── Retrieval ─────────────────────────────────────────────────────────────
 
@@ -170,26 +166,8 @@ class ChavrutaPipeline:
         return "general"
 
     def _query_by_type(self, vec: list, chunk_type: str, k: int) -> list[dict]:
-        """שולף k צ'אנקים מסוג מסוים."""
-        result = self.collection.query(
-            query_embeddings=vec,
-            n_results=k,
-            where={"chunk_type": chunk_type},
-            include=["metadatas", "distances", "documents"],
-        )
-        return [
-            {
-                "meta":       meta,
-                "distance":   dist,
-                "similarity": round(1 - dist, 4),
-                "document":   doc,
-            }
-            for meta, dist, doc in zip(
-                result["metadatas"][0],
-                result["distances"][0],
-                result["documents"][0],
-            )
-        ]
+        """שולף k צ'אנקים מסוג מסוים (דרך שכבת ה-store)."""
+        return self.store.search(vec, k, chunk_type=chunk_type)
 
     def retrieve(self, query: str, k: int | None = None) -> list[dict]:
         """
@@ -203,7 +181,7 @@ class ChavrutaPipeline:
           general    → top-3 לפי similarity (ללא סינון)
         """
         k   = k or self.top_k
-        vec = self.model.encode([query], normalize_embeddings=True).tolist()
+        vec = self.model.encode([query], normalize_embeddings=True)[0].tolist()
         intent = self._detect_intent(query)
         log.info("intent: %s", intent)
 
@@ -227,24 +205,7 @@ class ChavrutaPipeline:
             chunks = self._query_by_type(vec, "chumash", k)
         else:
             # general — top-k ללא סינון
-            result = self.collection.query(
-                query_embeddings=vec,
-                n_results=k,
-                include=["metadatas", "distances", "documents"],
-            )
-            chunks = [
-                {
-                    "meta":       meta,
-                    "distance":   dist,
-                    "similarity": round(1 - dist, 4),
-                    "document":   doc,
-                }
-                for meta, dist, doc in zip(
-                    result["metadatas"][0],
-                    result["distances"][0],
-                    result["documents"][0],
-                )
-            ]
+            chunks = self.store.search(vec, k)
 
         chunks.sort(key=lambda x: x["similarity"], reverse=True)
         return chunks
@@ -270,14 +231,19 @@ class ChavrutaPipeline:
         else:
             header = f"[{ct}/{cmt}] {book} {ch}:{vs}"
 
-        # גוף — רק השורות הרלוונטיות, מקסימום 400 תווים
+        # גוף — מלוא טקסט המקור (חיתוך רק אם ארוך מאוד) כדי שהמודל יצטט נכון
         lines = chunk["document"].split("\n")
-        body_lines = [l for l in lines[1:] if l.strip()]
-        body = "\n".join(body_lines[:3])  # מקסימום 3 שורות
-        if len(body) > 400:
-            body = body[:400].rsplit(" ", 1)[0] + "..."
+        body = "\n".join(l for l in lines[1:] if l.strip())
+        if len(body) > 1500:
+            body = body[:1500].rsplit(" ", 1)[0] + "..."
 
         return f"{header}\n{body}"
+
+    @staticmethod
+    def _answer_language_hint(query: str) -> str:
+        """הנחיית שפת תשובה לפי שפת השאלה (עברית אם יש אותיות עבריות)."""
+        has_he = any("֐" <= c <= "ת" for c in query)
+        return "ענה בעברית בלבד." if has_he else "Answer in English only."
 
     def build_prompt(
         self,
@@ -316,8 +282,9 @@ class ChavrutaPipeline:
         if history:
             messages.extend(history)
 
-        # שאלה + הקשר
-        user_content = f"{context}\n\n{QUERY_TEMPLATE.format(query=query)}"
+        # שאלה + הקשר + הנחיית שפה מפורשת (אמינה יותר מ-system לבדו)
+        hint = self._answer_language_hint(query)
+        user_content = f"{context}\n\n{QUERY_TEMPLATE.format(query=query)}\n\n{hint}"
         messages.append({"role": "user", "content": user_content})
 
         return messages

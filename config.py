@@ -12,8 +12,9 @@ CHROMA_DB_PATH  = BASE_DIR / "data" / "chroma_db"
 SQLITE_PATH     = BASE_DIR / "data" / "chavruta.db"
 
 # ── Embedding ────────────────────────────────────────────
-EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
-EMBEDDING_BATCH = 32
+EMBEDDING_MODEL  = "BAAI/bge-m3"   # רב-לשוני (עברית+אנגלית), 1024 מימד
+EMBEDDING_BATCH  = 8               # bge-m3 כבד יותר — batch קטן ל-CPU/16GB
+EMBEDDING_MAX_SEQ = 512            # חיתוך אורך RAG סביר (חוסך זמן/RAM ב-CPU)
 
 # ── ChromaDB ─────────────────────────────────────────────
 COLLECTION_NAME = "chavruta_torah"
@@ -21,7 +22,7 @@ RETRIEVAL_TOP_K = 5
 
 # ── Ollama ───────────────────────────────────────────────
 OLLAMA_BASE_URL    = "http://localhost:11434"
-OLLAMA_MODEL       = "qwen3.5:4b"
+OLLAMA_MODEL       = "granite4.1:3b"   # לא-thinking, RAG-native (מקומי/offline)
 OLLAMA_TEMPERATURE = 0.3
 OLLAMA_MAX_TOKENS  = 1024
 

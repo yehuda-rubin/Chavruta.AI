@@ -27,8 +27,8 @@ import os
 # ─────────────────────────────────────────────
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--model",   default="Qwen/Qwen3.5-4B",
-                   help="HF id של ה-base. החלף ל-id המדויק אם שונה.")
+    p.add_argument("--model",   default="unsloth/Qwen3-4B",
+                   help="HF id של ה-base (unsloth/Qwen3-4B = יציב ב-fp16 על T4).")
     p.add_argument("--train",   default="data/processed/torah_mixed_train.jsonl")
     p.add_argument("--val",     default="data/processed/torah_mixed_val.jsonl")
     p.add_argument("--out",     default="outputs/chavruta-qwen35-4b-lora")
@@ -105,7 +105,8 @@ def main():
         lr_scheduler_type       = "cosine",
         optim                   = "adamw_8bit",   # חוסך VRAM
         weight_decay            = 0.01,
-        max_seq_length          = args.max_seq,
+        max_length              = args.max_seq,   # TRL החדש: max_length (לא max_seq_length)
+        padding_free            = False,          # TRL מפעיל padding_free כברירת מחדל — מכבים כדי שהחיתוך ל-max_length ייאכף
         dataset_text_field      = "text",
         packing                 = False,          # שלא יערבב דוגמאות
         bf16                    = is_bfloat16_supported(),
