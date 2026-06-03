@@ -73,6 +73,28 @@ CONTEXT_TEMPLATE = """--- SOURCES ---
 
 QUERY_TEMPLATE = """Question: {query}"""
 
+# מיפוי שם ספר (תעתיק) → ref של Sefaria (להעשרה חיה, שלב 1)
+BOOK_TO_SEFARIA = {
+    "Bereishit": "Genesis", "Shemot": "Exodus", "Vayikra": "Leviticus",
+    "Bamidbar": "Numbers", "Devarim": "Deuteronomy",
+}
+
+# שם מפרש קנוני → כינויים (עברית + אנגלית) לזיהוי בשאלה
+COMMENTATORS_CANON = {
+    "Rashi":          ["rashi", 'רש"י', "רשי"],
+    "Ramban":         ["ramban", "nachmanides", 'רמב"ן', "רמבן"],
+    "Ibn Ezra":       ["ibn ezra", "אבן עזרא", 'ראב"ע'],
+    "Radak":          ["radak", "kimchi", 'רד"ק', "רדק"],
+    "Sforno":         ["sforno", "ספורנו"],
+    "Rashbam":        ["rashbam", 'רשב"ם', "רשבם"],
+    "Or HaChaim":     ["or hachaim", "ohr hachaim", "אור החיים", 'אוה"ח'],
+    "Malbim":         ["malbim", 'מלבי"ם', "מלבים"],
+    "Metzudat David": ["metzudat david", "מצודת דוד", "מצודות"],
+    "Metzudat Zion":  ["metzudat zion", "מצודת ציון"],
+    "Onkelos":        ["onkelos", "אונקלוס", "targum onkelos", "תרגום אונקלוס"],
+    "Targum Jonathan":["targum jonathan", "תרגום יונתן", "יונתן בן עוזיאל"],
+}
+
 
 # ════════════════════════════════════════════════════════════════════════════════
 # Pipeline
@@ -165,11 +187,21 @@ class ChavrutaPipeline:
             return "chumash"
         return "general"
 
+    @staticmethod
+    def _detect_commentators(query: str) -> list[str]:
+        """מזהה אילו מפרשים מוזכרים בשאלה (לפי כינויים עבריים/אנגליים)."""
+        q = query.lower()
+        found = []
+        for name, aliases in COMMENTATORS_CANON.items():
+            if any(a.lower() in q for a in aliases):
+                found.append(name)
+        return found
+
     def _query_by_type(self, vec: list, chunk_type: str, k: int) -> list[dict]:
         """שולף k צ'אנקים מסוג מסוים (דרך שכבת ה-store)."""
         return self.store.search(vec, k, chunk_type=chunk_type)
 
-    def retrieve(self, query: str, k: int | None = None) -> list[dict]:
+    def retrieve(self, query: str, k: int | None = None, enrich: bool = False) -> list[dict]:
         """
         שולף צ'אנקים לפי כוונת השאלה (smart retrieval).
 
@@ -180,35 +212,84 @@ class ChavrutaPipeline:
           chumash    → 3 חומש
           general    → top-3 לפי similarity (ללא סינון)
         """
-        k   = k or self.top_k
-        vec = self.model.encode([query], normalize_embeddings=True)[0].tolist()
-        intent = self._detect_intent(query)
-        log.info("intent: %s", intent)
+        k     = k or self.top_k
+        vec   = self.model.encode([query], normalize_embeddings=True)[0].tolist()
+        named = self._detect_commentators(query)
+        log.info("מפרשים בשאלה: %s", named or "—")
 
-        if intent == "comparison":
-            chunks = (
-                self._query_by_type(vec, "chumash", 1) +
-                self._query_by_type(vec, "rashi",   1) +
-                self._query_by_type(vec, "ramban",  1)
-            )
-        elif intent == "rashi":
-            chunks = (
-                self._query_by_type(vec, "rashi",   2) +
-                self._query_by_type(vec, "chumash", 1)
-            )
-        elif intent == "ramban":
-            chunks = (
-                self._query_by_type(vec, "ramban",  2) +
-                self._query_by_type(vec, "chumash", 1)
-            )
-        elif intent == "chumash":
-            chunks = self._query_by_type(vec, "chumash", k)
+        # עוגן ראשי (primary): הפסוקים הרלוונטיים ביותר
+        chunks = self.store.search(vec, 2, chunk_type="pasuk")
+
+        if named:
+            # שאלה על מפרש/ים ספציפיים → הבא אותם
+            per = max(2, k // len(named))
+            for name in named:
+                chunks += self.store.search(vec, per, commentator=name)
         else:
-            # general — top-k ללא סינון
-            chunks = self.store.search(vec, k)
+            # כללי → מיטב הפירושים לפי דמיון (כל מפרש)
+            chunks += self.store.search(vec, k, chunk_type="commentary")
 
-        chunks.sort(key=lambda x: x["similarity"], reverse=True)
-        return chunks
+        # dedup לפי (פסוק, מפרש) + מיון לפי דמיון
+        seen, uniq = set(), []
+        for c in chunks:
+            key = (c["meta"].get("verse_id"), c["meta"].get("commentator"))
+            if key in seen:
+                continue
+            seen.add(key)
+            uniq.append(c)
+        uniq.sort(key=lambda x: x["similarity"], reverse=True)
+
+        # שלב 1 — העשרה חיה מ-Sefaria (אופציונלי, מקוון)
+        if enrich:
+            uniq = uniq + self.enrich_with_sefaria(uniq)
+        return uniq
+
+    def enrich_with_sefaria(self, chunks: list[dict],
+                            names: list[str] | None = None) -> list[dict]:
+        """
+        מעשיר את ההקשר במפרשים נוספים מ-Sefaria על הפסוק המרכזי (התוצאה העליונה):
+        אבן-עזרא, רד"ק, ספורנו, רשב"ם, אור החיים — מעבר לרש"י/רמב"ן המקומיים.
+        דורש אינטרנט (הפרופיל המקוון). מחזיר צ'אנקים בפורמט הרגיל.
+        """
+        if not chunks:
+            return []
+        m = chunks[0]["meta"]
+        book, ch, vs = m.get("book", ""), m.get("chapter"), m.get("verse")
+        sef_book = BOOK_TO_SEFARIA.get(book)
+        if not (sef_book and ch and vs):
+            return []
+        ref = f"{sef_book} {ch}:{vs}"
+
+        try:
+            import sefaria_client
+        except ImportError:
+            from . import sefaria_client
+
+        extra = names or ["Ibn Ezra", "Radak", "Sforno", "Rashbam", "Or HaChaim"]
+        have = {c["meta"].get("commentator", "") for c in chunks}
+        anchor_sim = chunks[0].get("similarity", 0.5)
+
+        try:
+            fetched = sefaria_client.get_commentaries(ref, names=extra, include_targum=False)
+        except Exception as e:
+            log.warning("Sefaria enrich נכשל (%s) — ממשיך בלי העשרה", e)
+            return []
+
+        out = []
+        for c in fetched:
+            if c["commentator"] in have or not (c["he"] or c["en"]):
+                continue
+            doc = f"[{c['commentator']}] {book} {ch}:{vs}\n{c['he']}\n{c['en']}"
+            out.append({
+                "meta": {"book": book, "chapter": ch, "verse": vs,
+                         "chunk_type": "commentary", "commentator": c["commentator"],
+                         "verse_id": m.get("verse_id", "")},
+                "document":   doc,
+                "similarity": round(anchor_sim - 0.01, 4),
+                "distance":   round(1 - (anchor_sim - 0.01), 4),
+            })
+        log.info("Sefaria enrich: +%d מפרשים על %s", len(out), ref)
+        return out
 
     # ── Prompt Builder ────────────────────────────────────────────────────────
 
@@ -222,14 +303,12 @@ class ChavrutaPipeline:
         cmt  = meta.get("commentator", "")
 
         # כותרת
-        if ct == "chumash":
-            header = f"[חומש] {book} {ch}:{vs}"
-        elif ct == "rashi":
-            header = f"[רש\"י] {book} {ch}:{vs}"
-        elif ct == "ramban":
-            header = f"[רמב\"ן] {book} {ch}:{vs}"
+        if ct in ("pasuk", "chumash"):
+            header = f"[{book} {ch}:{vs}]"
+        elif cmt:
+            header = f"[{cmt}] {book} {ch}:{vs}"
         else:
-            header = f"[{ct}/{cmt}] {book} {ch}:{vs}"
+            header = f"[{ct}] {book} {ch}:{vs}"
 
         # גוף — מלוא טקסט המקור (חיתוך רק אם ארוך מאוד) כדי שהמודל יצטט נכון
         lines = chunk["document"].split("\n")
@@ -345,6 +424,7 @@ class ChavrutaPipeline:
         self,
         query: str,
         history: list[dict] | None = None,
+        enrich: bool = False,
     ) -> dict:
         """
         שאלה מלאה — retrieval + generation.
@@ -359,7 +439,7 @@ class ChavrutaPipeline:
         log.info("שאלה: %s", query)
 
         # 1. Retrieval
-        chunks = self.retrieve(query)
+        chunks = self.retrieve(query, enrich=enrich)
         log.info("נשלפו %d צ'אנקים", len(chunks))
 
         # 2. Prompt
@@ -408,14 +488,12 @@ class ChavrutaPipeline:
             ct   = meta.get("chunk_type", "?")
             cmt  = meta.get("commentator", "")
 
-            if ct == "chumash":
-                label = f"חומש — {book} {ch}:{vs}"
-            elif ct == "rashi":
-                label = f"רש\"י — {book} {ch}:{vs}"
-            elif ct == "ramban":
-                label = f"רמב\"ן — {book} {ch}:{vs}"
+            if ct in ("pasuk", "chumash"):
+                label = f"{book} {ch}:{vs}"
+            elif cmt:
+                label = f"{cmt} — {book} {ch}:{vs}"
             else:
-                label = f"{ct}/{cmt} — {book} {ch}:{vs}"
+                label = f"{ct} — {book} {ch}:{vs}"
 
             if label not in seen:
                 seen.add(label)

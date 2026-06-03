@@ -20,12 +20,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("question", nargs="+", help="השאלה")
     ap.add_argument("--k", type=int, default=None, help="כמה צ'אנקים לשלוף")
+    ap.add_argument("--enrich", action="store_true",
+                    help="העשרה חיה מ-Sefaria (אבן-עזרא, רד\"ק, ספורנו... — דורש אינטרנט)")
     args = ap.parse_args()
     q = " ".join(args.question)
 
     p = ChavrutaPipeline(top_k=args.k) if args.k else ChavrutaPipeline()
     print(f"\n🙋 {q}")
-    res = p.ask(q)
+    res = p.ask(q, enrich=args.enrich)
 
     print("\n📖 SOURCES:")
     for s in res["sources"]:

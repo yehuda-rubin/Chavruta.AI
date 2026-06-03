@@ -27,18 +27,23 @@ def main():
     ap.add_argument("--private", action="store_true", help="צור repo פרטי")
     ap.add_argument("--with_source", action="store_true",
                     help="העלה גם את all_chunks.json (107MB) כדי לאפשר רגנרציה")
+    ap.add_argument("--full", action="store_true",
+                    help="העלה רק את all_chunks_full.json (הקורפוס המלא — תנ\"ך + מפרשים)")
     args = ap.parse_args()
 
     from huggingface_hub import HfApi, create_repo
 
     # הקבצים שמהם המחברת תמשוך
-    files = [
-        ("data/processed/torah_mixed_train.jsonl", "torah_mixed_train.jsonl"),
-        ("data/processed/torah_mixed_val.jsonl",   "torah_mixed_val.jsonl"),
-        ("scripts/train_lora.py",                  "train_lora.py"),
-    ]
-    if args.with_source:
-        files.append(("data/processed/all_chunks.json", "all_chunks.json"))
+    if args.full:
+        files = [("data/processed/all_chunks_full.json", "all_chunks_full.json")]
+    else:
+        files = [
+            ("data/processed/torah_mixed_train.jsonl", "torah_mixed_train.jsonl"),
+            ("data/processed/torah_mixed_val.jsonl",   "torah_mixed_val.jsonl"),
+            ("scripts/train_lora.py",                  "train_lora.py"),
+        ]
+        if args.with_source:
+            files.append(("data/processed/all_chunks.json", "all_chunks.json"))
 
     missing = [src for src, _ in files if not Path(src).exists()]
     if missing:

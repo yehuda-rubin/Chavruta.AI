@@ -36,16 +36,19 @@ class QdrantStore:
         return self.client.count(self.collection).count
 
     def search(self, vector: list[float], k: int,
-               chunk_type: str | None = None) -> list[dict]:
+               chunk_type: str | None = None,
+               commentator: str | None = None) -> list[dict]:
         """
-        מחזיר רשימת {meta, document, similarity, distance} —
-        תואם בדיוק לפורמט ש-rag_pipeline ציפה לו מ-ChromaDB.
+        מחזיר רשימת {meta, document, similarity, distance}.
+        סינון אופציונלי לפי chunk_type (pasuk/commentary) ו/או commentator.
         """
         from qdrant_client.models import Filter, FieldCondition, MatchValue
-        flt = None
+        conds = []
         if chunk_type:
-            flt = Filter(must=[FieldCondition(
-                key="chunk_type", match=MatchValue(value=chunk_type))])
+            conds.append(FieldCondition(key="chunk_type", match=MatchValue(value=chunk_type)))
+        if commentator:
+            conds.append(FieldCondition(key="commentator", match=MatchValue(value=commentator)))
+        flt = Filter(must=conds) if conds else None
 
         hits = self.client.query_points(
             collection_name=self.collection,

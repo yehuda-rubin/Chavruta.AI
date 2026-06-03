@@ -77,7 +77,21 @@
       "Bash(.venv/Scripts/python.exe -m py_compile src/rag_pipeline.py)",
       "Bash(PYTHONWARNINGS=ignore HF_HUB_DISABLE_SYMLINKS_WARNING=1 .venv/Scripts/python.exe -u scripts/ask.py \"According to Rashi, why does the Torah call the light good?\")",
       "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(.venv/Scripts/python.exe -m py_compile src/rag_pipeline.py scripts/ask.py)",
+      "Bash(PYTHONWARNINGS=ignore HF_HUB_DISABLE_SYMLINKS_WARNING=1 .venv/Scripts/python.exe -u -c ' *)",
+      "Bash(.venv/Scripts/python.exe -m py_compile scripts/fetch_corpus.py)",
+      "Bash(.venv/Scripts/python.exe scripts/fetch_corpus.py --books Genesis)",
+      "Bash(.venv/Scripts/python.exe -u scripts/fetch_corpus.py)",
+      "Bash(.venv/Scripts/python.exe scripts/_build_embed_nb2.py)",
+      "Bash(.venv/Scripts/python.exe -c \"import json; nb=json.load\\(open\\('notebooks/embed_corpus_full_colab.ipynb',encoding='utf-8'\\)\\); print\\('valid | cells:', len\\(nb['cells']\\)\\)\")",
+      "Bash(rm scripts/_build_embed_nb2.py)",
+      "Bash(.venv/Scripts/python.exe -m py_compile scripts/upload_dataset_hf.py)",
+      "Bash(.venv/Scripts/python.exe scripts/_build_kaggle_nb.py)",
+      "Bash(.venv/Scripts/python.exe -c \"import json; nb=json.load\\(open\\('notebooks/embed_corpus_full_kaggle.ipynb',encoding='utf-8'\\)\\); print\\('valid | cells:', len\\(nb['cells']\\)\\)\")",
+      "Bash(rm scripts/_build_kaggle_nb.py notebooks/embed_corpus_full_colab.ipynb)",
+      "Bash(.venv/Scripts/python.exe scripts/upload_dataset_hf.py --repo Yehuda-Rubin/chavruta-torah-mixed --full)",
+      "Bash(.venv/Scripts/python.exe -m py_compile src/rag_pipeline.py src/vector_store.py)"
     ],
     "additionalDirectories": [
       "C:\\Users\\rubin\\.cache\\huggingface"
