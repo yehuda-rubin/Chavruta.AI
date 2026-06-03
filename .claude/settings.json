@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\rubin\\\\Documents\\\\Chavruta.AI\" -Force)",
+      "Bash(Select-Object Name, PSIsContainer)",
+      "Bash(Format-Table)",
+      "PowerShell(New-Item -ItemType Directory -Force \"c:\\\\Users\\\\rubin\\\\Documents\\\\Chavruta.AI\\\\docs\")",
+      "PowerShell(New-Item -ItemType Directory -Force \"c:\\\\Users\\\\rubin\\\\Documents\\\\Chavruta.AI\\\\scripts\")",
+      "PowerShell(New-Item -ItemType Directory -Force \"c:\\\\Users\\\\rubin\\\\Documents\\\\Chavruta.AI\\\\data\\\\raw\")",
+      "PowerShell(cd \"c:\\\\Users\\\\rubin\\\\Documents\\\\Chavruta.AI\"; python --version; Get-ChildItem -Name | Where-Object { $_ -match \"venv|env|\\\\.venv\" })",
+      "Bash(python -c ' *)",
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Read(//c/Users/rubin/.claude/projects/c--Users-rubin-Documents-Chavruta-AI/memory/**)",
+      "Bash(.venv\\\\Scripts\\\\pip install *)",
+      "Bash(.venvScriptspython -c ' *)",
+      "PowerShell(Start-Process -FilePath \"ollama\" -ArgumentList \"serve\" -WindowStyle Hidden)",
+      "PowerShell(ollama list 2>&1)",
+      "PowerShell(Test-NetConnection -ComputerName localhost -Port 11434 2>&1)",
+      "PowerShell(netstat -ano)",
+      "PowerShell(cd \"c:\\\\Users\\\\rubin\\\\Documents\\\\Chavruta.AI\"; $proc = Start-Process -FilePath \".venv\\\\Scripts\\\\streamlit\" -ArgumentList \"run app.py --server.headless true\" -PassThru -WindowStyle Hidden; Start-Sleep -Seconds 8; $result = Test-NetConnection -ComputerName 127.0.0.1 -Port 8501 -WarningAction SilentlyContinue; Write-Output \"Streamlit port 8501 open: $\\($result.TcpTestSucceeded\\)\"; Start-Sleep -Seconds 2; Stop-Process -Id $proc.Id -Force; Write-Output \"Streamlit stopped.\")",
+      "PowerShell(ollama pull llama3.2:3b 2>&1)",
+      "PowerShell(Stop-Process -Id \\(Get-Process ollama -ErrorAction SilentlyContinue | Select-Object -First 1\\).Id -Force -ErrorAction SilentlyContinue; Write-Output \"Cancelled.\")",
+      "Bash(.venv\\\\Scripts\\\\activate)",
+      "Bash(python scripts/build_vectordb.py --verify)",
+      "PowerShell(ollama rm gemma4:latest 2>&1)",
+      "PowerShell(ollama ps 2>&1)",
+      "Bash(python scripts/build_mixed_dataset.py)"
+    ]
+  }
+}

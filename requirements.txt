@@ -1,0 +1,29 @@
+# ===========================
+# Chavruta.AI — Dependencies
+# ===========================
+
+# Core RAG
+chromadb==0.5.3
+sentence-transformers==3.0.1
+langchain-community==0.2.5
+langchain-core==0.2.5
+
+# Local LLM
+ollama==0.2.1
+
+# Data Collection
+requests==2.32.3
+tqdm==4.66.4
+
+# NLP & Text Processing
+nltk==3.8.1
+regex==2024.5.15
+
+# Database (sqlite3 כלול ב-Python stdlib)
+
+# UI
+streamlit==1.36.0
+
+# Dev Tools
+pytest==8.2.2
+python-dotenv==1.0.1
