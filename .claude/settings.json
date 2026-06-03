@@ -24,7 +24,12 @@
       "Bash(python scripts/build_vectordb.py --verify)",
       "PowerShell(ollama rm gemma4:latest 2>&1)",
       "PowerShell(ollama ps 2>&1)",
-      "Bash(python scripts/build_mixed_dataset.py)"
+      "Bash(python scripts/build_mixed_dataset.py)",
+      "Bash(git fetch *)",
+      "Bash(git rev-list *)",
+      "Bash(git cat-file *)",
+      "Bash(awk '$1==\"blob\" && $2>52428800 {printf \"%.1f MB  %s\\\\n\", $2/1048576, $3}')",
+      "Bash(git push *)"
     ]
   }
 }
