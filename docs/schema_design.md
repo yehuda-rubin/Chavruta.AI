@@ -1,5 +1,9 @@
 # תכנון סכמת נתונים — Chavruta.AI
 
+> ⚠️ **מסמך היסטורי (Torah MVP).** מתאר את סכמת ChromaDB המקורית (וקטור 384, chunk_type=chumash/rashi/ramban).
+> הסכמה הנוכחית: **Qdrant** (וקטור 1024 מ-bge-m3), `chunk_type=pasuk/commentary` + `commentator`.
+> ראה [DECISIONS.md](DECISIONS.md) · [CORPUS.md](CORPUS.md).
+
 > **גרסה:** 0.1 (PoC)
 > **עודכן:** מאי 2026
 > **מטרה:** הגדרת מבני הנתונים, אסטרטגיית ה-Chunking, ותצורת מסד הנתונים הוקטורי.

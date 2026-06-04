@@ -1,5 +1,8 @@
 # מפת דרכים — Chavruta.AI
 
+> ⚠️ **מסמך היסטורי (Torah MVP).** מפת הדרכים הנוכחית (RAG על כל התנ"ך, bge-m3, Qdrant, Nebius)
+> נמצאת ב-[PLAN.md](PLAN.md) · החלטות טכניות ב-[DECISIONS.md](DECISIONS.md).
+
 > **גרסה:** 0.3  
 > **עודכן:** מאי 2026  
 > **יעד:** PoC פונקציונלי → Fine-tuned model מותאם לתורה.

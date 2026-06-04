@@ -109,6 +109,12 @@ with st.sidebar:
         index=0,
     )
 
+    enrich = st.checkbox(
+        "🌐 העשרה חיה מ-Sefaria",
+        value=False,
+        help="מפרשים נוספים על הפסוק המרכזי (דורש אינטרנט)",
+    )
+
     st.divider()
 
     # כפתור טעינה
@@ -119,9 +125,11 @@ with st.sidebar:
 
     # סטטוס
     if st.session_state.pipeline:
-        col = st.session_state.pipeline.collection
-        total = col.count()
-        st.success(f"✅ DB פעיל — {total:,} וקטורים")
+        try:
+            total = st.session_state.pipeline.store.count()
+            st.success(f"✅ Qdrant פעיל — {total:,} וקטורים")
+        except Exception as e:
+            st.error(f"⚠️ Qdrant לא זמין: {e}")
     else:
         st.warning("⚠️ המודל לא נטען")
 
@@ -133,8 +141,8 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
-    st.caption("Chavruta.AI • Local RAG • חמישה חומשי תורה")
-    st.caption("רש\"י • רמב\"ן • בגרסא מקומית")
+    st.caption("Chavruta.AI • RAG על כל התנ\"ך")
+    st.caption("12 מפרשים • bge-m3 • Qdrant")
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -173,9 +181,9 @@ with chat_container:
                         book = meta.get("book", "?")
                         ch   = meta.get("chapter", "?")
                         vs   = meta.get("verse", "?")
-                        ct   = meta.get("chunk_type", "?")
+                        cmt  = meta.get("commentator", "") or meta.get("chunk_type", "?")
                         sim  = chunk["similarity"]
-                        st.markdown(f"**{i}. [{ct}] {book} {ch}:{vs}** — sim={sim:.3f}")
+                        st.markdown(f"**{i}. [{cmt}] {book} {ch}:{vs}** — sim={sim:.3f}")
                         st.text(chunk["document"][:400])
                         st.divider()
 
@@ -219,7 +227,7 @@ if submit and query.strip():
 
         # שליפת צ'אנקים
         with st.spinner("🔍 מחפש במקורות..."):
-            chunks   = pipeline.retrieve(query.strip())
+            chunks   = pipeline.retrieve(query.strip(), enrich=enrich)
             messages = pipeline.build_prompt(query.strip(), chunks, history)
 
         # Streaming response
@@ -266,7 +274,7 @@ if not st.session_state.messages:
     st.markdown("""
     <div style="text-align:center; padding:40px; color:#888;">
         <h2>ברוך הבא לחברותא AI 🕍</h2>
-        <p>עוזר לימוד תורה מקומי — חמישה חומשי תורה עם רש"י ורמב"ן</p>
+        <p>עוזר לימוד תורה — כל התנ"ך עם 12 מפרשים (רש"י, רמב"ן, אבן עזרא, רד"ק, מלבי"ם ועוד)</p>
         <br>
         <b>שאלות לדוגמה:</b>
         <ul style="list-style:none; padding:0;">

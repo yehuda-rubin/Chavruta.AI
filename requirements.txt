@@ -2,28 +2,30 @@
 # Chavruta.AI — Dependencies
 # ===========================
 
-# Core RAG
-chromadb==0.5.3
-sentence-transformers==3.0.1
-langchain-community==0.2.5
-langchain-core==0.2.5
+# Embeddings (bge-m3, multilingual HE+EN)
+sentence-transformers>=3.0.0
+numpy>=1.26
 
-# Local LLM
-ollama==0.2.1
+# Vector store — Qdrant (embedded local / server)
+qdrant-client>=1.9
 
-# Data Collection
+# Corpus + dataset hosting (Sefaria API, Hugging Face Hub)
 requests==2.32.3
+huggingface_hub>=0.23
 tqdm==4.66.4
 
-# NLP & Text Processing
-nltk==3.8.1
-regex==2024.5.15
+# Local LLM generation (Ollama: granite4.1:3b)
+ollama>=0.3.0
 
-# Database (sqlite3 כלול ב-Python stdlib)
+# Cloud generation (Nebius Token Factory — OpenAI-compatible; used only in the cloud profile)
+openai>=1.30
 
 # UI
 streamlit==1.36.0
 
-# Dev Tools
-pytest==8.2.2
+# Dev / config
 python-dotenv==1.0.1
+pytest==8.2.2
+
+# ── Legacy (Torah MVP — superseded by Qdrant; kept for scripts/build_vectordb.py) ──
+chromadb==0.5.3

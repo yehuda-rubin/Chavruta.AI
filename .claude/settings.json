@@ -91,7 +91,9 @@
       "Bash(.venv/Scripts/python.exe -c \"import json; nb=json.load\\(open\\('notebooks/embed_corpus_full_kaggle.ipynb',encoding='utf-8'\\)\\); print\\('valid | cells:', len\\(nb['cells']\\)\\)\")",
       "Bash(rm scripts/_build_kaggle_nb.py notebooks/embed_corpus_full_colab.ipynb)",
       "Bash(.venv/Scripts/python.exe scripts/upload_dataset_hf.py --repo Yehuda-Rubin/chavruta-torah-mixed --full)",
-      "Bash(.venv/Scripts/python.exe -m py_compile src/rag_pipeline.py src/vector_store.py)"
+      "Bash(.venv/Scripts/python.exe -m py_compile src/rag_pipeline.py src/vector_store.py)",
+      "Bash(.venv/Scripts/python.exe -m py_compile scripts/eval.py)",
+      "Bash(.venv/Scripts/python.exe -m py_compile app.py)"
     ],
     "additionalDirectories": [
       "C:\\Users\\rubin\\.cache\\huggingface"
