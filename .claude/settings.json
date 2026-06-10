@@ -117,7 +117,9 @@
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\rubin\\\\Documents\\\\Chavruta.AI\\\\src\\\\chavruta\" -Directory)",
       "Bash(Select-Object Name)",
       "Bash(grep -E \"\\\\.py$\")",
-      "PowerShell(Get-ChildItem \"c:\\\\Users\\\\rubin\\\\Documents\\\\Chavruta.AI\\\\data\\\\qdrant\" -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum | ForEach-Object { \"qdrant storage: {0:N1} MB\" -f \\($_.Sum/1MB\\) })"
+      "PowerShell(Get-ChildItem \"c:\\\\Users\\\\rubin\\\\Documents\\\\Chavruta.AI\\\\data\\\\qdrant\" -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum | ForEach-Object { \"qdrant storage: {0:N1} MB\" -f \\($_.Sum/1MB\\) })",
+      "WebFetch(domain:huggingface.co)",
+      "Bash(./.venv/Scripts/python.exe -c ' *)"
     ],
     "additionalDirectories": [
       "C:\\Users\\rubin\\.cache\\huggingface",

@@ -137,7 +137,12 @@ def evaluate(pipeline, items: list[EvaluationItem], *, dataset_name: str = "",
         else:
             # Unanswerable by design — the honest path must hold (never fabricate).
             report.n_unanswerable += 1
-            if result.is_empty:
+            registry = getattr(pipeline, "registry", None)
+            asks_unloaded_work = bool(
+                registry is not None and query.requested_works
+                and not any(registry.has(w) for w in query.requested_works)
+            )
+            if asks_unloaded_work or result.is_empty:
                 report.no_source_honest += 1
             elif not retrieval_only:
                 answer = pipeline.ask(Query(text=item.question, lang=item.lang))

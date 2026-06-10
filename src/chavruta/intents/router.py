@@ -29,6 +29,21 @@ COMMENTATOR_ALIASES: dict[str, tuple[str, ...]] = {
     "targum_jonathan": ("targum jonathan", "תרגום יונתן"),
 }
 
+# Known bodies of work users ask about by name. Detecting an explicit mention lets the
+# pipeline answer honestly when that work is not loaded (Principle I — the spec's
+# "out-of-corpus question" edge case), instead of returning merely-similar Tanakh hits.
+WORK_ALIASES: dict[str, tuple[str, ...]] = {
+    "tanakh": ("tanakh", "tanach", "תנ\"ך", "תנך", "תנ״ך", "מקרא"),
+    "mishnah": ("mishnah", "mishna", "משנה", "מסכת"),
+    "talmud": ("talmud", "gemara", "גמרא", "תלמוד", "בבלי", "ירושלמי"),
+    "shulchan_aruch": ("shulchan aruch", "שולחן ערוך", "שו\"ע", "שו״ע"),
+    "tur": ("the tur", "טור "),
+    "mishneh_torah": ("mishneh torah", "משנה תורה", "rambam", 'הרמב"ם במשנה'),
+    "zohar": ("zohar", "זוהר", "הזוהר"),
+    "mishnah_berurah": ("mishnah berurah", "משנה ברורה"),
+    "midrash": ("midrash", "מדרש"),
+}
+
 # English book names as they appear in the corpus ref scheme ("Genesis.1.3")
 _BOOKS = (
     "Genesis|Exodus|Leviticus|Numbers|Deuteronomy|Joshua|Judges|I Samuel|II Samuel|"
@@ -67,6 +82,16 @@ def detect_commentators(text: str) -> list[str]:
     for cid, aliases in COMMENTATOR_ALIASES.items():
         if any(a in low or a in text for a in aliases):
             found.append(cid)
+    return found
+
+
+def detect_requested_works(text: str) -> list[str]:
+    """Which bodies of work does the question explicitly name? (e.g. 'מה אומרת המשנה…')"""
+    low = text.lower()
+    found = []
+    for work_id, aliases in WORK_ALIASES.items():
+        if any(a in low or a in text for a in aliases):
+            found.append(work_id)
     return found
 
 
@@ -116,6 +141,11 @@ class Router:
             refs = detect_refs(query.text)
             if refs:
                 query.named_refs = refs
+
+        if query.requested_works is None:
+            works = detect_requested_works(query.text)
+            if works:
+                query.requested_works = works
 
         if query.intent is Intent.QA:   # only override the default, never an explicit choice
             query.intent = detect_intent(query.text, len(commentators))

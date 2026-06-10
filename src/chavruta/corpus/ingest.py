@@ -106,11 +106,24 @@ def payload_from_legacy_meta(meta: dict, work_id: str = "tanakh") -> dict:
 
 
 def load_processed_chunks(out_dir: str | Path) -> Iterator[StoredChunk]:
-    """Yield StoredChunks from a legacy `out/` dir (dense-only; sparse added on re-embed)."""
+    """Yield StoredChunks from an `out/` dir produced by embed_corpus_gpu.py.
+
+    Picks up `corpus_sparse.jsonl` automatically when present (full hybrid, D5);
+    otherwise yields dense-only chunks (the fallback mode for legacy vectors).
+    """
     import numpy as np  # lazy
 
     out = Path(out_dir)
     vecs = np.load(out / "corpus_vectors.npy")
+
+    sparse_path = out / "corpus_sparse.jsonl"
+    sparse_by_idx: dict[int, dict[int, float]] = {}
+    if sparse_path.exists():
+        with sparse_path.open(encoding="utf-8") as f:
+            for line in f:
+                d = json.loads(line)
+                sparse_by_idx[d["i"]] = {int(t): float(w) for t, w in d["sparse"].items()}
+
     with (out / "corpus_meta.jsonl").open(encoding="utf-8") as f:
         for j, line in enumerate(f):
             meta = json.loads(line)
@@ -118,6 +131,6 @@ def load_processed_chunks(out_dir: str | Path) -> Iterator[StoredChunk]:
             yield StoredChunk(
                 chunk_id=payload["chunk_id"],
                 dense=[float(x) for x in vecs[j]],
-                sparse={},                         # legacy vectors are dense-only (D5 fallback)
+                sparse=sparse_by_idx.get(j, {}),
                 payload=payload,
             )

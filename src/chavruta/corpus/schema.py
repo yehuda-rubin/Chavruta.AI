@@ -140,6 +140,7 @@ class Query:
     work_ids: Optional[list[str]] = None         # corpus scoping; None = all loaded
     commentator_ids: Optional[list[str]] = None  # named-commentator bias/filter
     named_refs: Optional[list[str]] = None       # explicit verse refs detected in the question
+    requested_works: Optional[list[str]] = None  # works the question explicitly asks about
     expand_links: bool = False                   # follow Link edges + anchor chains
     expand_depth: int = 1
 

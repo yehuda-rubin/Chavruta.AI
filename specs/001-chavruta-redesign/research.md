@@ -4,6 +4,14 @@ Key technical decisions, each with rationale and the alternatives considered. Al
 are constrained by the Constitution (esp. II deployment-agnostic, III dynamic corpus, VI
 simplicity) and the offline envelope (CPU-only 16GB laptop).
 
+> **Update 2026-06-10 — Dicta-LM 3.0 (released 2026-02)**: Dicta released DictaLM-3.0 in
+> 24B (Mistral-Small-3.1), Nemotron-12B, and 1.7B (Qwen3) sizes, 65k context, base/instruct/
+> thinking variants. Within the 4–5GB local budget: 24B Q4 (~14GB) is out; **12B has no GGUF
+> yet** (only FP8/W4A16 GPU formats) and Q4 would be ~7GB; **1.7B-Instruct has GGUF** and is
+> a strong lightweight candidate (~2GB, 65k context, fast on CPU). Decision: keep 2.0-7B-Q4
+> as the default, evaluate 3.0-1.7B-Instruct against it with the eval harness, and treat
+> 3.0-12B as the upgrade path when a GGUF lands. Cloud profile may use 3.0-24B.
+
 ## D1 — Local LLM: DictaLM-2.0-Instruct (GGUF Q4), config-swappable
 
 - **Decision**: Use `DictaLM-2.0-Instruct` (7B, Mistral-based, Hebrew-specialized by Dicta)

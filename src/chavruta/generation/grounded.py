@@ -105,6 +105,23 @@ def enforce_citations(
     return clean.strip(), citations, grounded
 
 
+def work_not_loaded_answer(lang: str, missing_works: list[str], intent: Intent) -> Answer:
+    """Honest answer when the question asks about a work that is not in the library yet
+    (the spec's out-of-corpus edge case). Similar-sounding hits from other works must not
+    masquerade as the requested source (Principle I)."""
+    names = ", ".join(missing_works)
+    if lang == "he":
+        msg = (f"השאלה מתייחסת ל־{names}, שעדיין אינו טעון בספרייה הנוכחית. "
+               f"איני עונה ממקור אחר כאילו היה המקור המבוקש — ניתן להוסיף את הקורפוס "
+               f"הזה (פעולת data/config) ואז אענה ממנו ישירות.")
+    else:
+        msg = (f"This question refers to {names}, which is not loaded in the current "
+               f"library. I will not answer from a different source as if it were the "
+               f"requested one — that corpus can be added (a data/config operation), "
+               f"and then I will answer from it directly.")
+    return Answer(text=msg, citations=[], grounded=False, no_source=True, intent=intent)
+
+
 def no_commentator_answer(lang: str, missing: list[str], intent: Intent) -> Answer:
     """Honest answer when every requested commentator lacks a comment here (FR-006/007)."""
     names = ", ".join(missing)

@@ -15,6 +15,7 @@ from collections.abc import Iterator
 
 from chavruta.config.profile import Profile
 from chavruta.corpus.links import LinkGraph
+from chavruta.corpus.registry import CorpusRegistry, default_registry
 from chavruta.corpus.schema import Answer, Intent, Query, Turn
 from chavruta.generation import grounded
 from chavruta.retrieval.hybrid import HybridRetriever
@@ -62,9 +63,11 @@ def build_backends(profile: Profile):
 
 
 class ChavrutaPipeline:
-    def __init__(self, profile: Profile | None = None, *, router=None):
+    def __init__(self, profile: Profile | None = None, *, router=None,
+                 registry: CorpusRegistry | None = None):
         self.profile = profile or Profile.from_env()
         self.embedding, self.store, self.llm, self.retriever = build_backends(self.profile)
+        self.registry = registry or default_registry()
         if router is None:
             from chavruta.intents.router import Router
 
@@ -72,11 +75,13 @@ class ChavrutaPipeline:
         self.router = router
 
     @classmethod
-    def from_backends(cls, profile: Profile, *, embedding, store, llm, retriever, router=None):
+    def from_backends(cls, profile: Profile, *, embedding, store, llm, retriever,
+                      router=None, registry: CorpusRegistry | None = None):
         """Construct with injected backends (tests, embedding-free environments)."""
         self = cls.__new__(cls)
         self.profile = profile
         self.embedding, self.store, self.llm, self.retriever = embedding, store, llm, retriever
+        self.registry = registry or default_registry()
         if router is None:
             from chavruta.intents.router import Router
 
@@ -93,6 +98,16 @@ class ChavrutaPipeline:
 
     def ask(self, request: Query, *, history: list[Turn] | None = None) -> Answer:
         query = self._resolve_query(request)
+
+        # Out-of-corpus work honesty (spec edge case): the question explicitly asks about
+        # a body of work that is not loaded → say so; never substitute similar-sounding
+        # material from another work as if it were the requested source (Principle I).
+        if query.requested_works:
+            missing_works = [w for w in query.requested_works if not self.registry.has(w)]
+            loaded_requested = [w for w in query.requested_works if self.registry.has(w)]
+            if missing_works and not loaded_requested:
+                return grounded.work_not_loaded_answer(query.lang, missing_works, query.intent)
+
         result = self.retriever.retrieve(query, top_k=self.profile.top_k)
 
         if result.is_empty:

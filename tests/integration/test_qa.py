@@ -101,3 +101,19 @@ def test_intent_autodetection_routes_compare(pipeline):
     routed = pipeline.router.route(q)
     assert routed.intent is Intent.COMPARE
     assert set(routed.commentator_ids or []) >= {"rashi", "ramban"}
+
+
+def test_unloaded_work_is_honest(pipeline):
+    """A question explicitly about Mishnah/Gemara (not loaded) → honest answer, even though
+    semantically-similar Tanakh chunks exist (spec out-of-corpus edge case)."""
+    for q in ("מה אומרת המשנה במסכת ברכות על קריאת שמע?",
+              "What does the Mishnah in Berakhot say about the Shema?",
+              "מה כתוב בגמרא על שניים אוחזין בטלית?"):
+        answer = pipeline.ask(Query(text=q, lang=""))
+        assert answer.no_source and not answer.citations, q
+
+
+def test_loaded_work_mention_still_answers(pipeline):
+    """Mentioning the loaded work (Tanakh) must NOT trigger the unloaded-work path."""
+    answer = pipeline.ask(Query(text="מה כתוב בתנ\"ך על יהי אור?", lang="he"))
+    assert answer.grounded and answer.citations
