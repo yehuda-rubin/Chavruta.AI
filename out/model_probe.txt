@@ -1,0 +1,4 @@
+RAW OUTPUT (first 800 chars):
+
+---
+has <think>: False | len: 0

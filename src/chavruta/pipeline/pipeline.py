@@ -31,7 +31,8 @@ def build_backends(profile: Profile):
     from chavruta.embedding.bge_m3 import BgeM3Embedding
     from chavruta.store.qdrant_store import QdrantStore
 
-    embedding = BgeM3Embedding(model_id=profile.embedding_model, device=profile.embedding_device)
+    embedding = BgeM3Embedding(model_id=profile.embedding_model, device=profile.embedding_device,
+                               use_sparse=profile.hybrid)
     store = QdrantStore(mode=profile.qdrant_mode, path=profile.qdrant_path, url=profile.qdrant_url)
 
     if profile.llm_backend == "nebius":
@@ -130,7 +131,7 @@ class ChavrutaPipeline:
                 missing_note = grounded.missing_commentator_note(query.lang, missing)
 
         prompt, marker_map = grounded.build_prompt(
-            query.text, result.hits, intent=query.intent, history=history
+            query.text, result.hits, intent=query.intent, history=history, lang=query.lang
         )
         llm_out = self.llm.generate(
             prompt, lang=query.lang,
@@ -156,7 +157,7 @@ class ChavrutaPipeline:
             yield grounded.no_source_answer(query.lang, query.intent).text
             return
         prompt, _ = grounded.build_prompt(
-            query.text, result.hits, intent=query.intent, history=history
+            query.text, result.hits, intent=query.intent, history=history, lang=query.lang
         )
         yield from self.llm.stream(
             prompt, lang=query.lang,

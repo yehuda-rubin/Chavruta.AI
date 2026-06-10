@@ -133,7 +133,10 @@
       "Read(//c/c/Users/rubin/Documents/תואר/עיצוב/תרגילים/ex7/**)",
       "Bash(rm -f *.class)",
       "Bash(ls *.class)",
-      "PowerShell(Get-ChildItem \"$env:USERPROFILE\\\\Downloads\" | Where-Object { $_.Name -match \"chavruta|corpus|hybrid|vectors\" } | Sort-Object LastWriteTime -Descending | Select-Object Name, @{N='MB';E={[math]::Round\\($_.Length/1MB,1\\)}}, LastWriteTime | Format-Table -AutoSize)"
+      "PowerShell(Get-ChildItem \"$env:USERPROFILE\\\\Downloads\" | Where-Object { $_.Name -match \"chavruta|corpus|hybrid|vectors\" } | Sort-Object LastWriteTime -Descending | Select-Object Name, @{N='MB';E={[math]::Round\\($_.Length/1MB,1\\)}}, LastWriteTime | Format-Table -AutoSize)",
+      "Bash(PYTHONPATH=src ./.venv/Scripts/python.exe scripts/ask.py 'מה אומר רש\"י על בריאת האור?')",
+      "Bash(echo \"exit: $?\")",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name like '%python%'\" | Where-Object { $_.CommandLine -match \"ask.py\" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -Confirm:$false; \"killed $\\($_.ProcessId\\)\" })"
     ],
     "additionalDirectories": [
       "C:\\Users\\rubin\\.cache\\huggingface",

@@ -57,7 +57,7 @@ class Profile:
     llm_base_url: str = "http://localhost:11434"
     llm_api_key: str = ""                     # for the cloud backend
     llm_temperature: float = 0.2
-    llm_max_tokens: int = 1024
+    llm_max_tokens: int = 512                 # bounds CPU generation latency; config-tunable
 
     extra: dict = field(default_factory=dict)
 
@@ -97,7 +97,15 @@ def _local_preset() -> Profile:
     return Profile(
         name="local",
         embedding_device="cpu",
-        qdrant_mode="embedded",
+        # Local Qdrant SERVER in Docker (docker compose up -d) — still fully offline,
+        # real HNSW indexes → ms queries. No Docker? CHAVRUTA_QDRANT_MODE=embedded
+        # falls back to the in-process store.
+        qdrant_mode="server",
+        qdrant_url="http://localhost:6333",
+        # Dense-only queries locally (measured trade-off): hybrid adds +0.9pp retrieval
+        # but needs FlagEmbedding in RAM (~4.6GB vs ~2GB ST). The hybrid-indexed
+        # collection serves both; CHAVRUTA_HYBRID=true flips it on (eval gate / cloud).
+        hybrid=False,
         rerank=False,                         # keep RAM budget on the laptop
         llm_backend="ollama",
         llm_model="hf.co/dicta-il/DictaLM-3.0-1.7B-Thinking-GGUF:Q8_0",

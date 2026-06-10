@@ -1,0 +1,30 @@
+Loading weights:   0%|          | 0/391 [00:00<?, ?it/s]Loading weights:  84%|████████▍ | 329/391 [00:00<00:00, 3282.26it/s]Loading weights: 100%|██████████| 391/391 [00:00<00:00, 3078.70it/s]
+
+Okay, let's tackle this question. The user is asking what Rashi says about the creation of light (בְּרִיאַת הָאֹור). They want a short and direct answer in Hebrew, with the source marked like [S1], etc.
+
+First, I need to check all the provided sources. The user listed S1 through S8. Let me go through each one.
+
+Starting with S1: It's about "בְּרִיאַת הָאֹור" (creation of light) in Genesis 1:3? Wait, no, the title here is [S1] which says "אתה שואל מה אומר רש"י על בריאת האור?" So S1 might be a general note. Wait, looking at each source:
+
+Wait, actually, the user provided several sources labeled [S1] to [S8], each with Rashi's commentary on different verses.
+
+Let me check each one for mentions of "בְּרִיאַת הָאֹור".
+
+Starting from S1: The first source is titled "[S1] מה אומר רש"י על בריאת האור?" which translates to "What does Rashi say about the creation of light?" So this might be a meta-source, but in the user's list, each [Sn] is a specific commentary.
+
+Wait no. Wait, looking at the structure: The user provided 8 sources labeled S1 through S8. Each source has a title like "[S1] מה אומר רש"י על בריאת האור?" which might be confusing because the question itself is in Hebrew here. But perhaps each [Sn] is an example of Rashi's commentary on different verses.
+
+Wait, no. Let me re-read the user input carefully.
+
+The user says: "השאלה: מה אומר רש"י על בריאת האור?"
+
+Then they list several sources with labels like [S1], etc., each containing a Rashi commentary on specific verses (e.g., Genesis 1:3, Proverbs 3:19, etc.)
+
+Wait, the user provided 8 different commentaries by Rashi from various sources. For example:
+
+[S1] is about "בְּרִיאַת הָאֹור" (creation of light) in Genesis 1:3? Wait no
+
+────────────────────────────────────────────────────────────
+מקורות / Sources:
+  • Rashi on Genesis.1.4 (rashi)  →  https://www.sefaria.org/Genesis.1.4
+  • Rashi on Genesis.1.1 (rashi)  →  https://www.sefaria.org/Genesis.1.1

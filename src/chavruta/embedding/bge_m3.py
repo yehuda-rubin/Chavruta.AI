@@ -15,29 +15,37 @@ class BgeM3Embedding:
     dim = 1024
 
     def __init__(self, model_id: str = "BAAI/bge-m3", device: str = "cpu",
-                 max_length: int = 512, use_fp16: bool | None = None):
+                 max_length: int = 512, use_fp16: bool | None = None,
+                 use_sparse: bool = True):
         self.model_id = model_id
         self.device = device
         self.max_length = max_length
         self._use_fp16 = (device != "cpu") if use_fp16 is None else use_fp16
+        # When the profile runs dense-only (e.g. local interactive), skip FlagEmbedding
+        # entirely — the ST path is lighter (~2GB vs ~4.6GB fp32 on CPU) and faster.
+        self.use_sparse = use_sparse
         self._model = None  # lazy
 
     def _ensure_model(self):
-        """Prefer FlagEmbedding (dense + sparse → hybrid); fall back to
-        sentence-transformers (dense-only — the D5 fallback mode)."""
+        """FlagEmbedding (dense + sparse → hybrid) when sparse is wanted; otherwise —
+        or when FlagEmbedding is unavailable — sentence-transformers dense-only (D5
+        fallback mode)."""
         if self._model is None:
-            try:
-                from FlagEmbedding import BGEM3FlagModel  # heavy; imported on first use
+            if self.use_sparse:
+                try:
+                    from FlagEmbedding import BGEM3FlagModel  # heavy; imported on first use
 
-                self._model = ("flag", BGEM3FlagModel(
-                    self.model_id, use_fp16=self._use_fp16, device=self.device
-                ))
-            except ImportError:
-                from sentence_transformers import SentenceTransformer
+                    self._model = ("flag", BGEM3FlagModel(
+                        self.model_id, use_fp16=self._use_fp16, device=self.device
+                    ))
+                    return self._model
+                except ImportError:
+                    pass
+            from sentence_transformers import SentenceTransformer
 
-                st = SentenceTransformer(self.model_id, device=self.device)
-                st.max_seq_length = self.max_length
-                self._model = ("st", st)
+            st = SentenceTransformer(self.model_id, device=self.device)
+            st.max_seq_length = self.max_length
+            self._model = ("st", st)
         return self._model
 
     def _encode(self, texts: list[str]) -> list[Embedding]:

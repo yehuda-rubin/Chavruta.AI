@@ -61,14 +61,21 @@ def render_messages(prompt: GroundedPrompt, lang: str) -> list[dict]:
     else:
         sources_block = "(no sources retrieved)"
 
-    answer_lang = "Hebrew" if lang == "he" else "English"
-    user = (
-        f"SOURCES (the only knowledge you may use):\n{sources_block}\n\n"
-        f"QUESTION: {prompt.question}\n\n"
-        f"Answer in {answer_lang}. Cite every claim by its source marker like [S1]. "
-        f"Quote the Hebrew source text where relevant. "
-        f"If the sources do not contain the answer, say so plainly and do not invent."
-    )
+    if lang == "he":
+        user = (
+            f"המקורות (הידע היחיד המותר לך):\n{sources_block}\n\n"
+            f"השאלה: {prompt.question}\n\n"
+            f"ענה בעברית, קצר וישיר. צרף לכל טענה את סימון המקור, למשל [S1]. "
+            f"צטט את לשון המקור כשרלוונטי. אם אין תשובה במקורות — אמור זאת ואל תמציא."
+        )
+    else:
+        user = (
+            f"SOURCES (the only knowledge you may use):\n{sources_block}\n\n"
+            f"QUESTION: {prompt.question}\n\n"
+            f"Answer in English, concise and direct. Cite every claim by its source "
+            f"marker like [S1]. Quote the Hebrew source text where relevant. "
+            f"If the sources do not contain the answer, say so plainly and do not invent."
+        )
     messages.append({"role": "user", "content": user})
     return messages
 

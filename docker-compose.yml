@@ -1,0 +1,21 @@
+# Chavruta.AI — local Qdrant server (still fully offline; Principle II)
+#
+# Real HNSW + sparse indexes → millisecond queries vs the embedded brute-force mode.
+#   docker compose up -d        # start
+#   docker compose down         # stop (data persists in the volume)
+#
+# The app switches to it via config only: CHAVRUTA_QDRANT_MODE=server (the default
+# local profile already points at http://localhost:6333).
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: chavruta-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"   # REST / client API
+      - "6334:6334"   # gRPC
+    volumes:
+      - qdrant_storage:/qdrant/storage
+
+volumes:
+  qdrant_storage:

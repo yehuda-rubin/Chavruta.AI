@@ -28,23 +28,46 @@ class LocalLLM:
             self._client = ollama.Client(host=self.base_url)
         return self._client
 
+    def _chat_kwargs(self, prompt: GroundedPrompt, lang: str, max_tokens: int,
+                     temperature: float) -> dict:
+        return {
+            "model": self.model_id,
+            "messages": render_messages(prompt, lang),
+            # repeat_penalty guards small models against degenerate repetition loops
+            # (observed with the 1.7B); num_predict bounds latency on CPU.
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_tokens,
+                "repeat_penalty": 1.15,
+            },
+            # Thinking-variant models (DictaLM-3.0 Thinking) burn the token budget on a
+            # separate `thinking` channel and leave `content` empty — disable it; the RAG
+            # answer must be direct and grounded, not a reasoning trace.
+            "think": False,
+        }
+
     def generate(self, prompt: GroundedPrompt, *, lang: str, max_tokens: int,
                  temperature: float) -> LLMResult:
-        resp = self._client_().chat(
-            model=self.model_id,
-            messages=render_messages(prompt, lang),
-            options={"temperature": temperature, "num_predict": max_tokens},
-        )
-        return LLMResult(text=resp["message"]["content"], finish_reason=resp.get("done_reason", "stop"))
+        kwargs = self._chat_kwargs(prompt, lang, max_tokens, temperature)
+        try:
+            resp = self._client_().chat(**kwargs)
+        except Exception:
+            # Older Ollama / non-thinking model: retry without the think flag.
+            kwargs.pop("think", None)
+            resp = self._client_().chat(**kwargs)
+        text = resp["message"]["content"] or getattr(resp["message"], "thinking", "") or ""
+        return LLMResult(text=text, finish_reason=resp.get("done_reason", "stop"))
 
     def stream(self, prompt: GroundedPrompt, *, lang: str, max_tokens: int,
                temperature: float) -> Iterator[str]:
-        for chunk in self._client_().chat(
-            model=self.model_id,
-            messages=render_messages(prompt, lang),
-            options={"temperature": temperature, "num_predict": max_tokens},
-            stream=True,
-        ):
+        kwargs = self._chat_kwargs(prompt, lang, max_tokens, temperature)
+        kwargs["stream"] = True
+        try:
+            chunks = self._client_().chat(**kwargs)
+        except Exception:
+            kwargs.pop("think", None)
+            chunks = self._client_().chat(**kwargs)
+        for chunk in chunks:
             piece = chunk.get("message", {}).get("content", "")
             if piece:
                 yield piece

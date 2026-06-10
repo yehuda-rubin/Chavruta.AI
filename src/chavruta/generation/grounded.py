@@ -49,11 +49,37 @@ SYSTEM_LESSON = SYSTEM_QA + (
     "suggested flow, and discussion points — every source cited by marker."
 )
 
+# Hebrew system prompts — Hebrew-first models follow Hebrew instructions far better
+# (Principle IV; measured with DictaLM-3.0-1.7B which looped on the English protocol).
+SYSTEM_QA_HE = (
+    "אתה חברותא — שותף לימוד תורה אמין. ענה אך ורק מתוך המקורות שסופקו לך. "
+    "כל טענה חייבת ציון מקור בסוגריים, לדוגמה [S1]. צטט את לשון המקור העברית כשרלוונטי. "
+    "אסור להמציא מקורות, ציטוטים או ייחוסים שאינם במקורות שסופקו. "
+    "אם המקורות אינם עונים על השאלה — אמור זאת בפשטות. "
+    "ייחס כל דבר לפרשן הנכון. ענה תשובה קצרה וישירה, בלי הקדמות."
+)
+
+SYSTEM_EXPLAIN_HE = SYSTEM_QA_HE + (
+    " כשאתה מסביר או משווה פרשנים — הצג כל שיטה מתוך דברי הפרשן עצמו, ייחס נכון, "
+    "והצג מחלוקות כפי שהן, בלי לטשטש."
+)
+
+SYSTEM_LESSON_HE = SYSTEM_QA_HE + (
+    " כשאתה מכין שיעור — בנה מבנה ברור: המקורות המרכזיים ללימוד, סדר הלימוד, "
+    "ונקודות לדיון — כל מקור עם ציון [S#]."
+)
+
 HALACHA_CAVEAT_HE = "הערה: זו אינה פסיקה הלכתית מחייבת ואינה תחליף לרב מוסמך."
 HALACHA_CAVEAT_EN = "Note: this is not a binding halachic ruling and is not a substitute for a competent rav."
 
 
-def _system_for(intent: Intent) -> str:
+def _system_for(intent: Intent, lang: str = "en") -> str:
+    if lang == "he":
+        if intent in (Intent.EXPLAIN, Intent.COMPARE):
+            return SYSTEM_EXPLAIN_HE
+        if intent is Intent.LESSON:
+            return SYSTEM_LESSON_HE
+        return SYSTEM_QA_HE
     if intent in (Intent.EXPLAIN, Intent.COMPARE):
         return SYSTEM_EXPLAIN
     if intent is Intent.LESSON:
@@ -61,8 +87,12 @@ def _system_for(intent: Intent) -> str:
     return SYSTEM_QA
 
 
+MAX_SOURCE_CHARS = 600   # keep prompts small-model-friendly; citations carry the deep-link
+
+
 def build_prompt(
-    question: str, hits: list[RankedHit], *, intent: Intent = Intent.QA, history=None
+    question: str, hits: list[RankedHit], *, intent: Intent = Intent.QA, history=None,
+    lang: str = "en",
 ) -> tuple[GroundedPrompt, dict[str, RankedHit]]:
     """Build a grounded prompt and the marker→hit map used to enforce citations."""
     sources: list[SourceBlock] = []
@@ -70,12 +100,14 @@ def build_prompt(
     for i, h in enumerate(hits, start=1):
         marker = f"S{i}"
         marker_map[marker] = h
+        text = h.text if len(h.text) <= MAX_SOURCE_CHARS else h.text[:MAX_SOURCE_CHARS] + "…"
         sources.append(SourceBlock(
-            marker=marker, ref=h.ref, commentator_id=h.commentator_id, text=h.text
+            marker=marker, ref=h.ref, commentator_id=h.commentator_id, text=text
         ))
     llm_history = [LLMTurn(role=t.role, text=t.text) for t in (history or [])]
     prompt = GroundedPrompt(
-        system=_system_for(intent), sources=sources, question=question, history=llm_history
+        system=_system_for(intent, lang), sources=sources, question=question,
+        history=llm_history,
     )
     return prompt, marker_map
 
