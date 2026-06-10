@@ -65,7 +65,24 @@ class ChavrutaPipeline:
     def __init__(self, profile: Profile | None = None, *, router=None):
         self.profile = profile or Profile.from_env()
         self.embedding, self.store, self.llm, self.retriever = build_backends(self.profile)
-        self.router = router  # set by US1 (intents.router) for richer intent/ref detection
+        if router is None:
+            from chavruta.intents.router import Router
+
+            router = Router()
+        self.router = router
+
+    @classmethod
+    def from_backends(cls, profile: Profile, *, embedding, store, llm, retriever, router=None):
+        """Construct with injected backends (tests, embedding-free environments)."""
+        self = cls.__new__(cls)
+        self.profile = profile
+        self.embedding, self.store, self.llm, self.retriever = embedding, store, llm, retriever
+        if router is None:
+            from chavruta.intents.router import Router
+
+            router = Router()
+        self.router = router
+        return self
 
     def _resolve_query(self, request: Query) -> Query:
         if request.lang is None or request.lang == "":

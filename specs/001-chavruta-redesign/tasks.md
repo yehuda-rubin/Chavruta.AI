@@ -100,13 +100,13 @@ resolve to real sources, bilingual parity holds, and out-of-corpus questions nev
 
 ### Implementation
 
-- [ ] T025 [US1] Implement intent + language detection and named-ref/commentator extraction (default intent `qa`) in `src/chavruta/intents/router.py`
-- [ ] T026 [US1] Wire the `qa` path end-to-end in `ChavrutaPipeline.ask` (grounded answer, `citations`, `grounded`/`no_source`) in `src/chavruta/pipeline/pipeline.py` (depends on T019, T025)
-- [ ] T027 [P] [US1] Implement the one-shot CLI `scripts/ask.py` (`--intent`, `--profile`, prints answer + citations)
-- [ ] T028 [US1] Implement the Streamlit chat `app/streamlit_app.py` (RTL/LTR rendering, clickable citations, in-session conversation context, streaming responses) (depends on T026)
-- [ ] T029 [P] [US1] Implement the evaluation harness (retrieval@K + grounding scoring, reproducible/comparable report, runs per profile) in `src/chavruta/eval/harness.py` and `scripts/run_eval.py`
-- [ ] T030 [P] [US1] Author the evaluation dataset `eval/tanakh_v1.jsonl` — 100+ Tanakh questions (HE/EN) with `expected_refs` and grounding checks, per data-model.md EvaluationItem
-- [ ] T031 [P] [US1] Integration tests for the qa path (grounded happy path, honest no-source, HE/EN parity, **and that the answer quotes the Hebrew source text per FR-012**) in `tests/integration/test_qa.py`
+- [X] T025 [US1] Implement intent + language detection and named-ref/commentator extraction (default intent `qa`) in `src/chavruta/intents/router.py`
+- [X] T026 [US1] Wire the `qa` path end-to-end in `ChavrutaPipeline.ask` (grounded answer, `citations`, `grounded`/`no_source`) in `src/chavruta/pipeline/pipeline.py` (depends on T019, T025)
+- [X] T027 [P] [US1] Implement the one-shot CLI `scripts/ask.py` (`--intent`, `--profile`, prints answer + citations)
+- [X] T028 [US1] Implement the Streamlit chat `app/streamlit_app.py` (RTL/LTR rendering, clickable citations, in-session conversation context, streaming responses) (depends on T026)
+- [X] T029 [P] [US1] Implement the evaluation harness (retrieval@K + grounding scoring, reproducible/comparable report, runs per profile) in `src/chavruta/eval/harness.py` and `scripts/run_eval.py`
+- [X] T030 [P] [US1] Author the evaluation dataset `eval/tanakh_v1.jsonl` — 100+ Tanakh questions (HE/EN) with `expected_refs` and grounding checks, per data-model.md EvaluationItem (120 items: 110 answerable, 10 honesty probes)
+- [X] T031 [P] [US1] Integration tests for the qa path (grounded happy path, honest no-source, HE/EN parity, **and that the answer quotes the Hebrew source text per FR-012**) in `tests/integration/test_qa.py`
 
 **Checkpoint**: MVP — grounded, cited, bilingual Q&A over Tanakh, measured by the eval set.
 **STOP and VALIDATE** before proceeding.

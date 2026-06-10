@@ -1,0 +1,125 @@
+# Chavruta.AI evaluation set v1 — 112 items (Principle V / FR-023, SC-001/002/003)
+# Format: {"qid", "question", "lang", "expected_refs": [...], "intent", "note"}
+# expected_refs == [] means the item is UNANSWERABLE from the Tanakh corpus — the honest
+# "no grounded source" path must hold (SC-002). Refs use the corpus format "Book.Chapter.Verse".
+{"qid": "gen-001-he", "question": "מה נאמר בפסוק הראשון של התורה על בריאת העולם?", "lang": "he", "expected_refs": ["Genesis.1.1"], "intent": "qa", "note": "HE/EN pair with gen-001-en (SC-003)"}
+{"qid": "gen-001-en", "question": "What does the first verse of the Torah say about the creation of the world?", "lang": "en", "expected_refs": ["Genesis.1.1"], "intent": "qa", "note": "HE/EN pair with gen-001-he"}
+{"qid": "gen-002-he", "question": "מה אומר רש\"י על בראשית ברא?", "lang": "he", "expected_refs": ["Genesis.1.1"], "intent": "explain", "note": "Rashi's famous opening comment"}
+{"qid": "gen-002-en", "question": "What does Rashi say about the very first words of Genesis?", "lang": "en", "expected_refs": ["Genesis.1.1"], "intent": "explain", "note": "pair with gen-002-he"}
+{"qid": "gen-003-he", "question": "מה נאמר על בריאת האור ביום הראשון?", "lang": "he", "expected_refs": ["Genesis.1.3", "Genesis.1.4"], "intent": "qa", "note": ""}
+{"qid": "gen-003-en", "question": "What is said about the creation of light on the first day?", "lang": "en", "expected_refs": ["Genesis.1.3", "Genesis.1.4"], "intent": "qa", "note": "pair"}
+{"qid": "gen-004-en", "question": "What does Rashi say about the creation of light?", "lang": "en", "expected_refs": ["Genesis.1.3", "Genesis.1.4"], "intent": "explain", "note": "quickstart scenario 1"}
+{"qid": "gen-005-he", "question": "בצלם מי נברא האדם?", "lang": "he", "expected_refs": ["Genesis.1.26", "Genesis.1.27"], "intent": "qa", "note": ""}
+{"qid": "gen-005-en", "question": "In whose image was man created?", "lang": "en", "expected_refs": ["Genesis.1.26", "Genesis.1.27"], "intent": "qa", "note": "pair"}
+{"qid": "gen-006-he", "question": "מה נאמר על השבת בסוף מעשה בראשית?", "lang": "he", "expected_refs": ["Genesis.2.1", "Genesis.2.2", "Genesis.2.3"], "intent": "qa", "note": ""}
+{"qid": "gen-007-he", "question": "מאיזה עץ נאסר על אדם הראשון לאכול?", "lang": "he", "expected_refs": ["Genesis.2.17", "Genesis.2.16"], "intent": "qa", "note": ""}
+{"qid": "gen-007-en", "question": "From which tree was Adam forbidden to eat?", "lang": "en", "expected_refs": ["Genesis.2.17", "Genesis.2.16"], "intent": "qa", "note": "pair"}
+{"qid": "gen-008-he", "question": "מה ענה קין כשנשאל איפה הבל אחיו?", "lang": "he", "expected_refs": ["Genesis.4.9"], "intent": "qa", "note": "השומר אחי אנכי"}
+{"qid": "gen-008-en", "question": "What did Cain answer when asked where his brother Abel was?", "lang": "en", "expected_refs": ["Genesis.4.9"], "intent": "qa", "note": "pair"}
+{"qid": "gen-009-he", "question": "מי היו בני האלוהים שלקחו נשים מבנות האדם לפני המבול?", "lang": "he", "expected_refs": ["Genesis.6.2", "Genesis.6.4"], "intent": "qa", "note": "Rashi-Ramban machloket anchor"}
+{"qid": "gen-010-he", "question": "מה הציווי הראשון שנאמר לאברהם בלך לך?", "lang": "he", "expected_refs": ["Genesis.12.1"], "intent": "qa", "note": ""}
+{"qid": "gen-010-en", "question": "What was Abraham first commanded in Lech Lecha?", "lang": "en", "expected_refs": ["Genesis.12.1"], "intent": "qa", "note": "pair"}
+{"qid": "gen-011-he", "question": "מה נאמר בעקדת יצחק כשאברהם נושא את עיניו ורואה את ההר?", "lang": "he", "expected_refs": ["Genesis.22.4"], "intent": "qa", "note": ""}
+{"qid": "gen-012-en", "question": "What did the angel say to Abraham at the binding of Isaac?", "lang": "en", "expected_refs": ["Genesis.22.11", "Genesis.22.12"], "intent": "qa", "note": ""}
+{"qid": "gen-013-he", "question": "מה חלם יעקב בצאתו מבאר שבע לחרן?", "lang": "he", "expected_refs": ["Genesis.28.12"], "intent": "qa", "note": "סולם מוצב ארצה"}
+{"qid": "gen-013-en", "question": "What did Jacob dream on his way from Beer Sheva to Haran?", "lang": "en", "expected_refs": ["Genesis.28.12"], "intent": "qa", "note": "pair"}
+{"qid": "gen-014-he", "question": "מה אמר יוסף לאחיו כשהתוודע אליהם במצרים?", "lang": "he", "expected_refs": ["Genesis.45.3", "Genesis.45.4", "Genesis.45.5"], "intent": "qa", "note": ""}
+{"qid": "gen-015-he", "question": "מה ההבטחה שקיבל נח אחרי המבול בברית הקשת?", "lang": "he", "expected_refs": ["Genesis.9.11", "Genesis.9.13"], "intent": "qa", "note": ""}
+{"qid": "exo-001-he", "question": "מה ראה משה בסנה הבוער?", "lang": "he", "expected_refs": ["Exodus.3.2"], "intent": "qa", "note": ""}
+{"qid": "exo-001-en", "question": "What did Moses see in the burning bush?", "lang": "en", "expected_refs": ["Exodus.3.2"], "intent": "qa", "note": "pair"}
+{"qid": "exo-002-he", "question": "מהו הדיבר הראשון בעשרת הדיברות?", "lang": "he", "expected_refs": ["Exodus.20.2"], "intent": "qa", "note": ""}
+{"qid": "exo-002-en", "question": "What is the first of the Ten Commandments?", "lang": "en", "expected_refs": ["Exodus.20.2"], "intent": "qa", "note": "pair"}
+{"qid": "exo-003-he", "question": "מה נאמר על כיבוד אב ואם בעשרת הדיברות?", "lang": "he", "expected_refs": ["Exodus.20.12"], "intent": "qa", "note": ""}
+{"qid": "exo-004-he", "question": "מה שרו בני ישראל אחרי קריעת ים סוף?", "lang": "he", "expected_refs": ["Exodus.15.1"], "intent": "qa", "note": "שירת הים"}
+{"qid": "exo-004-en", "question": "What did the Israelites sing after the splitting of the sea?", "lang": "en", "expected_refs": ["Exodus.15.1"], "intent": "qa", "note": "pair"}
+{"qid": "exo-005-he", "question": "מה ענו בני ישראל במעמד הר סיני — נעשה ומה עוד?", "lang": "he", "expected_refs": ["Exodus.24.7"], "intent": "qa", "note": "נעשה ונשמע"}
+{"qid": "exo-006-he", "question": "מהו המן שירד לבני ישראל במדבר וכיצד הוא מתואר?", "lang": "he", "expected_refs": ["Exodus.16.31", "Exodus.16.14"], "intent": "qa", "note": ""}
+{"qid": "exo-007-en", "question": "What happened to Pharaoh's army at the Sea of Reeds?", "lang": "en", "expected_refs": ["Exodus.14.28", "Exodus.14.27"], "intent": "qa", "note": ""}
+{"qid": "exo-008-he", "question": "מה ביקש משה לראות כשאמר הראני נא את כבודך?", "lang": "he", "expected_refs": ["Exodus.33.18"], "intent": "qa", "note": ""}
+{"qid": "lev-001-he", "question": "מהו הציווי ואהבת לרעך כמוך והיכן הוא מופיע?", "lang": "he", "expected_refs": ["Leviticus.19.18"], "intent": "qa", "note": ""}
+{"qid": "lev-001-en", "question": "Where does the Torah command to love your neighbor as yourself?", "lang": "en", "expected_refs": ["Leviticus.19.18"], "intent": "qa", "note": "pair"}
+{"qid": "lev-002-he", "question": "מה נאמר על יום הכיפורים כשבת שבתון?", "lang": "he", "expected_refs": ["Leviticus.16.31", "Leviticus.23.32"], "intent": "qa", "note": ""}
+{"qid": "lev-003-he", "question": "אילו מועדים נמנים בפרשת המועדות בויקרא?", "lang": "he", "expected_refs": ["Leviticus.23.4", "Leviticus.23.2"], "intent": "qa", "note": ""}
+{"qid": "num-001-he", "question": "מהי ברכת הכהנים ומה נוסחה?", "lang": "he", "expected_refs": ["Numbers.6.24", "Numbers.6.25", "Numbers.6.26"], "intent": "qa", "note": ""}
+{"qid": "num-001-en", "question": "What is the text of the priestly blessing?", "lang": "en", "expected_refs": ["Numbers.6.24", "Numbers.6.25", "Numbers.6.26"], "intent": "qa", "note": "pair"}
+{"qid": "num-002-he", "question": "מה אמר בלעם כשראה את ישראל שוכן לשבטיו — מה טובו?", "lang": "he", "expected_refs": ["Numbers.24.5"], "intent": "qa", "note": ""}
+{"qid": "num-003-he", "question": "מה דיווחו המרגלים על ארץ כנען כשחזרו?", "lang": "he", "expected_refs": ["Numbers.13.27", "Numbers.13.28", "Numbers.13.32"], "intent": "qa", "note": ""}
+{"qid": "num-004-en", "question": "What happened to Korach and his followers?", "lang": "en", "expected_refs": ["Numbers.16.32", "Numbers.16.31"], "intent": "qa", "note": ""}
+{"qid": "deu-001-he", "question": "מהו פסוק שמע ישראל ומה נאמר בו?", "lang": "he", "expected_refs": ["Deuteronomy.6.4"], "intent": "qa", "note": ""}
+{"qid": "deu-001-en", "question": "What does the Shema Yisrael verse declare?", "lang": "en", "expected_refs": ["Deuteronomy.6.4"], "intent": "qa", "note": "pair"}
+{"qid": "deu-002-he", "question": "מה נאמר על ואהבת את ה' אלקיך בפרשת ואתחנן?", "lang": "he", "expected_refs": ["Deuteronomy.6.5"], "intent": "qa", "note": ""}
+{"qid": "deu-003-he", "question": "היכן נאמר ובחרת בחיים?", "lang": "he", "expected_refs": ["Deuteronomy.30.19"], "intent": "qa", "note": ""}
+{"qid": "deu-003-en", "question": "Where does the Torah say choose life?", "lang": "en", "expected_refs": ["Deuteronomy.30.19"], "intent": "qa", "note": "pair"}
+{"qid": "deu-004-he", "question": "מה נאמר על משה בסוף התורה — ולא קם נביא עוד?", "lang": "he", "expected_refs": ["Deuteronomy.34.10"], "intent": "qa", "note": ""}
+{"qid": "deu-005-he", "question": "מהו הציווי צדק צדק תרדוף?", "lang": "he", "expected_refs": ["Deuteronomy.16.20"], "intent": "qa", "note": ""}
+{"qid": "jos-001-he", "question": "מה הובטח ליהושע בתחילת הספר — חזק ואמץ?", "lang": "he", "expected_refs": ["Joshua.1.6", "Joshua.1.9"], "intent": "qa", "note": ""}
+{"qid": "jos-002-en", "question": "What happened to the walls of Jericho?", "lang": "en", "expected_refs": ["Joshua.6.20"], "intent": "qa", "note": ""}
+{"qid": "jud-001-he", "question": "מה אמרה דבורה הנביאה בשירתה על היום שבו נושעו ישראל?", "lang": "he", "expected_refs": ["Judges.5.1", "Judges.5.2"], "intent": "qa", "note": ""}
+{"qid": "sam-001-he", "question": "איך נענתה תפילת חנה ומה נדרה?", "lang": "he", "expected_refs": ["I Samuel.1.11", "I Samuel.1.27"], "intent": "qa", "note": ""}
+{"qid": "sam-002-he", "question": "מה אמר שמואל — הנה שמוע מזבח טוב?", "lang": "he", "expected_refs": ["I Samuel.15.22"], "intent": "qa", "note": ""}
+{"qid": "sam-003-en", "question": "How did David defeat Goliath?", "lang": "en", "expected_refs": ["I Samuel.17.49", "I Samuel.17.50"], "intent": "qa", "note": ""}
+{"qid": "kin-001-he", "question": "מה ביקש שלמה מה' בגבעון כשנגלה אליו בחלום?", "lang": "he", "expected_refs": ["I Kings.3.9", "I Kings.3.5"], "intent": "qa", "note": "לב שומע"}
+{"qid": "kin-002-he", "question": "מה קרה בהר הכרמל במבחן של אליהו מול נביאי הבעל?", "lang": "he", "expected_refs": ["I Kings.18.38", "I Kings.18.39"], "intent": "qa", "note": "ה' הוא האלהים"}
+{"qid": "isa-001-he", "question": "מה חזון אחרית הימים על וכתתו חרבותם לאתים?", "lang": "he", "expected_refs": ["Isaiah.2.4"], "intent": "qa", "note": ""}
+{"qid": "isa-001-en", "question": "Where is the prophecy of beating swords into plowshares?", "lang": "en", "expected_refs": ["Isaiah.2.4"], "intent": "qa", "note": "pair"}
+{"qid": "isa-002-he", "question": "מה אמרו השרפים בקדושה בחזון ישעיהו — קדוש קדוש קדוש?", "lang": "he", "expected_refs": ["Isaiah.6.3"], "intent": "qa", "note": ""}
+{"qid": "isa-003-he", "question": "מהי נחמת נחמו נחמו עמי ולמי נאמרה?", "lang": "he", "expected_refs": ["Isaiah.40.1"], "intent": "qa", "note": ""}
+{"qid": "isa-003-en", "question": "What is the prophecy of comfort, Nachamu Nachamu Ami?", "lang": "en", "expected_refs": ["Isaiah.40.1"], "intent": "qa", "note": "pair"}
+{"qid": "isa-004-he", "question": "מה נאמר על וגר זאב עם כבש בחזון ישעיהו?", "lang": "he", "expected_refs": ["Isaiah.11.6"], "intent": "qa", "note": ""}
+{"qid": "jer-001-he", "question": "מה נאמר על מציאת חן במדבר — חסד נעורייך?", "lang": "he", "expected_refs": ["Jeremiah.2.2"], "intent": "qa", "note": "זכרתי לך חסד נעוריך"}
+{"qid": "jer-002-he", "question": "מהי נבואת הבן יקיר לי אפרים?", "lang": "he", "expected_refs": ["Jeremiah.31.20"], "intent": "qa", "note": ""}
+{"qid": "eze-001-he", "question": "מה ראה יחזקאל במראה המרכבה על נהר כבר?", "lang": "he", "expected_refs": ["Ezekiel.1.4", "Ezekiel.1.26"], "intent": "qa", "note": ""}
+{"qid": "eze-002-he", "question": "מהו חזון העצמות היבשות?", "lang": "he", "expected_refs": ["Ezekiel.37.4", "Ezekiel.37.5"], "intent": "qa", "note": ""}
+{"qid": "eze-002-en", "question": "What is the vision of the dry bones?", "lang": "en", "expected_refs": ["Ezekiel.37.4", "Ezekiel.37.5"], "intent": "qa", "note": "pair"}
+{"qid": "hos-001-he", "question": "מה נאמר על וארשתיך לי לעולם בהושע?", "lang": "he", "expected_refs": ["Hosea.2.21"], "intent": "qa", "note": ""}
+{"qid": "jon-001-he", "question": "מה ציווה ה' את יונה בתחילת הספר ולאן ברח?", "lang": "he", "expected_refs": ["Jonah.1.2", "Jonah.1.3"], "intent": "qa", "note": ""}
+{"qid": "jon-001-en", "question": "What did God command Jonah at the start of the book, and where did he flee?", "lang": "en", "expected_refs": ["Jonah.1.2", "Jonah.1.3"], "intent": "qa", "note": "pair"}
+{"qid": "jon-002-he", "question": "מה אומר רד\"ק על ספר יונה בתחילתו?", "lang": "he", "expected_refs": ["Jonah.1.1", "Jonah.1.2"], "intent": "explain", "note": "quickstart scenario 2 — Radak on Jonah"}
+{"qid": "jon-003-he", "question": "כיצד שבו אנשי נינוה בתשובה ומה עשה מלך נינוה?", "lang": "he", "expected_refs": ["Jonah.3.6", "Jonah.3.8", "Jonah.3.10"], "intent": "qa", "note": "teshuva in Jonah — lesson anchor"}
+{"qid": "jon-003-en", "question": "How did the people of Nineveh repent, and what did the king of Nineveh do?", "lang": "en", "expected_refs": ["Jonah.3.6", "Jonah.3.8", "Jonah.3.10"], "intent": "qa", "note": "pair"}
+{"qid": "jon-004-he", "question": "מה היה הקיקיון של יונה ומה לימד אותו ה' בו?", "lang": "he", "expected_refs": ["Jonah.4.6", "Jonah.4.10"], "intent": "qa", "note": ""}
+{"qid": "mic-001-he", "question": "מה ה' דורש ממך — עשות משפט ואהבת חסד?", "lang": "he", "expected_refs": ["Micah.6.8"], "intent": "qa", "note": ""}
+{"qid": "mic-001-en", "question": "What does the Lord require of you according to Micah?", "lang": "en", "expected_refs": ["Micah.6.8"], "intent": "qa", "note": "pair"}
+{"qid": "mal-001-he", "question": "מה נאמר על השבת לב אבות על בנים בסוף מלאכי?", "lang": "he", "expected_refs": ["Malachi.3.24"], "intent": "qa", "note": ""}
+{"qid": "psa-001-he", "question": "מהו מזמור ה' רועי לא אחסר?", "lang": "he", "expected_refs": ["Psalms.23.1"], "intent": "qa", "note": ""}
+{"qid": "psa-001-en", "question": "Which psalm says the Lord is my shepherd, I shall not want?", "lang": "en", "expected_refs": ["Psalms.23.1"], "intent": "qa", "note": "pair"}
+{"qid": "psa-002-he", "question": "מה נאמר בתהילים על אשרי האיש אשר לא הלך בעצת רשעים?", "lang": "he", "expected_refs": ["Psalms.1.1"], "intent": "qa", "note": ""}
+{"qid": "psa-003-he", "question": "באיזה מזמור נאמר שיר המעלות בשוב ה' את שיבת ציון?", "lang": "he", "expected_refs": ["Psalms.126.1"], "intent": "qa", "note": ""}
+{"qid": "psa-004-he", "question": "מה נאמר על השמים מספרים כבוד אל?", "lang": "he", "expected_refs": ["Psalms.19.2"], "intent": "qa", "note": ""}
+{"qid": "psa-005-en", "question": "Which psalm begins By the rivers of Babylon?", "lang": "en", "expected_refs": ["Psalms.137.1"], "intent": "qa", "note": ""}
+{"qid": "pro-001-he", "question": "מה נאמר במשלי על ראשית חכמה יראת ה'?", "lang": "he", "expected_refs": ["Proverbs.1.7", "Proverbs.9.10"], "intent": "qa", "note": ""}
+{"qid": "pro-002-he", "question": "מהי אשת חיל מי ימצא ובאיזה פרק?", "lang": "he", "expected_refs": ["Proverbs.31.10"], "intent": "qa", "note": ""}
+{"qid": "pro-002-en", "question": "Where is the praise of the woman of valor, Eshet Chayil?", "lang": "en", "expected_refs": ["Proverbs.31.10"], "intent": "qa", "note": "pair"}
+{"qid": "job-001-he", "question": "מה ענה איוב אחרי האסונות — ה' נתן וה' לקח?", "lang": "he", "expected_refs": ["Job.1.21"], "intent": "qa", "note": ""}
+{"qid": "job-002-en", "question": "How did God answer Job from the whirlwind?", "lang": "en", "expected_refs": ["Job.38.1", "Job.38.4"], "intent": "qa", "note": ""}
+{"qid": "sos-001-he", "question": "היכן נאמר אני לדודי ודודי לי?", "lang": "he", "expected_refs": ["Song of Songs.6.3"], "intent": "qa", "note": ""}
+{"qid": "rut-001-he", "question": "מה אמרה רות לנעמי — עמך עמי ואלהיך אלהי?", "lang": "he", "expected_refs": ["Ruth.1.16"], "intent": "qa", "note": ""}
+{"qid": "rut-001-en", "question": "What did Ruth declare to Naomi about her people and her God?", "lang": "en", "expected_refs": ["Ruth.1.16"], "intent": "qa", "note": "pair"}
+{"qid": "ecc-001-he", "question": "מה נאמר על הבל הבלים אמר קהלת?", "lang": "he", "expected_refs": ["Ecclesiastes.1.2"], "intent": "qa", "note": ""}
+{"qid": "ecc-002-he", "question": "היכן נאמר לכל זמן ועת לכל חפץ?", "lang": "he", "expected_refs": ["Ecclesiastes.3.1"], "intent": "qa", "note": ""}
+{"qid": "ecc-003-he", "question": "מהו סוף דבר הכל נשמע בסיום קהלת?", "lang": "he", "expected_refs": ["Ecclesiastes.12.13"], "intent": "qa", "note": ""}
+{"qid": "est-001-he", "question": "מה אמר מרדכי לאסתר על עת כזאת הגעת למלכות?", "lang": "he", "expected_refs": ["Esther.4.14"], "intent": "qa", "note": ""}
+{"qid": "est-001-en", "question": "What did Mordechai tell Esther about reaching royalty for a time like this?", "lang": "en", "expected_refs": ["Esther.4.14"], "intent": "qa", "note": "pair"}
+{"qid": "est-002-he", "question": "מה נאמר על ליהודים היתה אורה ושמחה?", "lang": "he", "expected_refs": ["Esther.8.16"], "intent": "qa", "note": ""}
+{"qid": "dan-001-he", "question": "מה קרה לדניאל בגוב האריות?", "lang": "he", "expected_refs": ["Daniel.6.23", "Daniel.6.17"], "intent": "qa", "note": ""}
+{"qid": "lam-001-he", "question": "כיצד פותחת מגילת איכה — איכה ישבה בדד?", "lang": "he", "expected_refs": ["Lamentations.1.1"], "intent": "qa", "note": ""}
+{"qid": "lam-002-he", "question": "היכן נאמר השיבנו ה' אליך ונשובה בסוף איכה?", "lang": "he", "expected_refs": ["Lamentations.5.21"], "intent": "qa", "note": ""}
+{"qid": "cmp-001-he", "question": "מה ההבדל בין רש\"י לרמב\"ן בפירוש בראשית א?", "lang": "he", "expected_refs": ["Genesis.1.1"], "intent": "compare", "note": "compare path (US2 anchor)"}
+{"qid": "cmp-001-en", "question": "How do Rashi and Ibn Ezra differ on Genesis 1:1?", "lang": "en", "expected_refs": ["Genesis.1.1"], "intent": "compare", "note": "quickstart scenario 4"}
+{"qid": "cmp-002-he", "question": "מה אומר אבן עזרא על שמע ישראל לעומת רש\"י?", "lang": "he", "expected_refs": ["Deuteronomy.6.4"], "intent": "compare", "note": ""}
+{"qid": "exp-001-he", "question": "תסביר מה אומר ספורנו על בריאת האדם בצלם אלהים", "lang": "he", "expected_refs": ["Genesis.1.26", "Genesis.1.27"], "intent": "explain", "note": "Sforno explain path"}
+{"qid": "exp-002-he", "question": "מה מפרש המלבי\"ם על קדוש קדוש קדוש בישעיהו?", "lang": "he", "expected_refs": ["Isaiah.6.3"], "intent": "explain", "note": "Malbim explain"}
+{"qid": "exp-003-en", "question": "Explain what Ramban says about the purpose of creation in Genesis 1", "lang": "en", "expected_refs": ["Genesis.1.1", "Genesis.1"], "intent": "explain", "note": ""}
+{"qid": "les-001-he", "question": "הכן שיעור על תשובה בספר יונה", "lang": "he", "expected_refs": ["Jonah.3", "Jonah.3.10", "Jonah.3.8"], "intent": "lesson", "note": "quickstart scenario 5 — lesson path (US3)"}
+{"qid": "les-002-en", "question": "Prepare a lesson on the theme of teshuva in the book of Jonah", "lang": "en", "expected_refs": ["Jonah.3", "Jonah.3.10"], "intent": "lesson", "note": "pair"}
+# ── Unanswerable items (SC-002): outside the Tanakh corpus — the honest path must hold ──
+{"qid": "uns-001-he", "question": "מה אומרת המשנה במסכת ברכות על זמן קריאת שמע בערבית?", "lang": "he", "expected_refs": [], "intent": "qa", "note": "Mishnah — not in corpus"}
+{"qid": "uns-001-en", "question": "What does the Mishnah in Berakhot say about when to recite the evening Shema?", "lang": "en", "expected_refs": [], "intent": "qa", "note": "pair — Mishnah not in corpus"}
+{"qid": "uns-002-he", "question": "מה פוסק השולחן ערוך לגבי הדלקת נרות שבת?", "lang": "he", "expected_refs": [], "intent": "qa", "note": "Shulchan Aruch — halachic corpus deferred"}
+{"qid": "uns-002-en", "question": "What does the Shulchan Aruch rule about lighting Shabbat candles?", "lang": "en", "expected_refs": [], "intent": "qa", "note": "pair"}
+{"qid": "uns-003-he", "question": "מה אומרת הגמרא בבבא מציעא על שניים אוחזין בטלית?", "lang": "he", "expected_refs": [], "intent": "qa", "note": "Gemara — not in corpus"}
+{"qid": "uns-004-en", "question": "What does the Zohar say about the creation of the world?", "lang": "en", "expected_refs": [], "intent": "qa", "note": "Zohar — not in corpus"}
+{"qid": "uns-005-he", "question": "מה כותב הרמב\"ם במשנה תורה על הלכות תשובה?", "lang": "he", "expected_refs": [], "intent": "qa", "note": "Mishneh Torah — not in corpus"}
+{"qid": "uns-006-he", "question": "מה אומר המזרחי על פירוש רש\"י לבראשית א?", "lang": "he", "expected_refs": [], "intent": "qa", "note": "Mizrachi supercommentary — planned Work, not yet loaded"}
+{"qid": "uns-007-en", "question": "What does Rav Soloveitchik write about prayer in Halakhic Man?", "lang": "en", "expected_refs": [], "intent": "qa", "note": "modern work — not in corpus"}
+{"qid": "uns-008-he", "question": "מהי דעת המשנה ברורה על זמני תפילה?", "lang": "he", "expected_refs": [], "intent": "qa", "note": "Mishnah Berurah — not in corpus"}

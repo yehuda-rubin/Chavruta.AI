@@ -69,13 +69,23 @@ def ingest_work(
 
 # ── Reuse path: map the legacy embedded corpus into the new schema ──
 
+def _slug(name: str) -> str:
+    """'Ibn Ezra' → 'ibn_ezra', 'Or HaChaim' → 'or_hachaim' — matches router ids."""
+    import re
+
+    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+
+
 def payload_from_legacy_meta(meta: dict, work_id: str = "tanakh") -> dict:
     """Map a legacy `corpus_meta.jsonl` record to the new Chunk payload schema."""
     md = meta.get("metadata", {})
-    commentator = md.get("commentator", "") or None
+    commentator_raw = md.get("commentator", "")
+    commentator = _slug(commentator_raw) if commentator_raw else None
     chunk_type = md.get("chunk_type", "")
     is_commentary = bool(commentator) or chunk_type == "commentary"
-    ref = md.get("verse_id", "") or md.get("ref", "") or meta.get("id", "")
+    verse_id = md.get("verse_id", "") or md.get("ref", "") or meta.get("id", "")
+    # commentary gets its own ref ("Rashi on Genesis.1.1"); pasuk keeps the verse ref
+    ref = f"{commentator_raw} on {verse_id}" if is_commentary and commentator_raw else verse_id
     document = meta.get("document", "")
     chunk = Chunk(
         chunk_id=meta.get("id", ref),
@@ -84,10 +94,11 @@ def payload_from_legacy_meta(meta: dict, work_id: str = "tanakh") -> dict:
         ref=ref,
         lang="he",
         text=document,
-        text_he=document,
-        deep_link=f"https://www.sefaria.org/{ref.replace(' ', '.')}" if ref else "",
+        text_he=md.get("text_he", "") or document,
+        text_en=md.get("text_en", ""),
+        deep_link=f"https://www.sefaria.org/{verse_id}" if verse_id else "",
         position={k: md.get(k) for k in ("book", "chapter", "verse") if k in md},
-        anchor_ref=md.get("verse_id") if is_commentary else None,
+        anchor_ref=verse_id if is_commentary else None,
         anchor_kind=AnchorKind.SOURCE if is_commentary else None,
         commentator_id=commentator,
     )
