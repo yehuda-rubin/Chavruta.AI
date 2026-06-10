@@ -24,6 +24,9 @@ def main() -> None:
     ap.add_argument("--in", dest="indir", default="out")
     ap.add_argument("--profile", default=None, help="overrides CHAVRUTA_PROFILE")
     ap.add_argument("--batch", type=int, default=512)
+    ap.add_argument("--recreate", action="store_true", default=True,
+                    help="drop + recreate the collection (it is fully regenerable from --in)")
+    ap.add_argument("--no-recreate", dest="recreate", action="store_false")
     args = ap.parse_args()
 
     if args.profile:
@@ -32,6 +35,11 @@ def main() -> None:
     profile = Profile.from_env()
 
     store = QdrantStore(mode=profile.qdrant_mode, path=profile.qdrant_path, url=profile.qdrant_url)
+    if args.recreate:
+        client = store._client_()
+        if client.collection_exists(profile.collection):
+            print(f"♻️  dropping existing collection '{profile.collection}' (schema refresh)")
+            client.delete_collection(profile.collection)
     store.ensure_collection(profile.collection, dim=1024)
 
     batch = []

@@ -147,3 +147,13 @@ simplicity) and the offline envelope (CPU-only 16GB laptop).
   target laptop.
 - Final cloud model id and Nebius endpoint specifics — config, set at product time.
 - Chunking parameters (size/overlap) revisited against eval once measured.
+
+## Implementation status notes (2026-06-10, T039)
+
+- The reused legacy vectors are **dense-only** (embedded with sentence-transformers before
+  the redesign), so the local profile currently runs the D5 **dense-only fallback**;
+  `BgeM3Embedding` falls back to sentence-transformers when FlagEmbedding is absent.
+  Full hybrid (dense+sparse) activates after a one-time re-embed with FlagEmbedding.
+- Local reranker default stays **off** until measured: the tuning run (rerank on vs off
+  over `eval/tanakh_v1.jsonl`) requires DictaLM pulled via Ollama on the target laptop.
+  The retrieval-only gate (`scripts/run_eval.py --retrieval-only`) runs without the LLM.

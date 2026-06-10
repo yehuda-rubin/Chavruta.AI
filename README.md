@@ -22,27 +22,33 @@ in a **vector index**, not in the weights. The LLM is the *voice*, not the *memo
 
 ## Architecture
 
+Fully redesigned (Spec Kit feature `001-chavruta-redesign` — see [specs/](specs/001-chavruta-redesign/)):
+a deployment-agnostic core of **pluggable backends** selected purely by configuration.
+
 ```
 question (he / en)
    │
-   ▼  ① Query        detect named commentators, build search vector (bge-m3)
-   ▼  ② Retrieval    Qdrant semantic search: anchor pasuk + relevant commentaries
-   │                 (+ optional live Sefaria enrichment for extra commentators)
-   ▼  ③ Ranking      pasuk-anchored, per-commentator, dedup + similarity sort
-   ▼  ④ Generation   grounded answer — local (Ollama) or Nebius (serverless)
-   ▼  ⑤ Cite         answer in the question's language + source citations
+   ▼  ① Route        detect language + intent (qa / explain / compare / lesson),
+   │                 named commentators ("רש"י"), explicit refs ("Genesis 1:3")
+   ▼  ② Retrieve     hybrid search (bge-m3 dense+sparse, RRF in Qdrant)
+   │                 + link expansion: anchor chains → commentaries → supercommentaries,
+   │                 and across corpora along the chain of transmission
+   ▼  ③ Rank         pasuk-anchored, per-commentator, dedup, optional rerank
+   ▼  ④ Generate     grounded prompt = ONLY retrieved sources → local DictaLM / Nebius
+   ▼  ⑤ Enforce      citation gate: every claim maps to a real retrieved chunk;
+                     fabricated markers stripped; honest "no source found" path
 ```
 
-**Two deployment profiles — same code, chosen by env:**
+**Two deployment profiles — same code, chosen by `CHAVRUTA_PROFILE`:**
 
-| component  | 💻 Local / offline            | ☁️ Nebius (cloud / scale)              |
-|------------|-------------------------------|-----------------------------------------|
-| embedding  | `bge-m3` on CPU (query only)   | `bge-m3` GPU job (bulk index)           |
-| vector DB  | Qdrant **embedded**            | Qdrant **server** (Docker)              |
-| LLM        | `granite4.1:3b` via Ollama     | Token Factory (OpenAI-compatible API)   |
-| sources    | pre-downloaded corpus          | + live Sefaria Linker/Links API         |
+| component  | 💻 `local` (offline)              | ☁️ `cloud` (product / scale)            |
+|------------|-----------------------------------|-----------------------------------------|
+| embedding  | `bge-m3` on CPU (query only)      | `bge-m3` GPU (bulk index)               |
+| vector DB  | Qdrant **embedded**               | Qdrant **server**                       |
+| LLM        | **DictaLM-2.0 Q4** via Ollama (~4.4GB) | stronger model via Nebius (OpenAI-compatible) |
+| reranker   | off (RAM budget)                  | `bge-reranker-v2-m3`                    |
 
-`VECTOR_BACKEND`, `QDRANT_URL`/`QDRANT_PATH`, `LLM_BACKEND` select the profile.
+Every knob is a `CHAVRUTA_*` env var (see `src/chavruta/config/profile.py`).
 
 ---
 
@@ -73,14 +79,17 @@ python scripts/fetch_corpus.py                     # → data/processed/all_chun
 # 2. Embed on a GPU  (Colab/Kaggle/Nebius — see notebooks/)
 #    bge-m3 over 126k chunks is impractical on CPU; run the GPU notebook → corpus_vectors.npy
 
-# 3. Load vectors into Qdrant  (CPU, no re-embedding)
-docker run -p 6333:6333 -v "%cd%/qdrant_storage:/qdrant/storage" qdrant/qdrant
-python scripts/load_to_qdrant.py --in out/ --url http://localhost:6333
+# 3. Load vectors into the configured store  (CPU, no re-embedding)
+python scripts/load_to_store.py --in out/ --profile local    # embedded Qdrant, offline
 
-# 4. Ask  (retrieval = CPU; generation = Ollama or Nebius)
+# 4. Pull the local model (one-time) and ask
+ollama pull dictalm2.0-instruct:q4_k_m
 python scripts/ask.py "What does Rashi say about the creation of light?"
-python scripts/ask.py "מה אומר רד\"ק על ספר יונה?" --enrich
-streamlit run app.py
+python scripts/ask.py "מה אומר רד\"ק על ספר יונה?"
+streamlit run app/streamlit_app.py
+
+# 5. The trust gate — run the evaluation harness (Principle V)
+python scripts/run_eval.py --dataset eval/tanakh_v1.jsonl --retrieval-only
 ```
 
 ---
@@ -100,19 +109,22 @@ Everything that isn't the one-off GPU embed runs locally — including fully off
 ## Project structure
 
 ```
-scripts/
-  fetch_corpus.py        fetch all Tanakh + commentators from Sefaria
-  embed_corpus_gpu.py    GPU embedding → portable vectors (store-agnostic)
-  load_to_qdrant.py      load vectors into Qdrant (embedded or server)
-  ask.py                 one-shot RAG CLI
-  upload_dataset_hf.py   publish corpus to Hugging Face Hub
-src/
-  rag_pipeline.py        retrieval + prompt + generation (the chavruta)
-  vector_store.py        deployment-agnostic Qdrant layer
-  sefaria_client.py      live Sefaria fetcher (verse + commentaries)
-  llm_backend.py         Ollama (local) / Nebius (cloud) generation
-notebooks/
-  embed_corpus_full_kaggle.ipynb   GPU embedding on Kaggle
+src/chavruta/            the deployment-agnostic core (one package, config-driven)
+  config/                Profile — local/cloud selection of every backend
+  corpus/                CorpusRegistry · unified chunk schema · ingestion · Links graph
+  embedding/             EmbeddingBackend → bge-m3 (dense + sparse)
+  store/                 VectorStore → Qdrant (embedded / server)
+  retrieval/             HybridRetriever (RRF) · LinkExpander · optional Reranker
+  llm/                   LLMBackend → LocalLLM (Ollama/DictaLM) · CloudLLM (Nebius)
+  generation/            grounded prompts + the citation-enforcement gate
+  pipeline/              ChavrutaPipeline — route → retrieve → generate → cite
+  intents/               Router — language, intent, commentators, refs
+  eval/                  evaluation harness (retrieval@K, grounding, honesty)
+app/streamlit_app.py     RTL-aware chat UI with clickable citations
+scripts/                 fetch_corpus · embed_corpus_gpu · load_to_store · ask · run_eval
+eval/tanakh_v1.jsonl     versioned 120-question evaluation set (HE/EN)
+tests/                   contract · integration · unit (the trust guarantees)
+specs/001-chavruta-redesign/   spec · plan · research · data-model · contracts
 docs/  PLAN.md · DECISIONS.md · CORPUS.md
 ```
 
@@ -120,9 +132,14 @@ docs/  PLAN.md · DECISIONS.md · CORPUS.md
 
 ## Status
 
-Torah MVP (bge-m3 + Qdrant + grounded generation) is **working and validated**, including
-cross-lingual retrieval. The **full-Tanakh corpus is fetched** (126k chunks) and retrieval is
-upgraded to 12 commentators; the full-corpus GPU embedding is the active step.
+**Redesigned end to end** via Spec Kit (constitution → spec → plan → tasks → implement).
+The new `src/chavruta/` core implements all three MVP capabilities — grounded Q&A,
+explain/compare commentators (incl. supercommentary anchor chains), and structured lesson
+prep — behind config-swappable backends, with a 41-test suite and a 120-question evaluation
+harness. The full-Tanakh corpus (126k chunks) is fetched and embedded; remaining: load it
+into the embedded store on the target machine and run the live eval gate (see
+[specs/001-chavruta-redesign/quickstart.md](specs/001-chavruta-redesign/quickstart.md)).
+Halachic guidance is deferred until a halachic corpus is added (Constitution Principle VIII).
 
 ---
 

@@ -113,7 +113,11 @@
       "PowerShell(\"ok\")",
       "PowerShell($s = \"c:\\\\Users\\\\rubin\\\\Documents\\\\Chavruta.AI\\\\.specify\\\\scripts\\\\powershell\\\\setup-tasks.ps1\"; & $s -Json)",
       "PowerShell($s = \"c:\\\\Users\\\\rubin\\\\Documents\\\\Chavruta.AI\\\\.specify\\\\scripts\\\\powershell\\\\check-prerequisites.ps1\"; & $s -Json -RequireTasks -IncludeTasks)",
-      "PowerShell($s = \"c:\\\\Users\\\\rubin\\\\Documents\\\\Chavruta.AI\\\\.specify\\\\scripts\\\\powershell\\\\check-prerequisites.ps1\"; & $s -Json -RequireTasks -IncludeTasks; Write-Output \"---GIT---\"; git rev-parse --git-dir 2>$null; Write-Output \"---GITIGNORE EXISTS---\"; Test-Path \"c:\\\\Users\\\\rubin\\\\Documents\\\\Chavruta.AI\\\\.gitignore\")"
+      "PowerShell($s = \"c:\\\\Users\\\\rubin\\\\Documents\\\\Chavruta.AI\\\\.specify\\\\scripts\\\\powershell\\\\check-prerequisites.ps1\"; & $s -Json -RequireTasks -IncludeTasks; Write-Output \"---GIT---\"; git rev-parse --git-dir 2>$null; Write-Output \"---GITIGNORE EXISTS---\"; Test-Path \"c:\\\\Users\\\\rubin\\\\Documents\\\\Chavruta.AI\\\\.gitignore\")",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\rubin\\\\Documents\\\\Chavruta.AI\\\\src\\\\chavruta\" -Directory)",
+      "Bash(Select-Object Name)",
+      "Bash(grep -E \"\\\\.py$\")",
+      "PowerShell(Get-ChildItem \"c:\\\\Users\\\\rubin\\\\Documents\\\\Chavruta.AI\\\\data\\\\qdrant\" -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum | ForEach-Object { \"qdrant storage: {0:N1} MB\" -f \\($_.Sum/1MB\\) })"
     ],
     "additionalDirectories": [
       "C:\\Users\\rubin\\.cache\\huggingface",

@@ -1,5 +1,11 @@
 # Chavruta.AI — Master Plan
 
+> **⚠️ Superseded (2026-06-10):** הפרויקט עבר תכנון-מחדש מלא דרך Spec Kit.
+> המסמכים הקובעים כעת: [specs/001-chavruta-redesign/](../specs/001-chavruta-redesign/)
+> (spec · plan · research · data-model · contracts · tasks) בכפוף ל-
+> [.specify/memory/constitution.md](../.specify/memory/constitution.md) (v1.1.0).
+> המסמך הזה נשמר כרקע היסטורי.
+
 > חברותא וירטואלית מבוססת **RAG על כל ספריא**, דו-לשונית (עברית/אנגלית), מוגשת על
 > **Nebius Serverless** וגם מסוגלת לרוץ **לגמרי offline** על מחשב מקומי.
 

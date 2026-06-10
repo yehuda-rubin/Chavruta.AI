@@ -23,16 +23,29 @@ class BgeM3Embedding:
         self._model = None  # lazy
 
     def _ensure_model(self):
+        """Prefer FlagEmbedding (dense + sparse → hybrid); fall back to
+        sentence-transformers (dense-only — the D5 fallback mode)."""
         if self._model is None:
-            from FlagEmbedding import BGEM3FlagModel  # heavy; imported on first use
+            try:
+                from FlagEmbedding import BGEM3FlagModel  # heavy; imported on first use
 
-            self._model = BGEM3FlagModel(
-                self.model_id, use_fp16=self._use_fp16, device=self.device
-            )
+                self._model = ("flag", BGEM3FlagModel(
+                    self.model_id, use_fp16=self._use_fp16, device=self.device
+                ))
+            except ImportError:
+                from sentence_transformers import SentenceTransformer
+
+                st = SentenceTransformer(self.model_id, device=self.device)
+                st.max_seq_length = self.max_length
+                self._model = ("st", st)
         return self._model
 
     def _encode(self, texts: list[str]) -> list[Embedding]:
-        model = self._ensure_model()
+        kind, model = self._ensure_model()
+        if kind == "st":
+            vecs = model.encode(texts, normalize_embeddings=True, convert_to_numpy=True)
+            return [Embedding(dense=[float(x) for x in v], sparse={}) for v in vecs]
+
         out = model.encode(
             texts,
             max_length=self.max_length,
