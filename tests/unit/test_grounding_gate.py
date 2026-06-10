@@ -46,6 +46,23 @@ def test_no_source_answer_is_honest_in_both_languages():
         assert a.no_source and not a.grounded and a.citations == []
 
 
+def test_thinking_traces_are_stripped():
+    """Thinking-variant models (DictaLM-3.0 Thinking) emit <think> scratchpads — the
+    user-facing answer and the citation gate must see only the final answer."""
+    _, marker_map = build_prompt("q", _hits())
+    raw = "<think>המשתמש שואל על האור... אצטט את S1</think>האור נברא ביום הראשון [S1]"
+    text, citations, grounded = enforce_citations(raw, marker_map)
+    assert "<think>" not in text and "scratchpad" not in text
+    assert text.startswith("האור נברא")
+    assert grounded and citations[0].chunk_id == "c1"
+
+
+def test_unclosed_thinking_block_dropped():
+    from chavruta.generation.grounded import strip_thinking
+
+    assert strip_thinking("תשובה טובה <think>חשיבה שנקטעה באמצע") == "תשובה טובה"
+
+
 def test_prompt_contains_only_retrieved_sources():
     """The model receives ONLY retrieved material — the knowledge boundary (Principle I)."""
     prompt, marker_map = build_prompt("q", _hits())

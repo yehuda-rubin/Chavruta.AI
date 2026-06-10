@@ -5,12 +5,17 @@ are constrained by the Constitution (esp. II deployment-agnostic, III dynamic co
 simplicity) and the offline envelope (CPU-only 16GB laptop).
 
 > **Update 2026-06-10 — Dicta-LM 3.0 (released 2026-02)**: Dicta released DictaLM-3.0 in
-> 24B (Mistral-Small-3.1), Nemotron-12B, and 1.7B (Qwen3) sizes, 65k context, base/instruct/
-> thinking variants. Within the 4–5GB local budget: 24B Q4 (~14GB) is out; **12B has no GGUF
-> yet** (only FP8/W4A16 GPU formats) and Q4 would be ~7GB; **1.7B-Instruct has GGUF** and is
-> a strong lightweight candidate (~2GB, 65k context, fast on CPU). Decision: keep 2.0-7B-Q4
-> as the default, evaluate 3.0-1.7B-Instruct against it with the eval harness, and treat
-> 3.0-12B as the upgrade path when a GGUF lands. Cloud profile may use 3.0-24B.
+> 24B (Mistral-Small-3.1), Nemotron-12B, and 1.7B (Qwen3) sizes, 65k context, with
+> **official GGUFs** (incl. Nemotron-12B-Instruct-GGUF and 1.7B-Thinking-GGUF).
+>
+> **DECISION (user, 2026-06-10) — local default is DictaLM-3.0-1.7B (Q8_0, 1.83GB).**
+> The real memory budget on the target laptop is ~5-6GB free under normal use (OS +
+> apps occupy ≥60% of 16GB), which rules out: 12B Q4 (~7.2GB — dead), and the previous
+> default 2.0-7B Q4 (~4.4GB + bge-m3 ≈ 7.4GB — too heavy for daily use; dropped).
+> The 1.7B totals ≈ 4.2GB with bge-m3 — comfortable. Official GGUF:
+> `hf.co/dicta-il/DictaLM-3.0-1.7B-Thinking-GGUF:Q8_0` via Ollama; the generation layer
+> strips `<think>` traces before citation enforcement. Quality is validated by the eval
+> harness; the cloud profile carries the heavy models (3.0-24B/12B via Nebius/GPU).
 
 ## D1 — Local LLM: DictaLM-2.0-Instruct (GGUF Q4), config-swappable
 

@@ -17,6 +17,18 @@ from chavruta.llm.base import Turn as LLMTurn
 from chavruta.retrieval.base import RankedHit
 
 _MARKER_RE = re.compile(r"\[S(\d+)\]")
+_THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+
+
+def strip_thinking(text: str) -> str:
+    """Remove reasoning traces emitted by thinking-variant models (e.g. DictaLM-3.0
+    Thinking / Qwen3). The user sees the answer, not the scratchpad; citation
+    enforcement runs on the final answer only. Harmless for non-thinking models."""
+    cleaned = _THINK_RE.sub("", text)
+    # Unclosed <think> (generation cut off mid-reasoning) → nothing usable after it.
+    if "<think>" in cleaned:
+        cleaned = cleaned.split("<think>")[0]
+    return cleaned.strip()
 
 SYSTEM_QA = (
     "You are Chavruta, a trustworthy Torah study partner. You answer ONLY from the sources "
@@ -76,6 +88,7 @@ def enforce_citations(
     Returns (clean_text, citations, grounded). `grounded` is True iff at least one valid
     citation backs the answer (Principle I).
     """
+    text = strip_thinking(text)
     used: dict[str, RankedHit] = {}
     fabricated: set[str] = set()
     for m in _MARKER_RE.finditer(text):

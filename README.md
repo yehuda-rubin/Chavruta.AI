@@ -45,7 +45,7 @@ question (he / en)
 |------------|-----------------------------------|-----------------------------------------|
 | embedding  | `bge-m3` on CPU (query only)      | `bge-m3` GPU (bulk index)               |
 | vector DB  | Qdrant **embedded**               | Qdrant **server**                       |
-| LLM        | **DictaLM-2.0 Q4** via Ollama (~4.4GB) | stronger model via Nebius (OpenAI-compatible) |
+| LLM        | **DictaLM-3.0 1.7B Q8** via Ollama (~1.8GB) | stronger model via Nebius (OpenAI-compatible) |
 | reranker   | off (RAM budget)                  | `bge-reranker-v2-m3`                    |
 
 Every knob is a `CHAVRUTA_*` env var (see `src/chavruta/config/profile.py`).
@@ -82,8 +82,8 @@ python scripts/fetch_corpus.py                     # → data/processed/all_chun
 # 3. Load vectors into the configured store  (CPU, no re-embedding)
 python scripts/load_to_store.py --in out/ --profile local    # embedded Qdrant, offline
 
-# 4. Pull the local model (one-time) and ask
-ollama pull dictalm2.0-instruct:q4_k_m
+# 4. Pull the local model (one-time, ~1.8GB) and ask
+ollama pull hf.co/dicta-il/DictaLM-3.0-1.7B-Thinking-GGUF:Q8_0
 python scripts/ask.py "What does Rashi say about the creation of light?"
 python scripts/ask.py "מה אומר רד\"ק על ספר יונה?"
 streamlit run app/streamlit_app.py

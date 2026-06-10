@@ -50,7 +50,10 @@ class Profile:
 
     # ── Generation (LLM) — the dual-model strategy lives here ──
     llm_backend: str = "ollama"               # "ollama" (local) | "nebius" (cloud)
-    llm_model: str = "dictalm2.0-instruct:q4_k_m"
+    # DictaLM-3.0 1.7B (official Dicta GGUF, Q8_0 ≈ 1.83GB) — fits a realistically-loaded
+    # 16GB machine (~4.2GB total with bge-m3). User decision 2026-06-10: the 7B is too
+    # heavy for daily use; thinking traces are stripped by the generation layer.
+    llm_model: str = "hf.co/dicta-il/DictaLM-3.0-1.7B-Thinking-GGUF:Q8_0"
     llm_base_url: str = "http://localhost:11434"
     llm_api_key: str = ""                     # for the cloud backend
     llm_temperature: float = 0.2
@@ -97,7 +100,7 @@ def _local_preset() -> Profile:
         qdrant_mode="embedded",
         rerank=False,                         # keep RAM budget on the laptop
         llm_backend="ollama",
-        llm_model="dictalm2.0-instruct:q4_k_m",
+        llm_model="hf.co/dicta-il/DictaLM-3.0-1.7B-Thinking-GGUF:Q8_0",
         llm_base_url="http://localhost:11434",
     )
 
