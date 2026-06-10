@@ -42,6 +42,12 @@ WORK_ALIASES: dict[str, tuple[str, ...]] = {
     "zohar": ("zohar", "זוהר", "הזוהר"),
     "mishnah_berurah": ("mishnah berurah", "משנה ברורה"),
     "midrash": ("midrash", "מדרש"),
+    # planned supercommentaries (loaded later via the registry — D11)
+    "mizrachi": ("mizrachi", "המזרחי", "מזרחי"),
+    "gur_aryeh": ("gur aryeh", "גור אריה"),
+    "sifsei_chachamim": ("sifsei chachamim", "שפתי חכמים"),
+    # modern works (not on the ingestion roadmap; honesty still applies)
+    "modern_torah": ("soloveitchik", "סולוביצ'יק", "halakhic man", "rav kook", 'הראי"ה קוק'),
 }
 
 # English book names as they appear in the corpus ref scheme ("Genesis.1.3")

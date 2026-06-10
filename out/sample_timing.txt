@@ -1,0 +1,4 @@
+pipeline ready in 0s (model load)
+10 questions in 350s = 35.0s/question
+projected full 120: 70 min
+sample retrieval: 9/10

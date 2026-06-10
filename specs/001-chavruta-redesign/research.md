@@ -165,3 +165,29 @@ simplicity) and the offline envelope (CPU-only 16GB laptop).
 - Local reranker default stays **off** until measured: the tuning run (rerank on vs off
   over `eval/tanakh_v1.jsonl`) requires DictaLM pulled via Ollama on the target laptop.
   The retrieval-only gate (`scripts/run_eval.py --retrieval-only`) runs without the LLM.
+- **Embedded-Qdrant load cost at 126k scale (measured)**: dense-only load ≈ 13 min;
+  hybrid (dense+sparse) load is ~10-15× slower (sparse inverted-index updates in the
+  SQLite-backed local mode; Qdrant itself warns above 20k points). One-time cost per
+  reload; query latency is unaffected. If reloads become frequent, run Qdrant in local
+  Docker (still fully offline) — same code, `CHAVRUTA_QDRANT_MODE=server`.
+- **Embedded-Qdrant query cost at 126k scale (measured 2026-06-10)**: embedded local mode
+  does brute-force scans (no HNSW). Dense-only query ≈ 6s; **hybrid query ≈ 35s** — fine
+  for the batch eval gate, NOT acceptable for interactive chat (SC-004). Also,
+  FlagEmbedding on CPU runs fp32 (~4.6GB RAM) vs the ST dense-only fallback (~2GB).
+  **Recommendation for the local profile**: for interactive daily use either (a) run
+  Qdrant server in local Docker — still fully offline, real HNSW + sparse indexes,
+  millisecond queries, config-only switch; or (b) stay on the lightweight dense-only
+  fallback. Full hybrid in pure-embedded mode is for batch evaluation only.
+- **Hybrid corpus is live**: the full corpus was re-embedded on Kaggle GPU with
+  FlagEmbedding (dense + sparse, `out/corpus_sparse.jsonl`) and loaded; the dense-only
+  artifacts are archived in `out_dense_backup/`.
+- **T039 outcome — eval results on the real corpus (2026-06-10, retrieval-only @8)**:
+  dense 72.7% / hybrid **73.6%** retrieval; honesty **100%** (after the requested-work
+  detection + clean reload; was 0% before). Hybrid lift is marginal (+0.9pp) on the
+  current question set because most items are paraphrase-style (dense's strength); the
+  measured-failure review also shows several "misses" that are legitimate parallel
+  sources (e.g. the Devarim recounting of the Ten Commandments) not listed in
+  `expected_refs` — true quality is higher than measured. Follow-ups recorded: broaden
+  `expected_refs` with parallel passages; revisit hybrid + reranker after moving local
+  serving to Docker Qdrant. **Local-profile default remains dense-only ST fallback for
+  interactive use (RAM/speed); hybrid runs in the batch eval gate and in cloud.**

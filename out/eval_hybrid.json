@@ -1,0 +1,517 @@
+{
+  "dataset": "eval/tanakh_v1.jsonl",
+  "profile": "local",
+  "top_k": 8,
+  "n_items": 120,
+  "retrieval_at_k": 0.7364,
+  "grounding_rate": 0.7364,
+  "honesty_rate": 1.0,
+  "n_answerable": 110,
+  "n_unanswerable": 10,
+  "seconds": 2100.7,
+  "failures": [
+    {
+      "qid": "gen-006-he",
+      "kind": "retrieval",
+      "expected": [
+        "Genesis.2.1",
+        "Genesis.2.2",
+        "Genesis.2.3"
+      ],
+      "got": [
+        "Malbim on Exodus.20.8",
+        "Rashbam on Exodus.20.8",
+        "Ibn Ezra on Exodus.16.25",
+        "Rashbam on Exodus.20.11",
+        "Malbim on Nehemiah.9.14",
+        "Malbim on Exodus.16.23",
+        "Metzudat Zion on Psalms.89.45",
+        "Metzudat David on Isaiah.58.13"
+      ]
+    },
+    {
+      "qid": "gen-010-en",
+      "kind": "retrieval",
+      "expected": [
+        "Genesis.12.1"
+      ],
+      "got": [
+        "Genesis.20.10",
+        "Genesis.20.1",
+        "Targum Jonathan on Genesis.22.23",
+        "Targum Jonathan on Numbers.9.5",
+        "Rashi on Ezekiel.33.24",
+        "Genesis.21.22",
+        "I Chronicles.1.32",
+        "Targum Jonathan on Genesis.22.14"
+      ]
+    },
+    {
+      "qid": "gen-011-he",
+      "kind": "retrieval",
+      "expected": [
+        "Genesis.22.4"
+      ],
+      "got": [
+        "Metzudat David on Psalms.121.1",
+        "Radak on II Chronicles.6.2",
+        "Malbim on Genesis.22.2",
+        "Radak on I Kings.8.13",
+        "Ibn Ezra on Genesis.22.5",
+        "Genesis.13.14",
+        "Deuteronomy.3.27",
+        "Metzudat Zion on II Kings.10.12"
+      ]
+    },
+    {
+      "qid": "gen-013-he",
+      "kind": "retrieval",
+      "expected": [
+        "Genesis.28.12"
+      ],
+      "got": [
+        "Malbim on Genesis.28.10",
+        "Malbim on Genesis.37.11",
+        "Malbim on Isaiah.41.14",
+        "Radak on I Samuel.12.8",
+        "Rashi on Genesis.22.19",
+        "Rashbam on Genesis.46.8",
+        "Malbim on Genesis.37.1",
+        "Rashbam on Exodus.6.14"
+      ]
+    },
+    {
+      "qid": "gen-013-en",
+      "kind": "retrieval",
+      "expected": [
+        "Genesis.28.12"
+      ],
+      "got": [
+        "Ibn Ezra on Genesis.28.10",
+        "Genesis.28.10",
+        "Genesis.29.4",
+        "Ramban on Genesis.31.23",
+        "Genesis.31.24",
+        "Targum Jonathan on Genesis.46.5",
+        "Genesis.46.5",
+        "Genesis.33.18"
+      ]
+    },
+    {
+      "qid": "exo-002-he",
+      "kind": "retrieval",
+      "expected": [
+        "Exodus.20.2"
+      ],
+      "got": [
+        "Ibn Ezra on Deuteronomy.5.16",
+        "Radak on I Kings.5.23",
+        "Malbim on Genesis.2.19",
+        "Metzudat David on Proverbs.10.22",
+        "Radak on Jeremiah.7.22",
+        "Ibn Ezra on Daniel.11.20",
+        "Ibn Ezra on Exodus.20.1",
+        "Metzudat Zion on Psalms.52.4"
+      ]
+    },
+    {
+      "qid": "exo-002-en",
+      "kind": "retrieval",
+      "expected": [
+        "Exodus.20.2"
+      ],
+      "got": [
+        "Deuteronomy.4.13",
+        "Ibn Ezra on Deuteronomy.26.1",
+        "Deuteronomy.10.4",
+        "Proverbs.9.10",
+        "Rashi on Deuteronomy.5.12",
+        "Isaiah.1.10",
+        "Exodus.34.28",
+        "Rashi on Exodus.24.12"
+      ]
+    },
+    {
+      "qid": "exo-005-he",
+      "kind": "retrieval",
+      "expected": [
+        "Exodus.24.7"
+      ],
+      "got": [
+        "Radak on Ezekiel.16.60",
+        "Malbim on Deuteronomy.27.9",
+        "Sforno on Leviticus.24.23",
+        "Malbim on Deuteronomy.26.17",
+        "Rashi on Leviticus.24.23",
+        "Metzudat Zion on Malachi.3.22",
+        "Radak on Joshua.7.11",
+        "Ibn Ezra on Leviticus.7.38"
+      ]
+    },
+    {
+      "qid": "num-001-en",
+      "kind": "retrieval",
+      "expected": [
+        "Numbers.6.24",
+        "Numbers.6.25",
+        "Numbers.6.26"
+      ],
+      "got": [
+        "Ibn Ezra on Deuteronomy.27.14",
+        "Onkelos on Genesis.49.25",
+        "Psalms.103.22",
+        "Deuteronomy.21.5",
+        "Targum Jonathan on Genesis.49.25",
+        "II Chronicles.30.27",
+        "Targum Jonathan on Numbers.23.20",
+        "Jeremiah.29.1"
+      ]
+    },
+    {
+      "qid": "num-002-he",
+      "kind": "retrieval",
+      "expected": [
+        "Numbers.24.5"
+      ],
+      "got": [
+        "Malbim on Numbers.24.2",
+        "Radak on Micah.7.14",
+        "Rashi on Numbers.24.2",
+        "Ibn Ezra on Micah.6.5",
+        "Ibn Ezra on Numbers.24.2",
+        "Malbim on Numbers.24.1",
+        "Radak on Isaiah.46.12",
+        "Radak on I Kings.12.1"
+      ]
+    },
+    {
+      "qid": "num-003-he",
+      "kind": "retrieval",
+      "expected": [
+        "Numbers.13.27",
+        "Numbers.13.28",
+        "Numbers.13.32"
+      ],
+      "got": [
+        "Malbim on Deuteronomy.1.22",
+        "Metzudat David on Judges.11.17",
+        "Malbim on Numbers.13.25",
+        "Sforno on Song of Songs.2.13",
+        "Sforno on Numbers.33.40",
+        "Metzudat David on Joshua.9.7",
+        "Ibn Ezra on Hosea.13.6",
+        "Ibn Ezra on Malachi.1.2"
+      ]
+    },
+    {
+      "qid": "deu-001-he",
+      "kind": "retrieval",
+      "expected": [
+        "Deuteronomy.6.4"
+      ],
+      "got": [
+        "Metzudat David on Psalms.81.9",
+        "Ibn Ezra on Psalms.78.59",
+        "Rashi on Deuteronomy.20.3",
+        "Ibn Ezra on Isaiah.1.2",
+        "Metzudat David on Psalms.50.7",
+        "Malbim on Amos.7.16",
+        "Metzudat David on Isaiah.42.18",
+        "Jeremiah.10.1"
+      ]
+    },
+    {
+      "qid": "deu-001-en",
+      "kind": "retrieval",
+      "expected": [
+        "Deuteronomy.6.4"
+      ],
+      "got": [
+        "Psalms.118.2",
+        "Onkelos on Genesis.46.1",
+        "Jeremiah.17.13",
+        "Onkelos on Exodus.29.45",
+        "Isaiah.45.17",
+        "Onkelos on Genesis.47.27",
+        "Jeremiah.3.12",
+        "Onkelos on Genesis.35.10"
+      ]
+    },
+    {
+      "qid": "deu-002-he",
+      "kind": "retrieval",
+      "expected": [
+        "Deuteronomy.6.5"
+      ],
+      "got": [
+        "Radak on I Kings.11.38",
+        "Malbim on Hosea.9.1",
+        "Psalms.45.8",
+        "Rashi on Deuteronomy.3.23",
+        "Radak on Hosea.9.1",
+        "Ibn Ezra on Psalms.106.16",
+        "Ibn Ezra on Leviticus.19.18",
+        "Rashbam on Leviticus.19.18"
+      ]
+    },
+    {
+      "qid": "jos-002-en",
+      "kind": "retrieval",
+      "expected": [
+        "Joshua.6.20"
+      ],
+      "got": [
+        "Joshua.6.1",
+        "Joshua.6.2",
+        "Rashi on Nehemiah.6.15",
+        "Joshua.24.11",
+        "Jeremiah.52.7",
+        "Joshua.4.13",
+        "Rashi on Joshua.11.13",
+        "I Kings.16.34"
+      ]
+    },
+    {
+      "qid": "sam-003-en",
+      "kind": "retrieval",
+      "expected": [
+        "I Samuel.17.49",
+        "I Samuel.17.50"
+      ],
+      "got": [
+        "Targum Jonathan on II Samuel.21.19",
+        "I Chronicles.18.9",
+        "Targum Jonathan on I Samuel.17.23",
+        "I Samuel.17.23",
+        "II Samuel.21.19",
+        "Targum Jonathan on II Samuel.8.9",
+        "I Samuel.23.5",
+        "I Chronicles.18.3"
+      ]
+    },
+    {
+      "qid": "kin-002-he",
+      "kind": "retrieval",
+      "expected": [
+        "I Kings.18.38",
+        "I Kings.18.39"
+      ],
+      "got": [
+        "Malbim on Isaiah.42.3",
+        "Radak on I Kings.18.19",
+        "Radak on I Kings.18.43",
+        "Radak on I Kings.19.13",
+        "Radak on Jeremiah.23.13",
+        "Radak on I Kings.18.42",
+        "Joshua.8.33",
+        "Radak on Isaiah.47.1"
+      ]
+    },
+    {
+      "qid": "isa-001-he",
+      "kind": "retrieval",
+      "expected": [
+        "Isaiah.2.4"
+      ],
+      "got": [
+        "Sforno on Deuteronomy.13.16",
+        "Malbim on Daniel.8.17",
+        "Radak on Ezekiel.12.22",
+        "Radak on Jeremiah.14.14",
+        "Malbim on Daniel.10.14",
+        "Malbim on Ezekiel.21.34",
+        "Malbim on Isaiah.1.1",
+        "Radak on II Kings.12.18"
+      ]
+    },
+    {
+      "qid": "pro-002-en",
+      "kind": "retrieval",
+      "expected": [
+        "Proverbs.31.10"
+      ],
+      "got": [
+        "Targum Jonathan on Judges.5.24",
+        "Metzudat David on Judges.4.4",
+        "Rashi on Esther.9.29",
+        "Targum Jonathan on Genesis.20.7",
+        "Metzudat David on Judges.5.24",
+        "Psalms.109.1",
+        "Metzudat David on Isaiah.35.2",
+        "Proverbs.31.30"
+      ]
+    },
+    {
+      "qid": "job-001-he",
+      "kind": "retrieval",
+      "expected": [
+        "Job.1.21"
+      ],
+      "got": [
+        "Malbim on Job.6.1",
+        "Malbim on Joshua.24.20",
+        "Ramban on Job.38.1",
+        "Metzudat David on II Kings.15.25",
+        "Ramban on Job.42.10",
+        "Ramban on Job.2.9",
+        "Ibn Ezra on Job.42.17",
+        "Malbim on Job.34.5"
+      ]
+    },
+    {
+      "qid": "rut-001-he",
+      "kind": "retrieval",
+      "expected": [
+        "Ruth.1.16"
+      ],
+      "got": [
+        "Malbim on Ruth.2.20",
+        "Malbim on I Chronicles.22.11",
+        "Rashi on Ruth.1.19",
+        "Ibn Ezra on Micah.7.15",
+        "Malbim on Ruth.1.11",
+        "Radak on Psalms.21.14",
+        "Ibn Ezra on Ruth.4.17",
+        "Ruth.1.8"
+      ]
+    },
+    {
+      "qid": "rut-001-en",
+      "kind": "retrieval",
+      "expected": [
+        "Ruth.1.16"
+      ],
+      "got": [
+        "Ruth.2.20",
+        "Ibn Ezra on Ruth.1.19",
+        "Ruth.1.21",
+        "Ruth.1.8",
+        "Ruth.2.1",
+        "Ruth.1.19",
+        "Ruth.4.9",
+        "Ruth.2.2"
+      ]
+    },
+    {
+      "qid": "est-001-he",
+      "kind": "retrieval",
+      "expected": [
+        "Esther.4.14"
+      ],
+      "got": [
+        "Malbim on Esther.2.11",
+        "Metzudat David on Ezra.2.2",
+        "Ibn Ezra on Esther.2.5",
+        "Ibn Ezra on Esther.2.9",
+        "Ibn Ezra on Esther.9.28",
+        "Malbim on Esther.2.21",
+        "Ibn Ezra on Esther.5.1",
+        "Malbim on Esther.6.1"
+      ]
+    },
+    {
+      "qid": "est-001-en",
+      "kind": "retrieval",
+      "expected": [
+        "Esther.4.14"
+      ],
+      "got": [
+        "Esther.4.13",
+        "Rashi on Esther.4.17",
+        "Esther.2.22",
+        "Rashi on Esther.6.12",
+        "Rashi on Esther.2.20",
+        "Esther.2.15",
+        "Rashi on Esther.9.20",
+        "Rashi on Esther.2.23"
+      ]
+    },
+    {
+      "qid": "lam-001-he",
+      "kind": "retrieval",
+      "expected": [
+        "Lamentations.1.1"
+      ],
+      "got": [
+        "Metzudat Zion on Isaiah.27.10",
+        "Metzudat Zion on Jeremiah.15.17",
+        "Metzudat Zion on Hosea.8.9",
+        "Radak on Hosea.2.5",
+        "Ibn Ezra on Leviticus.13.46",
+        "Metzudat David on Jeremiah.45.1",
+        "Radak on Zechariah.5.7",
+        "Ibn Ezra on Zephaniah.3.20"
+      ]
+    },
+    {
+      "qid": "cmp-001-en",
+      "kind": "retrieval",
+      "expected": [
+        "Genesis.1.1"
+      ],
+      "got": [
+        "Ibn Ezra on Genesis.1.12",
+        "Ibn Ezra on Genesis.44.2",
+        "Rashi on Genesis.17.1",
+        "Ibn Ezra on Genesis.4.20",
+        "Rashi on Genesis.1.2",
+        "Ibn Ezra on Genesis.29.32",
+        "Rashi on Ezekiel.1.1",
+        "Ibn Ezra on Genesis.25.8"
+      ]
+    },
+    {
+      "qid": "cmp-002-he",
+      "kind": "retrieval",
+      "expected": [
+        "Deuteronomy.6.4"
+      ],
+      "got": [
+        "Rashi on Deuteronomy.20.3",
+        "Ibn Ezra on Isaiah.1.2",
+        "Rashi on Exodus.23.1",
+        "Ibn Ezra on Psalms.78.59",
+        "Ibn Ezra on Obadiah.1.1",
+        "Ibn Ezra on Malachi.1.1",
+        "Ibn Ezra on Micah.6.1",
+        "Ibn Ezra on Psalms.60.4"
+      ]
+    },
+    {
+      "qid": "exp-001-he",
+      "kind": "retrieval",
+      "expected": [
+        "Genesis.1.26",
+        "Genesis.1.27"
+      ],
+      "got": [
+        "Sforno on Genesis.5.1",
+        "Sforno on Leviticus.25.17",
+        "Sforno on Deuteronomy.4.35",
+        "Sforno on Genesis.38.11",
+        "Sforno on Genesis.2.22",
+        "Sforno on Genesis.34.17",
+        "Sforno on Genesis.2.21",
+        "Sforno on Genesis.34.21"
+      ]
+    },
+    {
+      "qid": "les-002-en",
+      "kind": "retrieval",
+      "expected": [
+        "Jonah.3",
+        "Jonah.3.10"
+      ],
+      "got": [
+        "Joshua.24.26",
+        "Malbim on Jonah.2.8",
+        "II Samuel.1.18",
+        "Jonah.1.1",
+        "Jonah.1.3",
+        "Targum Jonathan on II Samuel.1.18",
+        "Jonah.1.15",
+        "Targum Jonathan on Deuteronomy.31.19"
+      ]
+    }
+  ]
+}

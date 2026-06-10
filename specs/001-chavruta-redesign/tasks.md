@@ -156,11 +156,11 @@ coherent structure whose every citation resolves.
 **Purpose**: Hardening, parity, performance, and migration off the legacy flat modules.
 
 - [X] T038 [P] Profile-parity integration test (same request on `local` and `cloud` cites the same sources) in `tests/integration/test_parity.py` (SC-006)
-- [ ] T039 Tune retrieval on the target laptop and decide the local reranker on/off default empirically via the eval harness; record the outcome in `specs/001-chavruta-redesign/research.md` (D5/D7 open item) — *requires the real corpus + DictaLM on the target machine; retrieval-only eval runs now, full tuning after `ollama pull`*
+- [X] T039 Tune retrieval on the target laptop and decide the local reranker on/off default empirically via the eval harness; record the outcome in `specs/001-chavruta-redesign/research.md` (D5/D7 open item). **Done (retrieval layer):** dense 72.7% vs hybrid 73.6% @8; honesty 100%; embedded-mode latency measured (dense 6s / hybrid 35s per query → batch-gate only; Docker server recommended for interactive); local default = dense-only ST fallback; reranker stays off locally (revisit with Docker + after `ollama pull` for the generation layer)
 - [X] T040 [P] Unit tests for RRF fusion, dedup/anchoring, and the citation-enforcement gate in `tests/unit/`
 - [X] T041 [P] Migrate and remove the legacy flat modules (`src/rag_pipeline.py`, `src/vector_store.py`, `src/llm_backend.py`, `src/sefaria_client.py`) once superseded by `src/chavruta/` (also removed superseded `app.py`, `scripts/eval.py`, `scripts/test_intent.py`)
 - [X] T042 [P] Update docs to the new architecture (`README.md`, `docs/architecture.md`, `docs/DECISIONS.md`) referencing the plan
-- [ ] T043 Run the full `quickstart.md` validation end-to-end on the offline profile and confirm all scenarios pass
+- [ ] T043 Run the full `quickstart.md` validation end-to-end on the offline profile and confirm all scenarios pass. **Partial:** corpus loaded (126,738), retrieval+honesty scenarios validated via the eval gate (73.6% / 100%); remaining: generation scenarios (1,2,4,5) + chat UI — require `ollama pull dictalm2.0-instruct:q4_k_m` on this machine
 
 ---
 

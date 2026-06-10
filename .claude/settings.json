@@ -119,11 +119,27 @@
       "Bash(grep -E \"\\\\.py$\")",
       "PowerShell(Get-ChildItem \"c:\\\\Users\\\\rubin\\\\Documents\\\\Chavruta.AI\\\\data\\\\qdrant\" -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum | ForEach-Object { \"qdrant storage: {0:N1} MB\" -f \\($_.Sum/1MB\\) })",
       "WebFetch(domain:huggingface.co)",
-      "Bash(./.venv/Scripts/python.exe -c ' *)"
+      "Bash(./.venv/Scripts/python.exe -c ' *)",
+      "Read(//c/Users/rubin/Documents/����/�����/�������/**)",
+      "Read(//c/Users/rubin/Documents/תואר/עיצוב/תרגילים/ex7/src/**)",
+      "PowerShell(Set-Location \"C:\\\\Users\\\\rubin\\\\Documents\\\\תואר\\\\עיצוב\\\\תרגילים\\\\ex7\\\\src\"; $out = \"f`nc`nq\" | java Main 2>&1 | Out-String; $out; \"EXIT: $LASTEXITCODE\")",
+      "Bash(java Main)",
+      "Bash(echo \"EXIT: $?\")",
+      "Read(//c/Users/rubin/Documents/תואר/עיצוב/תרגילים/ex7/**)",
+      "Bash(java -cp src Main)",
+      "Bash(javac *.java)",
+      "Read(//c/Users/rubin/Documents/**)",
+      "Bash(rm -v *.class)",
+      "Read(//c/c/Users/rubin/Documents/תואר/עיצוב/תרגילים/ex7/**)",
+      "Bash(rm -f *.class)",
+      "Bash(ls *.class)",
+      "PowerShell(Get-ChildItem \"$env:USERPROFILE\\\\Downloads\" | Where-Object { $_.Name -match \"chavruta|corpus|hybrid|vectors\" } | Sort-Object LastWriteTime -Descending | Select-Object Name, @{N='MB';E={[math]::Round\\($_.Length/1MB,1\\)}}, LastWriteTime | Format-Table -AutoSize)"
     ],
     "additionalDirectories": [
       "C:\\Users\\rubin\\.cache\\huggingface",
-      "c:\\Users\\rubin\\.claude\\projects\\c--Users-rubin-Documents-Chavruta-AI\\memory"
+      "c:\\Users\\rubin\\.claude\\projects\\c--Users-rubin-Documents-Chavruta-AI\\memory",
+      "C:\\Users\\rubin\\Documents\\תואר\\עיצוב\\תרגילים\\ex7\\src",
+      "C:\\Users\\rubin\\Documents\\תואר\\עיצוב\\תרגילים\\ex7\\.idea"
     ]
   }
 }
