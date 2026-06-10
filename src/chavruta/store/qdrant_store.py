@@ -134,17 +134,27 @@ class QdrantStore:
     def fetch_by_refs(
         self, name: str, refs: list[str], filters: Optional[Filter] = None
     ) -> list[Hit]:
-        """Non-vector lookup by `ref` (for link-based retrieval). Uses scroll + filter."""
+        """Non-vector lookup: chunks whose `ref` OR `anchor_ref` is in `refs`.
+
+        Returns the verses plus everything anchored on them (commentaries) — used by
+        link-based retrieval and named-ref anchoring. Uses scroll + filter.
+        """
         from qdrant_client import models
 
         if not refs:
             return []
-        combined = dict(filters or {})
-        combined["ref"] = list(refs)            # MatchAny on the ref payload field
+        base = self._build_filter(filters)
+        ref_or_anchor = models.Filter(should=[
+            models.FieldCondition(key="ref", match=models.MatchAny(any=list(refs))),
+            models.FieldCondition(key="anchor_ref", match=models.MatchAny(any=list(refs))),
+        ])
+        combined = models.Filter(
+            must=([*base.must, ref_or_anchor] if base else [ref_or_anchor])
+        )
         points, _ = self._client_().scroll(
             collection_name=name,
-            scroll_filter=self._build_filter(combined),
-            limit=max(len(refs) * 4, 16),
+            scroll_filter=combined,
+            limit=max(len(refs) * 16, 64),
             with_payload=True,
         )
         return [

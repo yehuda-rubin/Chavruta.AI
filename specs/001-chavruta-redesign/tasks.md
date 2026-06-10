@@ -123,10 +123,10 @@ two-commentator comparison, and a commentator who has no comment on the verse.
 
 ### Implementation
 
-- [ ] T032 [US2] Add the `explain`/`compare` intent to `src/chavruta/intents/router.py` (single vs multi-commentator, target verse resolution)
-- [ ] T033 [US2] Implement the explanation + comparison generation (per-commentator grounding, attribution, disagreement surfacing, "no comment here" handling) in `src/chavruta/generation/grounded.py` and wired in `src/chavruta/pipeline/pipeline.py` (depends on T032, T026)
-- [ ] T033a [US2] Enable supercommentary surfacing in the compare path — when comparing two commentators, use `expand_links` to bring sources whose anchor is one of those commentators' comments (who *explains the dispute*), attributed and cited, in `src/chavruta/intents/router.py` + `src/chavruta/pipeline/pipeline.py` (depends on T016a, T033). *(Surfaces supercommentaries once such works are loaded.)*
-- [ ] T034 [P] [US2] Integration tests (explain one commentator; compare two with disagreement; missing-commentator case; supercommentary-on-dispute when available) in `tests/integration/test_explain.py`
+- [X] T032 [US2] Add the `explain`/`compare` intent to `src/chavruta/intents/router.py` (single vs multi-commentator, target verse resolution)
+- [X] T033 [US2] Implement the explanation + comparison generation (per-commentator grounding, attribution, disagreement surfacing, "no comment here" handling) in `src/chavruta/generation/grounded.py` and wired in `src/chavruta/pipeline/pipeline.py` (depends on T032, T026)
+- [X] T033a [US2] Enable supercommentary surfacing in the compare path — when comparing two commentators, use `expand_links` to bring sources whose anchor is one of those commentators' comments (who *explains the dispute*), attributed and cited, in `src/chavruta/intents/router.py` + `src/chavruta/pipeline/pipeline.py` (depends on T016a, T033). *(Surfaces supercommentaries once such works are loaded.)*
+- [X] T034 [P] [US2] Integration tests (explain one commentator; compare two with disagreement; missing-commentator case; supercommentary-on-dispute when available) in `tests/integration/test_explain.py`
 
 **Checkpoint**: US1 and US2 both work independently.
 
@@ -142,10 +142,10 @@ coherent structure whose every citation resolves.
 
 ### Implementation
 
-- [ ] T035 [P] [US3] Add the `LessonPlan` type (topic/parasha, sections with source_refs + explanation + discussion_points + citations) to `src/chavruta/corpus/schema.py`
-- [ ] T036 [US3] Add the `lesson` intent + structured-lesson builder (select sources, build sections, discussion points, attach resolving citations) in `src/chavruta/intents/router.py`, `src/chavruta/generation/grounded.py`, and `src/chavruta/pipeline/pipeline.py` (depends on T026, T035)
-- [ ] T036a [US3] Make the lesson builder **multi-corpus chain-aware** — use `expand_links` to follow the chain of transmission (pasuk → Rishonim → Acharonim → Halacha) across all loaded corpora, ordering sections along the chain with citations at each step (depends on T016a, T036). *(Spans pesukim + commentators in the Tanakh MVP; full chain activates as corpora are loaded.)*
-- [ ] T037 [P] [US3] Integration test (lesson on a topic → structured sections with resolving citations) in `tests/integration/test_lesson.py`
+- [X] T035 [P] [US3] Add the `LessonPlan` type (topic/parasha, sections with source_refs + explanation + discussion_points + citations) to `src/chavruta/corpus/schema.py`
+- [X] T036 [US3] Add the `lesson` intent + structured-lesson builder (select sources, build sections, discussion points, attach resolving citations) in `src/chavruta/intents/router.py`, `src/chavruta/generation/grounded.py`, and `src/chavruta/pipeline/pipeline.py` (depends on T026, T035)
+- [X] T036a [US3] Make the lesson builder **multi-corpus chain-aware** — use `expand_links` to follow the chain of transmission (pasuk → Rishonim → Acharonim → Halacha) across all loaded corpora, ordering sections along the chain with citations at each step (depends on T016a, T036). *(Spans pesukim + commentators in the Tanakh MVP; full chain activates as corpora are loaded.)*
+- [X] T037 [P] [US3] Integration test (lesson on a topic → structured sections with resolving citations) in `tests/integration/test_lesson.py`
 
 **Checkpoint**: All MVP user stories (1–3) independently functional over Tanakh.
 

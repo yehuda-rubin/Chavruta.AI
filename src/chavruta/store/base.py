@@ -49,4 +49,7 @@ class VectorStore(Protocol):
 
     def fetch_by_refs(
         self, name: str, refs: list[str], filters: Optional[Filter] = None
-    ) -> list[Hit]: ...   # non-vector lookup, used by link-based retrieval
+    ) -> list[Hit]: ...
+    # Non-vector lookup: returns chunks whose `ref` OR `anchor_ref` is in `refs` —
+    # i.e. the verses themselves plus everything anchored on them (commentaries).
+    # Used by link-based retrieval and named-ref anchoring.

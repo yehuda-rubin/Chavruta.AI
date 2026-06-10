@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 
-from chavruta.corpus.schema import Answer, Citation, Intent
+from chavruta.corpus.schema import Answer, Citation, Intent, LessonPlan, LessonSection
 from chavruta.llm.base import GroundedPrompt, SourceBlock
 from chavruta.llm.base import Turn as LLMTurn
 from chavruta.retrieval.base import RankedHit
@@ -105,6 +105,26 @@ def enforce_citations(
     return clean.strip(), citations, grounded
 
 
+def no_commentator_answer(lang: str, missing: list[str], intent: Intent) -> Answer:
+    """Honest answer when every requested commentator lacks a comment here (FR-006/007)."""
+    names = ", ".join(missing)
+    if lang == "he":
+        msg = (f"לא נמצא בקורפוס פירוש של {names} על המקום הזה. "
+               f"איני ממציא פירוש — ייתכן שהמפרש לא כתב כאן, או שהטקסט טרם נטען.")
+    else:
+        msg = (f"No comment by {names} on this passage was found in the corpus. "
+               f"I will not invent one — the commentator may not comment here, "
+               f"or the text is not loaded yet.")
+    return Answer(text=msg, citations=[], grounded=False, no_source=True, intent=intent)
+
+
+def missing_commentator_note(lang: str, missing: list[str]) -> str:
+    names = ", ".join(missing)
+    if lang == "he":
+        return f"הערה: לא נמצא בקורפוס פירוש של {names} על המקום הזה."
+    return f"Note: no comment by {names} on this passage was found in the corpus."
+
+
 def no_source_answer(lang: str, intent: Intent = Intent.QA) -> Answer:
     if lang == "he":
         msg = ("לא נמצא מקור מעוגן בקורפוס הנוכחי שעונה על השאלה. "
@@ -113,6 +133,36 @@ def no_source_answer(lang: str, intent: Intent = Intent.QA) -> Answer:
         msg = ("No grounded source in the current corpus answers this question. "
                "I will not invent one — try rephrasing, or add the relevant corpus.")
     return Answer(text=msg, citations=[], grounded=False, no_source=True, intent=intent)
+
+
+def build_lesson_plan(topic: str, hits: list[RankedHit]) -> LessonPlan:
+    """Structure the retrieved sources into a lesson scaffold (FR-008/008a, task T036/T036a).
+
+    Sections are grouped by anchor pasuk and ordered along the chain of transmission:
+    within each section the pasuk comes first, then its commentaries (and, as corpora are
+    loaded, Acharonim/Halacha reached via link expansion). Every section carries resolving
+    citations; the LLM narrative (discussion points, flow) is generated separately and
+    grounded by the same sources.
+    """
+    by_anchor: dict[str, list[RankedHit]] = {}
+    for h in hits:
+        anchor = h.anchor_ref or h.ref
+        by_anchor.setdefault(anchor, []).append(h)
+
+    sections: list[LessonSection] = []
+    for anchor, group in by_anchor.items():
+        # pasuk (no commentator) first, then commentaries — the chain order
+        group_sorted = sorted(group, key=lambda h: (h.commentator_id is not None, h.work_id))
+        sections.append(LessonSection(
+            heading=anchor,
+            source_refs=[h.ref for h in group_sorted],
+            citations=[
+                Citation(chunk_id=h.chunk_id, ref=h.ref, deep_link=h.deep_link,
+                         quote=h.text[:280], commentator_id=h.commentator_id)
+                for h in group_sorted
+            ],
+        ))
+    return LessonPlan(topic=topic, sections=sections)
 
 
 def maybe_halacha_caveat(answer: Answer, lang: str) -> Answer:

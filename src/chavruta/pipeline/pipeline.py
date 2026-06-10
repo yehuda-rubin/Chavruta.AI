@@ -96,7 +96,23 @@ class ChavrutaPipeline:
         result = self.retriever.retrieve(query, top_k=self.profile.top_k)
 
         if result.is_empty:
+            if query.intent in (Intent.EXPLAIN, Intent.COMPARE) and query.commentator_ids:
+                # Empty because the requested commentator(s) have no comment here.
+                return grounded.no_commentator_answer(
+                    query.lang, list(query.commentator_ids), query.intent
+                )
             return grounded.no_source_answer(query.lang, query.intent)
+
+        # Explain/compare honesty (FR-006/007): a requested commentator with no retrieved
+        # comment must be reported as absent, never invented (Principle I).
+        missing_note = None
+        if query.intent in (Intent.EXPLAIN, Intent.COMPARE) and query.commentator_ids:
+            present = {h.commentator_id for h in result.hits if h.commentator_id}
+            missing = [c for c in query.commentator_ids if c not in present]
+            if missing and len(missing) == len(query.commentator_ids):
+                return grounded.no_commentator_answer(query.lang, missing, query.intent)
+            if missing:
+                missing_note = grounded.missing_commentator_note(query.lang, missing)
 
         prompt, marker_map = grounded.build_prompt(
             query.text, result.hits, intent=query.intent, history=history
@@ -110,6 +126,12 @@ class ChavrutaPipeline:
             text=text, citations=citations, grounded=is_grounded,
             no_source=not is_grounded, intent=query.intent,
         )
+        if missing_note:
+            answer.caveats.append(missing_note)
+        if query.intent is Intent.LESSON:
+            # Structured scaffold alongside the narrative: sources grouped per anchor,
+            # ordered along the chain of transmission, every section cited (FR-008/008a).
+            answer.lesson_plan = grounded.build_lesson_plan(query.text, result.hits)
         return grounded.maybe_halacha_caveat(answer, query.lang)
 
     def ask_stream(self, request: Query, *, history: list[Turn] | None = None) -> Iterator[str]:

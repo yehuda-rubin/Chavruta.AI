@@ -139,6 +139,7 @@ class Query:
     intent: Intent = Intent.QA
     work_ids: Optional[list[str]] = None         # corpus scoping; None = all loaded
     commentator_ids: Optional[list[str]] = None  # named-commentator bias/filter
+    named_refs: Optional[list[str]] = None       # explicit verse refs detected in the question
     expand_links: bool = False                   # follow Link edges + anchor chains
     expand_depth: int = 1
 

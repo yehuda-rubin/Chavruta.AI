@@ -29,6 +29,17 @@ COMMENTATOR_ALIASES: dict[str, tuple[str, ...]] = {
     "targum_jonathan": ("targum jonathan", "תרגום יונתן"),
 }
 
+# English book names as they appear in the corpus ref scheme ("Genesis.1.3")
+_BOOKS = (
+    "Genesis|Exodus|Leviticus|Numbers|Deuteronomy|Joshua|Judges|I Samuel|II Samuel|"
+    "I Kings|II Kings|Isaiah|Jeremiah|Ezekiel|Hosea|Joel|Amos|Obadiah|Jonah|Micah|"
+    "Nahum|Habakkuk|Zephaniah|Haggai|Zechariah|Malachi|Psalms|Proverbs|Job|"
+    "Song of Songs|Ruth|Lamentations|Ecclesiastes|Esther|Daniel|Ezra|Nehemiah|"
+    "I Chronicles|II Chronicles"
+)
+_REF_PAT = re.compile(rf"\b({_BOOKS})\s+(\d+)(?:[:.](\d+))?", re.IGNORECASE)
+_BOOK_CANON = {b.lower(): b for b in _BOOKS.split("|")}
+
 _LESSON_PAT = re.compile(
     r"\b(prepare|build|create|make)\b.*\b(lesson|shiur|class)\b"
     r"|שיעור|הכן\s+שיעור|תכין\s+שיעור|בנה\s+שיעור", re.IGNORECASE)
@@ -59,6 +70,20 @@ def detect_commentators(text: str) -> list[str]:
     return found
 
 
+def detect_refs(text: str) -> list[str]:
+    """Detect explicit verse refs ('Genesis 1:1' / 'Genesis 1.3') → corpus format 'Genesis.1.1'.
+
+    A chapter-only mention ('Genesis 1') yields 'Genesis.1' (chapter-level anchor).
+    """
+    refs = []
+    for m in _REF_PAT.finditer(text):
+        book = _BOOK_CANON.get(m.group(1).lower(), m.group(1).title())
+        ref = f"{book}.{m.group(2)}" + (f".{m.group(3)}" if m.group(3) else "")
+        if ref not in refs:
+            refs.append(ref)
+    return refs
+
+
 def detect_intent(text: str, n_commentators: int) -> Intent:
     if _LESSON_PAT.search(text):
         return Intent.LESSON
@@ -87,6 +112,11 @@ class Router:
             # Bias, don't hard-filter, when exactly one is named in a compare-less question:
             query.commentator_ids = commentators
 
+        if query.named_refs is None:
+            refs = detect_refs(query.text)
+            if refs:
+                query.named_refs = refs
+
         if query.intent is Intent.QA:   # only override the default, never an explicit choice
             query.intent = detect_intent(query.text, len(commentators))
 
@@ -96,5 +126,8 @@ class Router:
         # Comparison/explanation benefits from anchor-chain expansion (supercommentaries).
         if query.intent in (Intent.COMPARE, Intent.LESSON) and not query.expand_links:
             query.expand_links = True
+            # depth 2 reaches commentary-on-commentary: pasuk → Rashi → Mizrachi (T033a);
+            # for lessons it spans the chain of transmission across loaded corpora (T036a).
+            query.expand_depth = max(query.expand_depth, 2)
 
         return query

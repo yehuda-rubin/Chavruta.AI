@@ -53,6 +53,17 @@ class HybridRetriever:
         )
         hits = [_to_hit(h) for h in raw]
 
+        # Named-ref anchoring: the question explicitly names a verse → fetch that verse and
+        # everything anchored on it (exact, score above the relevance threshold by design).
+        if query.named_refs:
+            anchored = self.store.fetch_by_refs(
+                self.profile.collection, query.named_refs, filters=self._filters(query)
+            )
+            for h in anchored:
+                rh = _to_hit(h)
+                rh.score = max(rh.score, 1.0)
+                hits.append(rh)
+
         # Optional reranking (heavy in cloud / optional local)
         if self.reranker is not None and self.profile.rerank and hits:
             hits = self.reranker.rerank(query.text, hits)

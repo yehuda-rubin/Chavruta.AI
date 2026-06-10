@@ -94,7 +94,8 @@ class InMemoryStore:
         coll = self._data.get(name, {})
         out = []
         for c in coll.values():
-            if c.payload.get("ref") in refs and self._matches(c.payload, filters):
+            in_refs = c.payload.get("ref") in refs or c.payload.get("anchor_ref") in refs
+            if in_refs and self._matches(c.payload, filters):
                 out.append(Hit(chunk_id=c.chunk_id, score=1.0, payload=c.payload))
         return out
 
