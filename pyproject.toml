@@ -1,0 +1,28 @@
+[project]
+name = "chavruta"
+version = "0.2.0"
+description = "A trustworthy Jewish-text study partner (RAG over the Jewish bookshelf)"
+requires-python = ">=3.11"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]  # line length handled by formatter; long Hebrew strings are fine
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"
+markers = [
+    "contract: backend interface conformance tests",
+    "integration: end-to-end pipeline tests",
+    "requires_corpus: needs the indexed corpus to be loaded",
+    "requires_llm: needs a running LLM backend (Ollama/Nebius)",
+]

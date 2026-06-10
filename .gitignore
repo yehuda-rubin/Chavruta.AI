@@ -53,6 +53,9 @@ data/
 *.parquet
 *.feather
 *.jsonl
+# Keep the versioned evaluation datasets (Principle V — trustworthiness is measured)
+!eval/
+!eval/**/*.jsonl
 
 # ---- Vector DB / embeddings / indexes ----
 *.faiss
