@@ -143,6 +143,7 @@ simplicity) and the offline envelope (CPU-only 16GB laptop).
   (Principle VI) while not precluding the user's full vision.
 - **Alternatives considered**: special-casing supercommentary/halacha in code (rejected —
   violates III).
+- **Concrete roadmap → D12.**
 
 ## D9 — Deployment profiles via a single Config/Profile object
 
@@ -153,6 +154,173 @@ simplicity) and the offline envelope (CPU-only 16GB laptop).
   testing.
 - **Alternatives considered**: separate entrypoints/branches per profile (drift risk),
   feature flags scattered through logic (unmaintainable). Rejected.
+
+## D12 — Corpus-expansion roadmap: Mishnah → Shulchan Aruch + Mishnah Berurah → Talmud (user, 2026-06-13)
+
+- **North-star (user, 2026-06-13): the target corpus is the *entire Sefaria library*.** The
+  phases below are not the scope ceiling — they are the **ingestion order** toward full-Sefaria
+  coverage. Everything in Sefaria (Tanakh, Mishnah, Talmud Bavli + Yerushalmi, Halacha, Midrash,
+  Kabbalah, Machshava, Responsa, modern works…) is in eventual scope; the roadmap just sequences
+  *what loads first* by value and ingestion difficulty.
+- **What "all of Sefaria" implies architecturally** (does not change the schema — Principle III —
+  but changes ingestion + ops):
+  - **Ingestion must become index-driven, not hand-listed.** `SefariaAdapter.fetch_*` currently
+    takes explicit `refs`; full coverage needs a crawler that walks Sefaria's **Index / table-of-
+    contents API** (categories → works → every ref) to enumerate the library systematically and
+    resumably. This is the main *new code* the goal requires — a generic traversal, still one
+    adapter, no per-work special-casing.
+  - **Scale is now millions of segments** → Qdrant **server** is mandatory in every profile
+    (embedded mode is for the Tanakh-sized slice only); embedding becomes a staged GPU batch job;
+    storage + reload cost must be budgeted (cf. D4 / Implementation status notes).
+  - **Per-work licensing must be captured and respected** — Sefaria texts vary (CC0 / CC-BY /
+    restricted). `Work.license`/`attribution` already exist; ingestion MUST populate them per work
+    and the crawler MUST honor texts that can't be redistributed.
+  - **Eval stays sampled, honesty stays universal** — `expected_refs` can't be authored for the
+    whole library; the retrieval eval remains a growing *sample*, while the honesty/grounding
+    gates (SC-002, Principle I) apply to everything ingested.
+- **Decision**: Concretize D11 into a **phased content roadmap** toward that north-star, each phase
+  a data/config operation through `SefariaAdapter` + `CorpusRegistry` — **no change** to retrieval,
+  ranking, generation, or schema (Principle III; guarded by extensibility test T024a / SC-005).
+  Phases are ordered by ingestion difficulty, not importance, so each phase validates against the
+  eval harness before the next begins (Principle V):
+  1. **Mishnah** — `kind=mishnah` (or `scripture`-like), `reference_scheme="tractate/chapter/mishnah"`.
+     Cleanest: clean Hebrew, fully structured, one Mishnah = one chunk. Lowest risk; validates
+     the non-Tanakh ingestion path end-to-end.
+  2. **Shulchan Aruch + Mishnah Berurah (a linked pair)** — SA `kind=halacha`,
+     `reference_scheme="section/siman/seif"`; MB ingested as a **commentary Work anchored to SA**
+     (`unit_type=commentary`, `anchor_kind=source`, `anchor_ref` = the SA seif via Sefaria's Links
+     graph). The value is the **SA↔MB linkage** (seif ↔ s"k), which D10's `LinkExpander` already
+     traverses — load it as links, do not flatten. **Activates US4 / FR-009**: once a halachic
+     corpus is loaded the halachic intent path goes live and **every** halachic answer MUST carry
+     the "not a substitute for a rav / not a binding pesak" caveat (Principle VIII, SC-007); the
+     eval set must add halachic items asserting that caveat.
+  3. **Talmud Bavli + commentaries (Rashi, Tosafot, …)** — the hard phase, deferred until 1–2 are
+     solid. `kind=talmud`, `reference_scheme="daf/amud"`. **Chunking decision (user): chunk = one
+     Sefaria text segment** (e.g. `Shabbat 2a:1`, `2a:2` …) — Sefaria's own division of each amud
+     into numbered segments. `position` keeps `{tractate, daf, amud, segment}` for ordering; the
+     daf/amud stays the citable unit. **Rashi/Tosafot/other mefarshim are separate commentary
+     `Work`s** anchored to their gemara segment via the Links graph (`anchor_kind=source`),
+     exactly as the Tanakh commentators are — so the dialectical layout (gemara + Rashi + Tosafot
+     on the same segment) is reconstructed by link-expansion at query time, not by special code.
+
+- **Rambam (user, 2026-06-13) — a multi-work author whose books slot across the phases above,
+  not one monolithic phase**:
+  - **Peirush HaMishnayot (Commentary on the Mishnah)** → loads with **phase 1**, as a commentary
+    `Work` anchored to each Mishnah (`anchor_kind=source`). Natural pairing with the Mishnah.
+  - **Mishneh Torah (Yad HaChazakah)** → loads with **phase 2** (`kind=halacha`,
+    `reference_scheme="sefer/hilchot/perek/halacha"`). Highly structured. Its classical nosei
+    kelim (Maggid Mishneh, Kesef Mishneh, Lechem Mishneh, Hagahot Maimoniyot) are further
+    commentary `Work`s anchored to the halacha — same supercommentary pattern as Tanakh.
+  - **Sefer HaMitzvot** → with phase 2; structured list of the 613, anchored to its mitzvot.
+  - **Moreh Nevuchim (Guide for the Perplexed)** → `kind=emunah`, a **separate philosophical
+    register** from the halachic/exegetical core; add it on its own track (after the core chain
+    works) since it serves a different intent and its Hebrew is a translation (Ibn Tibbon/Kapach).
+  - Rambam is also a **chain hub**: Mishneh Torah is a node on the halachic spine
+    (Talmud → Rambam → Tur/Beit Yosef → Shulchan Aruch → Mishnah Berurah), so loading it enriches
+    the D10 link-expansion across the other halachic works.
+
+- **Candidate backlog (prioritized by chain-completion + structuredness, not yet scheduled)**:
+  - **Tur (Arba'ah Turim) + Beit Yosef** — *highest-value next halachic addition.* The SA is
+    literally structured on the Tur, and the Beit Yosef bridges Rambam→Tur→SA; loading it
+    **completes the halachic spine** so a single question can traverse Talmud → Rambam → Tur → SA
+    → MB. Structured, cheap to ingest. Strong recommendation.
+  - **Mishnah commentaries — Bartenura, Tosafot Yom Tov** — pair with phase 1; the standard
+    learning layer on Mishnah, structured, low risk.
+  - **Midrash (Rabbah, Tanchuma)** — aggadic, densely linked to pesukim; high value for
+    **lessons/shiurim (US3)** and structured by parasha. Medium priority.
+  - **Talmud Yerushalmi** — parallels the Bavli; same difficulty class, lower priority — after
+    the Bavli phase proves the Talmud ingestion path.
+  - **Defer / out of near-term scope**: She'elot uTeshuvot (responsa — huge, weakly structured,
+    hard to anchor); Kabbalah/Zohar (Aramaic + interpretively sensitive — needs its own guardrail
+    design, cf. Principle VIII spirit). Record but do not schedule.
+- **Rationale**: Phasing by difficulty front-loads cheap validation: a regression after adding
+  Mishnah (clean, small) is trivially attributable; a regression after Talmud (Aramaic, huge,
+  dialectical) is not — so Talmud goes last, on a corpus whose other layers are already trusted.
+  Chunking Talmud by Sefaria segment reuses a curated, stable division (matching how the Links
+  graph anchors commentaries) instead of inventing our own sugya segmentation.
+- **Open considerations (measure, don't assume)**:
+  - **Aramaic retrieval** — bge-m3 covers Aramaic but quality is unverified here; the Talmud
+    phase MUST extend the eval set with Aramaic/Talmud questions and gate on retrieval@K before
+    acceptance (Principle V). Marginal hybrid lift may matter more on exact-term Talmud queries
+    than it did on paraphrase-heavy Tanakh items (cf. T039).
+  - **Scale → vector backend** — Talmud + commentaries is far larger than the 126k-chunk Tanakh
+    corpus; per the measured embedded-Qdrant limits (Implementation status notes / D4), this phase
+    almost certainly mandates **Qdrant server in Docker** even locally (config-only switch,
+    `CHAVRUTA_QDRANT_MODE=server`). Budget GPU embedding time + Qdrant disk before ingesting.
+  - **Dialectical reasoning** — RAG retrieves segments but does not natively model קושיא/תירוץ
+    flow; segment-level chunking + link-expansion is the first cut, to be revisited against eval.
+
+## D13 — Validate the existing product on Nebius (cloud profile) in parallel, on the current corpus first (user, 2026-06-13)
+
+- **Decision**: Run cloud-profile (Nebius Token Factory) validation **concurrently** with the D12
+  corpus expansion, but **against the current Tanakh corpus and the existing eval set first** —
+  establish a stable cloud baseline before the corpus changes underneath it.
+- **Rationale**: The two efforts test orthogonal axes — D12 changes the **corpus**
+  (retrieval/grounding quality), D13 changes the **LLM + deployment layer** (cloud serverless
+  generation vs local DictaLM). Running them in parallel is efficient, but changing both the model
+  and the corpus at once makes any regression unattributable. Pin one: fix the corpus, swap the
+  profile, run the **same** eval harness (`scripts/run_eval.py`) under `profile=cloud` → this both
+  validates Nebius generation quality and exercises profile parity (SC-006) on known data. Only
+  after the cloud baseline holds should expanded corpora be evaluated under it.
+- **Cost note**: corpus expansion multiplies embedding time and Qdrant footprint, and cloud
+  generation is per-token billed — measure both on a single source (Mishnah) before running the
+  full batch (Principle VI: no surprise blowups).
+- **Alternatives considered**: validate cloud only after the corpus is final (rejected — wastes
+  the parallelism and delays catching cloud-specific issues); change corpus + model together
+  (rejected — confounds attribution, violates the measurement discipline of Principle V).
+
+## D14 — Thematic source tree for lesson generation (2026-06-16)
+
+- **Problem**: `Intent.LESSON` currently dumps all retrieved + link-expanded chunks into the
+  LLM prompt and lets the model impose structure. This is brittle: the LLM may reorder,
+  over-weight, or omit layers of the transmission chain — the model does not natively "know"
+  that a Shulchan Aruch seif is the *ruling* and a Talmudic passage is the *root*, or that
+  Rashi is *interpretation* while Mishnah Berurah is *practical application*.
+- **Decision**: Add a **`ThematicOrganizer`** post-retrieval step, executed only on
+  `Intent.LESSON`, that clusters the retrieved + link-expanded sources into **named thematic
+  slots** before passing them to generation:
+
+  ```
+  root_sources   — primary pesukim / Mishnah / Talmud segments on the topic
+  interpretations — Rishonim & Acharonim explaining the root (Rashi, Rambam, …)
+  rulings        — halachic conclusions (SA, MT, Tur, MB, responsa)
+  applications   — practical examples, edge cases, machloket
+  ```
+
+  Each slot is populated by **source metadata** already available in the chunk schema
+  (`work.kind`, `anchor_kind`, `corpus_id`) — no new LLM call needed for classification.
+  Works with `kind=scripture|mishnah|talmud` go to `root_sources`; `kind=commentary` with
+  `anchor_kind=source` go to `interpretations`; `kind=halacha` go to `rulings`, etc.
+  Ambiguous chunks (e.g. a Rambam in Mishneh Torah that is both interpretation and ruling)
+  are placed in the best-fitting slot by a small rule table, with a fallback to `interpretations`.
+
+- **Interaction with D10**: `LinkExpander` already traverses the transmission chain
+  (pasuk → Rishonim → Acharonim → Halacha). `ThematicOrganizer` sits *after* link expansion
+  and organises its output — the two are complementary. The link graph provides the *connections*;
+  the thematic organizer provides the *lesson structure*.
+
+- **Generation impact**: The grounded prompt builder (`generation/grounded.py`) receives the
+  organiser's output as a **structured dict** (not a flat list). It renders each slot as a
+  labelled section header in the prompt (`## שורש — ## פרשנות — ## פסיקה`) so the LLM can
+  produce a lesson that flows naturally from source to interpretation to ruling, grounded at
+  every step (Principle I). The organizer must never drop a source — it only reorders.
+
+- **Scope and preconditions**: The organizer is trivially useful even with Tanakh-only corpus
+  (slot: `root_sources` + `interpretations`); it becomes fully expressive once Phase 2
+  (SA + MT) is loaded and `rulings` slot fills. Implement the organizer before Phase 2
+  ingestion so the lesson path is exercised and tested from the start.
+
+- **Rationale**: Semantic similarity retrieves *relevant* sources; the link graph traverses
+  *connected* sources; the thematic organizer ensures they arrive at generation in *pedagogical
+  order* — the three layers together (D5 + D10 + D14) make lesson generation reliable rather
+  than model-dependent. Keeps lesson structure in deterministic code, not in the LLM's
+  discretion (Principle VI: simplicity and inspectability).
+
+- **Alternatives considered**: letting the LLM structure the lesson from a flat source list
+  (current — fragile, order-dependent, tested to drift on long source lists); a separate
+  "structuring" LLM call before generation (rejected — doubles latency, adds cost, introduces
+  a second grounding failure mode); a rigid template per topic (rejected — topics vary too
+  much; the slot-based design is flexible enough without being fully open-ended).
 
 ## Open items deferred to implementation (non-blocking)
 
