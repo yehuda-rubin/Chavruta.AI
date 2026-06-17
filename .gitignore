@@ -111,3 +111,10 @@ coverage.xml
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# ---- Private notes (not for GitHub) ----
+.private/
+
+# ---- Frontend (Node) ----
+app/frontend/node_modules/
+app/frontend/dist/

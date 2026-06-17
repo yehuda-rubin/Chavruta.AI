@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+:root {
+  --font-sans: "Segoe UI", system-ui, sans-serif;
+  --font-hebrew: "David Libre", "Frank Ruhl Libre", "Noto Serif Hebrew", var(--font-sans);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: var(--font-sans);
+  background: #0f1117;
+  color: #e2e8f0;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+#root {
+  height: 100dvh;
+  display: flex;
+}
+
+/* Hebrew text */
+.he {
+  font-family: var(--font-hebrew);
+  direction: rtl;
+  unicode-bidi: isolate;
+}
+
+.en {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
