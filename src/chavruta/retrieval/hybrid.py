@@ -43,8 +43,14 @@ class HybridRetriever:
             f["commentator_id"] = list(query.commentator_ids)
         return f or None
 
+    def _work_filter(self, query: Query) -> Filter | None:
+        """Work scope only — used for ref anchoring so the verse itself and ALL its
+        commentaries are fetched, not just the named commentators (the named ones are
+        still boosted to score 1.0; this also brings the pasuk in for context)."""
+        return {"work_id": list(query.work_ids)} if query.work_ids else None
+
     def retrieve(self, query: Query, *, top_k: int) -> RetrievalResult:
-        emb = self.embedding.embed_query(query.text)
+        emb = self.embedding.embed_query(query.search_text or query.text)
         use_sparse = self.profile.hybrid and bool(emb.sparse)
         hquery = HybridQuery(dense=emb.dense, sparse=emb.sparse if use_sparse else None)
 
@@ -56,8 +62,12 @@ class HybridRetriever:
         # Named-ref anchoring: the question explicitly names a verse → fetch that verse and
         # everything anchored on it (exact, score above the relevance threshold by design).
         if query.named_refs:
+            # Named commentators → fetch them *specifically* on the ref (small, never
+            # truncated), guaranteeing e.g. Rashi AND Ramban on Genesis.1.1. No named
+            # commentator → fetch the verse + all its commentaries (work scope) for context.
+            anchor_filter = self._filters(query) if query.commentator_ids else self._work_filter(query)
             anchored = self.store.fetch_by_refs(
-                self.profile.collection, query.named_refs, filters=self._filters(query)
+                self.profile.collection, query.named_refs, filters=anchor_filter
             )
             for h in anchored:
                 rh = _to_hit(h)
@@ -95,11 +105,12 @@ class HybridRetriever:
 
     @staticmethod
     def _dedup(hits: list[RankedHit]) -> list[RankedHit]:
-        seen: set[str] = set()
-        out: list[RankedHit] = []
+        # Keep the HIGHEST-scoring occurrence per chunk: an anchored hit (score 1.0) must
+        # win over the same chunk appearing as a low-scored vector hit, otherwise a verse's
+        # named commentator can be demoted out of top_k (it returns sorted by the caller).
+        best: dict[str, RankedHit] = {}
         for h in hits:
-            if h.chunk_id in seen:
-                continue
-            seen.add(h.chunk_id)
-            out.append(h)
-        return out
+            cur = best.get(h.chunk_id)
+            if cur is None or h.score > cur.score:
+                best[h.chunk_id] = h
+        return list(best.values())

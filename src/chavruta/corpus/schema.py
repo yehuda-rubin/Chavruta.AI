@@ -143,11 +143,14 @@ class Query:
     requested_works: Optional[list[str]] = None  # works the question explicitly asks about
     expand_links: bool = False                   # follow Link edges + anchor chains
     expand_depth: int = 1
+    search_text: str = ""                        # text used for retrieval (trigger phrases like
+                                                 # "prepare a lesson on" stripped); falls back to `text`
 
 
 @dataclass
 class LessonSection:
     heading: str
+    role: str = "branch"                    # "opening" | "branch" | "convergence" (spec 003)
     source_refs: list[str] = field(default_factory=list)
     explanation: str = ""
     discussion_points: list[str] = field(default_factory=list)
@@ -158,6 +161,8 @@ class LessonSection:
 class LessonPlan:
     topic: str
     sections: list[LessonSection] = field(default_factory=list)
+    template_id: str = ""                   # which template shaped the arc (spec 003)
+    is_open: bool = False                   # True → the sugya does not converge to a conclusion
 
 
 @dataclass

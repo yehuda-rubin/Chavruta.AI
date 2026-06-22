@@ -12,6 +12,8 @@ import re
 from dataclasses import dataclass, field
 
 from chavruta.corpus.schema import Intent, Query
+from chavruta.intents.hebrew_refs import detect_hebrew_refs
+from chavruta.intents.landmarks import resolve_landmarks
 
 # ── Commentator aliases (extendable as data; mirrors the corpus commentator ids) ──
 COMMENTATOR_ALIASES: dict[str, tuple[str, ...]] = {
@@ -75,6 +77,21 @@ _HALACHA_PAT = re.compile(
     r"|הלכה|מותר|אסור|האם\s+מותר|האם\s+אסור|מה\s+הדין", re.IGNORECASE)
 
 
+# Lesson/prepare lead-ins to strip from the RETRIEVAL text (they pollute the embedding;
+# the intent is already known). The related-material breadth itself is desirable — this
+# only sharpens the central match so the sugya's core source surfaces for the opening.
+_LESSON_LEAD_HE = re.compile(r"^\s*(?:הכן|תכין|תכנן|בנה|הכנת|הכינו|תכינו)?\s*שיעור\s*(?:על|בנושא|של|ב)?\s*")
+_LESSON_LEAD_EN = re.compile(
+    r"^\s*(?:please\s+)?(?:prepare|build|make|create|give\s+me)?\s*(?:an?\s+)?"
+    r"(?:lesson|shiur|class|source\s*sheet)\s+(?:on|about|for)?\s*", re.IGNORECASE)
+
+
+def retrieval_text(text: str) -> str:
+    """Strip lesson/prepare lead-ins so retrieval embeds the topic, not the instruction."""
+    t = _LESSON_LEAD_EN.sub("", _LESSON_LEAD_HE.sub("", text)).strip()
+    return t or text
+
+
 def detect_lang(text: str) -> str:
     """Hebrew if Hebrew letters dominate the alphabetic content, else English."""
     he = sum(1 for ch in text if "א" <= ch <= "ת")
@@ -129,14 +146,23 @@ def detect_intent(text: str, n_commentators: int) -> Intent:
 
 @dataclass
 class Router:
-    """Enriches a Query in place; explicit user choices always win over detection."""
+    """Enriches a Query in place; explicit user choices always win over detection.
+
+    `planner` is an optional LLM fallback (Phase 5) with a `.plan(text) -> dict` method;
+    when set, it runs ONLY if the heuristics resolved no explicit ref, and never breaks
+    the request (its failures are swallowed). Default None keeps routing offline.
+    """
 
     default_work_ids: list[str] | None = None
     extra_aliases: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    planner: object | None = None
 
     def route(self, query: Query) -> Query:
         if not query.lang:
             query.lang = detect_lang(query.text)
+
+        if not query.search_text:
+            query.search_text = retrieval_text(query.text)
 
         commentators = detect_commentators(query.text)
         if commentators and not query.commentator_ids:
@@ -144,7 +170,13 @@ class Router:
             query.commentator_ids = commentators
 
         if query.named_refs is None:
-            refs = detect_refs(query.text)
+            # English explicit refs + Hebrew explicit refs + indirect landmarks.
+            refs: list[str] = []
+            for r in (*detect_refs(query.text),
+                      *detect_hebrew_refs(query.text),
+                      *resolve_landmarks(query.text)):
+                if r not in refs:
+                    refs.append(r)
             if refs:
                 query.named_refs = refs
 
@@ -155,6 +187,22 @@ class Router:
 
         if query.intent is Intent.QA:   # only override the default, never an explicit choice
             query.intent = detect_intent(query.text, len(commentators))
+
+        # Optional LLM fallback — only when the heuristics resolved no explicit ref.
+        if self.planner is not None and not query.named_refs:
+            try:
+                hints = self.planner.plan(query.text)
+            except Exception:
+                hints = {}
+            if hints.get("refs"):
+                query.named_refs = list(hints["refs"])
+            if hints.get("commentators") and not query.commentator_ids:
+                query.commentator_ids = list(hints["commentators"])
+            if hints.get("intent") and query.intent is Intent.QA:
+                try:
+                    query.intent = Intent(hints["intent"])
+                except ValueError:
+                    pass
 
         if query.work_ids is None and self.default_work_ids:
             query.work_ids = list(self.default_work_ids)

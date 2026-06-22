@@ -1,0 +1,45 @@
+# Chavruta.AI — Nebius Serverless Job (corpus ingestion + GPU embedding)
+#
+# Fetches Tanakh + commentators from Sefaria, embeds with bge-m3 on GPU,
+# and loads into Qdrant Cloud. Designed for Nebius Serverless Jobs.
+#
+# Build:
+#   docker build -f docker/Dockerfile.job -t chavruta-ingest:latest .
+#
+# Run locally (CPU, for testing):
+#   docker run --env-file .env.cloud chavruta-ingest:latest
+#
+# Deploy to Nebius:
+#   See nebius/job.yaml
+
+FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 python3.11-dev python3-pip git curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN ln -sf python3.11 /usr/bin/python3 && ln -sf python3.11 /usr/bin/python
+
+WORKDIR /app
+
+# Install Python dependencies for the job
+COPY docker/requirements.job.txt ./requirements.job.txt
+RUN pip install --upgrade pip && pip install -r requirements.job.txt
+
+# Copy the project source
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+COPY pyproject.toml ./
+
+# Install the chavruta package (editable-equivalent, no tests)
+RUN pip install -e . --no-deps
+
+# Pre-download bge-m3 weights at build time so the job starts fast
+RUN python3 -c "from FlagEmbedding import BGEM3FlagModel; BGEM3FlagModel('BAAI/bge-m3', use_fp16=False)"
+
+ENTRYPOINT ["python3", "scripts/ingest_job.py"]

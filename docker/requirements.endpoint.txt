@@ -1,0 +1,10 @@
+# Nebius Endpoint: RAG query service
+fastapi>=0.111
+uvicorn[standard]>=0.29
+pydantic>=2.7
+FlagEmbedding>=1.2
+torch>=2.2
+qdrant-client>=1.9
+openai>=1.30
+numpy>=1.26
+sentence-transformers>=3.0

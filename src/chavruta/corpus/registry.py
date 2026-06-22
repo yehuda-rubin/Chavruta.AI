@@ -67,8 +67,34 @@ TANAKH = Work(
     attribution="Sefaria (sefaria.org)",
 )
 
+MISHNAH = Work(
+    work_id="mishnah",
+    title_he="משנה",
+    title_en="Mishnah",
+    kind="mishnah",
+    languages=("he", "en"),
+    reference_scheme="tractate/chapter/mishnah",
+    source_adapter="sefaria",
+    license="CC0 / Sefaria",
+    attribution="Sefaria (sefaria.org)",
+)
+
+TALMUD_BAVLI = Work(
+    work_id="talmud_bavli",
+    title_he="תלמוד בבלי",
+    title_en="Talmud Bavli",
+    kind="talmud",
+    languages=("he", "en"),
+    reference_scheme="tractate/daf/amud",
+    source_adapter="sefaria",
+    license="CC0 / Sefaria",
+    attribution="Sefaria (sefaria.org)",
+)
+
 
 def default_registry() -> CorpusRegistry:
     reg = CorpusRegistry()
     reg.register(TANAKH)
+    reg.register(MISHNAH)
+    reg.register(TALMUD_BAVLI)
     return reg

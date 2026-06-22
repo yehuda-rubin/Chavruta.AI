@@ -1,37 +1,19 @@
-import { useEffect } from 'react'
-import { ChatPane } from './components/ChatPane'
-import { SessionSidebar } from './components/SessionSidebar'
-import { useSession } from './hooks/useSession'
-import type { Intent } from './types'
-
+/**
+ * The UI design lives entirely in the static HTML mockup
+ * (public/ui/chavruta.html — the approved "Modern Glass" design, mockup #5).
+ * React just "launches" that file in a full-screen frame so the rendered
+ * design is byte-identical to the mockup (its own Tailwind CDN + fonts),
+ * with no interference from the app's build-time Tailwind.
+ *
+ * Data wiring (sessions / chat / sources) is decoupled for now and can be
+ * re-connected to the backend from inside the HTML or via postMessage.
+ */
 export default function App() {
-  const {
-    sessions, activeId, messages, loading, error,
-    loadSessions, loadSession, sendMessage, deleteSession, startNew,
-  } = useSession()
-
-  useEffect(() => {
-    loadSessions()
-  }, [loadSessions])
-
   return (
-    <div className="flex h-full w-full">
-      <SessionSidebar
-        sessions={sessions}
-        activeId={activeId}
-        onSelect={sid => loadSession(sid)}
-        onNew={startNew}
-        onDelete={sid => deleteSession(sid)}
-      />
-
-      <main className="flex-1 flex flex-col overflow-hidden">
-        <ChatPane
-          messages={messages}
-          loading={loading}
-          error={error}
-          onSend={(text: string, intent: Intent) => sendMessage(text, intent)}
-        />
-      </main>
-    </div>
+    <iframe
+      src="/ui/chavruta.html"
+      title="Chavruta.AI"
+      className="w-screen h-screen border-0 block"
+    />
   )
 }

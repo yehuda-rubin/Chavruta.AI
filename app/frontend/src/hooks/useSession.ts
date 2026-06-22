@@ -22,9 +22,19 @@ export function useSession() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const loadSessions = useCallback(async () => {
+  const loadSessions = useCallback(async (autoSelectFirst = false) => {
     const data = await apiFetch<Session[]>('/sessions')
     setSessions(data)
+    if (autoSelectFirst && data.length > 0) {
+      const firstSession = data[0]
+      setActiveId(firstSession.id)
+      try {
+        const msgs = await apiFetch<Message[]>(`/sessions/${firstSession.id}/messages`)
+        setMessages(msgs)
+      } catch (e) {
+        console.error("Failed to load first session messages:", e)
+      }
+    }
   }, [])
 
   const loadSession = useCallback(async (sid: string) => {
@@ -33,7 +43,7 @@ export function useSession() {
     setMessages(data)
   }, [])
 
-  const newSession = useCallback(async (question: string, intent: Intent) => {
+  const newSession = useCallback(async (question: string, intent: Intent, lang = '') => {
     setLoading(true)
     setError(null)
     try {
@@ -48,7 +58,7 @@ export function useSession() {
         '/sessions',
         {
           method: 'POST',
-          body: JSON.stringify({ question, intent }),
+          body: JSON.stringify({ question, intent, lang }),
         },
       )
 
@@ -73,8 +83,8 @@ export function useSession() {
     }
   }, [])
 
-  const sendMessage = useCallback(async (question: string, intent: Intent) => {
-    if (!activeId) return newSession(question, intent)
+  const sendMessage = useCallback(async (question: string, intent: Intent, lang = '') => {
+    if (!activeId) return newSession(question, intent, lang)
     setLoading(true)
     setError(null)
 
@@ -84,7 +94,7 @@ export function useSession() {
     try {
       const res = await apiFetch<QueryResponse>(`/sessions/${activeId}/query`, {
         method: 'POST',
-        body: JSON.stringify({ question, intent }),
+        body: JSON.stringify({ question, intent, lang }),
       })
       const assistantMsg: Message = {
         role: 'assistant',

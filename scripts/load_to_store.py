@@ -23,7 +23,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--in", dest="indir", default="out")
     ap.add_argument("--profile", default=None, help="overrides CHAVRUTA_PROFILE")
-    ap.add_argument("--batch", type=int, default=512)
+    ap.add_argument("--batch", type=int, default=128)
     ap.add_argument("--recreate", action="store_true", default=True,
                     help="drop + recreate the collection (it is fully regenerable from --in)")
     ap.add_argument("--no-recreate", dest="recreate", action="store_false")
@@ -34,7 +34,7 @@ def main() -> None:
         os.environ["CHAVRUTA_PROFILE"] = args.profile
     profile = Profile.from_env()
 
-    store = QdrantStore(mode=profile.qdrant_mode, path=profile.qdrant_path, url=profile.qdrant_url)
+    store = QdrantStore(mode=profile.qdrant_mode, path=profile.qdrant_path, url=profile.qdrant_url, api_key=profile.qdrant_api_key)
     if args.recreate:
         client = store._client_()
         if client.collection_exists(profile.collection):

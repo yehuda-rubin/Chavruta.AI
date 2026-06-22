@@ -31,26 +31,26 @@ class FakeAdapter:
 
 def test_add_new_work_is_data_config_only(store, fake_embedding):
     reg = default_registry()
-    assert not reg.has("mishnah")
+    assert not reg.has("zohar")   # a work still outside the default registry
 
-    # 1. Register a new Work (data/config) — e.g. a slice of Mishnah.
-    mishnah = Work(work_id="mishnah", title_he="משנה", title_en="Mishnah", kind="mishnah")
-    reg.register(mishnah)
-    assert reg.has("mishnah")
+    # 1. Register a new Work (data/config) — e.g. a slice of the Zohar.
+    zohar = Work(work_id="zohar", title_he="זוהר", title_en="Zohar", kind="emunah")
+    reg.register(zohar)
+    assert reg.has("zohar")
 
     # 2. Ingest it via the standard ingestion path (no new code).
     chunks = [
-        Chunk(chunk_id="m1", work_id="mishnah", unit_type=UnitType.SOURCE,
-              ref="Mishnah Berakhot 1:1", lang="he",
-              text="מאימתי קורין את שמע בערבית", text_he="מאימתי קורין את שמע בערבית"),
+        Chunk(chunk_id="z1", work_id="zohar", unit_type=UnitType.SOURCE,
+              ref="Zohar, Bereshit 1:1", lang="he",
+              text="בריש הורמנותא דמלכא", text_he="בריש הורמנותא דמלכא"),
     ]
     profile = Profile(name="test", collection="c", top_k=5, relevance_threshold=0.0)
-    n = ingest_work(mishnah, FakeAdapter(chunks), ["Mishnah Berakhot 1:1"],
+    n = ingest_work(zohar, FakeAdapter(chunks), ["Zohar, Bereshit 1:1"],
                     fake_embedding, store, collection="c")
     assert n == 1
 
     # 3. Retrieve with the UNCHANGED retriever, scoped to the new work.
     retr = HybridRetriever(fake_embedding, store, profile)
-    res = retr.retrieve(Query(text="מאימתי קורין", lang="he", work_ids=["mishnah"]), top_k=5)
+    res = retr.retrieve(Query(text="בריש הורמנותא", lang="he", work_ids=["zohar"]), top_k=5)
     assert not res.is_empty
-    assert res.hits[0].work_id == "mishnah"
+    assert res.hits[0].work_id == "zohar"

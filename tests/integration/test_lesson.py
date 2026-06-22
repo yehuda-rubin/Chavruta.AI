@@ -62,12 +62,16 @@ def test_lesson_returns_structured_plan_with_resolving_citations(pipeline):
             assert c.chunk_id and c.ref and c.deep_link, "citations must resolve"
 
 
-def test_lesson_sections_put_pasuk_before_commentary(pipeline):
-    """Chain order (FR-008a): within a section the pasuk precedes its commentaries."""
+def test_lesson_uses_template_arc(pipeline):
+    """Spec 003: the lesson is shaped by a template into a grounded arc (opening / branch /
+    convergence). Deterministic arc placement is covered in unit/test_lesson_builder.py."""
     answer = pipeline.ask(Query(text="הכן שיעור על תשובה בספר יונה", lang="he"))
-    section = next(s for s in answer.lesson_plan.sections if s.heading == "Jonah.3.10")
-    assert section.citations[0].commentator_id is None, "pasuk first"
-    assert any(c.commentator_id == "radak" for c in section.citations[1:]), "then commentary"
+    plan = answer.lesson_plan
+    assert plan.template_id, "a template shaped the arc"
+    assert plan.sections
+    assert all(s.role in {"opening", "branch", "convergence"} for s in plan.sections)
+    assert all(s.citations for s in plan.sections), "every arc section is grounded"
+    assert isinstance(plan.is_open, bool)
 
 
 def test_lesson_router_enables_link_expansion(pipeline):

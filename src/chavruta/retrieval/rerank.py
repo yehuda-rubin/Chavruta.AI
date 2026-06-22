@@ -2,10 +2,15 @@
 
 Optional cross-encoder reranking (bge-reranker-v2-m3): sharpens ordering when compute is
 available (cloud profile by default; optional locally). Config-gated via `profile.rerank`.
-FlagEmbedding is imported lazily.
+
+Uses sentence-transformers' CrossEncoder rather than FlagEmbedding's FlagReranker: the
+latter calls `tokenizer.prepare_for_model`, which current transformers removed, breaking
+the slow XLM-Roberta path. CrossEncoder runs the same model on a maintained code path.
 """
 
 from __future__ import annotations
+
+import math
 
 from chavruta.retrieval.base import RankedHit
 
@@ -15,24 +20,22 @@ class Reranker:
                  use_fp16: bool | None = None):
         self.model_id = model_id
         self.device = device
-        self._use_fp16 = (device != "cpu") if use_fp16 is None else use_fp16
         self._model = None  # lazy
 
     def _ensure(self):
         if self._model is None:
-            from FlagEmbedding import FlagReranker  # lazy
+            from sentence_transformers import CrossEncoder  # lazy
 
-            self._model = FlagReranker(self.model_id, use_fp16=self._use_fp16, device=self.device)
+            self._model = CrossEncoder(self.model_id, device=self.device)
         return self._model
 
     def rerank(self, query: str, hits: list[RankedHit]) -> list[RankedHit]:
         if not hits:
             return hits
         model = self._ensure()
-        scores = model.compute_score([[query, h.text] for h in hits], normalize=True)
-        if not isinstance(scores, list):
-            scores = [scores]
-        for h, s in zip(hits, scores):
-            h.score = float(s)
+        raw = model.predict([(query, h.text) for h in hits])
+        for h, s in zip(hits, raw):
+            # sigmoid → 0..1 (matches the previous normalize=True relevance semantics)
+            h.score = 1.0 / (1.0 + math.exp(-float(s)))
         hits.sort(key=lambda h: h.score, reverse=True)
         return hits

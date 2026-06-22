@@ -1,0 +1,52 @@
+# Chavruta.AI — Nebius Serverless Endpoint manifest
+#
+# Deploys the grounded RAG query service as a live HTTP endpoint.
+# Connects to the Qdrant Cloud collection populated by the ingest Job.
+#
+# Prerequisites:
+#   1. Run nebius/job.yaml first to populate Qdrant Cloud
+#   2. docker build -f docker/Dockerfile.endpoint -t YOUR_REGISTRY/chavruta-endpoint:latest .
+#   3. docker push YOUR_REGISTRY/chavruta-endpoint:latest
+#   4. Fill in image, NEBIUS_API_KEY, CHAVRUTA_QDRANT_URL, CHAVRUTA_QDRANT_API_KEY below
+#
+# Deploy:
+#   nebius ai serverless endpoint create --spec nebius/endpoint.yaml
+#
+# Test:
+#   curl -X POST https://YOUR_ENDPOINT_URL/query \
+#     -H "Content-Type: application/json" \
+#     -d '{"question": "מה אומר רש\"י על בראשית א:א?"}'
+
+name: chavruta-endpoint-v1
+
+container:
+  image: docker.io/YOUR_DOCKERHUB_USER/chavruta-endpoint:latest
+
+resources:
+  cpu: 4
+  memory_gb: 12        # bge-m3 CPU: ~2.5GB RAM; Qdrant client: minimal
+  # Add gpu: 1 + gpu_type: l4 to accelerate query embedding (optional)
+
+port: 8080
+
+health_check:
+  path: /health
+  initial_delay_seconds: 90    # bge-m3 warm-up takes ~60s on CPU
+  period_seconds: 30
+  timeout_seconds: 10
+
+environment:
+  CHAVRUTA_PROFILE: cloud
+  CHAVRUTA_LLM_BACKEND: nebius
+  CHAVRUTA_LLM_MODEL: "Qwen/Qwen3-32B"
+  CHAVRUTA_LLM_BASE_URL: "https://api.studio.nebius.ai/v1"
+  NEBIUS_API_KEY: "your-nebius-api-key"
+  CHAVRUTA_LLM_API_KEY: "your-nebius-api-key"   # same key, picked up by CloudLLM
+  CHAVRUTA_QDRANT_MODE: server
+  CHAVRUTA_QDRANT_URL: "https://YOUR-CLUSTER.cloud.qdrant.io:6333"
+  CHAVRUTA_QDRANT_API_KEY: "your-qdrant-api-key"
+  CHAVRUTA_COLLECTION: chavruta
+  CHAVRUTA_EMBEDDING_DEVICE: cpu
+  CHAVRUTA_HYBRID: "true"
+  CHAVRUTA_RERANK: "true"
+  CHAVRUTA_TOP_K: "8"

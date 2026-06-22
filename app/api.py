@@ -75,12 +75,27 @@ class CitationOut(BaseModel):
     deep_link: str = ""
 
 
+class LessonSectionOut(BaseModel):
+    heading: str
+    role: str = "branch"               # opening | branch | convergence (spec 003)
+    source_refs: list[str] = []
+    citations: list[CitationOut] = []
+
+
+class LessonPlanOut(BaseModel):
+    topic: str
+    template_id: str = ""
+    is_open: bool = False
+    sections: list[LessonSectionOut] = []
+
+
 class QueryResponse(BaseModel):
     answer: str
     citations: list[CitationOut]
     grounded: bool
     intent: str
     caveats: list[str] = []
+    lesson_plan: LessonPlanOut | None = None   # the lesson arc (spec 003), present for LESSON
 
 
 def _run_query(question: str, lang: str, intent_str: str, history: list[Turn]) -> QueryResponse:
@@ -94,21 +109,36 @@ def _run_query(question: str, lang: str, intent_str: str, history: list[Turn]) -
     q = Query(text=question, lang=lang or None, intent=intent)
     answer = _get_pipeline().ask(q, history=history)
 
+    def _cite(c) -> CitationOut:
+        return CitationOut(
+            ref=c.ref,
+            text_he=getattr(c, "text_he", "") or getattr(c, "quote", ""),
+            text_en=getattr(c, "text_en", ""),
+            commentator=getattr(c, "commentator_id", "") or "",
+            deep_link=getattr(c, "deep_link", "") or "",
+        )
+
+    lesson_plan = None
+    if answer.lesson_plan:
+        lp = answer.lesson_plan
+        lesson_plan = LessonPlanOut(
+            topic=lp.topic, template_id=lp.template_id, is_open=lp.is_open,
+            sections=[
+                LessonSectionOut(
+                    heading=s.heading, role=s.role, source_refs=s.source_refs,
+                    citations=[_cite(c) for c in s.citations],
+                )
+                for s in lp.sections
+            ],
+        )
+
     return QueryResponse(
         answer=answer.text,
-        citations=[
-            CitationOut(
-                ref=c.ref,
-                text_he=getattr(c, "text_he", ""),
-                text_en=getattr(c, "text_en", ""),
-                commentator=getattr(c, "commentator_id", "") or "",
-                deep_link=getattr(c, "deep_link", "") or "",
-            )
-            for c in answer.citations
-        ],
+        citations=[_cite(c) for c in answer.citations],
         grounded=answer.grounded,
         intent=answer.intent.value if answer.intent else "qa",
         caveats=list(answer.caveats),
+        lesson_plan=lesson_plan,
     )
 
 
@@ -149,12 +179,18 @@ class SessionOut(BaseModel):
     created_at: str
 
 
+class SessionCreateOut(SessionOut):
+    # The first-query result must survive serialization — a bare SessionOut
+    # response_model would strip it (client then sees no `result`/`answer`).
+    result: QueryResponse
+
+
 @app.get("/sessions", response_model=list[SessionOut])
 def list_sessions():
     return db.list_sessions()
 
 
-@app.post("/sessions", response_model=SessionOut, status_code=201)
+@app.post("/sessions", response_model=SessionCreateOut, status_code=201)
 def create_session(req: QueryRequest):
     """Create a new session and run the first query."""
     if not req.question.strip():
@@ -181,12 +217,7 @@ def create_session(req: QueryRequest):
             "result": result}
 
 
-class SessionQueryResponse(BaseModel):
-    answer: str
-    citations: list[CitationOut]
-    grounded: bool
-    intent: str
-    caveats: list[str] = []
+class SessionQueryResponse(QueryResponse):   # inherits lesson_plan etc.
     session_id: str
 
 

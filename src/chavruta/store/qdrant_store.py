@@ -21,10 +21,12 @@ def _point_id(chunk_id: str) -> str:
 
 
 class QdrantStore:
-    def __init__(self, mode: str = "embedded", path: str = "", url: str = ""):
+    def __init__(self, mode: str = "embedded", path: str = "", url: str = "",
+                 api_key: str = ""):
         self.mode = mode
         self.path = path
         self.url = url
+        self.api_key = api_key
         self._client = None  # lazy
 
     def _client_(self):
@@ -32,7 +34,10 @@ class QdrantStore:
             from qdrant_client import QdrantClient  # heavy; lazy
 
             if self.mode == "server":
-                self._client = QdrantClient(url=self.url)
+                kwargs = {"url": self.url, "timeout": 300}
+                if self.api_key:
+                    kwargs["api_key"] = self.api_key
+                self._client = QdrantClient(**kwargs)
             else:
                 self._client = QdrantClient(path=self.path)
         return self._client
@@ -73,11 +78,37 @@ class QdrantStore:
 
         must = []
         for key, value in filters.items():
-            if isinstance(value, (list, tuple)):
+            if isinstance(value, dict) and "$text" in value:
+                # Full-text (tokenised) match against a text-indexed payload field — every
+                # token must be present (AND). Used for nikud/ktiv-insensitive lexical lookup.
+                must.append(models.FieldCondition(key=key, match=models.MatchText(text=value["$text"])))
+            elif isinstance(value, (list, tuple)):
                 must.append(models.FieldCondition(key=key, match=models.MatchAny(any=list(value))))
             else:
                 must.append(models.FieldCondition(key=key, match=models.MatchValue(value=value)))
         return models.Filter(must=must)
+
+    def ensure_text_index(self, name: str, field: str = "search_he") -> None:
+        """Create a full-text payload index on `field` (idempotent) so MatchText works.
+
+        Word tokeniser, lowercased, min token length 1 (Hebrew has 2-letter words). The
+        indexed field holds the nikud/ktiv-normalised search form (see corpus.normalize).
+        """
+        from qdrant_client import models
+
+        try:
+            self._client_().create_payload_index(
+                collection_name=name,
+                field_name=field,
+                field_schema=models.TextIndexParams(
+                    type=models.TextIndexType.TEXT,
+                    tokenizer=models.TokenizerType.WORD,
+                    min_token_len=1,
+                    lowercase=True,
+                ),
+            )
+        except Exception:
+            pass  # already exists / index in place
 
     def search(
         self, name: str, query: HybridQuery, top_k: int, filters: Optional[Filter] = None

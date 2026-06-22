@@ -87,9 +87,16 @@ def payload_from_legacy_meta(meta: dict, work_id: str = "tanakh") -> dict:
     # commentary gets its own ref ("Rashi on Genesis.1.1"); pasuk keeps the verse ref
     ref = f"{commentator_raw} on {verse_id}" if is_commentary and commentator_raw else verse_id
     document = meta.get("document", "")
+    # work_id override: Mishnah chunks carry work="mishnah" in metadata
+    effective_work_id = md.get("work", work_id)
+    position = {k: md.get(k) for k in ("book", "chapter", "verse") if k in md}
+    # Mishnah-specific extra coords (seder, tractate) stored alongside standard keys
+    for k in ("seder", "tractate"):
+        if k in md:
+            position[k] = md[k]
     chunk = Chunk(
         chunk_id=meta.get("id", ref),
-        work_id=work_id,
+        work_id=effective_work_id,
         unit_type=UnitType.COMMENTARY if is_commentary else UnitType.SOURCE,
         ref=ref,
         lang="he",
@@ -97,7 +104,7 @@ def payload_from_legacy_meta(meta: dict, work_id: str = "tanakh") -> dict:
         text_he=md.get("text_he", "") or document,
         text_en=md.get("text_en", ""),
         deep_link=f"https://www.sefaria.org/{verse_id}" if verse_id else "",
-        position={k: md.get(k) for k in ("book", "chapter", "verse") if k in md},
+        position=position,
         anchor_ref=verse_id if is_commentary else None,
         anchor_kind=AnchorKind.SOURCE if is_commentary else None,
         commentator_id=commentator,

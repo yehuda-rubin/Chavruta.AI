@@ -1,0 +1,74 @@
+# Lesson templates (spec 003) — structural skeletons for building a shiur as a narrative
+# arc: opening → branches → convergence (or open). ORIGINAL structural abstractions derived
+# from the *shape* of real shiurim (Olamot / Kerem B'Yavneh) — no copyrighted text.
+#
+# stage.key ∈ {opening, branch, convergence}; source_kinds guides which sources fill it.
+# Extendable as data/config (Constitution Principle III).
+
+- template_id: machloket_rishonim
+  name_he: "מחלוקת ראשונים"
+  when_to_use: "מחלוקת בין מפרשים וראשונים על פסוק או דין — הצדדים, השורש והנפקא מינה."
+  stages:
+    - key: opening
+      title_he: "פתיחה — המקור והשאלה"
+      source_kinds: [pasuk, mishnah, gemara]
+    - key: branch
+      title_he: "שיטה ראשונה"
+      source_kinds: [rishonim]
+    - key: branch
+      title_he: "שיטה שנייה (החולקת)"
+      source_kinds: [rishonim]
+    - key: convergence
+      title_he: "שורש המחלוקת ונפקא מינה"
+      source_kinds: [acharonim, pesak]
+
+- template_id: talmudic_sugya
+  name_he: "סוגיית גמרא"
+  when_to_use: "לימוד סוגיית גמרא מהמשנה דרך השקלא וטריא עד מסקנת הסוגיא, לעיתים פתוחה."
+  stages:
+    - key: opening
+      title_he: "פתיחת הסוגיא — המשנה/הברייתא"
+      source_kinds: [mishnah, gemara]
+    - key: branch
+      title_he: "שקלא וטריא — קושיות ותירוצים"
+      source_kinds: [gemara, rishonim]
+    - key: branch
+      title_he: "שיטות האמוראים"
+      source_kinds: [gemara, rishonim]
+    - key: convergence
+      title_he: "מסקנת הסוגיא"
+      source_kinds: [rishonim, pesak]
+
+- template_id: parsha_iyun
+  name_he: "עיון בפרשה"
+  when_to_use: "עיון בפרשה ובפסוקי התורה — מהפשט אל הדרש והרעיון המרכזי."
+  stages:
+    - key: opening
+      title_he: "הפסוק"
+      source_kinds: [pasuk]
+    - key: branch
+      title_he: "פשט — רש\"י וראב\"ע"
+      source_kinds: [rishonim]
+    - key: branch
+      title_he: "עומק ודרש — רמב\"ן ומדרש"
+      source_kinds: [rishonim, midrash]
+    - key: convergence
+      title_he: "הרעיון המרכזי"
+      source_kinds: [acharonim]
+
+- template_id: machshava_mussar
+  name_he: "מחשבה ומוסר"
+  when_to_use: "שיעור במחשבת ישראל ובמוסר — ממקור דרך קושי וכיווני הסבר אל המסר."
+  stages:
+    - key: opening
+      title_he: "המקור"
+      source_kinds: [pasuk, gemara, midrash]
+    - key: branch
+      title_he: "השאלה / הקושי"
+      source_kinds: [rishonim, acharonim]
+    - key: branch
+      title_he: "כיווני הסבר"
+      source_kinds: [acharonim]
+    - key: convergence
+      title_he: "המסר"
+      source_kinds: [acharonim]

@@ -104,11 +104,15 @@ def test_intent_autodetection_routes_compare(pipeline):
 
 
 def test_unloaded_work_is_honest(pipeline):
-    """A question explicitly about Mishnah/Gemara (not loaded) → honest answer, even though
-    semantically-similar Tanakh chunks exist (spec out-of-corpus edge case)."""
-    for q in ("מה אומרת המשנה במסכת ברכות על קריאת שמע?",
-              "What does the Mishnah in Berakhot say about the Shema?",
-              "מה כתוב בגמרא על שניים אוחזין בטלית?"):
+    """A question explicitly about a NOT-loaded work (Zohar / Shulchan Aruch) → honest
+    answer, even though semantically-similar Tanakh chunks exist (out-of-corpus edge case).
+
+    Note: Mishnah and Talmud are now in the default registry, so honesty is tested against
+    works that are still genuinely unloaded.
+    """
+    for q in ("מה אומר הזוהר על בריאת העולם?",
+              "What does the Zohar say about the creation of the world?",
+              "מה כתוב בשולחן ערוך על שמירת שבת?"):
         answer = pipeline.ask(Query(text=q, lang=""))
         assert answer.no_source and not answer.citations, q
 

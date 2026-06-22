@@ -17,7 +17,20 @@ from chavruta.llm.base import Turn as LLMTurn
 from chavruta.retrieval.base import RankedHit
 
 _MARKER_RE = re.compile(r"\[S(\d+)\]")
+_BRACKET_RE = re.compile(r"\[([^\[\]]*)\]")   # any bracket group (may hold several markers)
+_SNUM_RE = re.compile(r"S(\d+)")              # an individual source marker inside a bracket
 _THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+
+
+def source_body(text: str) -> str:
+    """Drop the internal "[label] Ref daf:seg" header line a stored document carries, leaving
+    the source's actual text. The header is prompt scaffolding (and may hold a pre-correction
+    daf label) — never the thing to quote back to the user."""
+    if text.startswith("["):
+        nl = text.find("\n")
+        if nl != -1:
+            return text[nl + 1:]
+    return text
 
 
 def strip_thinking(text: str) -> str:
@@ -46,27 +59,51 @@ SYSTEM_EXPLAIN = SYSTEM_QA + (
 
 SYSTEM_LESSON = SYSTEM_QA + (
     " When preparing a lesson, produce a clear structure: the key sources to study, a "
-    "suggested flow, and discussion points — every source cited by marker."
+    "suggested flow, and discussion points — every source cited by marker. Match the length "
+    "to the lesson's purpose — be as thorough as the topic genuinely needs (a deep sugya may "
+    "be long) — but never pad, repeat, or add filler. Stop when the lesson is complete."
 )
 
 # Hebrew system prompts — Hebrew-first models follow Hebrew instructions far better
 # (Principle IV; measured with DictaLM-3.0-1.7B which looped on the English protocol).
-SYSTEM_QA_HE = (
+SYSTEM_BASE_HE = (
     "אתה חברותא — שותף לימוד תורה אמין. ענה אך ורק מתוך המקורות שסופקו לך. "
     "כל טענה חייבת ציון מקור בסוגריים, לדוגמה [S1]. צטט את לשון המקור העברית כשרלוונטי. "
     "אסור להמציא מקורות, ציטוטים או ייחוסים שאינם במקורות שסופקו. "
-    "אם המקורות אינם עונים על השאלה — אמור זאת בפשטות. "
-    "ייחס כל דבר לפרשן הנכון. ענה תשובה קצרה וישירה, בלי הקדמות."
+    "אם המקורות אינם עונים על השאלה — אמור זאת בפשטות. ייחס כל דבר לפרשן הנכון."
 )
 
-SYSTEM_EXPLAIN_HE = SYSTEM_QA_HE + (
+# QA stays short and direct; explain/lesson must NOT inherit that brevity instruction.
+SYSTEM_QA_HE = SYSTEM_BASE_HE + " ענה תשובה קצרה וישירה, בלי הקדמות."
+
+SYSTEM_EXPLAIN_HE = SYSTEM_BASE_HE + (
     " כשאתה מסביר או משווה פרשנים — הצג כל שיטה מתוך דברי הפרשן עצמו, ייחס נכון, "
     "והצג מחלוקות כפי שהן, בלי לטשטש."
 )
 
-SYSTEM_LESSON_HE = SYSTEM_QA_HE + (
+SYSTEM_LESSON_HE = SYSTEM_BASE_HE + (
     " כשאתה מכין שיעור — בנה מבנה ברור: המקורות המרכזיים ללימוד, סדר הלימוד, "
-    "ונקודות לדיון — כל מקור עם ציון [S#]."
+    "ונקודות לדיון — כל מקור עם ציון [S#]. התאם את אורך השיעור למטרתו: הרחב כפי שהנושא "
+    "באמת מצריך (סוגיא עמוקה עשויה להיות ארוכה), אבל אל תבזבז טוקנים על מילוי, חזרות "
+    "או אריכות מיותרת — סיים כשהשיעור שלם."
+)
+
+# Walkthrough: the lesson is delivered as the flowing shiur itself (the "מהלך"), stage by
+# stage along the arc, not as a bullet list of sources. Sources still gate every claim.
+SYSTEM_LESSON_WALKTHROUGH_HE = SYSTEM_BASE_HE + (
+    " אתה מגיד שיעור. כתוב את מהלך השיעור המלא כפרוזה רציפה וזורמת, שלב אחר שלב לפי "
+    "הקשת שנמסרה לך: פתח מן המקור הפותח והצג את השאלה/הסוגיא, פַתֵּחַ כל כיוון מתוך לשון "
+    "מקורו (הבא את דברי הפרשן עצמו, ייחס נכון), הראה את הקושיות והתירוצים, וסכם למסקנות "
+    "או השאר את הסוגיא פתוחה אם כך היא. זה הטקסט שהמגיד-שיעור אומר בפועל — לא רשימת מקורות. "
+    "כל טענה עם [S#], אך ורק מן המקורות שסופקו. התאם את האורך למטרת השיעור, בלי מילוי."
+)
+SYSTEM_LESSON_WALKTHROUGH = SYSTEM_QA + (
+    " You are a maggid shiur. Write the full lesson as flowing prose, stage by stage along "
+    "the given arc: open from the opening source and pose the question, develop each "
+    "direction from its own source's language (attribute correctly), show the difficulties "
+    "and resolutions, and converge to conclusions — or leave the sugya open if it is. This "
+    "is the lesson as actually delivered, not a list of sources. Cite every claim with [S#], "
+    "only from the provided sources. Right-size the length to the lesson's purpose; no filler."
 )
 
 HALACHA_CAVEAT_HE = "הערה: זו אינה פסיקה הלכתית מחייבת ואינה תחליף לרב מוסמך."
@@ -122,26 +159,33 @@ def enforce_citations(
     """
     text = strip_thinking(text)
     used: dict[str, RankedHit] = {}
-    fabricated: set[str] = set()
-    for m in _MARKER_RE.finditer(text):
-        marker = f"S{m.group(1)}"
-        if marker in marker_map:
-            used[marker] = marker_map[marker]
-        else:
-            fabricated.add(marker)
 
-    # Remove any fabricated markers from the text (the model referenced a source that
-    # was never provided — must not stand).
-    clean = text
-    for marker in fabricated:
-        clean = clean.replace(f"[{marker}]", "")
+    # A bracket group may hold one or more markers in any separator the model picks:
+    # "[S1]", "[S1, S2]", "[S1; S3]", "[S1 S2]" — extract every S# from each bracket.
+    for bm in _BRACKET_RE.finditer(text):
+        for n in _SNUM_RE.findall(bm.group(1)):
+            marker = f"S{n}"
+            if marker in marker_map:
+                used[marker] = marker_map[marker]
+
+    # Rebuild each bracket keeping only valid markers; drop wholly-fabricated brackets
+    # (the model referenced a source that was never provided — must not stand).
+    def _clean_bracket(bm: "re.Match") -> str:
+        nums = _SNUM_RE.findall(bm.group(1))
+        if not nums:
+            return bm.group(0)                       # not a citation bracket — leave as-is
+        valid = [f"S{n}" for n in nums if f"S{n}" in marker_map]
+        return f"[{', '.join(valid)}]" if valid else ""
+
+    clean = _BRACKET_RE.sub(_clean_bracket, text)
 
     citations = [
         Citation(
             chunk_id=h.chunk_id,
             ref=h.ref,
             deep_link=h.deep_link,
-            quote=h.text[:280],
+            # marker_map values may be RankedHit (.text) or Citation (.quote)
+            quote=source_body(getattr(h, "text", None) or getattr(h, "quote", "") or "")[:280],
             commentator_id=h.commentator_id,
         )
         for h in used.values()
@@ -195,6 +239,67 @@ def no_source_answer(lang: str, intent: Intent = Intent.QA) -> Answer:
         msg = ("No grounded source in the current corpus answers this question. "
                "I will not invent one — try rephrasing, or add the relevant corpus.")
     return Answer(text=msg, citations=[], grounded=False, no_source=True, intent=intent)
+
+
+def build_lesson_walkthrough_prompt(plan: LessonPlan, question: str, lang: str = "he"):
+    """Prompt the model to deliver the lesson as a flowing walkthrough (the "מהלך"),
+    laying out the arc's stages in order with their sources as [S#] markers.
+
+    Returns (GroundedPrompt, marker_map) — marker_map values are the plan's Citations, so
+    enforce_citations resolves the cited sources and lets the caller keep only those.
+    """
+    seen: dict[str, str] = {}
+    sources: list[SourceBlock] = []
+    marker_map: dict[str, Citation] = {}
+    stages: list[tuple[str, list[str]]] = []
+    for sec in plan.sections:
+        markers: list[str] = []
+        for cit in sec.citations:
+            m = seen.get(cit.chunk_id)
+            if m is None:
+                m = f"S{len(seen) + 1}"
+                seen[cit.chunk_id] = m
+                marker_map[m] = cit
+                text = cit.quote or ""
+                if len(text) > MAX_SOURCE_CHARS:
+                    text = text[:MAX_SOURCE_CHARS] + "…"
+                sources.append(SourceBlock(marker=m, ref=cit.ref,
+                                           commentator_id=cit.commentator_id, text=text))
+            markers.append(m)
+        stages.append((sec.heading, markers))
+
+    if lang == "he":
+        lines = [f"נושא השיעור: {question}", "", "שלבי מהלך השיעור, לפי הסדר:"]
+        lines += [f"• {h} — מקורות: {', '.join(ms) if ms else '—'}" for h, ms in stages]
+        lines += ["", "כתוב כעת את מהלך השיעור המלא לפי השלבים הללו."]
+        system = SYSTEM_LESSON_WALKTHROUGH_HE
+    else:
+        lines = [f"Lesson topic: {question}", "", "Lesson arc, in order:"]
+        lines += [f"• {h} — sources: {', '.join(ms) if ms else '—'}" for h, ms in stages]
+        lines += ["", "Now write the full lesson walkthrough following these stages."]
+        system = SYSTEM_LESSON_WALKTHROUGH
+    prompt = GroundedPrompt(system=system, sources=sources, question="\n".join(lines), history=[])
+    return prompt, marker_map
+
+
+def prune_lesson_to_cited(plan: LessonPlan, citations: list[Citation]) -> LessonPlan:
+    """Keep, in each section, only the sources the walkthrough actually cited — the lesson
+    holds the material it uses, not every retrieved hit. Sections left empty are dropped.
+    If nothing was cited (ungrounded), the arc is returned unchanged."""
+    cited = {c.chunk_id for c in citations}
+    if not cited:
+        return plan
+    sections: list[LessonSection] = []
+    for s in plan.sections:
+        kept = [c for c in s.citations if c.chunk_id in cited]
+        if kept:
+            sections.append(LessonSection(heading=s.heading, role=s.role,
+                                          source_refs=[c.ref for c in kept], citations=kept))
+    if not sections:
+        return plan
+    is_open = not any(s.role == "convergence" for s in sections)
+    return LessonPlan(topic=plan.topic, sections=sections,
+                      template_id=plan.template_id, is_open=is_open)
 
 
 def build_lesson_plan(topic: str, hits: list[RankedHit]) -> LessonPlan:

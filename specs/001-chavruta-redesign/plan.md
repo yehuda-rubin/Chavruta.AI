@@ -78,6 +78,32 @@ clean seam for a future web API).
 - Designed to grow to **millions** of chunks across many works (Gemara, Halacha, Emunah…)
   via the corpus registry without architectural change.
 
+## Index build & distribution (Job-as-factory / HF-as-warehouse)
+
+Computing the index is separated from distributing it, so the expensive GPU work happens
+**once** and everyone else just downloads. This keeps the offline profile genuinely
+zero-cost (no Qdrant Cloud, no GPU) while still satisfying the Nebius challenge's Job +
+Endpoint deliverables.
+
+- **The Job is the factory** (`scripts/ingest_job.py`, Nebius Serverless GPU Job). It:
+  1. gets the raw corpus — reuse a local file, else download a **Hugging Face corpus
+     dataset**, else fall back to a live Sefaria fetch (used only to (re)build from source);
+  2. embeds it with bge-m3 (dense + sparse) on the GPU → portable `out/` artifact
+     (`corpus_vectors.npy` + `corpus_sparse.jsonl` + `corpus_meta.jsonl`);
+  3. **publishes** that prebuilt index to a **Hugging Face dataset** (the downloadable
+     artifact);
+  4. *optionally* upserts into **Qdrant Cloud** so the live **Endpoint** has data.
+- **Hugging Face is the warehouse.** A Serverless Job's filesystem is ephemeral and a user's
+  machine has no public address for the cloud to push to, so the Job cannot deliver to a
+  laptop directly. HF is the shared mailbox: the Job **pushes**, clients **pull**.
+- **The user just downloads** (`scripts/bootstrap_rag.py`): one command pulls the prebuilt
+  index from HF and loads it into a local Qdrant (embedded or server, per `Profile`) — no
+  GPU, no re-embedding. The same `load_processed_chunks` reuse path feeds both the local
+  load and the cloud load, so local and cloud stay byte-identical (Principle II).
+- **Who runs the Job:** the maintainer (initial build + every corpus update — Tanakh,
+  Mishnah, Gemara…), and anyone embedding **their own** corpus (Principle III). Regular
+  users never run it.
+
 ## Constitution Check
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
@@ -141,6 +167,7 @@ app/
 └── streamlit_app.py   # chat UI (RTL-aware, clickable citations, in-session context)
 
 scripts/               # fetch_corpus, embed_corpus_gpu, load_to_store, ask (CLI), run_eval
+#                        ingest_job (Nebius GPU factory: build+publish), bootstrap_rag (user download)
 tests/
 ├── contract/          # backend interface conformance tests
 ├── integration/       # end-to-end pipeline + profile-parity tests

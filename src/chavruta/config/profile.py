@@ -39,6 +39,7 @@ class Profile:
     qdrant_mode: str = "embedded"             # "embedded" | "server"
     qdrant_path: str = str(BASE_DIR / "data" / "qdrant")   # embedded storage path
     qdrant_url: str = ""                      # server URL (cloud)
+    qdrant_api_key: str = ""                  # Qdrant Cloud API key
     collection: str = "chavruta"
 
     # ── Retrieval ──
@@ -59,6 +60,9 @@ class Profile:
     llm_temperature: float = 0.2
     llm_max_tokens: int = 512                 # bounds CPU generation latency; config-tunable
 
+    # ── Query understanding (spec 002) ──
+    query_planner: str = "none"               # "none" (heuristic only) | "llm" (LLM fallback)
+
     extra: dict = field(default_factory=dict)
 
     @classmethod
@@ -77,6 +81,7 @@ class Profile:
         p.qdrant_mode = _env("CHAVRUTA_QDRANT_MODE", p.qdrant_mode)
         p.qdrant_path = _env("CHAVRUTA_QDRANT_PATH", p.qdrant_path)
         p.qdrant_url = _env("CHAVRUTA_QDRANT_URL", p.qdrant_url)
+        p.qdrant_api_key = _env("CHAVRUTA_QDRANT_API_KEY", p.qdrant_api_key)
         p.collection = _env("CHAVRUTA_COLLECTION", p.collection)
         p.top_k = int(_env("CHAVRUTA_TOP_K", str(p.top_k)))
         p.hybrid = _env_bool("CHAVRUTA_HYBRID", p.hybrid)
@@ -89,6 +94,7 @@ class Profile:
         p.llm_api_key = _env("CHAVRUTA_LLM_API_KEY", p.llm_api_key)
         p.llm_temperature = float(_env("CHAVRUTA_LLM_TEMPERATURE", str(p.llm_temperature)))
         p.llm_max_tokens = int(_env("CHAVRUTA_LLM_MAX_TOKENS", str(p.llm_max_tokens)))
+        p.query_planner = _env("CHAVRUTA_QUERY_PLANNER", p.query_planner)
         return p
 
 
@@ -122,7 +128,7 @@ def _cloud_preset() -> Profile:
         qdrant_url=_env("CHAVRUTA_QDRANT_URL", "http://localhost:6333"),
         rerank=True,                          # compute available — sharpen ranking
         llm_backend="nebius",
-        llm_model=_env("CHAVRUTA_LLM_MODEL", "Qwen/Qwen2.5-72B-Instruct"),
+        llm_model=_env("CHAVRUTA_LLM_MODEL", "Qwen/Qwen3-32B"),
         llm_base_url=_env("CHAVRUTA_LLM_BASE_URL", "https://api.studio.nebius.ai/v1"),
         llm_api_key=_env("CHAVRUTA_LLM_API_KEY", _env("NEBIUS_API_KEY", "")),
     )

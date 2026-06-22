@@ -1,4 +1,6 @@
 import type { Session } from '../types'
+import { Icon } from './Icon'
+import { useLang } from '../i18n'
 
 interface Props {
   sessions: Session[]
@@ -6,75 +8,112 @@ interface Props {
   onSelect: (sid: string) => void
   onNew: () => void
   onDelete: (sid: string) => void
+  onCloseMobile?: () => void
 }
 
-function relativeTime(isoDate: string): string {
-  const diff = Date.now() - new Date(isoDate).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'עכשיו'
-  if (mins < 60) return `לפני ${mins} דק׳`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `לפני ${hours} ש׳`
-  const days = Math.floor(hours / 24)
-  return `לפני ${days} ימים`
+function groupSessions(sessions: Session[], lang: 'he' | 'en') {
+  const today: Session[] = []
+  const yesterday: Session[] = []
+  const older: Session[] = []
+
+  const now = new Date()
+  const todayStr = now.toDateString()
+  const y = new Date(now)
+  y.setDate(now.getDate() - 1)
+  const yStr = y.toDateString()
+
+  sessions.forEach(s => {
+    const d = new Date(s.created_at)
+    if (isNaN(d.getTime())) { older.push(s); return }
+    const ds = d.toDateString()
+    if (ds === todayStr) today.push(s)
+    else if (ds === yStr) yesterday.push(s)
+    else older.push(s)
+  })
+
+  return [
+    { label: lang === 'he' ? 'שיחות אחרונות' : 'Recent', items: today },
+    { label: lang === 'he' ? 'אתמול' : 'Yesterday', items: yesterday },
+    { label: lang === 'he' ? 'שיחות קודמות' : 'Older', items: older },
+  ].filter(g => g.items.length > 0)
 }
 
-export function SessionSidebar({ sessions, activeId, onSelect, onNew, onDelete }: Props) {
+/** Right sidebar — faithful port of mockup #5. */
+export function SessionSidebar({ sessions, activeId, onSelect, onNew, onDelete, onCloseMobile }: Props) {
+  const { t, lang } = useLang()
+  const grouped = groupSessions(sessions, lang)
+
   return (
-    <aside className="w-64 shrink-0 flex flex-col border-r border-slate-800 bg-slate-950 h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-4 border-b border-slate-800">
-        <span className="text-lg font-semibold text-slate-100 he">חברותא.AI</span>
-        <button
-          onClick={onNew}
-          title="שיחה חדשה"
-          className="text-slate-400 hover:text-white hover:bg-slate-800 rounded-md p-1.5 transition-colors text-lg leading-none"
-        >
-          ✏
-        </button>
-      </div>
-
-      {/* Session list */}
-      <nav className="flex-1 overflow-y-auto py-2">
-        {sessions.length === 0 && (
-          <p className="text-slate-600 text-xs text-center mt-8 he px-4">
-            אין שיחות עדיין
-          </p>
-        )}
-
-        {sessions.map(s => (
-          <div
-            key={s.id}
-            className={`group flex items-center gap-2 px-3 py-2.5 mx-2 rounded-lg cursor-pointer transition-colors ${
-              activeId === s.id
-                ? 'bg-indigo-900/50 text-slate-100'
-                : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
-            }`}
-            onClick={() => onSelect(s.id)}
+    <aside className="flex flex-col h-full bg-transparent w-full max-w-full p-4">
+      {/* Mobile close */}
+      {onCloseMobile && (
+        <div className="flex justify-end mb-2 md:hidden">
+          <button
+            onClick={onCloseMobile}
+            className="p-1 rounded-xl text-text-muted hover:text-primary"
+            title={lang === 'he' ? 'סגור' : 'Close'}
           >
-            <span className="flex-1 truncate text-sm he text-right leading-snug">
-              {s.first_q}
-            </span>
+            <Icon name="close" size={20} />
+          </button>
+        </div>
+      )}
 
-            <div className="flex items-center gap-1 shrink-0">
-              <span className="text-xs text-slate-600 group-hover:hidden">
-                {relativeTime(s.created_at)}
-              </span>
-              <button
-                onClick={e => { e.stopPropagation(); onDelete(s.id) }}
-                className="hidden group-hover:block text-slate-600 hover:text-red-400 transition-colors text-xs p-0.5"
-                title="מחק שיחה"
-              >
-                ✕
-              </button>
-            </div>
+      {/* New discussion */}
+      <button
+        onClick={() => { onNew(); onCloseMobile?.() }}
+        className="w-full grad text-white py-3 rounded-2xl font-serif text-lg font-bold hover:opacity-95 active:scale-[0.98] transition shadow-glass flex items-center justify-center gap-2 cursor-pointer"
+      >
+        <Icon name="add" size={20} />
+        <span>{t('newDiscussion')}</span>
+      </button>
+
+      {/* Sessions */}
+      <div className="mt-6 flex-1 overflow-y-auto flex flex-col gap-4">
+        {grouped.length === 0 && (
+          <p className="text-text-muted/70 text-xs text-center mt-6">{t('noSessions')}</p>
+        )}
+        {grouped.map(group => (
+          <div key={group.label} className="flex flex-col gap-1.5">
+            <p className="text-[11px] tracking-widest text-text-muted/70 font-bold uppercase px-2 mb-1">
+              {group.label}
+            </p>
+            {group.items.map(s => {
+              const active = activeId === s.id
+              return (
+                <div
+                  key={s.id}
+                  onClick={() => { onSelect(s.id); onCloseMobile?.() }}
+                  className={`group px-4 py-3 rounded-2xl cursor-pointer transition-all flex items-center gap-2 ${
+                    active
+                      ? 'bg-white/70 text-primary font-bold shadow-glass ring-1 ring-primary/10'
+                      : 'text-text-main hover:bg-white/40'
+                  }`}
+                >
+                  <span className="flex-1 text-sm truncate font-medium">{s.first_q}</span>
+                  <button
+                    onClick={e => { e.stopPropagation(); onDelete(s.id) }}
+                    className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-red-500 transition shrink-0 cursor-pointer"
+                    title={t('delete')}
+                  >
+                    <Icon name="close" size={14} />
+                  </button>
+                </div>
+              )
+            })}
           </div>
         ))}
-      </nav>
+      </div>
 
       {/* Footer */}
-      <div className="px-4 py-3 border-t border-slate-800 text-xs text-slate-600 he text-right">
-        כל תשובה מצוטטת ממקורות
+      <div className="mt-auto pt-3 flex flex-col gap-1 text-text-muted text-sm">
+        <button className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-white/40 transition w-full text-start cursor-pointer">
+          <Icon name="settings" size={20} />
+          <span>{t('settings')}</span>
+        </button>
+        <button className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-white/40 transition w-full text-start cursor-pointer">
+          <Icon name="help_outline" size={20} />
+          <span>{t('support')}</span>
+        </button>
       </div>
     </aside>
   )

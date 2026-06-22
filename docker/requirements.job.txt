@@ -1,0 +1,8 @@
+# Nebius Job: corpus ingestion + GPU embedding + HF publish
+requests>=2.32
+numpy>=1.26
+FlagEmbedding>=1.2
+torch>=2.2
+qdrant-client>=1.9
+sentence-transformers>=3.0
+huggingface_hub>=0.23

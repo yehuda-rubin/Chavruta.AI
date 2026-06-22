@@ -26,6 +26,48 @@ def _detect_lang(text: str) -> str:
     return "he" if any("֐" <= ch <= "׿" for ch in text) else "en"
 
 
+# Per-intent generation budgets (user decision 2026-06-18): lessons need room for a full
+# scaffold, comparisons are medium, regular Q&A / explanations stay tight. Falls back to
+# the profile's llm_max_tokens for any other intent.
+_INTENT_MAX_TOKENS = {
+    Intent.QA: 3000,
+    Intent.EXPLAIN: 3000,
+    Intent.LESSON: 30000,
+    Intent.COMPARE: 10000,
+}
+
+
+def _max_tokens_for(intent, profile: Profile) -> int:
+    return _INTENT_MAX_TOKENS.get(intent, profile.llm_max_tokens)
+
+
+# Per-intent retrieval breadth (user decision 2026-06-20): the number of chunks sent to the
+# model is DYNAMIC, not fixed. The corpus is stored at fine segment granularity (precise but
+# small per chunk), so a lesson spanning a whole sugya needs many more chunks than a short
+# Q&A. Falls back to the profile's top_k for any other intent.
+_INTENT_TOP_K = {
+    Intent.QA: 8,
+    Intent.EXPLAIN: 16,
+    Intent.COMPARE: 24,
+    Intent.LESSON: 48,
+}
+
+
+def _top_k_for(intent, profile: Profile) -> int:
+    return _INTENT_TOP_K.get(intent, profile.top_k)
+
+
+def _dedup_hits(hits):
+    """De-duplicate hits by chunk, keeping the highest-scoring occurrence (anchored/source
+    material outranks the same chunk arriving as a low-scored link-expanded duplicate)."""
+    best: dict = {}
+    for h in hits:
+        cur = best.get(h.chunk_id)
+        if cur is None or h.score > cur.score:
+            best[h.chunk_id] = h
+    return list(best.values())
+
+
 def build_backends(profile: Profile):
     """Construct embedding, store, llm, optional reranker, link graph, and retriever."""
     from chavruta.embedding.bge_m3 import BgeM3Embedding
@@ -33,7 +75,8 @@ def build_backends(profile: Profile):
 
     embedding = BgeM3Embedding(model_id=profile.embedding_model, device=profile.embedding_device,
                                use_sparse=profile.hybrid)
-    store = QdrantStore(mode=profile.qdrant_mode, path=profile.qdrant_path, url=profile.qdrant_url)
+    store = QdrantStore(mode=profile.qdrant_mode, path=profile.qdrant_path,
+                        url=profile.qdrant_url, api_key=profile.qdrant_api_key)
 
     if profile.llm_backend == "nebius":
         from chavruta.llm.cloud import CloudLLM
@@ -72,7 +115,14 @@ class ChavrutaPipeline:
         if router is None:
             from chavruta.intents.router import Router
 
-            router = Router()
+            planner = None
+            if self.profile.query_planner == "llm":
+                from chavruta.intents.llm_planner import LLMQueryPlanner
+
+                planner = LLMQueryPlanner(
+                    self.profile.llm_model, self.profile.llm_base_url, self.profile.llm_api_key
+                )
+            router = Router(planner=planner)
         self.router = router
 
     @classmethod
@@ -109,7 +159,7 @@ class ChavrutaPipeline:
             if missing_works and not loaded_requested:
                 return grounded.work_not_loaded_answer(query.lang, missing_works, query.intent)
 
-        result = self.retriever.retrieve(query, top_k=self.profile.top_k)
+        result = self.retriever.retrieve(query, top_k=_top_k_for(query.intent, self.profile))
 
         if result.is_empty:
             if query.intent in (Intent.EXPLAIN, Intent.COMPARE) and query.commentator_ids:
@@ -130,12 +180,18 @@ class ChavrutaPipeline:
             if missing:
                 missing_note = grounded.missing_commentator_note(query.lang, missing)
 
+        # A lesson is delivered as a full walkthrough (the "מהלך") that follows the arc, and
+        # keeps only the sources it actually uses (spec 003 + user request).
+        if query.intent is Intent.LESSON:
+            return self._lesson_answer(query, result)
+
         prompt, marker_map = grounded.build_prompt(
             query.text, result.hits, intent=query.intent, history=history, lang=query.lang
         )
         llm_out = self.llm.generate(
             prompt, lang=query.lang,
-            max_tokens=self.profile.llm_max_tokens, temperature=self.profile.llm_temperature,
+            max_tokens=_max_tokens_for(query.intent, self.profile),
+            temperature=self.profile.llm_temperature,
         )
         text, citations, is_grounded = grounded.enforce_citations(llm_out.text, marker_map)
         answer = Answer(
@@ -144,15 +200,148 @@ class ChavrutaPipeline:
         )
         if missing_note:
             answer.caveats.append(missing_note)
-        if query.intent is Intent.LESSON:
-            # Structured scaffold alongside the narrative: sources grouped per anchor,
-            # ordered along the chain of transmission, every section cited (FR-008/008a).
-            answer.lesson_plan = grounded.build_lesson_plan(query.text, result.hits)
         return grounded.maybe_halacha_caveat(answer, query.lang)
+
+    def _lesson_answer(self, query, result):
+        """Generate the lesson as a flowing walkthrough that follows the narrative arc
+        (opening → branches → convergence), then keep in each section only the sources the
+        walkthrough actually cited — the plan holds the material it uses, not every hit."""
+        plan = self._build_lesson(query, result)
+        if plan.sections:
+            prompt, marker_map = grounded.build_lesson_walkthrough_prompt(
+                plan, query.text, lang=query.lang)
+        else:
+            prompt, marker_map = grounded.build_prompt(
+                query.text, result.hits, intent=Intent.LESSON, lang=query.lang)
+        llm_out = self.llm.generate(
+            prompt, lang=query.lang,
+            max_tokens=_max_tokens_for(Intent.LESSON, self.profile),
+            temperature=self.profile.llm_temperature,
+        )
+        text, citations, is_grounded = grounded.enforce_citations(llm_out.text, marker_map)
+        if plan.sections:
+            plan = grounded.prune_lesson_to_cited(plan, citations)
+        answer = Answer(text=text, citations=citations, grounded=is_grounded,
+                        no_source=not is_grounded, intent=Intent.LESSON)
+        answer.lesson_plan = plan
+        return grounded.maybe_halacha_caveat(answer, query.lang)
+
+    def _template_index(self):
+        """Lazily load the lesson-template index (built once from this pipeline's embedding)."""
+        if not getattr(self, "_tmpl_tried", False):
+            self._tmpl_tried = True
+            self._tmpl_index = None
+            try:
+                from chavruta.lessons.templates import TemplateIndex, load_templates
+
+                templates = load_templates()
+                if templates:
+                    self._tmpl_index = TemplateIndex(templates, self.embedding)
+            except Exception:
+                self._tmpl_index = None
+        return self._tmpl_index
+
+    def _build_lesson(self, query, result):
+        topic = query.text
+        search = query.search_text or topic
+        hits = list(result.hits)
+        anchor_refs = result.anchor_refs
+        idx = self._template_index()
+        if idx is not None:
+            template = idx.select(search)
+            if template is not None:
+                from chavruta.lessons.builder import build_lesson_from_template, hit_kind
+
+                opening = template.opening
+                # Stage-aware opening (spec 003 Phase 4): a lesson must START at the sugya's
+                # primary source. If the main retrieval surfaced only commentaries, fetch the
+                # primary source (unit_type=source) for the topic and lead with it.
+                if opening and not any(hit_kind(h) in opening.source_kinds for h in hits):
+                    src = self._retrieve_opening_source(search, opening.source_kinds)
+                    if src is not None:
+                        hits = [src, *hits]
+                        if not anchor_refs:
+                            anchor_refs = [src.anchor_ref or src.ref]
+
+                # Pull the connected meforshim (and their supercommentaries) of EVERY primary
+                # source we have, via the links graph up to query.expand_depth (2 for lessons)
+                # — focused, on-topic material rather than broad similarity. Each source IS
+                # linked to its commentaries.
+                source_anchors: list[str] = []
+                for h in hits:
+                    if h.commentator_id is None:                # a primary source (not a commentary)
+                        ref = h.anchor_ref or h.ref
+                        if ref and ref not in source_anchors:
+                            source_anchors.append(ref)
+                if source_anchors:
+                    hits = hits + self._expand_from(source_anchors, query)
+
+                return build_lesson_from_template(topic, template, _dedup_hits(hits), anchor_refs)
+        return grounded.build_lesson_plan(topic, hits)
+
+    def _expand_from(self, refs, query):
+        """Commentaries/supercommentaries connected to `refs` in the links graph (depth from
+        query.expand_depth). Returns [] if expansion is off or unavailable."""
+        le = getattr(self.retriever, "link_expander", None)
+        if le is None or not query.expand_links:
+            return []
+        try:
+            return le.expand([r for r in refs if r], query)
+        except Exception:
+            return []
+
+    # Map a template's opening source_kinds → the corpus work_ids that hold those sources,
+    # so the opening retrieval looks in the RIGHT books (a gemara sugya opens from
+    # mishnah/talmud, not from a semantically-near Tanakh verse).
+    _KIND_WORK = {"pasuk": "tanakh", "mishnah": "mishnah", "gemara": "talmud_bavli",
+                  "midrash": "midrash"}
+
+    def _retrieve_opening_source(self, topic, source_kinds=None):
+        """Targeted retrieval of the primary source (the sugya's start) for a lesson opening,
+        scoped to the works that match the opening stage's kinds.
+
+        A named sugya's topic IS its opening words ("שניים אוחזין" = Mishnah BM 1.1), so we
+        first try a nikud/ktiv-insensitive full-text match (search_he) — which the diluted
+        dense/sparse vectors miss — and fall back to vector search when there's no literal hit.
+        """
+        from chavruta.corpus.normalize import normalize_he
+
+        works = [self._KIND_WORK[k] for k in (source_kinds or []) if k in self._KIND_WORK]
+        norm = normalize_he(topic)
+
+        # Try each preferred work IN ORDER (a talmudic sugya opens from its MISHNA, not from
+        # a gemara segment that merely quotes it), lexical-first: a literal nikud/ktiv match on
+        # the opening words beats the diluted vectors. Fall back to vector over all works.
+        for w in works:
+            if norm:
+                hit = self._search_source(topic, {"unit_type": "source", "work_id": [w],
+                                                  "search_he": {"$text": norm}})
+                if hit is not None:
+                    return hit
+        base = {"unit_type": "source"}
+        if works:
+            base["work_id"] = works
+        return self._search_source(topic, base)
+
+    def _search_source(self, topic, filters):
+        """Hybrid search for one source under `filters`; best hit or None."""
+        try:
+            from chavruta.retrieval.hybrid import _to_hit
+            from chavruta.store.base import HybridQuery
+
+            emb = self.embedding.embed_query(topic)
+            sparse = emb.sparse if (self.profile.hybrid and emb.sparse) else None
+            raw = self.store.search(
+                self.profile.collection, HybridQuery(dense=emb.dense, sparse=sparse),
+                top_k=4, filters=filters,
+            )
+            return _to_hit(raw[0]) if raw else None
+        except Exception:
+            return None
 
     def ask_stream(self, request: Query, *, history: list[Turn] | None = None) -> Iterator[str]:
         query = self._resolve_query(request)
-        result = self.retriever.retrieve(query, top_k=self.profile.top_k)
+        result = self.retriever.retrieve(query, top_k=_top_k_for(query.intent, self.profile))
         if result.is_empty:
             yield grounded.no_source_answer(query.lang, query.intent).text
             return
@@ -161,5 +350,6 @@ class ChavrutaPipeline:
         )
         yield from self.llm.stream(
             prompt, lang=query.lang,
-            max_tokens=self.profile.llm_max_tokens, temperature=self.profile.llm_temperature,
+            max_tokens=_max_tokens_for(query.intent, self.profile),
+            temperature=self.profile.llm_temperature,
         )
