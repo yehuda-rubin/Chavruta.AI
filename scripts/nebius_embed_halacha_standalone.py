@@ -22,7 +22,8 @@ Config (env vars):
   HF_TOKEN              HF write token (required to publish; read works without for public)
   CORPUS_REPO          HF dataset with the shards (default: Yehuda-Rubin/chavruta-torah-mixed)
   CORPUS_PREFIX        shard filename prefix     (default: halacha_part)
-  INDEX_REPO           HF dataset to publish to  (default: Yehuda-Rubin/chavruta-index-halacha)
+  INDEX_REPO           HF dataset to publish to  (default: Yehuda-Rubin/chavruta-torah-mixed
+                       — same repo as the corpus; the 3 index files live at the repo root)
   BATCH                embedding batch size      (default: 128)
 """
 
@@ -34,7 +35,7 @@ from pathlib import Path
 HF_TOKEN = os.environ.get("HF_TOKEN")
 CORPUS_REPO = os.environ.get("CORPUS_REPO", "Yehuda-Rubin/chavruta-torah-mixed")
 CORPUS_PREFIX = os.environ.get("CORPUS_PREFIX", "halacha_part")
-INDEX_REPO = os.environ.get("INDEX_REPO", "Yehuda-Rubin/chavruta-index-halacha")
+INDEX_REPO = os.environ.get("INDEX_REPO", "Yehuda-Rubin/chavruta-torah-mixed")
 BATCH = int(os.environ.get("BATCH", "128"))
 
 OUT = Path("out")
