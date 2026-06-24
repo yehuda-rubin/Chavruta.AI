@@ -22,6 +22,7 @@ class RankedHit:
     deep_link: str = ""
     work_id: str = ""
     anchor_ref: str | None = None
+    period: str | None = None      # halachic era for sources w/o a commentator (e.g. responsa)
 
 
 @dataclass

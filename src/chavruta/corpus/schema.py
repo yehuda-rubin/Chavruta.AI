@@ -68,6 +68,8 @@ class Chunk:
     text_he: str = ""                      # always present (Hebrew is first-class — Principle IV)
     text_en: str = ""
     deep_link: str = ""
+    period: str = ""                       # halachic era for primary sources without a commentator
+                                           # (geonim|rishonim|acharonim|modern) — e.g. responsa
     # structural coordinates for ordering/anchoring (e.g. {"book": "Genesis", "chapter": 1, "verse": 3})
     position: dict = field(default_factory=dict)
     # commentary-only fields
@@ -87,6 +89,7 @@ class Chunk:
             "text_he": self.text_he,
             "text_en": self.text_en,
             "deep_link": self.deep_link,
+            "period": self.period,
             "position": self.position,
             "anchor_ref": self.anchor_ref,
             "anchor_kind": self.anchor_kind.value if self.anchor_kind else None,

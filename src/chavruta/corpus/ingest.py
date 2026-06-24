@@ -104,6 +104,7 @@ def payload_from_legacy_meta(meta: dict, work_id: str = "tanakh") -> dict:
         text_he=md.get("text_he", "") or document,
         text_en=md.get("text_en", ""),
         deep_link=f"https://www.sefaria.org/{verse_id}" if verse_id else "",
+        period=md.get("period", ""),   # responsa carry their halachic era (geonim/rishonim/…)
         position=position,
         anchor_ref=verse_id if is_commentary else None,
         anchor_kind=AnchorKind.SOURCE if is_commentary else None,

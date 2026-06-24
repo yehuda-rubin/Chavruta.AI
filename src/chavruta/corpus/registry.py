@@ -91,10 +91,26 @@ TALMUD_BAVLI = Work(
     attribution="Sefaria (sefaria.org)",
 )
 
+# Responsa (שו"ת) — the full Sefaria responsa library (גאונים · ראשונים · אחרונים · מודרני),
+# ingested into the SAME collection. Each chunk carries work_id="responsa" and its halachic
+# `period`; segments span many authors, so the reference scheme is the work's own segment path.
+RESPONSA = Work(
+    work_id="responsa",
+    title_he="שו\"ת",
+    title_en="Responsa",
+    kind="responsa",
+    languages=("he", "en"),
+    reference_scheme="work/section/segment",
+    source_adapter="sefaria",
+    license="CC0 / Sefaria",
+    attribution="Sefaria (sefaria.org)",
+)
+
 
 def default_registry() -> CorpusRegistry:
     reg = CorpusRegistry()
     reg.register(TANAKH)
     reg.register(MISHNAH)
     reg.register(TALMUD_BAVLI)
+    reg.register(RESPONSA)
     return reg

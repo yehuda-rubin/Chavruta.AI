@@ -34,6 +34,7 @@ _INTENT_MAX_TOKENS = {
     Intent.EXPLAIN: 3000,
     Intent.LESSON: 30000,
     Intent.COMPARE: 10000,
+    Intent.HALACHA: 12000,     # a teshuva: source → poskim → pesak, can be substantial
 }
 
 
@@ -50,6 +51,7 @@ _INTENT_TOP_K = {
     Intent.EXPLAIN: 16,
     Intent.COMPARE: 24,
     Intent.LESSON: 48,
+    Intent.HALACHA: 32,        # responsa pulls a wide net of sources + poskim
 }
 
 
@@ -180,9 +182,10 @@ class ChavrutaPipeline:
             if missing:
                 missing_note = grounded.missing_commentator_note(query.lang, missing)
 
-        # A lesson is delivered as a full walkthrough (the "מהלך") that follows the arc, and
-        # keeps only the sources it actually uses (spec 003 + user request).
-        if query.intent is Intent.LESSON:
+        # A lesson — and a responsa (שו"ת) — is delivered as a full walkthrough (the "מהלך")
+        # that follows its arc and keeps only the sources it actually uses. Both run the same
+        # machine; HALACHA just selects the separate responsa template set (shared corpus).
+        if query.intent in (Intent.LESSON, Intent.HALACHA):
             return self._lesson_answer(query, result)
 
         prompt, marker_map = grounded.build_prompt(
@@ -203,50 +206,50 @@ class ChavrutaPipeline:
         return grounded.maybe_halacha_caveat(answer, query.lang)
 
     def _lesson_answer(self, query, result):
-        """Generate the lesson as a flowing walkthrough that follows the narrative arc
-        (opening → branches → convergence), then keep in each section only the sources the
-        walkthrough actually cited — the plan holds the material it uses, not every hit."""
+        """Generate the lesson — or responsa (שו"ת) — as a flowing walkthrough that follows
+        the arc (opening → branches → convergence), then keep in each section only the sources
+        the walkthrough actually cited. HALACHA uses the responsa template set + voice."""
+        is_shut = query.intent is Intent.HALACHA
         plan = self._build_lesson(query, result)
         if plan.sections:
             prompt, marker_map = grounded.build_lesson_walkthrough_prompt(
-                plan, query.text, lang=query.lang)
+                plan, query.text, lang=query.lang, shut=is_shut)
         else:
             prompt, marker_map = grounded.build_prompt(
-                query.text, result.hits, intent=Intent.LESSON, lang=query.lang)
+                query.text, result.hits, intent=query.intent, lang=query.lang)
         llm_out = self.llm.generate(
             prompt, lang=query.lang,
-            max_tokens=_max_tokens_for(Intent.LESSON, self.profile),
+            max_tokens=_max_tokens_for(query.intent, self.profile),
             temperature=self.profile.llm_temperature,
         )
         text, citations, is_grounded = grounded.enforce_citations(llm_out.text, marker_map)
         if plan.sections:
             plan = grounded.prune_lesson_to_cited(plan, citations)
         answer = Answer(text=text, citations=citations, grounded=is_grounded,
-                        no_source=not is_grounded, intent=Intent.LESSON)
+                        no_source=not is_grounded, intent=query.intent)
         answer.lesson_plan = plan
         return grounded.maybe_halacha_caveat(answer, query.lang)
 
-    def _template_index(self):
-        """Lazily load the lesson-template index (built once from this pipeline's embedding)."""
-        if not getattr(self, "_tmpl_tried", False):
-            self._tmpl_tried = True
-            self._tmpl_index = None
-            try:
-                from chavruta.lessons.templates import TemplateIndex, load_templates
+    def _template_index(self, intent=None):
+        """Lazily load the template index for the intent — the responsa (שו"ת) set for HALACHA,
+        the lesson set otherwise. Both are built once from this pipeline's embedding."""
+        from chavruta.lessons.templates import SHUT_PATH, TemplateIndex, load_templates
 
-                templates = load_templates()
-                if templates:
-                    self._tmpl_index = TemplateIndex(templates, self.embedding)
+        key = "_tmpl_shut" if intent is Intent.HALACHA else "_tmpl_lesson"
+        if not hasattr(self, key):
+            try:
+                templates = load_templates(SHUT_PATH if intent is Intent.HALACHA else None)
+                setattr(self, key, TemplateIndex(templates, self.embedding) if templates else None)
             except Exception:
-                self._tmpl_index = None
-        return self._tmpl_index
+                setattr(self, key, None)
+        return getattr(self, key)
 
     def _build_lesson(self, query, result):
         topic = query.text
         search = query.search_text or topic
         hits = list(result.hits)
         anchor_refs = result.anchor_refs
-        idx = self._template_index()
+        idx = self._template_index(query.intent)
         if idx is not None:
             template = idx.select(search)
             if template is not None:

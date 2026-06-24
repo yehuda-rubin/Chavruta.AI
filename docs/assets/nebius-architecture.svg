@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="560" viewBox="0 0 1040 560" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="9" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <style>
+      .zone   { fill:#f8fafc; stroke:#cbd5e1; stroke-width:2; rx:14; }
+      .ztitle { font-size:15px; font-weight:700; fill:#334155; }
+      .box    { stroke-width:2; rx:10; }
+      .label  { font-size:14px; font-weight:600; }
+      .sub    { font-size:11.5px; fill:#64748b; }
+      .step   { font-size:12px; fill:#475569; }
+      .edge   { stroke:#475569; stroke-width:2.5; fill:none; }
+      .edgelbl{ font-size:11.5px; fill:#475569; font-weight:600; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1040" height="560" fill="#ffffff"/>
+  <text x="520" y="34" text-anchor="middle" font-size="20" font-weight="800" fill="#0f172a">Chavruta.AI — Halacha ingest: Factory → Warehouse → Local</text>
+  <text x="520" y="56" text-anchor="middle" font-size="13" fill="#64748b">Embed 594K halacha chunks on a Nebius GPU, publish to Hugging Face, load into the local Docker Qdrant</text>
+
+  <!-- Zone 1: FACTORY (Nebius GPU Job) -->
+  <rect class="zone" x="30" y="90" width="430" height="420" rx="14"/>
+  <text class="ztitle" x="50" y="118">1 · FACTORY — Nebius Serverless Job (GPU)</text>
+
+  <rect class="box" x="60" y="140" width="370" height="64" fill="#eff6ff" stroke="#3b82f6"/>
+  <text class="label" x="78" y="166" fill="#1e3a8a">fetch_corpus  (merge mode)</text>
+  <text class="sub"   x="78" y="186">pulls halacha_part01…part44.jsonl from HF → one corpus</text>
+
+  <line class="edge" x1="245" y1="204" x2="245" y2="232" marker-end="url(#arrow)"/>
+
+  <rect class="box" x="60" y="234" width="370" height="64" fill="#ecfdf5" stroke="#10b981"/>
+  <text class="label" x="78" y="260" fill="#065f46">embed_corpus  (bge-m3, GPU)</text>
+  <text class="sub"   x="78" y="280">dense + sparse vectors · batch=128 · ~35–65 min on H100</text>
+
+  <line class="edge" x1="245" y1="298" x2="245" y2="326" marker-end="url(#arrow)"/>
+
+  <rect class="box" x="60" y="328" width="370" height="64" fill="#fef3c7" stroke="#f59e0b"/>
+  <text class="label" x="78" y="354" fill="#92400e">publish_index  → Hugging Face</text>
+  <text class="sub"   x="78" y="374">uploads corpus_vectors.npy + _sparse.jsonl + _meta.jsonl</text>
+
+  <rect class="box" x="60" y="416" width="370" height="56" fill="#f1f5f9" stroke="#94a3b8" stroke-dasharray="6 4"/>
+  <text class="label" x="78" y="440" fill="#475569">load_to_store  → Qdrant Cloud</text>
+  <text class="sub"   x="78" y="458">SKIPPED in this workflow (publish-only — no Qdrant block)</text>
+
+  <!-- Zone 2: WAREHOUSE (Hugging Face) -->
+  <rect class="zone" x="490" y="150" width="230" height="180" rx="14"/>
+  <text class="ztitle" x="510" y="178">2 · WAREHOUSE</text>
+  <rect class="box" x="512" y="196" width="186" height="112" fill="#fef3c7" stroke="#f59e0b"/>
+  <text class="label" x="528" y="222" fill="#92400e">🤗 Hugging Face</text>
+  <text class="sub"   x="528" y="244">dataset:</text>
+  <text class="sub"   x="528" y="262">chavruta-index-</text>
+  <text class="sub"   x="528" y="278">halacha</text>
+  <text class="step"  x="528" y="300">the prebuilt index</text>
+
+  <!-- Zone 3: LOCAL (your machine) -->
+  <rect class="zone" x="750" y="90" width="260" height="420" rx="14"/>
+  <text class="ztitle" x="770" y="118">3 · LOCAL — your machine</text>
+
+  <rect class="box" x="772" y="150" width="216" height="74" fill="#eff6ff" stroke="#3b82f6"/>
+  <text class="label" x="788" y="176" fill="#1e3a8a">download index</text>
+  <text class="sub"   x="788" y="196">bootstrap_rag.py</text>
+  <text class="sub"   x="788" y="212">→ out_halacha/</text>
+
+  <line class="edge" x1="880" y1="224" x2="880" y2="252" marker-end="url(#arrow)"/>
+
+  <rect class="box" x="772" y="254" width="216" height="84" fill="#ecfdf5" stroke="#10b981"/>
+  <text class="label" x="788" y="280" fill="#065f46">append-load</text>
+  <text class="sub"   x="788" y="300">--append (same cmd)</text>
+  <text class="sub"   x="788" y="316">--profile local</text>
+
+  <line class="edge" x1="880" y1="338" x2="880" y2="366" marker-end="url(#arrow)"/>
+
+  <rect class="box" x="772" y="368" width="216" height="104" fill="#f5f3ff" stroke="#8b5cf6"/>
+  <text class="label" x="788" y="394" fill="#5b21b6">🐳 Docker Qdrant</text>
+  <text class="sub"   x="788" y="414">collection: chavruta</text>
+  <text class="sub"   x="788" y="432">localhost:6333</text>
+  <text class="step"  x="788" y="454">+halacha (append)</text>
+
+  <!-- cross-zone edges -->
+  <line class="edge" x1="430" y1="360" x2="512" y2="300" marker-end="url(#arrow)"/>
+  <text class="edgelbl" x="438" y="338">publish</text>
+
+  <line class="edge" x1="698" y1="240" x2="772" y2="186" marker-end="url(#arrow)"/>
+  <text class="edgelbl" x="700" y="210">pull</text>
+</svg>

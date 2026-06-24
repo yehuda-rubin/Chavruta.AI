@@ -54,6 +54,9 @@ def main() -> None:
     ap.add_argument("--batch", type=int, default=128)
     ap.add_argument("--skip-download", action="store_true",
                     help="reuse an index already present in --out instead of re-downloading")
+    ap.add_argument("--append", action="store_true",
+                    help="ADD this index to the existing collection instead of dropping it "
+                         "(incremental load — e.g. adding halacha on top of Tanakh+Mishnah+Gemara+שו\"ת)")
     args = ap.parse_args()
 
     out_dir = Path(args.out)
@@ -70,7 +73,9 @@ def main() -> None:
     store = QdrantStore(mode=profile.qdrant_mode, path=profile.qdrant_path,
                         url=profile.qdrant_url, api_key=profile.qdrant_api_key)
     client = store._client_()
-    if client.collection_exists(profile.collection):
+    if args.append:
+        print(f"➕ --append — adding to existing collection '{profile.collection}' (not dropping)")
+    elif client.collection_exists(profile.collection):
         print(f"♻️  dropping existing collection '{profile.collection}' (fully regenerable from the index)")
         client.delete_collection(profile.collection)
     store.ensure_collection(profile.collection, dim=1024)

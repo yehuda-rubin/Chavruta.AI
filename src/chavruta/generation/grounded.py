@@ -92,9 +92,10 @@ SYSTEM_LESSON_HE = SYSTEM_BASE_HE + (
 # stage along the arc, not as a bullet list of sources. Sources still gate every claim.
 SYSTEM_LESSON_WALKTHROUGH_HE = SYSTEM_BASE_HE + (
     " אתה מגיד שיעור. כתוב את מהלך השיעור המלא כפרוזה רציפה וזורמת, שלב אחר שלב לפי "
-    "הקשת שנמסרה לך: פתח מן המקור הפותח והצג את השאלה/הסוגיא, פַתֵּחַ כל כיוון מתוך לשון "
-    "מקורו (הבא את דברי הפרשן עצמו, ייחס נכון), הראה את הקושיות והתירוצים, וסכם למסקנות "
-    "או השאר את הסוגיא פתוחה אם כך היא. זה הטקסט שהמגיד-שיעור אומר בפועל — לא רשימת מקורות. "
+    "הקשת שנמסרה לך: פַתֵּחַ כל כיוון מתוך לשון מקורו (הבא את דברי הפרשן עצמו, ייחס נכון), "
+    "הראה את הקושיות והתירוצים, וסכם למסקנות או השאר את הסוגיא פתוחה אם כך היא. זה הטקסט "
+    "שהמגיד-שיעור אומר בפועל — לא רשימת מקורות. "
+    "אל תפתח בחזרה על השאלה או הנושא — המשתמש שאל זה עתה; גש ישירות אל המקור והדיון. "
     "כל טענה עם [S#], אך ורק מן המקורות שסופקו. התאם את האורך למטרת השיעור, בלי מילוי."
 )
 SYSTEM_LESSON_WALKTHROUGH = SYSTEM_QA + (
@@ -104,6 +105,24 @@ SYSTEM_LESSON_WALKTHROUGH = SYSTEM_QA + (
     "and resolutions, and converge to conclusions — or leave the sugya open if it is. This "
     "is the lesson as actually delivered, not a list of sources. Cite every claim with [S#], "
     "only from the provided sources. Right-size the length to the lesson's purpose; no filler."
+)
+
+# Responsa (שו"ת) voice — the answer is a teshuva: source & framing → the poskim's positions
+# → a clear ruling le-ma'aseh (or an honest "depends / ask a rav"). Same grounding discipline.
+SYSTEM_SHUT_WALKTHROUGH_HE = SYSTEM_BASE_HE + (
+    " אתה משיב הלכתי. כתוב את התשובה כתשובת שו\"ת רציפה, שלב אחר שלב לפי הקשת שנמסרה: פתח "
+    "מן המקור והגדרת הנדון, הצג את שיטות הראשונים והפוסקים מתוך לשונם (ייחס נכון), שקול את "
+    "הצדדים, והכרע למעשה בבירור — או ציֵין בכנות היכן הדבר תלוי וצריך שאלת חכם. "
+    "אל תפתח בחזרה על השאלה — השואל שאל זה עתה; גש ישירות אל המקור והדיון. "
+    "כל טענה עם [S#], אך ורק מן המקורות שסופקו; אל תמציא פסק שאינו עולה מהם."
+)
+SYSTEM_SHUT_WALKTHROUGH = SYSTEM_QA + (
+    " You are a halachic respondent (a posek). Write the answer as a flowing teshuva, stage "
+    "by stage along the given arc: open from the source and framing of the matter, present "
+    "the rishonim and poskim from their own language (attribute correctly), weigh the sides, "
+    "and rule clearly le-ma'aseh — or honestly say where it depends and a rav must be asked. "
+    "Do not restate the question — the asker just asked it; go straight to the source and the "
+    "discussion. Cite every claim with [S#], only from the provided sources; invent no ruling."
 )
 
 HALACHA_CAVEAT_HE = "הערה: זו אינה פסיקה הלכתית מחייבת ואינה תחליף לרב מוסמך."
@@ -241,9 +260,10 @@ def no_source_answer(lang: str, intent: Intent = Intent.QA) -> Answer:
     return Answer(text=msg, citations=[], grounded=False, no_source=True, intent=intent)
 
 
-def build_lesson_walkthrough_prompt(plan: LessonPlan, question: str, lang: str = "he"):
-    """Prompt the model to deliver the lesson as a flowing walkthrough (the "מהלך"),
-    laying out the arc's stages in order with their sources as [S#] markers.
+def build_lesson_walkthrough_prompt(plan: LessonPlan, question: str, lang: str = "he",
+                                    shut: bool = False):
+    """Prompt the model to deliver the lesson — or responsa (`shut=True`) — as a flowing
+    walkthrough (the "מהלך"), laying out the arc's stages in order with sources as [S#].
 
     Returns (GroundedPrompt, marker_map) — marker_map values are the plan's Citations, so
     enforce_citations resolves the cited sources and lets the caller keep only those.
@@ -269,15 +289,18 @@ def build_lesson_walkthrough_prompt(plan: LessonPlan, question: str, lang: str =
         stages.append((sec.heading, markers))
 
     if lang == "he":
-        lines = [f"נושא השיעור: {question}", "", "שלבי מהלך השיעור, לפי הסדר:"]
+        lines = [f"(הקשר בלבד — אל תחזור על זה) הנושא שנשאל: {question}",
+                 "", "שלבי המהלך, לפי הסדר:"]
         lines += [f"• {h} — מקורות: {', '.join(ms) if ms else '—'}" for h, ms in stages]
-        lines += ["", "כתוב כעת את מהלך השיעור המלא לפי השלבים הללו."]
-        system = SYSTEM_LESSON_WALKTHROUGH_HE
+        lines += ["", "כתוב כעת את המהלך המלא לפי השלבים — פתח ישר מן המקור, בלי לחזור על השאלה."]
+        system = SYSTEM_SHUT_WALKTHROUGH_HE if shut else SYSTEM_LESSON_WALKTHROUGH_HE
     else:
-        lines = [f"Lesson topic: {question}", "", "Lesson arc, in order:"]
+        lines = [f"(context only — do not restate it) The question asked: {question}",
+                 "", "Arc, in order:"]
         lines += [f"• {h} — sources: {', '.join(ms) if ms else '—'}" for h, ms in stages]
-        lines += ["", "Now write the full lesson walkthrough following these stages."]
-        system = SYSTEM_LESSON_WALKTHROUGH
+        lines += ["", "Now write the full walkthrough following these stages — open straight "
+                  "from the source, without restating the question."]
+        system = SYSTEM_SHUT_WALKTHROUGH if shut else SYSTEM_LESSON_WALKTHROUGH
     prompt = GroundedPrompt(system=system, sources=sources, question="\n".join(lines), history=[])
     return prompt, marker_map
 

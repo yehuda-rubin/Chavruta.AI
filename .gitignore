@@ -48,8 +48,9 @@ fetch_sefaria.log
 
 # ---- Data & artifacts ----
 data/
-# Keep the lesson-template config (small, essential — it is code, not bulk data)
+# Keep the template configs (small, essential — they are code, not bulk data)
 !data/lesson_templates.yaml
+!data/shut_templates.yaml
 *.csv
 *.tsv
 *.parquet

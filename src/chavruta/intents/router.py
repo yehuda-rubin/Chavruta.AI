@@ -39,6 +39,8 @@ WORK_ALIASES: dict[str, tuple[str, ...]] = {
     "mishnah": ("mishnah", "mishna", "משנה", "מסכת"),
     "talmud": ("talmud", "gemara", "גמרא", "תלמוד", "בבלי", "ירושלמי"),
     "shulchan_aruch": ("shulchan aruch", "שולחן ערוך", "שו\"ע", "שו״ע"),
+    # Responsa (שו"ת) — unambiguous terms only; bare "תשובה" means repentance, not a teshuva.
+    "responsa": ("responsa", "teshuvot", "שו\"ת", "שו״ת", "שאלות ותשובות"),
     "tur": ("the tur", "טור "),
     "mishneh_torah": ("mishneh torah", "משנה תורה", "rambam", 'הרמב"ם במשנה'),
     "zohar": ("zohar", "זוהר", "הזוהר"),
@@ -207,8 +209,9 @@ class Router:
         if query.work_ids is None and self.default_work_ids:
             query.work_ids = list(self.default_work_ids)
 
-        # Comparison/explanation benefits from anchor-chain expansion (supercommentaries).
-        if query.intent in (Intent.COMPARE, Intent.LESSON) and not query.expand_links:
+        # Comparison/lesson/responsa benefit from anchor-chain expansion (supercommentaries,
+        # poskim-on-the-source) — pull the connected meforshim of each source.
+        if query.intent in (Intent.COMPARE, Intent.LESSON, Intent.HALACHA) and not query.expand_links:
             query.expand_links = True
             # depth 2 reaches commentary-on-commentary: pasuk → Rashi → Mizrachi (T033a);
             # for lessons it spans the chain of transmission across loaded corpora (T036a).

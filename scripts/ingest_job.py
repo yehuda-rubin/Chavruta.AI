@@ -61,7 +61,14 @@ BOOKS_ENV = os.environ.get("INGEST_BOOKS", "")
 
 CORPUS_HF_REPO = os.environ.get("INGEST_CORPUS_HF_REPO", "")
 CORPUS_HF_FILE = os.environ.get("INGEST_CORPUS_HF_FILE", "all_chunks_full.json")
+# Merge mode: download EVERY file in the repo whose name starts with this prefix and
+# concatenate them into one corpus (e.g. INGEST_CORPUS_HF_PREFIX=halacha_part → all 44
+# halacha_partNN.jsonl shards embedded in a single Job, one unified index out).
+CORPUS_HF_PREFIX = os.environ.get("INGEST_CORPUS_HF_PREFIX", "")
 INDEX_HF_REPO = os.environ.get("INGEST_INDEX_HF_REPO", "")
+# Keep the existing collection on load (append) instead of dropping it — set false for
+# incremental loads (e.g. adding halacha on top of Tanakh+Mishnah+Gemara+שו"ת).
+RECREATE = os.environ.get("INGEST_RECREATE", "true").strip().lower() not in ("false", "0", "no")
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
 # Files that make up the prebuilt index artifact (consumed by load_processed_chunks)
@@ -74,7 +81,17 @@ def _elapsed() -> str:
     return f"{(time.time() - t0) / 60:.1f}m"
 
 
+def _load_chunks(path: Path) -> list:
+    """Load chunks from a .jsonl (one per line) or .json ({"chunks":[…]} / [...])."""
+    if path.suffix == ".jsonl":
+        return [json.loads(l) for l in path.open(encoding="utf-8") if l.strip()]
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    return raw["chunks"] if isinstance(raw, dict) else raw
+
+
 def _chunk_count(path: Path) -> int:
+    if path.suffix == ".jsonl":
+        return sum(1 for l in path.open(encoding="utf-8") if l.strip())
     raw = json.loads(path.read_text(encoding="utf-8"))
     return len(raw["chunks"] if isinstance(raw, dict) else raw)
 
@@ -85,6 +102,29 @@ def step_fetch():
     # a) Reuse a local corpus file if it's already here.
     if CHUNKS_PATH.exists():
         print(f"[fetch] ✅ using local {CHUNKS_PATH} ({_chunk_count(CHUNKS_PATH):,} chunks)")
+        return
+
+    # a2) Merge mode — download every shard matching the prefix and concatenate.
+    if CORPUS_HF_PREFIX and CORPUS_HF_REPO:
+        from huggingface_hub import HfApi, hf_hub_download
+
+        files = sorted(
+            f for f in HfApi().list_repo_files(CORPUS_HF_REPO, repo_type="dataset", token=HF_TOKEN)
+            if f.startswith(CORPUS_HF_PREFIX)
+        )
+        print(f"[fetch] merging {len(files)} shards matching {CORPUS_HF_PREFIX!r} from {CORPUS_HF_REPO}")
+        CHUNKS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        total = 0
+        with CHUNKS_PATH.open("w", encoding="utf-8") as out:
+            for fn in files:
+                local = hf_hub_download(repo_id=CORPUS_HF_REPO, filename=fn,
+                                        repo_type="dataset", token=HF_TOKEN)
+                for line in Path(local).open(encoding="utf-8"):
+                    if line.strip():
+                        out.write(line if line.endswith("\n") else line + "\n")
+                        total += 1
+                print(f"  + {fn}  (running total {total:,})")
+        print(f"[fetch] ✅ merged {total:,} chunks → {CHUNKS_PATH} ({_elapsed()})")
         return
 
     # b) Pull the corpus dataset from Hugging Face (the common path: corpus is prebuilt).
@@ -176,8 +216,7 @@ def step_embed():
     if device == "cpu":
         print("[embed] ⚠️  no GPU detected — embedding will be slow")
 
-    raw = json.loads(CHUNKS_PATH.read_text(encoding="utf-8"))
-    chunks = raw["chunks"] if isinstance(raw, dict) else raw
+    chunks = _load_chunks(CHUNKS_PATH)
     print(f"[embed] {len(chunks):,} chunks")
 
     docs = [c["document"] for c in chunks]
@@ -264,9 +303,11 @@ def step_load():
     store = QdrantStore(mode="server", url=profile.qdrant_url, api_key=profile.qdrant_api_key)
     client = store._client_()
 
-    if client.collection_exists(profile.collection):
+    if RECREATE and client.collection_exists(profile.collection):
         print(f"[load] ♻️  dropping existing collection '{profile.collection}'")
         client.delete_collection(profile.collection)
+    elif not RECREATE:
+        print(f"[load] ➕ INGEST_RECREATE=false — appending to '{profile.collection}'")
     store.ensure_collection(profile.collection, dim=1024)
 
     batch, total = [], 0

@@ -24,6 +24,7 @@ def _to_hit(h) -> RankedHit:
         deep_link=p.get("deep_link", ""),
         work_id=p.get("work_id", ""),
         anchor_ref=p.get("anchor_ref"),
+        period=p.get("period"),
     )
 
 

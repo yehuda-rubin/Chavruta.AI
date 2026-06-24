@@ -14,7 +14,12 @@ from pathlib import Path
 
 import yaml
 
-DEFAULT_PATH = Path(__file__).resolve().parents[3] / "data" / "lesson_templates.yaml"
+_DATA = Path(__file__).resolve().parents[3] / "data"
+DEFAULT_PATH = _DATA / "lesson_templates.yaml"
+# Responsa templates live in their own file — only the TEMPLATE SET is separate; the responsa
+# corpus is ingested into the SAME (shared) RAG as everything else. Loaded via
+# load_templates(SHUT_PATH).
+SHUT_PATH = _DATA / "shut_templates.yaml"
 
 
 @dataclass

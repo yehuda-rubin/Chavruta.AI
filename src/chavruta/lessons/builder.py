@@ -17,12 +17,23 @@ _ACHARONIM = {
     "kli_yakar", "shach", "taz", "mishnah_berurah",
 }
 
+# Halachic era → source kind, for primary sources that carry a `period` instead of a
+# commentator (responsa). Geonim are folded into rishonim, modern poskim into acharonim,
+# so a teshuva slots into the rishonim/acharonim stages of ANY template (lessons, not just
+# the שו"ת set) — responsa are cited everywhere, the same way they are in real shiurim.
+_PERIOD_KIND = {
+    "geonim": "rishonim", "rishonim": "rishonim",
+    "acharonim": "acharonim", "modern": "acharonim",
+}
+
 
 def hit_kind(h: RankedHit) -> str:
     """Classify a hit into a source kind matching the templates' `source_kinds` vocabulary."""
     if h.commentator_id:
         cid = h.commentator_id.lower()
         return "acharonim" if cid in _ACHARONIM else "rishonim"
+    if getattr(h, "period", None):
+        return _PERIOD_KIND.get(h.period.lower(), "acharonim")
     work = (h.work_id or "").lower()
     if "mishnah" in work:
         return "mishnah"
@@ -90,6 +101,21 @@ def build_lesson_from_template(topic: str, template: Template, hits: list[Ranked
             sections.append(_section(opening, [kinds[chosen][0]]))
             used.add(chosen)
 
+    # convergence reservation — set aside ONE matching source for the conclusion BEFORE the
+    # branches run, so a teshuva (or shiur) actually reaches its pesak even when a branch
+    # shares the convergence kind (e.g. poskim appear both in the discussion and the ruling).
+    # The LAST eligible hit is reserved (lowest-scored), leaving the stronger ones for branches.
+    convergence = template.convergence
+    reserved_conv = None
+    if convergence:
+        reserved_conv = next(
+            (i for i in reversed(range(len(kinds)))
+             if i not in used and kinds[i][1] in convergence.source_kinds),
+            None,
+        )
+        if reserved_conv is not None:
+            used.add(reserved_conv)
+
     # branches — round-robin remaining hits across the branch stages that want their kind
     branches = template.branches
     if branches:
@@ -109,11 +135,12 @@ def build_lesson_from_template(topic: str, template: Template, hits: list[Ranked
             if buckets[bi]:
                 sections.append(_section(stage, buckets[bi][:_BRANCH_CAP]))
 
-    # convergence — conclusion / pesak sources, if any
-    convergence = template.convergence
+    # convergence — the reserved hit plus any other still-unused matching sources
     if convergence:
-        conv_hits = [h for i, (h, k) in enumerate(kinds)
-                     if i not in used and k in convergence.source_kinds]
+        conv_hits = ([kinds[reserved_conv][0]] if reserved_conv is not None else []) + [
+            h for i, (h, k) in enumerate(kinds)
+            if i not in used and i != reserved_conv and k in convergence.source_kinds
+        ]
         if conv_hits:
             sections.append(_section(convergence, conv_hits[:_CONVERGENCE_CAP]))
 

@@ -17,7 +17,7 @@ def test_dynamic_top_k_scales_with_intent():
     # a lesson (whole sugya) pulls far more chunks than a short Q&A
     assert _top_k_for(Intent.LESSON, p) > _top_k_for(Intent.EXPLAIN, p) > _top_k_for(Intent.QA, p)
     assert _top_k_for(Intent.LESSON, p) == 48
-    assert _top_k_for(Intent.HALACHA, p) == 10   # falls back to profile.top_k
+    assert _top_k_for(Intent.HALACHA, p) == 32   # responsa has its own (wide) breadth
 
 
 def _tpl(tid):
