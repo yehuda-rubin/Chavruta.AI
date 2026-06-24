@@ -48,9 +48,7 @@ https://raw.githubusercontent.com/yehuda-rubin/Chavruta.AI/main/scripts/nebius_e
 ```
 (אני יכול לבצע את ה-commit + push של הקובץ הבודד הזה עבורך.)
 
-> 📸 **צילום #0** → `docs/screenshots/00-raw-url.png` — ה-URL הגולמי נפתח בדפדפן (מוכיח שזמין).
-
-![צילום #0 — ה-URL הגולמי של הסקריפט](screenshots/00-raw-url.png)
+> 📸 **צילום #0** (`00-raw-url.png`, ה-URL הגולמי בדפדפן) — _אין צילום מהריצה הזו; אפשר ללכוד בהרצה הבאה._
 
 ---
 
@@ -63,7 +61,7 @@ https://raw.githubusercontent.com/yehuda-rubin/Chavruta.AI/main/scripts/nebius_e
 | **Image** | `pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime` |
 | **Command** | `bash` |
 | **Args** | שורה 1: `-c` · שורה 2: הפקודה למטה |
-| **Environment** | `HF_TOKEN` = `hf_…` |
+| **Environment** | `HF_TOKEN` = `hf_…` (כ-Secret) · `INDEX_REPO` = `Yehuda-Rubin/chavruta-index-halacha` · `BATCH` = `256` |
 | **GPU / preset** | 1× H100 (למשל platform `gpu-h100-sxm`, preset `1gpu-…`) |
 | **Timeout** | `3h` |
 
@@ -72,9 +70,23 @@ https://raw.githubusercontent.com/yehuda-rubin/Chavruta.AI/main/scripts/nebius_e
 pip install -q "FlagEmbedding==1.3.4" "transformers==4.44.2" huggingface_hub numpy && python -c "import urllib.request as u; u.urlretrieve('https://raw.githubusercontent.com/yehuda-rubin/Chavruta.AI/main/scripts/nebius_embed_halacha_standalone.py','embed.py')" && python embed.py
 ```
 
-> 📸 **צילום #1** → `docs/screenshots/01-create-job.png` — טופס יצירת ה-Job המלא.
+> 📸 **צילום #1** → טופס יצירת ה-Job + בחירת GPU + ה-`HF_TOKEN` secret.
 
-![צילום #1 — טופס יצירת ה-Job](screenshots/01-create-job.png)
+**בחירת ה-GPU** — בחר preset של 1-GPU עם *High chance of launch* (אם H100/H200 עמוסים — ראה "פתרון תקלות"):
+
+![צילום 1a — זמינות פלטפורמות GPU](screenshots/01a-gpu-availability.png)
+
+**ראש טופס היצירה** — `Image path` + `Entrypoint command`:
+
+![צילום 1 — טופס יצירת ה-Job](screenshots/01-create-job.png)
+
+**משאבים** — `With GPU` · `Regular` · הפלטפורמה · `Timeout`:
+
+![צילום 1b — משאבי המחשוב](screenshots/01b-create-job-resources.png)
+
+**ה-`HF_TOKEN` כ-Secret** (לא env רגיל), כשהשם החשוף הוא `HF_TOKEN`:
+
+![צילום 1c — HF_TOKEN secret](screenshots/01c-secret-token.png)
 
 ### חלופה — דרך ה-CLI
 ```bash
@@ -97,33 +109,41 @@ nebius ai job logs <JOB_ID>
 שלבי הלוג:
 ```
 [merge]  44 shards from Yehuda-Rubin/chavruta-torah-mixed …
-[embed]  bge-m3 on CUDA | batch=128
-  🧠 128,000/594,400 …
-[publish] → https://huggingface.co/datasets/Yehuda-Rubin/chavruta-torah-mixed
+[embed]  bge-m3 on CUDA | batch=256
+  🧠 256,000/594,400 …
+[publish] → https://huggingface.co/datasets/Yehuda-Rubin/chavruta-index-halacha
 [publish] ✅ published
 ```
 ניצול ה-GPU צריך להיות קרוב ל-100% בשלב ה-embed.
 
-> 📸 **צילום #2a** → `docs/screenshots/02a-embed-logs.png` — לוגים בשלב `[embed]`
-> 📸 **צילום #2b** → `docs/screenshots/02b-gpu-metrics.png` — לשונית GPU/Metrics (זיכרון/utilization)
-> 📸 **צילום #2c** → `docs/screenshots/02c-publish-ok.png` — שורת `[publish] ✅`
+> 📸 צילומי שלב 2 — הג'וב נוצר, הלוגים, והמטריקות.
 
-![צילום #2a — לוגים בשלב embed](screenshots/02a-embed-logs.png)
+**הג'וב נוצר ועובר ל-Provisioning/Running** (פלטפורמה H100, 1 GPU):
 
-![צילום #2b — מטריקות GPU](screenshots/02b-gpu-metrics.png)
+![צילום 2 — הג'וב ב-Provisioning](screenshots/02-job-provisioning.png)
 
-![צילום #2c — publish הושלם](screenshots/02c-publish-ok.png)
+**לוגי ה-`[embed]`** — שים לב ל-`[merge] ✅ 594,400 chunks` ול-`bge-m3 on CUDA | batch=256`:
+
+![צילום 2a — לוגים בשלב embed](screenshots/02a-embed-logs.png)
+
+**מטריקות ה-GPU** (Frame Buffer) — ה-`Used` מטפס כשההטמעה רצה; `Total ~81GB` = H100 80GB:
+
+![צילום 2b — מטריקות GPU](screenshots/02b-gpu-metrics.png)
+
+**מטריקות ה-VM** (CPU / RAM / Disk) — ה-RAM מתמלא בקטעים, והדיסק פעיל בשלב ה-`[merge]`:
+
+![צילום 2d — מטריקות VM](screenshots/02d-vm-metrics.png)
+
+> 📸 **צילום #2c** (`02c-publish-ok.png`, שורת `[publish] ✅`) — _אין צילום מהריצה הזו; אפשר ללכוד בהרצה הבאה._
 
 ---
 
 ## שלב 3 — Job הסתיים → אימות המחסן
 
-פתח `https://huggingface.co/datasets/Yehuda-Rubin/chavruta-torah-mixed` ובדוק ששלושת
-הקבצים קיימים: `corpus_vectors.npy` · `corpus_sparse.jsonl` · `corpus_meta.jsonl`.
+פתח `https://huggingface.co/datasets/Yehuda-Rubin/chavruta-index-halacha` ובדוק ששלושת
+הקבצים קיימים: `corpus_vectors.npy` (~2.43 GB) · `corpus_sparse.jsonl` (~1.13 GB) · `corpus_meta.jsonl` (~1.55 GB).
 
-> 📸 **צילום #3** → `docs/screenshots/03-job-succeeded.png` — מצב **SUCCEEDED** + דף ה-HF עם 3 קבצים.
-
-![צילום #3 — Job הסתיים + 3 קבצים ב-HF](screenshots/03-job-succeeded.png)
+> 📸 **צילום #3** (`03-job-succeeded.png`, **SUCCEEDED** + דף ה-HF עם 3 הקבצים) — _אין צילום מהריצה הזו; אפשר ללכוד בהרצה הבאה._
 
 ---
 
@@ -133,16 +153,14 @@ nebius ai job logs <JOB_ID>
 
 ```powershell
 .venv\Scripts\python.exe scripts/bootstrap_rag.py `
-    --repo Yehuda-Rubin/chavruta-torah-mixed `
+    --repo Yehuda-Rubin/chavruta-index-halacha `
     --out out_halacha --append --profile local
 ```
 
 > ⚠️ **קריטי:** השתמש ב-`--append`. בלעדיו `bootstrap_rag.py` **מוחק** את הקולקשן הקיים
 > (596,733 הנקודות של תנ"ך+משנה+גמרא+שו"ת). עם `--append` הוא רק מוסיף.
 
-> 📸 **צילום #4** → `docs/screenshots/04-local-loaded.png` — `➕ --append …` + `✅ ready — N chunks`.
-
-![צילום #4 — טעינה מקומית ל-Qdrant](screenshots/04-local-loaded.png)
+> 📸 **צילום #4** (`04-local-loaded.png`, `➕ --append …` + `✅ ready — N chunks`) — _אין צילום מהריצה הזו; אפשר ללכוד בהרצה הבאה (אחרי שלב 4)._
 
 אימות הספירה הסופית:
 ```powershell
