@@ -177,6 +177,7 @@ class SessionOut(BaseModel):
     id: str
     first_q: str
     created_at: str
+    updated_at: str | None = None
 
 
 class SessionCreateOut(SessionOut):

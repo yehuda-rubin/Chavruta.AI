@@ -1,10 +1,11 @@
-# 🕍 Chavruta.AI — a trustworthy Torah study partner (RAG over Sefaria)
+# 🕍 Chavruta.AI — a trustworthy Torah study partner (RAG over the Jewish bookshelf)
 
-**Chavruta.AI** answers questions on Tanakh by **retrieving the actual sources** — the verse,
-plus classical commentators (Rashi, Ramban, Ibn Ezra, Radak, Sforno, Malbim, and more) — and
-generating a **grounded, cited** answer. It quotes the Hebrew source and explains it **in the
-language you asked in** (Hebrew or English). No invented "divrei Torah": every claim is anchored
-in a retrieved source, the way a *chavruta* (study partner) learns straight from the text.
+**Chavruta.AI** answers questions on the Jewish bookshelf by **retrieving the actual sources** —
+the verse or passage, plus the classical commentators (Rashi, Ramban, Ibn Ezra, Tosafot, Rambam,
+and many more) — and generating a **grounded, cited** answer. It quotes the source in its original
+language and explains it **in the language you asked in** (Hebrew or English). No invented "divrei
+Torah": every claim is anchored in a retrieved source, the way a *chavruta* (study partner) learns
+straight from the text.
 
 > Built for the **Nebius Serverless AI Builders Challenge**. Runs both **fully offline** on a
 > laptop and **serverless on Nebius** — the same code, one config switch.
@@ -33,7 +34,7 @@ question (he / en)
    ▼  ② Retrieve     hybrid search (bge-m3 dense+sparse, RRF in Qdrant)
    │                 + link expansion: anchor chains → commentaries → supercommentaries,
    │                 and across corpora along the chain of transmission
-   ▼  ③ Rank         pasuk-anchored, per-commentator, dedup, optional rerank
+   ▼  ③ Rank         anchored, per-commentator, dedup, optional rerank
    ▼  ④ Generate     grounded prompt = ONLY retrieved sources → local DictaLM / Nebius
    ▼  ⑤ Enforce      citation gate: every claim maps to a real retrieved chunk;
                      fabricated markers stripped; honest "no source found" path
@@ -44,17 +45,37 @@ question (he / en)
 | component  | 💻 `local` (offline)              | ☁️ `cloud` (product / scale)            |
 |------------|-----------------------------------|-----------------------------------------|
 | embedding  | `bge-m3` on CPU (query only)      | `bge-m3` GPU (bulk index)               |
-| vector DB  | Qdrant **embedded**               | Qdrant **server**                       |
-| LLM        | **DictaLM-3.0 1.7B Q8** via Ollama (~1.8GB) | stronger model via Nebius (OpenAI-compatible) |
+| vector DB  | Qdrant **embedded** (small sets)  | Qdrant **server** (hybrid, full index)  |
+| LLM        | **DictaLM** via Ollama (small, offline) | stronger model via Nebius (OpenAI-compatible) |
 | reranker   | off (RAM budget)                  | `bge-reranker-v2-m3`                    |
 
-Every knob is a `CHAVRUTA_*` env var (see `src/chavruta/config/profile.py`).
+The serving setup ([scripts/serve.ps1](scripts/serve.ps1)) runs **hybrid** retrieval against a
+Qdrant **server** (embedded mode cannot do hybrid at this scale) with generation on Nebius
+(`Llama-3.3-70B-Instruct`). Every knob is a `CHAVRUTA_*` env var (see `src/chavruta/config/profile.py`).
 
 ---
 
-## Corpus — all of Tanakh
+## Application
 
-Fetched from [Sefaria](https://www.sefaria.org) (free, open): **24 books × ~12 commentators**.
+The app is a **React + Vite SPA** talking to a **FastAPI** backend, with **SQLite** chat history.
+
+| layer        | what it is                                                                 |
+|--------------|----------------------------------------------------------------------------|
+| `app/api.py` | FastAPI service — sessions, messages, and the `/sessions/{id}/query` RAG endpoint (uvicorn, port 8080) |
+| `app/db.py`  | SQLite persistence — conversations survive restarts; deleting a chat cascades to its messages |
+| `app/frontend/` | React SPA — three-column "beit midrash" UI, clickable citations, full **Hebrew (RTL) / English (LTR)** i18n with a language toggle (port 5173) |
+
+Conversation history is stored in `chavruta.db` (path overridable via `CHAVRUTA_DB_PATH`; mounted to
+a volume in `docker-compose.yml` so it persists). See [app/frontend/README.md](app/frontend/README.md).
+
+---
+
+## Corpus — the whole bookshelf
+
+Fetched from [Sefaria](https://www.sefaria.org) (free, open API + bulk export). Each text is stored
+**in Hebrew and English**.
+
+**Validated baseline — all of Tanakh** (24 books × ~12 commentators):
 
 | | chunks |
 |---|---|
@@ -62,34 +83,78 @@ Fetched from [Sefaria](https://www.sefaria.org) (free, open): **24 books × ~12 
 | Commentary (Rashi, Ramban, Ibn Ezra, Radak, Sforno, Rashbam, Or HaChaim, Malbim, Metzudat David/Zion, Onkelos, Targum Jonathan) | 103,532 |
 | **Total** | **126,738** |
 
+**Expanded to the full Sefaria bookshelf** (all 14 categories — Tanakh, Mishnah, Talmud, Halacha,
+Midrash, Responsa/Shut, Kabbalah, Liturgy, and more), fetched via `scripts/fetch_*.py`, embedded in
+**Nebius GPU jobs**, and distributed as **per-category Hugging Face index repos** (see
+[docs/CORPUS.md](docs/CORPUS.md) and [docs/NEBIUS_HALACHA_JOB.md](docs/NEBIUS_HALACHA_JOB.md)). The
+**live served hybrid index** currently holds **~449k points** (Tanakh + Mishnah + Talmud + Responsa);
+the Halacha library (~594k segments incl. Shulchan Aruch + Mishnah Berura) is embedded and loaded
+incrementally without re-embedding what is already in the store.
+
 Embedded with **`BAAI/bge-m3`** (multilingual, 1024-dim) — a Hebrew query and its English
-translation land close in vector space, so you can ask in either language. See [docs/CORPUS.md](docs/CORPUS.md).
+translation land close in vector space, so you can ask in either language.
+
+### Pre-built indexes on Hugging Face
+
+The embedded vectors + payloads are published per category under
+**[🤗 Yehuda-Rubin](https://huggingface.co/Yehuda-Rubin)** as `chavruta-index-<slug>` datasets, so
+you can load them into Qdrant without re-embedding (see [docs/CORPUS.md](docs/CORPUS.md) §6):
+
+| | | | |
+|---|---|---|---|
+| [tanakh](https://huggingface.co/datasets/Yehuda-Rubin/chavruta-index-tanakh) | [mishnah](https://huggingface.co/datasets/Yehuda-Rubin/chavruta-index-mishnah) | [gemara](https://huggingface.co/datasets/Yehuda-Rubin/chavruta-index-gemara) | [shut](https://huggingface.co/datasets/Yehuda-Rubin/chavruta-index-shut) |
+| [halacha](https://huggingface.co/datasets/Yehuda-Rubin/chavruta-index-halacha) | [midrash](https://huggingface.co/datasets/Yehuda-Rubin/chavruta-index-midrash) | [kabbalah](https://huggingface.co/datasets/Yehuda-Rubin/chavruta-index-kabbalah) | [musar](https://huggingface.co/datasets/Yehuda-Rubin/chavruta-index-musar) |
+| [liturgy](https://huggingface.co/datasets/Yehuda-Rubin/chavruta-index-liturgy) | [jewish_thought](https://huggingface.co/datasets/Yehuda-Rubin/chavruta-index-jewish_thought) | [chasidut](https://huggingface.co/datasets/Yehuda-Rubin/chavruta-index-chasidut) | [tosefta](https://huggingface.co/datasets/Yehuda-Rubin/chavruta-index-tosefta) |
+| [reference](https://huggingface.co/datasets/Yehuda-Rubin/chavruta-index-reference) | [second_temple](https://huggingface.co/datasets/Yehuda-Rubin/chavruta-index-second_temple) | | |
+
+The LoRA "chavruta style" training set is at
+[🤗 Yehuda-Rubin/chavruta-torah-mixed](https://huggingface.co/datasets/Yehuda-Rubin/chavruta-torah-mixed).
 
 ---
 
 ## Quickstart
 
-```bash
-python -m venv .venv && .venv\Scripts\activate     # Windows
+```powershell
+python -m venv .venv ; .\.venv\Scripts\Activate.ps1     # Windows PowerShell
 pip install -r requirements.txt
+```
 
-# 1. Fetch the corpus from Sefaria  (CPU/network)
-python scripts/fetch_corpus.py                     # → data/processed/all_chunks_full.json
+### Ask from the CLI (offline, embedded store)
 
-# 2. Embed on a GPU  (Colab/Kaggle/Nebius — see notebooks/)
-#    bge-m3 over 126k chunks is impractical on CPU; run the GPU notebook → corpus_vectors.npy
+```powershell
+# 1. Fetch a corpus from Sefaria (CPU/network) — e.g. Tanakh
+python scripts/fetch_corpus.py
 
-# 3. Load vectors into the configured store  (CPU, no re-embedding)
-python scripts/load_to_store.py --in out/ --profile local    # embedded Qdrant, offline
+# 2. Embed on a GPU (Colab/Kaggle/Nebius — see notebooks/). bge-m3 over 100k+ chunks
+#    is impractical on CPU; the GPU notebook produces the vectors.
 
-# 4. Pull the local model (one-time, ~1.8GB) and ask
-ollama pull hf.co/dicta-il/DictaLM-3.0-1.7B-Thinking-GGUF:Q8_0
+# 3. Load vectors into the configured store (CPU, no re-embedding)
+python scripts/load_to_store.py --profile local
+
+# 4. Pull a local model (one-time) and ask
+ollama pull dictalm2.0-instruct:q4_k_m
 python scripts/ask.py "What does Rashi say about the creation of light?"
 python scripts/ask.py "מה אומר רד\"ק על ספר יונה?"
-streamlit run app/streamlit_app.py
+```
 
-# 5. The trust gate — run the evaluation harness (Principle V)
-python scripts/run_eval.py --dataset eval/tanakh_v1.jsonl --retrieval-only
+### Run the full app (hybrid retrieval + chat UI)
+
+```powershell
+# 1. Start the Qdrant server holding the hybrid index
+docker compose --profile server up -d qdrant
+
+# 2. Backend (FastAPI on :8080) — reads NEBIUS_API_KEY from .env
+powershell -ExecutionPolicy Bypass -File scripts\serve.ps1
+
+# 3. Frontend (Vite dev server on :5173, separate terminal)
+cd app\frontend ; npm install ; npm run dev
+#    → open http://localhost:5173   (toggle HE / EN in the top bar)
+```
+
+### The trust gate — run the evaluation harness (Principle V)
+
+```powershell
+python scripts/run_eval.py --profile local --dataset eval/tanakh_v1.jsonl
 ```
 
 ---
@@ -98,11 +163,13 @@ python scripts/run_eval.py --dataset eval/tanakh_v1.jsonl --retrieval-only
 
 The full lifecycle maps onto **"run a job, serve a model, pay only for what you use"**:
 
-1. **Embedding job** — embed the 126k-chunk corpus on a Nebius GPU (one-off batch).
+1. **Embedding job** — embed each corpus category on a Nebius GPU (one-off batches; see
+   [docs/NEBIUS_HALACHA_JOB.md](docs/NEBIUS_HALACHA_JOB.md)).
 2. **Serving** — generation via Nebius Token Factory (OpenAI-compatible, per-token).
-3. *(optional)* **Fine-tuning job** — a LoRA "chavruta style" adapter (see `scripts/train_lora.py`).
+3. *(optional)* **Fine-tuning job** — a LoRA "chavruta style" adapter (see `scripts/train_lora.py`
+   and [scripts/TRAIN_README.md](scripts/TRAIN_README.md)).
 
-Everything that isn't the one-off GPU embed runs locally — including fully offline.
+Everything that isn't a one-off GPU embed runs locally — including fully offline.
 
 ---
 
@@ -120,12 +187,15 @@ src/chavruta/            the deployment-agnostic core (one package, config-drive
   pipeline/              ChavrutaPipeline — route → retrieve → generate → cite
   intents/               Router — language, intent, commentators, refs
   eval/                  evaluation harness (retrieval@K, grounding, honesty)
-app/streamlit_app.py     RTL-aware chat UI with clickable citations
-scripts/                 fetch_corpus · embed_corpus_gpu · load_to_store · ask · run_eval
-eval/tanakh_v1.jsonl     versioned 120-question evaluation set (HE/EN)
+app/
+  api.py                 FastAPI service (sessions, messages, RAG query endpoint)
+  db.py                  SQLite chat-history persistence (sessions + messages, cascade delete)
+  frontend/              React + Vite SPA (HE/EN i18n, clickable citations)
+scripts/                 fetch_* · embed_corpus_gpu · load_to_store · ask · run_eval · serve.ps1
+eval/tanakh_v1.jsonl     versioned evaluation set (HE/EN)
 tests/                   contract · integration · unit (the trust guarantees)
-specs/001-chavruta-redesign/   spec · plan · research · data-model · contracts
-docs/  PLAN.md · DECISIONS.md · CORPUS.md
+specs/001-chavruta-redesign/   spec · plan · research · data-model · contracts · quickstart
+docs/                    CORPUS.md · NEBIUS_HALACHA_JOB.md · screenshots/
 ```
 
 ---
@@ -133,21 +203,22 @@ docs/  PLAN.md · DECISIONS.md · CORPUS.md
 ## Status
 
 **Redesigned end to end** via Spec Kit (constitution → spec → plan → tasks → implement).
-The new `src/chavruta/` core implements all three MVP capabilities — grounded Q&A,
-explain/compare commentators (incl. supercommentary anchor chains), and structured lesson
-prep — behind config-swappable backends, with a 41-test suite and a 120-question evaluation
-harness. The full-Tanakh corpus (126k chunks) is fetched and embedded; remaining: load it
-into the embedded store on the target machine and run the live eval gate (see
-[specs/001-chavruta-redesign/quickstart.md](specs/001-chavruta-redesign/quickstart.md)).
-Halachic guidance is deferred until a halachic corpus is added (Constitution Principle VIII).
+The `src/chavruta/` core implements the MVP capabilities — grounded Q&A, explain/compare
+commentators (incl. supercommentary anchor chains), and structured lesson prep — behind
+config-swappable backends, with a test suite and a versioned evaluation harness. The corpus has
+grown from the validated Tanakh baseline (126k chunks) to the full Sefaria bookshelf, embedded on
+Nebius and served from a ~449k-point hybrid Qdrant index. The React SPA + FastAPI app ships with
+persistent SQLite chat history and full Hebrew/English UI. Halachic *rulings* remain advisory only,
+never a substitute for a competent rav (Constitution Principle VIII).
 
 ---
 
 ## Documentation
 
-- [docs/PLAN.md](docs/PLAN.md) — master plan & roadmap
-- [docs/DECISIONS.md](docs/DECISIONS.md) — technical decisions (ADR) with rationale
+- [specs/001-chavruta-redesign/](specs/001-chavruta-redesign/) — spec · plan · research · data-model · contracts · quickstart
 - [docs/CORPUS.md](docs/CORPUS.md) — corpus scope & commentators
+- [docs/NEBIUS_HALACHA_JOB.md](docs/NEBIUS_HALACHA_JOB.md) — Nebius embedding-job guide (no Docker) + screenshots
+- [.specify/memory/constitution.md](.specify/memory/constitution.md) — the project constitution (governing principles)
 
 ## Credits
 

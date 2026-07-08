@@ -122,23 +122,34 @@ def load_processed_chunks(out_dir: str | Path) -> Iterator[StoredChunk]:
     import numpy as np  # lazy
 
     out = Path(out_dir)
-    vecs = np.load(out / "corpus_vectors.npy")
+    # mmap the vectors instead of loading all ~GBs into RAM — the big index files (e.g. gemara,
+    # 711k×1024) otherwise thrash a 16GB box that is also running Qdrant. Rows are paged in on
+    # demand as each chunk is yielded.
+    vecs = np.load(out / "corpus_vectors.npy", mmap_mode="r")
 
+    # Stream sparse in lockstep with meta instead of pre-building a dict of all N rows — for
+    # gemara (711k) that dict is several GB. corpus_sparse.jsonl and corpus_meta.jsonl are written
+    # in the same index order by the embed step, so positional zip is exact.
     sparse_path = out / "corpus_sparse.jsonl"
-    sparse_by_idx: dict[int, dict[int, float]] = {}
-    if sparse_path.exists():
-        with sparse_path.open(encoding="utf-8") as f:
-            for line in f:
-                d = json.loads(line)
-                sparse_by_idx[d["i"]] = {int(t): float(w) for t, w in d["sparse"].items()}
-
-    with (out / "corpus_meta.jsonl").open(encoding="utf-8") as f:
-        for j, line in enumerate(f):
+    sparse_f = sparse_path.open(encoding="utf-8") if sparse_path.exists() else None
+    meta_f = (out / "corpus_meta.jsonl").open(encoding="utf-8")
+    try:
+        for j, line in enumerate(meta_f):
             meta = json.loads(line)
             payload = payload_from_legacy_meta(meta)
+            sparse: dict[int, float] = {}
+            if sparse_f is not None:
+                s_line = sparse_f.readline()
+                if s_line:
+                    d = json.loads(s_line)
+                    sparse = {int(t): float(w) for t, w in d["sparse"].items()}
             yield StoredChunk(
                 chunk_id=payload["chunk_id"],
                 dense=[float(x) for x in vecs[j]],
-                sparse=sparse_by_idx.get(j, {}),
+                sparse=sparse,
                 payload=payload,
             )
+    finally:
+        meta_f.close()
+        if sparse_f is not None:
+            sparse_f.close()

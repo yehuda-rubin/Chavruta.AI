@@ -41,7 +41,7 @@ function isHebrewText(text: string): boolean {
 
 /** Collapsible accordion source card matching screen.png. */
 export function CitationCard({ citation, isActive, onToggle }: Props) {
-  const { lang } = useLang()
+  const { t, lang } = useLang()
   const [isExpanded, setIsExpanded] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   
@@ -134,12 +134,12 @@ export function CitationCard({ citation, isActive, onToggle }: Props) {
               className="flex items-center gap-1.5 text-accent hover:text-accent-hover font-semibold transition-colors bg-accent/5 px-2.5 py-1.5 rounded border border-accent/10 hover:border-accent/30"
             >
               <Icon name="open_in_new" size={12} />
-              <span>{lang === 'he' ? 'פתח בספריה (Sefaria)' : 'Open in Library (Sefaria)'}</span>
+              <span>{t('openLibrary')}</span>
             </a>
-            
+
             {citation.commentator && (
               <span className="text-text-muted text-[10px] italic">
-                {lang === 'he' ? `מפרש: ${citation.commentator}` : `Commentator: ${citation.commentator}`}
+                {`${t('commentator')}: ${citation.commentator}`}
               </span>
             )}
           </div>

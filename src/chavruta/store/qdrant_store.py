@@ -15,6 +15,19 @@ from chavruta.store.base import Filter, Hit, HybridQuery, StoredChunk
 
 _NAMESPACE = uuid.UUID("c4a5f0de-0000-4000-8000-000000000001")  # stable, for chunk_id → point id
 
+# Memory tiers — how much of the index lives in RAM vs on SSD. Chosen by machine RAM
+# (Principle II: config, not code). Approx RAM for the full ~2.9M×1024 corpus:
+#   16gb : int8-quantized vectors in RAM, originals + payload on SSD  → ~4 GB   (default)
+#   32gb : int8-quantized + full vectors in RAM (faster rescore), payload on SSD → ~15 GB
+#   max  : full-precision vectors + payload in RAM, no quantization   → ~22 GB  (fastest)
+# Quality is preserved under quantization by rescoring the top candidates against the
+# original vectors (kept on SSD or in RAM) — see `search`'s oversampling.
+MEM_TIERS = {
+    "16gb": {"quant": "int8", "on_disk_vectors": True,  "on_disk_payload": True},
+    "32gb": {"quant": "int8", "on_disk_vectors": False, "on_disk_payload": True},
+    "max":  {"quant": None,   "on_disk_vectors": False, "on_disk_payload": False},
+}
+
 
 def _point_id(chunk_id: str) -> str:
     return str(uuid.uuid5(_NAMESPACE, chunk_id))
@@ -42,16 +55,28 @@ class QdrantStore:
                 self._client = QdrantClient(path=self.path)
         return self._client
 
-    def ensure_collection(self, name: str, dim: int) -> None:
+    def ensure_collection(self, name: str, dim: int, mem_tier: str = "16gb") -> None:
         from qdrant_client import models
 
         client = self._client_()
         if client.collection_exists(name):
             return
+        cfg = MEM_TIERS.get(mem_tier, MEM_TIERS["16gb"])
+        quant = None
+        if cfg["quant"] == "int8":
+            quant = models.ScalarQuantization(
+                scalar=models.ScalarQuantizationConfig(
+                    type=models.ScalarType.INT8, always_ram=True))   # quantized vectors in RAM
         client.create_collection(
             collection_name=name,
-            vectors_config={"dense": models.VectorParams(size=dim, distance=models.Distance.COSINE)},
-            sparse_vectors_config={"sparse": models.SparseVectorParams()},
+            vectors_config={"dense": models.VectorParams(
+                size=dim, distance=models.Distance.COSINE,
+                on_disk=cfg["on_disk_vectors"],     # original vectors on SSD (rescore source)
+                quantization_config=quant,
+            )},
+            sparse_vectors_config={"sparse": models.SparseVectorParams(
+                index=models.SparseIndexParams(on_disk=cfg["on_disk_vectors"]))},
+            on_disk_payload=cfg["on_disk_payload"],  # text payload on SSD
         )
 
     def upsert(self, name: str, chunks: list[StoredChunk]) -> None:
@@ -69,7 +94,21 @@ class QdrantStore:
             points.append(
                 models.PointStruct(id=_point_id(c.chunk_id), vector=vector, payload=c.payload)
             )
-        self._client_().upsert(collection_name=name, points=points)
+        # Bulk loads over long-lived HTTP connections occasionally hit a transient reset
+        # (Windows WinError 10054) even when the server is healthy. Retry with a fresh
+        # client so a single dropped connection doesn't abort the whole ingest.
+        import time as _time
+
+        last = None
+        for attempt in range(5):
+            try:
+                self._client_().upsert(collection_name=name, points=points)
+                return
+            except Exception as e:  # noqa: BLE001 — reconnect on any transport error
+                last = e
+                self._client = None            # force a fresh connection next call
+                _time.sleep(2 * (attempt + 1))
+        raise last
 
     def _build_filter(self, filters: Optional[Filter]):
         if not filters:
@@ -116,12 +155,18 @@ class QdrantStore:
         from qdrant_client import models
 
         qfilter = self._build_filter(filters)
+        # Under quantization, rescore top candidates against the original vectors so recall
+        # matches full precision (oversampling pulls extra candidates first). No-op when the
+        # collection isn't quantized.
+        qsp = models.SearchParams(
+            quantization=models.QuantizationSearchParams(rescore=True, oversampling=2.0))
         if query.sparse:
             # Hybrid: prefetch dense + sparse candidates, fuse with RRF server-side.
             idx = list(query.sparse.keys())
             vals = [query.sparse[i] for i in idx]
             prefetch = [
-                models.Prefetch(query=query.dense, using="dense", limit=top_k * 4, filter=qfilter),
+                models.Prefetch(query=query.dense, using="dense", limit=top_k * 4,
+                                filter=qfilter, params=qsp),
                 models.Prefetch(
                     query=models.SparseVector(indices=idx, values=vals),
                     using="sparse", limit=top_k * 4, filter=qfilter,
@@ -142,6 +187,7 @@ class QdrantStore:
                 limit=top_k,
                 query_filter=qfilter,
                 with_payload=True,
+                search_params=qsp,
             )
         return [
             Hit(chunk_id=(p.payload or {}).get("chunk_id", str(p.id)), score=p.score, payload=p.payload or {})

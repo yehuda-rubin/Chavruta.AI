@@ -1,6 +1,6 @@
 import type { Session } from '../types'
 import { Icon } from './Icon'
-import { useLang } from '../i18n'
+import { useLang, type StringKey } from '../i18n'
 
 interface Props {
   sessions: Session[]
@@ -11,7 +11,7 @@ interface Props {
   onCloseMobile?: () => void
 }
 
-function groupSessions(sessions: Session[], lang: 'he' | 'en') {
+function groupSessions(sessions: Session[], t: (k: StringKey) => string) {
   const today: Session[] = []
   const yesterday: Session[] = []
   const older: Session[] = []
@@ -32,16 +32,16 @@ function groupSessions(sessions: Session[], lang: 'he' | 'en') {
   })
 
   return [
-    { label: lang === 'he' ? 'שיחות אחרונות' : 'Recent', items: today },
-    { label: lang === 'he' ? 'אתמול' : 'Yesterday', items: yesterday },
-    { label: lang === 'he' ? 'שיחות קודמות' : 'Older', items: older },
+    { label: t('recent'), items: today },
+    { label: t('yesterday'), items: yesterday },
+    { label: t('older'), items: older },
   ].filter(g => g.items.length > 0)
 }
 
 /** Right sidebar — faithful port of mockup #5. */
 export function SessionSidebar({ sessions, activeId, onSelect, onNew, onDelete, onCloseMobile }: Props) {
-  const { t, lang } = useLang()
-  const grouped = groupSessions(sessions, lang)
+  const { t } = useLang()
+  const grouped = groupSessions(sessions, t)
 
   return (
     <aside className="flex flex-col h-full bg-transparent w-full max-w-full p-4">
@@ -51,7 +51,7 @@ export function SessionSidebar({ sessions, activeId, onSelect, onNew, onDelete, 
           <button
             onClick={onCloseMobile}
             className="p-1 rounded-xl text-text-muted hover:text-primary"
-            title={lang === 'he' ? 'סגור' : 'Close'}
+            title={t('close')}
           >
             <Icon name="close" size={20} />
           </button>

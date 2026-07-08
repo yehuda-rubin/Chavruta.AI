@@ -41,6 +41,8 @@ class Profile:
     qdrant_url: str = ""                      # server URL (cloud)
     qdrant_api_key: str = ""                  # Qdrant Cloud API key
     collection: str = "chavruta"
+    qdrant_mem_tier: str = "16gb"             # "16gb" | "32gb" | "max" — RAM budget for the index
+                                              # (quantization + on-disk; see store.MEM_TIERS)
 
     # ── Retrieval ──
     top_k: int = 8
@@ -83,6 +85,7 @@ class Profile:
         p.qdrant_url = _env("CHAVRUTA_QDRANT_URL", p.qdrant_url)
         p.qdrant_api_key = _env("CHAVRUTA_QDRANT_API_KEY", p.qdrant_api_key)
         p.collection = _env("CHAVRUTA_COLLECTION", p.collection)
+        p.qdrant_mem_tier = _env("CHAVRUTA_MEM_TIER", p.qdrant_mem_tier)
         p.top_k = int(_env("CHAVRUTA_TOP_K", str(p.top_k)))
         p.hybrid = _env_bool("CHAVRUTA_HYBRID", p.hybrid)
         p.rerank = _env_bool("CHAVRUTA_RERANK", p.rerank)

@@ -38,6 +38,24 @@ const STRINGS = {
   intent_qa:          { he: 'שאלות כלליות',              en: 'Q&A' },
   intent_explain:     { he: 'הסבר',                      en: 'Explain' },
   intent_lesson:      { he: 'שיעור',                     en: 'Lesson' },
+  // Controls / chrome previously hardcoded as `lang === 'he' ? … : …` ternaries
+  close:              { he: 'סגור',                      en: 'Close' },
+  chatHistory:        { he: 'היסטוריית שיחות',           en: 'Chat History' },
+  langToggle:         { he: 'עברית · EN',                en: 'EN · עברית' },
+  // Session-list time groups
+  yesterday:          { he: 'אתמול',                     en: 'Yesterday' },
+  older:              { he: 'שיחות קודמות',              en: 'Older' },
+  // Citation card
+  openLibrary:        { he: 'פתח בספריה (Sefaria)',      en: 'Open in Library (Sefaria)' },
+  commentator:        { he: 'מפרש',                      en: 'Commentator' },
+  // Avatar initials (Latin in English, Hebrew letters in Hebrew)
+  logoInitial:        { he: 'ח',                         en: 'C' },
+  userInitial:        { he: 'א',                         en: 'Y' },
+  // Cited-source tag labels (commentator short names)
+  tagGemara:          { he: 'גמרא',                      en: 'Gemara' },
+  tagRashi:           { he: 'רש"י',                      en: 'Rashi' },
+  tagRambam:          { he: 'רמב"ם',                     en: 'Rambam' },
+  tagTosafot:         { he: 'תוספות',                    en: 'Tosafot' },
 } as const
 
 export type StringKey = keyof typeof STRINGS

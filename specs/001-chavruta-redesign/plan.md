@@ -4,6 +4,15 @@
 
 **Input**: Feature specification from `specs/001-chavruta-redesign/spec.md`
 
+> **Implementation note (2026-06-29):** this document is the original design record. Two things
+> diverged in implementation and are intentionally **not** rewritten inline below: (1) the UI
+> shipped as a **React + Vite SPA over a FastAPI backend with SQLite chat history**
+> (`app/api.py`, `app/db.py`, `app/frontend/`), **not** Streamlit; (2) the corpus expanded from
+> the Tanakh MVP to the **full Sefaria bookshelf** served from a hybrid Qdrant index. For the
+> living description of the system see the root [README.md](../../README.md) and
+> [docs/CORPUS.md](../../docs/CORPUS.md); for how to run/validate it see
+> [quickstart.md](./quickstart.md). References to "Streamlit" below are historical.
+
 ## Summary
 
 Rebuild Chavruta.AI as a **deployment-agnostic, dynamically-extensible RAG system** that

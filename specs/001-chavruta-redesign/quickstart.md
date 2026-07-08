@@ -41,10 +41,12 @@ same question retrieves the same underlying source.
 
 ### 3. Honest no-source (FR-003 / SC-002)
 ```powershell
-python scripts/ask.py "What does the Mishnah say about Shabbat candles?"
+# Ask about any work that is NOT loaded in your current store (adjust to your corpus).
+python scripts/ask.py "What does the Zohar say about the sefirot of creation?"
 ```
-**Expected**: an honest "no grounded source found in the current corpus" response (Mishnah
-is not in the Tanakh MVP corpus) — **no fabricated** answer or citation.
+**Expected**: an honest "no grounded source found in the current corpus" response for a work
+outside the loaded corpus — **no fabricated** answer or citation. (Originally validated when
+only the Tanakh MVP was loaded; pick a work you have not ingested yet.)
 
 ### 4. Explain & compare commentators (User Story 2 — P2)
 ```powershell
@@ -62,10 +64,15 @@ source resolves.
 
 ### 6. Chat UI (in-session context, Principle VII)
 ```powershell
-streamlit run app/streamlit_app.py
+# Backend (FastAPI on :8080) — for hybrid retrieval, start Qdrant server first:
+#   docker compose --profile server up -d qdrant
+powershell -ExecutionPolicy Bypass -File scripts\serve.ps1
+# Frontend (Vite on :5173, separate terminal):
+cd app\frontend ; npm install ; npm run dev   # → http://localhost:5173
 ```
 **Expected**: ask a question, get a cited answer with clickable citations rendered RTL/LTR
-correctly; a follow-up question uses the current conversation's context; responsive feedback.
+correctly; a follow-up question uses the conversation's context (persisted in SQLite); the
+HE/EN toggle switches the whole UI and the answer language; responsive feedback.
 
 ### 7. Trust gate — evaluation harness (Principle V / SC-001/002/008)
 ```powershell

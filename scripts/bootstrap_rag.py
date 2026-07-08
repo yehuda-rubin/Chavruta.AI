@@ -78,7 +78,8 @@ def main() -> None:
     elif client.collection_exists(profile.collection):
         print(f"♻️  dropping existing collection '{profile.collection}' (fully regenerable from the index)")
         client.delete_collection(profile.collection)
-    store.ensure_collection(profile.collection, dim=1024)
+    print(f"🧠 memory tier: {profile.qdrant_mem_tier} (quantization + on-disk per store.MEM_TIERS)")
+    store.ensure_collection(profile.collection, dim=1024, mem_tier=profile.qdrant_mem_tier)
 
     batch, total = [], 0
     for sc in load_processed_chunks(str(out_dir)):

@@ -8,7 +8,7 @@ interface Props {
 
 /** Top header — faithful port of mockup #5 (Modern Glass). */
 export function TopNav({ onOpenHistoryDrawer, onOpenSourcesDrawer }: Props) {
-  const { t, lang, toggle } = useLang()
+  const { t, toggle } = useLang()
 
   return (
     <header className="h-[70px] flex items-center justify-between px-4 md:px-8 shrink-0 z-40">
@@ -18,13 +18,13 @@ export function TopNav({ onOpenHistoryDrawer, onOpenSourcesDrawer }: Props) {
           <button
             onClick={onOpenHistoryDrawer}
             className="p-1.5 -ms-1 rounded-xl text-text-muted hover:text-primary md:hidden cursor-pointer"
-            title={lang === 'he' ? 'היסטוריית שיחות' : 'Chat History'}
+            title={t('chatHistory')}
           >
             <Icon name="menu" size={22} />
           </button>
         )}
         <div className="h-11 w-11 rounded-2xl grad grid place-items-center text-white font-serif text-xl font-black shadow-glass">
-          ח
+          {t('logoInitial')}
         </div>
         <h1 className="font-serif text-2xl font-bold text-primary">{t('appName')}</h1>
       </div>
@@ -36,7 +36,7 @@ export function TopNav({ onOpenHistoryDrawer, onOpenSourcesDrawer }: Props) {
           className="px-4 py-2 rounded-full glass text-text-main text-sm font-semibold hover:opacity-90 transition cursor-pointer"
           title="HE / EN"
         >
-          {lang === 'he' ? 'עברית · EN' : 'EN · עברית'}
+          {t('langToggle')}
         </button>
 
         {onOpenSourcesDrawer && (
@@ -57,7 +57,7 @@ export function TopNav({ onOpenHistoryDrawer, onOpenSourcesDrawer }: Props) {
         </button>
 
         <div className="h-10 w-10 rounded-full grad grid place-items-center text-white font-bold shrink-0">
-          א
+          {t('userInitial')}
         </div>
       </div>
     </header>

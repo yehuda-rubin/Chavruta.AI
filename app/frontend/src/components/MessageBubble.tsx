@@ -1,6 +1,6 @@
 import type { Message, Citation } from '../types'
 import { Icon } from './Icon'
-import { useLang } from '../i18n'
+import { useLang, type StringKey } from '../i18n'
 import React from 'react'
 
 interface Props {
@@ -125,16 +125,16 @@ function formatTime(iso?: string): string {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
-function sourceTags(message: Message): string[] {
+function sourceTags(message: Message, t: (k: StringKey) => string): string[] {
   const seen = new Set<string>()
   for (const c of message.citations ?? []) {
     const tag = (c.commentator || '').trim().toLowerCase()
     let displayTag = c.commentator
-    if (tag.includes('rashi') || tag.includes('רש')) displayTag = 'רש"י'
-    else if (tag.includes('rambam') || tag.includes('רמב')) displayTag = 'רמב"ם'
-    else if (tag.includes('tosafot') || tag.includes('תוספ')) displayTag = 'תוספות'
-    else if (tag.includes('gemara') || tag.includes('גמרא') || tag.includes('talmud')) displayTag = 'גמרא'
-    
+    if (tag.includes('rashi') || tag.includes('רש')) displayTag = t('tagRashi')
+    else if (tag.includes('rambam') || tag.includes('רמב')) displayTag = t('tagRambam')
+    else if (tag.includes('tosafot') || tag.includes('תוספ')) displayTag = t('tagTosafot')
+    else if (tag.includes('gemara') || tag.includes('גמרא') || tag.includes('talmud')) displayTag = t('tagGemara')
+
     if (displayTag && !seen.has(displayTag)) seen.add(displayTag)
     if (seen.size >= 4) break
   }
@@ -161,7 +161,7 @@ export function MessageBubble({ message, activeCitationRef, onCitationClick }: P
   // AI: always Avatar first, Bubble second [showAvatarFirst = true]
   const showAvatarFirst = !isUser
   
-  const tags = isUser ? [] : sourceTags(message)
+  const tags = isUser ? [] : sourceTags(message, t)
 
   // Parse text inline to render traditional citations as styled links
   function parseMessageText(text: string, citations: Citation[]) {
@@ -223,7 +223,7 @@ export function MessageBubble({ message, activeCitationRef, onCitationClick }: P
   // Render Avatar
   const avatarEl = isUser ? (
     <div className="h-8.5 w-8.5 shrink-0 rounded-2xl grad flex items-center justify-center shadow-glass">
-      <span className="text-white font-serif font-bold text-sm leading-none">א</span>
+      <span className="text-white font-serif font-bold text-sm leading-none">{t('userInitial')}</span>
     </div>
   ) : (
     <div className="h-8.5 w-8.5 shrink-0 rounded-2xl bg-card/80 border border-white/60 flex items-center justify-center shadow-glass">
