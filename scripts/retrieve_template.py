@@ -32,6 +32,8 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--query", required=True, help="lesson topic / short description")
     ap.add_argument("--k", type=int, default=3)
+    ap.add_argument("--mode", choices=["lesson", "shut", "all"], default="all",
+                    help="restrict to lesson templates (3 files) or shut templates (single answer)")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
 
@@ -39,14 +41,20 @@ def main() -> None:
     emb = BgeM3Embedding(use_sparse=False)
     emb.embed_query("warmup")
 
-    from qdrant_client import QdrantClient
+    from qdrant_client import QdrantClient, models
     client = QdrantClient(url=QDRANT_URL, timeout=120)
     if not client.collection_exists(COLLECTION):
         print(f"template collection '{COLLECTION}' not found — run scripts/index_templates.py first")
         sys.exit(1)
 
+    qfilter = None
+    if args.mode != "all":
+        qfilter = models.Filter(must=[
+            models.FieldCondition(key="mode", match=models.MatchValue(value=args.mode))])
+
     e = emb.embed_query(args.query)
-    res = client.query_points(collection_name=COLLECTION, query=e.dense, limit=args.k, with_payload=True)
+    res = client.query_points(collection_name=COLLECTION, query=e.dense, limit=args.k,
+                              query_filter=qfilter, with_payload=True)
 
     matches = []
     for p in res.points:
@@ -55,6 +63,7 @@ def main() -> None:
         matches.append({
             "score": round(p.score, 4),
             "id": pl.get("id"),
+            "mode": pl.get("mode", "lesson"),
             "genre": pl.get("genre"),
             "title": pl.get("title"),
             "dir": pl.get("dir"),
@@ -69,7 +78,7 @@ def main() -> None:
     print(f"\nQUERY: {args.query}\n{'='*60}")
     for i, m in enumerate(matches, 1):
         star = "  ← best match" if i == 1 else ""
-        print(f"\n[{i}] {m['score']}  {m['id']}  ({m['genre']}){star}")
+        print(f"\n[{i}] {m['score']}  {m['id']}  [{m['mode']}] ({m['genre']}){star}")
         print(f"    {m['title']}")
         print(f"    דוגמאות: {', '.join(m['example_topics'])}")
         for role, path in m["files"].items():

@@ -81,6 +81,7 @@ def main() -> None:
             "id": tid,
             "title": m.get("title", ""),
             "genre": m.get("genre", ""),
+            "mode": m.get("mode", "lesson"),  # "lesson" (3 files) or "shut" (single answer)
             "description": m.get("description", "").strip(),
             "when_to_use": m.get("when_to_use", "").strip(),
             "keywords": m.get("keywords", []),
