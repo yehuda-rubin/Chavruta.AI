@@ -84,6 +84,10 @@ def build_backends(profile: Profile):
         from chavruta.llm.cloud import CloudLLM
 
         llm = CloudLLM(profile.llm_model, profile.llm_base_url, profile.llm_api_key)
+    elif profile.llm_backend == "bridge":
+        from chavruta.llm.bridge import BridgeLLM
+
+        llm = BridgeLLM()
     else:
         from chavruta.llm.local import LocalLLM
 

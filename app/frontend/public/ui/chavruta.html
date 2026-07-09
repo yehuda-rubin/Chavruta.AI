@@ -99,7 +99,7 @@ tailwind.config = { theme: { extend: {
       <div class="p-5">
         <form id="composer" class="max-w-2xl mx-auto flex items-center gap-2 glass rounded-full px-3 py-2 focus-within:ring-2 focus-within:ring-indigo/30">
           <span id="goalLabel" class="text-gold font-bold text-sm px-3 py-1.5 rounded-full select-none whitespace-nowrap">🎯 שיעור</span>
-          <input id="input" class="flex-1 bg-transparent outline-none font-serif text-[16px] placeholder:text-ink/35" placeholder="שאל את החברותא…" data-i18n-ph="askPlaceholder" autocomplete="off">
+          <textarea id="input" rows="1" class="flex-1 bg-transparent outline-none font-serif text-[16px] placeholder:text-ink/35 resize-none leading-relaxed max-h-32 py-1" placeholder="שאל את החברותא…" data-i18n-ph="askPlaceholder"></textarea>
           <button id="sendBtn" type="submit" class="h-10 w-10 rounded-full grad text-white grid place-items-center hover:opacity-95 shadow-lg shadow-tekhelet/20 disabled:opacity-40">↑</button>
         </form>
         <p class="text-center text-[10px] text-ink/35 mt-2.5" data-i18n="footer">נבנה ביראת שמיים · אינו פסיקת הלכה למעשה</p>
@@ -343,9 +343,26 @@ function applyLang() {
   render();
 }
 
+// ── Persist settings across refreshes (localStorage) ─────────────────────────────
+const LS_KEY = 'chavruta.settings';
+function saveSettings(){
+  try { localStorage.setItem(LS_KEY, JSON.stringify({ lang:state.lang, theme:state.theme, defaultIntent:state.defaultIntent, srcDefaultOpen:state.srcDefaultOpen })); } catch(e){}
+}
+function loadSettings(){
+  try {
+    const s = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+    if (s.lang) state.lang = s.lang;
+    if (s.theme) state.theme = s.theme;
+    if (s.defaultIntent) { state.defaultIntent = s.defaultIntent; state.intent = s.defaultIntent; }
+    if (typeof s.srcDefaultOpen === 'boolean') state.srcDefaultOpen = s.srcDefaultOpen;
+  } catch(e){}
+}
+
 const $ = sel => document.querySelector(sel);
 const el = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; };
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// Escape first, then render simple markdown bold (**text** → <strong>).
+const fmt = (s) => esc(s).replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
 
 async function api(path, opts) {
   const res = await fetch(API + path, { headers: { 'Content-Type': 'application/json' }, ...opts });
@@ -392,7 +409,7 @@ function isHe(t){ const h=(t.match(/[א-ת]/g)||[]).length, e=(t.match(/[a-zA-Z]
 // ── Word (.doc) generation, client-side (HTML-based; opens in Word/Docs) ─────────
 function downloadDoc(filename, title, bodyText) {
   const paras = String(bodyText || '').split('\n')
-    .map(line => line.trim() ? '<p>' + esc(line) + '</p>' : '<p>&nbsp;</p>').join('');
+    .map(line => line.trim() ? '<p>' + fmt(line) + '</p>' : '<p>&nbsp;</p>').join('');
   const html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" ' +
     'xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>' + esc(title) + '</title></head>' +
     '<body dir="rtl" style="font-family:\'Frank Ruhl Libre\',\'David\',serif;font-size:13pt;line-height:1.7;color:#1c1a17;">' +
@@ -471,7 +488,7 @@ function bubble(m) {
     const node = el('<div class="flex gap-3.5">' +
       '<div class="h-9 w-9 rounded-2xl bg-white/80 grid place-items-center text-tekhelet font-serif font-black shrink-0 shadow-sm">ח</div>' +
       '<div class="bg-white/70 rounded-3xl rounded-tr-md p-5 shadow-sm ring-1 ring-white/60 max-w-[85%] w-full">' +
-        (m.text ? '<p class="font-serif text-[17px] leading-loose ' + dir + ' mb-3" style="white-space:pre-wrap">' + esc(m.text) + '</p>' : '') +
+        (m.text ? '<p class="font-serif text-[17px] leading-loose ' + dir + ' mb-3" style="white-space:pre-wrap">' + fmt(m.text) + '</p>' : '') +
         '<p class="text-[11px] tracking-widest text-gold font-bold uppercase mb-2">' + esc(tr('lessonThreeFiles')) + '</p>' +
         '<div class="flex flex-col gap-2">' + cards + '</div>' +
       '</div></div>');
@@ -490,7 +507,7 @@ function bubble(m) {
   return el('<div class="flex gap-3.5">' +
     '<div class="h-9 w-9 rounded-2xl bg-white/80 grid place-items-center text-tekhelet font-serif font-black shrink-0 shadow-sm">ח</div>' +
     '<div class="bg-white/70 rounded-3xl rounded-tr-md p-5 shadow-sm ring-1 ring-white/60">' +
-      '<p class="font-serif text-[18px] leading-loose ' + dir + '" style="white-space:pre-wrap">' + esc(m.text) + '</p>' + tagHtml +
+      '<p class="font-serif text-[18px] leading-loose ' + dir + '" style="white-space:pre-wrap">' + fmt(m.text) + '</p>' + tagHtml +
     '</div></div>');
 }
 
@@ -520,7 +537,8 @@ function renderMessages() {
 function renderSources() {
   const box = $('#sources'); box.innerHTML = '';
   const last = [...state.messages].reverse().find(m => m.role === 'assistant' && (m.citations||[]).length);
-  const cits = last ? last.citations : [];
+  // drop empty/degenerate citations (no ref, or no text) so no blank "מקור" card is shown
+  const cits = (last ? last.citations : []).filter(c => c && c.ref && ((c.text_he||'').trim() || (c.text_en||'').trim()));
   if (!cits.length) {
     box.appendChild(el('<p class="text-ink/40 text-sm text-center mt-10">' + esc(tr('sourcesHint')) + '</p>'));
     return;
@@ -537,12 +555,12 @@ function renderSources() {
       '<div class="flex items-start justify-between gap-2">' +
         '<div class="min-w-0">' +
           '<p class="text-[10px] font-black tracking-widest text-gold uppercase">' + esc(commentatorTag(c)) + '</p>' +
-          '<h4 class="font-serif text-lg font-bold text-tekhelet mt-1 leading-tight">' + esc(c.ref) + '</h4>' +
+          '<h4 class="font-serif text-lg font-bold text-tekhelet mt-1 leading-tight break-words">' + esc(c.ref) + '</h4>' +
         '</div>' +
         '<span class="material-symbols-outlined text-ink/40 shrink-0 transition-transform">' + (expanded ? 'expand_less' : 'expand_more') + '</span>' +
       '</div>' +
       (expanded ? ('<div class="mt-3 pt-3 border-t border-line/60">' +
-          '<p class="text-[15px] text-ink/85 font-serif leading-relaxed" style="white-space:pre-wrap" dir="' + (isHe(full||'')?'rtl':'ltr') + '">' + esc(full || tr('noText')) + '</p>' +
+          '<p class="text-[15px] text-ink/85 font-serif leading-relaxed break-words" style="white-space:pre-wrap;overflow-wrap:anywhere" dir="' + (isHe(full||'')?'rtl':'ltr') + '">' + esc(full || tr('noText')) + '</p>' +
         '</div>') : '') +
     '</div>');
     card.addEventListener('click', () => {
@@ -624,7 +642,8 @@ async function send(text) {
       state.activeId = r.id;
       state.sessions.unshift({ id:r.id, first_q:r.first_q, created_at:r.created_at });
       $('#subtitle').textContent = r.first_q;
-      state.messages = await api('/sessions/' + r.id + '/messages');
+      // Use the returned result directly — it carries `files` (lesson mode), which /messages omits.
+      state.messages.push({ role:'assistant', text:r.result.answer, citations:r.result.citations||[], caveats:r.result.caveats||[], grounded:r.result.grounded, files:r.result.files });
     } else {
       const result = await api('/sessions/' + sid + '/query', { method:'POST', body });
       // Lesson mode → the backend returns 3 lesson files; other modes → plain text answer.
@@ -642,17 +661,25 @@ async function send(text) {
 }
 
 // ── Wire up controls ─────────────────────────────────────────────────────────────
+function autogrow(t){ t.style.height='auto'; t.style.height=Math.min(t.scrollHeight,128)+'px'; }
 $('#composer').addEventListener('submit', e => {
   e.preventDefault();
   const v = $('#input').value.trim();
   if (!v || state.loading) return;
-  $('#input').value = '';
+  $('#input').value = ''; $('#input').style.height='auto';
   send(v);
+});
+$('#input').addEventListener('input', e => autogrow(e.target));
+$('#input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {   // Enter sends · Shift+Enter = newline
+    e.preventDefault();
+    $('#composer').requestSubmit ? $('#composer').requestSubmit() : $('#composer').dispatchEvent(new Event('submit', {cancelable:true}));
+  }
 });
 $('#newBtn').addEventListener('click', newDiscussion);
 $('#langBtn').addEventListener('click', () => {
   state.lang = state.lang === 'he' ? 'en' : 'he';
-  applyLang();
+  applyLang(); saveSettings();
 });
 function setIntent(intent) {
   state.intent = intent;
@@ -708,7 +735,7 @@ let previewFile = null;
 function openFilePreview(f) {
   previewFile = f;
   $('#filePreviewTitle').textContent = f.title || f.name;
-  $('#filePreviewBody').textContent = f.content || 'אין תוכן זמין.';
+  $('#filePreviewBody').innerHTML = fmt(f.content || tr('noContent'));
   $('#filePreview').classList.remove('hidden'); $('#filePreview').classList.add('flex');
 }
 function closeFilePreview() { $('#filePreview').classList.add('hidden'); $('#filePreview').classList.remove('flex'); previewFile = null; }
@@ -748,15 +775,17 @@ $('#settingsModal').addEventListener('click', e => { if (e.target.id==='settings
 $('#supportLink').addEventListener('click', () => showModal('supportModal'));
 $('#supportClose').addEventListener('click', () => hideModal('supportModal'));
 $('#supportModal').addEventListener('click', e => { if (e.target.id==='supportModal') hideModal('supportModal'); });
-$('#setLangSeg').addEventListener('click', e => { const b=e.target.closest('[data-val]'); if(!b)return; state.lang=b.dataset.val; applyLang(); refreshSettingsUI(); });
-$('#setModeSeg').addEventListener('click', e => { const b=e.target.closest('[data-val]'); if(!b)return; state.defaultIntent=b.dataset.val; markSeg('setModeSeg', state.defaultIntent); });
-$('#setThemeSeg').addEventListener('click', e => { const b=e.target.closest('[data-val]'); if(!b)return; state.theme=b.dataset.val; applyTheme(); markSeg('setThemeSeg', state.theme); });
-$('#setSrcSeg').addEventListener('click', e => { const b=e.target.closest('[data-val]'); if(!b)return; state.srcDefaultOpen=(b.dataset.val==='expanded'); state.expandedSrc.clear(); markSeg('setSrcSeg', b.dataset.val); renderSources(); });
+$('#setLangSeg').addEventListener('click', e => { const b=e.target.closest('[data-val]'); if(!b)return; state.lang=b.dataset.val; applyLang(); refreshSettingsUI(); saveSettings(); });
+$('#setModeSeg').addEventListener('click', e => { const b=e.target.closest('[data-val]'); if(!b)return; state.defaultIntent=b.dataset.val; markSeg('setModeSeg', state.defaultIntent); saveSettings(); });
+$('#setThemeSeg').addEventListener('click', e => { const b=e.target.closest('[data-val]'); if(!b)return; state.theme=b.dataset.val; applyTheme(); markSeg('setThemeSeg', state.theme); saveSettings(); });
+$('#setSrcSeg').addEventListener('click', e => { const b=e.target.closest('[data-val]'); if(!b)return; state.srcDefaultOpen=(b.dataset.val==='expanded'); state.expandedSrc.clear(); markSeg('setSrcSeg', b.dataset.val); renderSources(); saveSettings(); });
 $('#setClear').addEventListener('click', clearAllSessions);
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
+loadSettings();
 applyTheme();
 applyLang();
+setIntent(state.defaultIntent);
 loadSessions(true);
 </script>
 </body>

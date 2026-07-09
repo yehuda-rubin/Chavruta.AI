@@ -203,8 +203,9 @@ def enforce_citations(
             chunk_id=h.chunk_id,
             ref=h.ref,
             deep_link=h.deep_link,
-            # marker_map values may be RankedHit (.text) or Citation (.quote)
-            quote=source_body(getattr(h, "text", None) or getattr(h, "quote", "") or "")[:280],
+            # marker_map values may be RankedHit (.text) or Citation (.quote).
+            # Full source text (no truncation) — the UI shows the complete quote on expand.
+            quote=source_body(getattr(h, "text", None) or getattr(h, "quote", "") or ""),
             commentator_id=h.commentator_id,
         )
         for h in used.values()

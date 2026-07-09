@@ -9,10 +9,21 @@ The pipeline is loaded once at startup and shared across requests.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+# Source markers ([S1], [S1, S5], …) are the grounding mechanism — the pipeline maps them to
+# citations, then we strip them from the DISPLAYED text so the answer reads cleanly.
+_MARKER_RE = re.compile(r"\s*\[\s*S\d+(?:\s*,\s*S\d+)*\s*\]")
+
+
+def _strip_markers(text: str) -> str:
+    return re.sub(r"[ \t]{2,}", " ", _MARKER_RE.sub("", text or "")).strip()
+
+import torch  # noqa: F401,E402 — MUST precede qdrant_client import (Windows pyarrow DLL order)
 
 from contextlib import asynccontextmanager
 
@@ -42,7 +53,11 @@ def _get_pipeline():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.get_conn()          # initialise DB + run migrations
-    _get_pipeline()        # warm up bge-m3 + Qdrant connection at startup
+    p = _get_pipeline()    # warm up bge-m3 + Qdrant connection at startup
+    try:
+        p.embedding.embed_query("warmup")   # load the embedder BEFORE any qdrant_client use
+    except Exception:
+        pass
     yield
 
 
@@ -89,6 +104,12 @@ class LessonPlanOut(BaseModel):
     sections: list[LessonSectionOut] = []
 
 
+class FileOut(BaseModel):
+    name: str          # download filename (.doc)
+    title: str         # document heading
+    content: str       # plain text body
+
+
 class QueryResponse(BaseModel):
     answer: str
     citations: list[CitationOut]
@@ -96,15 +117,109 @@ class QueryResponse(BaseModel):
     intent: str
     caveats: list[str] = []
     lesson_plan: LessonPlanOut | None = None   # the lesson arc (spec 003), present for LESSON
+    files: list[FileOut] = []                   # LESSON mode → 3 files (source sheet · flow · full)
+
+
+_LESSON_SPLIT_RE = re.compile(r"^===(SOURCE_SHEET|LESSON_FLOW|FULL_LESSON|ORDER)===\s*$", re.M)
+
+
+def _lesson_job_md(question: str, hits, lang: str) -> str:
+    """The bridge job that asks Claude to WRITE all three lesson files (deep iyun)."""
+    lines = [f"lang: {lang}", "", "## TOPIC", question.strip(), "", "## SOURCES"]
+    for i, h in enumerate(hits, 1):
+        who = f" ({h.commentator_id})" if getattr(h, "commentator_id", None) else ""
+        lines += [f"### [S{i}] {h.ref}{who}", (getattr(h, "text", "") or "").strip(), ""]
+    lines += [
+        "## INSTRUCTIONS FOR CLAUDE — write a FULL IYUN lesson (four parts)",
+        "Write ONE answer with these parts, separated by these EXACT delimiter lines:",
+        "===SOURCE_SHEET===", "===LESSON_FLOW===", "===FULL_LESSON===", "===ORDER===", "",
+        "SOURCE_SHEET — the sources ARRANGED IN THE ORDER THEY ARE DISCUSSED in the lesson "
+        "(1 = the first source taught, then 2, …). For each: a number, its reference, and its full text.",
+        "LESSON_FLOW — a clear, detailed outline following the classic yeshiva (Har Etzion / Brisk) "
+        "iyun arc: (0) הצגת הסוגיה, (1) העמדת החקירה, (2) שיטות הראשונים, (3) האחרונים, (4) נפקא מינה, "
+        "(5) סיכום. For each stage: the guiding question, which source is brought, and what is asked/answered.",
+        "FULL_LESSON — a full beit-midrash IYUN shiur in the classic yeshiva style (Har Etzion / Brisk), "
+        "written out in depth and at length: "
+        "(a) **הצגת הסוגיה** — open straight from the source and frame the sugya; "
+        "(b) **העמדת החקירה** — sharpen a central lamdanic חקירה with TWO clearly-named sides "
+        "('צד א׳... לעומת צד ב׳...'); "
+        "(c) **שיטות הראשונים** — bring each rishon, explain it, and show to which side of the חקירה it falls; "
+        "(d) **העמקה עם האחרונים** — the conceptual formulation that sharpens the two sides; "
+        "(e) **נפקא מינה** — concrete ramifications that distinguish the sides; "
+        "(f) **סיכום** — the yesod to take away. "
+        "Throughout: present each שיטה, raise קושיות and answer them where possible, and progress step "
+        "by step. A real, long shiur — not a summary.",
+        "ORDER — a single line listing the source markers in the exact order they are discussed, "
+        "e.g. 'S3, S1, S5'. The backend orders the sources panel by this list.",
+        "",
+        "Rules: ground everything ONLY in the SOURCES; cite by [S#] (the markers build the sources "
+        "panel and are stripped from the shown text); write in the question's language; **bold** key terms.",
+    ]
+    return "\n".join(lines)
+
+
+def _split_lesson(text: str) -> tuple[str, str, str, str]:
+    parts = {}
+    ms = list(_LESSON_SPLIT_RE.finditer(text))
+    for i, m in enumerate(ms):
+        end = ms[i + 1].start() if i + 1 < len(ms) else len(text)
+        parts[m.group(1)] = text[m.end():end].strip()
+    return (parts.get("SOURCE_SHEET", ""), parts.get("LESSON_FLOW", ""),
+            parts.get("FULL_LESSON", ""), parts.get("ORDER", ""))
+
+
+def _run_lesson(question: str, lang: str) -> QueryResponse:
+    """Dedicated LESSON path: real RAG retrieval → Claude writes all 3 files (deep iyun) via the
+    bridge → 3 Word files + only-cited sources (in discussion order). No chat text."""
+    pipeline = _get_pipeline()
+    q = Query(text=question, lang=lang or None, intent=Intent.LESSON)
+    rq = pipeline._resolve_query(q)
+    lang = rq.lang or lang or "he"
+    result = pipeline.retriever.retrieve(rq, top_k=16)
+    hits = list(result.hits)
+    if not hits:
+        msg = "לא נמצאו מקורות לנושא זה." if lang != "en" else "No sources found for this topic."
+        return QueryResponse(answer=msg, citations=[], grounded=False, intent="lesson", files=[])
+
+    raw = pipeline.llm.request(_lesson_job_md(question, hits, lang)) if hasattr(pipeline.llm, "request") else ""
+    ss, lf, fl, order = _split_lesson(raw)
+    if not (ss or lf or fl):
+        fl = raw
+
+    # sources panel order = the model's explicit ORDER list; else the order first cited in the text.
+    nums = [int(n) for n in re.findall(r"S(\d+)", order)] or \
+           [int(n) for n in re.findall(r"\[\s*S(\d+)\s*\]", raw)]
+    used, seen = [], set()
+    for i in nums:
+        if 1 <= i <= len(hits) and i not in seen:
+            seen.add(i)
+            h = hits[i - 1]
+            used.append(CitationOut(ref=h.ref, text_he=(getattr(h, "text", "") or ""), text_en="",
+                                    commentator=(getattr(h, "commentator_id", "") or ""),
+                                    deep_link=(getattr(h, "deep_link", "") or "")))
+    ss, lf, fl = _strip_markers(ss), _strip_markers(lf), _strip_markers(fl)
+
+    he = lang != "en"
+    names = (["דף_מקורות.doc", "מהלך_השיעור.doc", "השיעור_המלא.doc"] if he
+             else ["source_sheet.doc", "lesson_flow.doc", "full_lesson.doc"])
+    titles = ([f"דף מקורות — {question}", f"מהלך השיעור — {question}", f"שיעור מלא — {question}"] if he
+              else [f"Source Sheet — {question}", f"Lesson Flow — {question}", f"Full Lesson — {question}"])
+    files = [FileOut(name=names[i], title=titles[i], content=[ss, lf, fl][i]) for i in range(3)]
+    return QueryResponse(answer="", citations=used, grounded=bool(used), intent="lesson", files=files)
 
 
 def _run_query(question: str, lang: str, intent_str: str, history: list[Turn]) -> QueryResponse:
+    if intent_str == "shut":          # UI's responsa mode → HALACHA intent
+        intent_str = "halacha"
     intent = None
     if intent_str:
         try:
             intent = Intent(intent_str)
         except ValueError:
             raise HTTPException(status_code=422, detail=f"unknown intent: {intent_str!r}")
+
+    if intent == Intent.LESSON:            # lesson mode → Claude writes the 3 files (deep iyun)
+        return _run_lesson(question, lang)
 
     q = Query(text=question, lang=lang or None, intent=intent)
     answer = _get_pipeline().ask(q, history=history)
@@ -132,13 +247,17 @@ def _run_query(question: str, lang: str, intent_str: str, history: list[Turn]) -
             ],
         )
 
+    citations_out = [_cite(c) for c in answer.citations]
+    clean = _strip_markers(answer.text)
+
     return QueryResponse(
-        answer=answer.text,
-        citations=[_cite(c) for c in answer.citations],
+        answer=clean,
+        citations=citations_out,
         grounded=answer.grounded,
         intent=answer.intent.value if answer.intent else "qa",
         caveats=list(answer.caveats),
         lesson_plan=lesson_plan,
+        files=[],
     )
 
 
