@@ -101,13 +101,27 @@ def detect_lang(text: str) -> str:
     return "he" if he >= latin else "en"
 
 
+_HEB_CLASS = "֐-ת"
+
+
+def _alias_hit(alias: str, text: str, low: str) -> bool:
+    """Whole-word alias match. A bare substring test wrongly fires 'רשי' inside 'מפרשים'
+    (the generic word for commentators), 'שרשי', etc. — so single Hebrew tokens must match at a
+    word boundary (allowing one common one-letter prefix ו/ה/ב/כ/ל/מ, e.g. 'לרש"י')."""
+    a = alias.strip()
+    if not a:
+        return False
+    if " " in a:                                   # multi-word alias is specific → substring is fine
+        return a in low or a in text
+    if re.search(f"[{_HEB_CLASS}]", a):
+        return re.search(f"(?<![{_HEB_CLASS}])[והבכלמ]?{re.escape(a)}(?![{_HEB_CLASS}])", text) is not None
+    return re.search(rf"(?<![a-z]){re.escape(a.lower())}(?![a-z])", low) is not None
+
+
 def detect_commentators(text: str) -> list[str]:
     low = text.lower()
-    found = []
-    for cid, aliases in COMMENTATOR_ALIASES.items():
-        if any(a in low or a in text for a in aliases):
-            found.append(cid)
-    return found
+    return [cid for cid, aliases in COMMENTATOR_ALIASES.items()
+            if any(_alias_hit(a, text, low) for a in aliases)]
 
 
 def detect_requested_works(text: str) -> list[str]:
