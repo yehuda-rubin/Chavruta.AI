@@ -107,10 +107,44 @@ RESPONSA = Work(
 )
 
 
+# The categories actually loaded into the corpus (payload `work_id` values in Qdrant). The honesty
+# gate must know ALL of them — otherwise it falsely refuses to answer about loaded material (e.g. the
+# whole Talmud) just because it wasn't registered. Keep in sync with scripts/load_all_indexes.py.
+_LOADED_CATEGORIES: dict[str, tuple[str, str, str]] = {
+    "tanakh": ("תנ\"ך", "Tanakh", "scripture"),
+    "mishnah": ("משנה", "Mishnah", "mishnah"),
+    "talmud_bavli": ("תלמוד בבלי", "Talmud Bavli", "talmud"),
+    "tosefta": ("תוספתא", "Tosefta", "talmud"),
+    "midrash": ("מדרש", "Midrash", "midrash"),
+    "halacha": ("הלכה", "Halacha", "halacha"),
+    "responsa": ("שו\"ת", "Responsa", "responsa"),
+    "kabbalah": ("קבלה", "Kabbalah", "kabbalah"),
+    "chasidut": ("חסידות", "Chasidut", "chasidut"),
+    "musar": ("מוסר", "Musar", "musar"),
+    "jewish_thought": ("מחשבה", "Jewish Thought", "machshava"),
+    "liturgy": ("סידור ותפילה", "Liturgy", "liturgy"),
+    "reference": ("עיון ועזר", "Reference", "reference"),
+    "second_temple": ("ספרות בית שני", "Second Temple", "second_temple"),
+}
+# router WORK_ALIASES key → the loaded category it actually lives in, so the honesty gate recognizes
+# 'הגמרא', 'שולחן ערוך', 'רמב"ם', 'זוהר' as present (they're inside these categories).
+_ALIAS_CATEGORY: dict[str, str] = {
+    "talmud": "talmud_bavli",
+    "shulchan_aruch": "halacha", "mishneh_torah": "halacha", "mishnah_berurah": "halacha", "tur": "halacha",
+    "zohar": "kabbalah",
+}
+
+
 def default_registry() -> CorpusRegistry:
     reg = CorpusRegistry()
-    reg.register(TANAKH)
-    reg.register(MISHNAH)
-    reg.register(TALMUD_BAVLI)
-    reg.register(RESPONSA)
+    for wid, (he, en, kind) in _LOADED_CATEGORIES.items():
+        reg.register(Work(work_id=wid, title_he=he, title_en=en, kind=kind, languages=("he", "en"),
+                          reference_scheme="work/section/segment", source_adapter="sefaria",
+                          license="CC0 / Sefaria", attribution="Sefaria (sefaria.org)"))
+    for alias, cat in _ALIAS_CATEGORY.items():
+        if reg.has(cat) and not reg.has(alias):
+            c = reg.get(cat)
+            reg.register(Work(work_id=alias, title_he=c.title_he, title_en=c.title_en, kind=c.kind,
+                              languages=c.languages, reference_scheme=c.reference_scheme,
+                              source_adapter=c.source_adapter, license=c.license, attribution=c.attribution))
     return reg

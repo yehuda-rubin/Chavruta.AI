@@ -88,7 +88,19 @@ class HybridRetriever:
         hits.sort(key=lambda h: h.score, reverse=True)
         hits = hits[:top_k]
 
-        is_empty = (not hits) or (hits[0].score < self.profile.relevance_threshold)
+        # Relevance / honesty gate. hits[0].score is a COSINE only in dense-only mode; in hybrid it is
+        # an RRF fusion score on a different scale, so we probe the raw dense cosine instead. Exact
+        # named-ref anchors (score ≥ 1.0) are always relevant.
+        has_anchor = any(h.score >= 1.0 for h in hits)
+        if not hits:
+            is_empty = True
+        elif has_anchor:
+            is_empty = False
+        elif use_sparse:
+            top_dense = self.store.top_dense_score(self.profile.collection, emb.dense, self._filters(query))
+            is_empty = top_dense < self.profile.relevance_threshold
+        else:
+            is_empty = hits[0].score < self.profile.relevance_threshold
         return RetrievalResult(
             hits=[] if is_empty else hits,
             anchor_refs=self._anchor_refs(hits),

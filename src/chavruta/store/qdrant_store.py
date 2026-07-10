@@ -194,6 +194,16 @@ class QdrantStore:
             for p in res.points
         ]
 
+    def top_dense_score(self, name: str, dense, filters: Optional[Filter] = None) -> float:
+        """Top-1 DENSE cosine score — an honest, mode-independent relevance signal. In hybrid mode
+        `search` returns RRF fusion scores that are NOT comparable to the cosine relevance threshold,
+        so the honesty gate must probe the raw dense cosine instead."""
+        res = self._client_().query_points(
+            collection_name=name, query=list(dense), using="dense", limit=1,
+            query_filter=self._build_filter(filters), with_payload=False,
+        )
+        return res.points[0].score if res.points else 0.0
+
     def count(self, name: str, filters: Optional[Filter] = None) -> int:
         res = self._client_().count(
             collection_name=name, count_filter=self._build_filter(filters), exact=True

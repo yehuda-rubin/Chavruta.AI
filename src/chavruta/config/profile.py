@@ -49,7 +49,8 @@ class Profile:
     hybrid: bool = True                       # dense + sparse via RRF
     rerank: bool = False                      # heavy cross-encoder; on in cloud, optional local
     rerank_model: str = "BAAI/bge-reranker-v2-m3"
-    relevance_threshold: float = 0.3          # below this → no grounded source
+    relevance_threshold: float = 0.5          # min DENSE cosine to be "relevant" (bge-m3 in-corpus ≈0.60–0.70,
+    #                                           off-corpus ≈0.47–0.58); server may tighten via env (we use 0.55)
 
     # ── Generation (LLM) — the dual-model strategy lives here ──
     llm_backend: str = "ollama"               # "ollama" (local) | "nebius" (cloud)

@@ -200,22 +200,41 @@ def _select_template(topic: str, audience: str | None = None, grade_band: str | 
         return None
 
 
+def _user_blob(question: str, history) -> str:
+    """Only the USER's words — never the assistant's. The assistant's own clarify question contains
+    'בית ספר / ישיבה / קצר · בינוני · ארוך', which would otherwise re-detect on the next turn and
+    poison audience/length resolution."""
+    turns = [getattr(h, "text", "") or "" for h in (history or [])
+             if getattr(h, "role", "user") == "user"]
+    return question + " " + " ".join(turns)
+
+
 def _detect_school(text: str) -> bool:
-    return bool(re.search(r"בית.?ספר|תלמיד|כית[הת]|יסודי|חטיב|תיכון|ילדים|גן חובה|גן ילדים", text))
+    return bool(re.search(
+        r"בית.?ספר|תלמיד|כית(?:ה|ת|ות)|יסודי|חטיב|תיכון|ילדים|גן חובה|גן ילדים"
+        r"|\bschool\b|\bpupils?\b|\bgrade\b|elementary|kindergarten|\bkids\b|children"
+        r"|high[- ]?school|middle[- ]?school", text, re.I))
 
 
 def _detect_yeshiva(text: str) -> bool:
-    return bool(re.search(r"ישיב|בית.?מדרש|אברך|בחור|עיון|למדנ|כולל|חבורה", text))
+    return bool(re.search(
+        r"ישיב|בית.?מדרש|אברך|בחור|עיון|למדנ|כולל|חבורה"
+        r"|yeshiv|beit ?midrash|beis ?medrash|kollel|avrech", text, re.I))
 
 
 def _detect_band(text: str) -> str:
-    if re.search(r"תיכון|בגרות|כית[הת]\s*(י|יא|יב|10|11|12)\b", text):
+    # Hebrew כית(?:ה|ת|ות) covers singular AND plural 'כיתות'; English grade phrasings too.
+    if re.search(r"תיכון|בגרות|כית(?:ה|ת|ות)\s*(י|יא|יב|10|11|12)\b"
+                 r"|high[- ]?school|\bgrades?\s*(10|11|12)\b|\b(10th|11th|12th)\s+grade", text, re.I):
         return "j-l"
-    if re.search(r"חטיב|כית[הת]\s*(ז|ח|ט|7|8|9)\b", text):
+    if re.search(r"חטיב|כית(?:ה|ת|ות)\s*(ז|ח|ט|7|8|9)\b"
+                 r"|middle[- ]?school|\bgrades?\s*(7|8|9)\b|\b(7th|8th|9th)\s+grade", text, re.I):
         return "g-i"
-    if re.search(r"יסודי.?בוגר|כית[הת]\s*(ד|ה|ו|4|5|6)\b", text):
+    if re.search(r"יסודי.?בוגר|כית(?:ה|ת|ות)\s*(ד|ה|ו|4|5|6)\b"
+                 r"|\bgrades?\s*(4|5|6)\b|\b(4th|5th|6th)\s+grade", text, re.I):
         return "d-f"
-    if re.search(r"גן\b|צעיר|קטנים|כית[הת]\s*(א|ב|ג|1|2|3)\b", text):
+    if re.search(r"גן\b|צעיר|קטנים|כית(?:ה|ת|ות)\s*(א|ב|ג|1|2|3)\b"
+                 r"|kindergarten|\bgrades?\s*(1|2|3)\b|\b(1st|2nd|3rd)\s+grade", text, re.I):
         return "a-c"
     return ""
 
@@ -231,23 +250,22 @@ def _detect_length(text: str) -> str:
 
 
 def _resolve_length(question: str, history, length: str) -> str | None:
-    """Explicit param wins; else read the length from the prompt/conversation; else None (ask)."""
+    """Explicit param wins; else read the length from the USER's prompt/answers; else None (ask)."""
     l = (length or "").strip().lower()
     if l in _LENGTHS:
         return l
-    blob = question + " " + " ".join(getattr(h, "text", "") or "" for h in (history or []))
-    return _detect_length(blob) or None
+    return _detect_length(_user_blob(question, history)) or None
 
 
 def _resolve_audience(question: str, history, audience: str, grade_band: str) -> tuple[str | None, str | None]:
-    """Explicit params win; otherwise infer audience/grade from the topic + conversation."""
+    """Explicit params win; otherwise infer audience/grade from the USER's topic + answers only."""
     aud = (audience or "").strip().lower() or None
     band = (grade_band or "").strip().lower() or None
     if band not in _GRADE_HE:
         band = None
     if aud not in ("school", "yeshiva"):
         aud = None
-    blob = question + " " + " ".join(getattr(h, "text", "") or "" for h in (history or []))
+    blob = _user_blob(question, history)
     if aud is None:
         if _detect_school(blob):
             aud = "school"
@@ -256,6 +274,33 @@ def _resolve_audience(question: str, history, audience: str, grade_band: str) ->
     if aud == "school" and band is None:
         band = _detect_band(blob) or None
     return aud, band
+
+
+def _is_clarify_answer(text: str) -> bool:
+    """True if the turn carries ONLY audience/grade/length words (a reply to a clarify question),
+    with no actual lesson topic left in it."""
+    t = text or ""
+    t = re.sub(r"[א-ט]\s*[–\-]\s*[א-ט]", " ", t)                      # grade ranges first (ד–ו)
+    t = re.sub(
+        r"בית.?ספר|בית.?מדרש|ישיב\w*|כית(?:ה|ת|ות)|תיכון|חטיב\w*|יסודי\w*|\bגן\b|בוגר|צעיר"
+        r"|קצר\w*|בינונ\w*|ארוכ?\w*|תמציתי|מעמיק\w*|בהרחבה"
+        r"|\bshort\b|\bmedium\b|\blong\b|\bbrief\b|\bschool\b|\byeshiva\w*|beit.?midrash|\bgrade\b|elementary"
+        r"|\bhigh\b|\bmiddle\b|\b(?:1st|2nd|3rd|\d+th)\b",
+        " ", t, flags=re.I)
+    t = re.sub(r"(?<![א-ת])[א-טי](?![א-ת])", " ", t)                  # standalone grade letters (ב)
+    t = re.sub(r"[\d.,·•\-–\s\"'()־׳״]", "", t)
+    return len(t) < 2
+
+
+def _resolve_topic(question: str, history) -> str:
+    """The lesson topic for retrieval + the job. If the current turn is just a clarify answer
+    ('ארוך', 'בית ספר כיתה ב'), recover the topic from the most recent substantive USER turn."""
+    if not _is_clarify_answer(question):
+        return question
+    subs = [(getattr(h, "text", "") or "").strip() for h in (history or [])
+            if getattr(h, "role", "user") == "user"
+            and (getattr(h, "text", "") or "").strip() and not _is_clarify_answer(h.text)]
+    return subs[-1] if subs else question
 
 
 _LESSON_SPLIT_RE = re.compile(r"^===(SOURCE_SHEET|LESSON_FLOW|FULL_LESSON|ORDER)===\s*$", re.M)
@@ -374,8 +419,11 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
     pipeline = _get_pipeline()
     aud, band = _resolve_audience(question, history, audience, grade_band)
     length = _resolve_length(question, history, length)   # key or None (None → ask)
+    # The topic drives retrieval + the job. If this turn is just a clarify answer ('ארוך'), recover
+    # the real topic from history — otherwise we'd retrieve sources for the word 'ארוך'.
+    topic = _resolve_topic(question, history)
 
-    q = Query(text=question, lang=lang or None, intent=Intent.LESSON)
+    q = Query(text=topic, lang=lang or None, intent=Intent.LESSON)
     rq = pipeline._resolve_query(q)
     lang = rq.lang or lang or "he"
     he = lang != "en"
@@ -397,7 +445,7 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
         msg = head + "\n\n" + "\n".join(f"• {a}" for a in ask)
         return QueryResponse(answer=msg, citations=[], grounded=False, intent="lesson", files=[])
 
-    tpl = _select_template(question, aud, band)
+    tpl = _select_template(topic, aud, band)
 
     ln = _LENGTHS[length]
     # School gets a wider candidate pool so the model has enough accessible sources (verse, Rashi,
@@ -409,7 +457,7 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
         msg = "לא נמצאו מקורות לנושא זה." if he else "No sources found for this topic."
         return QueryResponse(answer=msg, citations=[], grounded=False, intent="lesson", files=[])
 
-    job = _lesson_job_md(question, hits, lang, audience=aud, grade_band=band, length=length,
+    job = _lesson_job_md(topic, hits, lang, audience=aud, grade_band=band, length=length,
                          tpl=tpl, history=history)
     raw = pipeline.llm.request(job) if hasattr(pipeline.llm, "request") else ""
 
@@ -443,8 +491,8 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
         tag = " · בית מדרש" if he else " · beit midrash"
     names = (["דף_מקורות.doc", "מהלך_השיעור.doc", "השיעור_המלא.doc"] if he
              else ["source_sheet.doc", "lesson_flow.doc", "full_lesson.doc"])
-    titles = ([f"דף מקורות — {question}{tag}", f"מהלך השיעור — {question}{tag}", f"שיעור מלא — {question}{tag}"] if he
-              else [f"Source Sheet — {question}{tag}", f"Lesson Flow — {question}{tag}", f"Full Lesson — {question}{tag}"])
+    titles = ([f"דף מקורות — {topic}{tag}", f"מהלך השיעור — {topic}{tag}", f"שיעור מלא — {topic}{tag}"] if he
+              else [f"Source Sheet — {topic}{tag}", f"Lesson Flow — {topic}{tag}", f"Full Lesson — {topic}{tag}"])
     files = [FileOut(name=names[i], title=titles[i], content=[ss, lf, fl][i]) for i in range(3)]
     return QueryResponse(answer="", citations=used, grounded=bool(used), intent="lesson", files=files)
 
