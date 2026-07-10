@@ -61,7 +61,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -103,6 +103,21 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_messages_session
             ON messages(session_id, id);
+
+        -- 'My Shiurim' library: generated lessons persisted on their own (not just inside a chat),
+        -- so teachers can browse, reopen and reuse them. CREATE IF NOT EXISTS is idempotent.
+        CREATE TABLE IF NOT EXISTS saved_lessons (
+            id          TEXT PRIMARY KEY,
+            topic       TEXT NOT NULL,
+            audience    TEXT,
+            grade_band  TEXT,
+            length      TEXT,
+            lang        TEXT,
+            files       TEXT NOT NULL,   -- JSON [{name,title,content}]
+            citations   TEXT,            -- JSON
+            created_at  TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_saved_lessons_time ON saved_lessons(created_at DESC);
     """)
 
     # Forward migrations for databases created by an older schema version.
@@ -325,6 +340,49 @@ def get_messages(session_id: str) -> list[dict[str, Any]]:
         d["files"] = json.loads(d["files"]) if d.get("files") else []
         out.append(d)
     return out
+
+
+# ── 'My Shiurim' saved-lesson library ────────────────────────────────────────
+
+def save_lesson(lesson_id: str, topic: str, audience: str, grade_band: str, length: str,
+                lang: str, files: list[dict], citations: list[dict] | None = None) -> None:
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        conn.execute(
+            "INSERT OR REPLACE INTO saved_lessons "
+            "(id, topic, audience, grade_band, length, lang, files, citations, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (lesson_id, topic, audience or "", grade_band or "", length or "", lang or "he",
+             json.dumps(files, ensure_ascii=False),
+             json.dumps(citations or [], ensure_ascii=False), _now()),
+        )
+
+
+def list_lessons() -> list[dict[str, Any]]:
+    with _LOCK:
+        rows = get_conn().execute(
+            "SELECT id, topic, audience, grade_band, length, lang, created_at "
+            "FROM saved_lessons ORDER BY created_at DESC"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_lesson(lesson_id: str) -> dict[str, Any] | None:
+    with _LOCK:
+        r = get_conn().execute("SELECT * FROM saved_lessons WHERE id=?", (lesson_id,)).fetchone()
+    if not r:
+        return None
+    d = dict(r)
+    d["files"] = json.loads(d["files"]) if d.get("files") else []
+    d["citations"] = json.loads(d["citations"]) if d.get("citations") else []
+    return d
+
+
+def delete_lesson(lesson_id: str) -> bool:
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        cur = conn.execute("DELETE FROM saved_lessons WHERE id=?", (lesson_id,))
+    return cur.rowcount > 0
 
 
 def _now() -> str:

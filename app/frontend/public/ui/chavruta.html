@@ -74,6 +74,7 @@ tailwind.config = { theme: { extend: {
       <p class="text-[11px] tracking-widest text-ink/40 font-bold uppercase mt-3 mb-2 px-2" data-i18n="recentChats">שיחות אחרונות</p>
       <nav id="sessions" class="flex flex-col gap-1.5 overflow-y-auto"></nav>
       <div class="mt-auto pt-3 flex flex-col gap-2">
+        <button id="libraryLink" class="w-full px-4 py-2.5 rounded-2xl glass text-ink/70 font-semibold text-sm hover:bg-white/60 hover:text-tekhelet transition flex items-center gap-2 cursor-pointer"><span class="material-symbols-outlined text-[19px]">auto_stories</span><span data-i18n="myShiurim">השיעורים שלי</span></button>
         <button id="settingsLink" class="w-full px-4 py-2.5 rounded-2xl glass text-ink/70 font-semibold text-sm hover:bg-white/60 hover:text-tekhelet transition flex items-center gap-2 cursor-pointer"><span class="material-symbols-outlined text-[19px]">settings</span><span data-i18n="settingsTitle">הגדרות</span></button>
         <button id="supportLink" class="w-full px-4 py-2.5 rounded-2xl glass text-ink/70 font-semibold text-sm hover:bg-white/60 hover:text-tekhelet transition flex items-center gap-2 cursor-pointer"><span class="material-symbols-outlined text-[19px]">help</span><span data-i18n="supportTitle">תמיכה</span></button>
       </div>
@@ -236,6 +237,17 @@ tailwind.config = { theme: { extend: {
 </div>
 
 <!-- Support modal -->
+<!-- 'My Shiurim' — saved-lesson library -->
+<div id="libraryModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-ink/40 backdrop-blur-sm p-4">
+  <div class="glass rounded-[28px] w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+    <div class="flex items-center justify-between p-6 pb-3">
+      <h3 class="font-serif text-xl font-bold text-tekhelet flex items-center gap-2"><span class="material-symbols-outlined">auto_stories</span><span data-i18n="myShiurim">השיעורים שלי</span></h3>
+      <button id="libraryClose" class="h-9 w-9 rounded-full glass grid place-items-center text-ink/60 hover:text-tekhelet">✕</button>
+    </div>
+    <div id="libraryBody" class="px-6 pb-6 overflow-y-auto flex flex-col gap-2"></div>
+  </div>
+</div>
+
 <div id="supportModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-ink/40 backdrop-blur-sm p-4">
   <div id="supportCard" class="glass rounded-[28px] p-6 w-full max-w-lg max-h-[85vh] overflow-y-auto flex flex-col gap-4">
     <div class="flex items-center justify-between">
@@ -277,6 +289,7 @@ const T = {
   he: {
     brand:'חברותא', settings:'הגדרות', newChat:'+ דיון חדש', recentChats:'שיחות אחרונות',
     noChats:'אין שיחות עדיין', del:'מחק', settingsLink:'⚙ הגדרות', supportLink:'? תמיכה',
+    myShiurim:'השיעורים שלי', libEmpty:'עדיין לא נשמרו שיעורים. כל שיעור שתכין יישמר כאן אוטומטית.',
     openChats:'פתח שיחות', newChatShort:'דיון חדש', collapse:'כווץ',
     discussionTitle:'דיון עם החברותא', lesson:'שיעור', explain:'הסבר', qa:'שאלה',
     forWhom:'עבור:', audAuto:'אוטומטי (מהפרומט)', audYeshiva:'בית מדרש / ישיבה', audSchool:'בית ספר',
@@ -316,6 +329,7 @@ const T = {
   en: {
     brand:'Chavruta', settings:'Settings', newChat:'+ New discussion', recentChats:'Recent chats',
     noChats:'No chats yet', del:'Delete', settingsLink:'⚙ Settings', supportLink:'? Support',
+    myShiurim:'My Shiurim', libEmpty:'No saved lessons yet. Every lesson you build is saved here automatically.',
     openChats:'Open chats', newChatShort:'New discussion', collapse:'Collapse',
     discussionTitle:'Discussion with the Chavruta', lesson:'Lesson', explain:'Explain', qa:'Q&A',
     forWhom:'For:', audAuto:'Auto (from prompt)', audYeshiva:'Beit Midrash / Yeshiva', audSchool:'School',
@@ -824,6 +838,46 @@ $('#settingsModal').addEventListener('click', e => { if (e.target.id==='settings
 $('#supportLink').addEventListener('click', () => showModal('supportModal'));
 $('#supportClose').addEventListener('click', () => hideModal('supportModal'));
 $('#supportModal').addEventListener('click', e => { if (e.target.id==='supportModal') hideModal('supportModal'); });
+
+// ── 'My Shiurim' saved-lesson library ─────────────────────────────────────────
+async function openLibrary() {
+  showModal('libraryModal');
+  const body = $('#libraryBody');
+  body.innerHTML = '<p class="text-ink/40 text-sm p-4">…</p>';
+  try {
+    const list = await (await fetch(API + '/lessons')).json();
+    if (!list.length) { body.innerHTML = '<p class="text-ink/50 text-sm p-8 text-center">' + esc(tr('libEmpty')) + '</p>'; return; }
+    body.innerHTML = '';
+    list.forEach(L => {
+      const aud = L.audience === 'school' ? ('בית ספר ' + (L.grade_band || '')) : (L.audience === 'yeshiva' ? 'בית מדרש' : '');
+      const meta = [aud, L.length, (L.created_at || '').slice(0, 10)].filter(Boolean).join(' · ');
+      const row = el('<div class="flex items-center gap-3 bg-white/70 hover:bg-white/95 ring-1 ring-line/70 rounded-2xl p-3.5 transition"></div>');
+      row.innerHTML =
+        '<button class="openL flex-1 min-w-0 text-right"><span class="block font-serif font-bold text-tekhelet truncate">' + esc(L.topic) + '</span><span class="block text-[11px] text-ink/50">' + esc(meta) + '</span></button>' +
+        '<button class="delL h-8 w-8 rounded-lg hover:bg-white grid place-items-center text-ink/40 hover:text-red-500 shrink-0" title="' + esc(tr('del')) + '"><span class="material-symbols-outlined text-[20px]">delete</span></button>';
+      row.querySelector('.openL').addEventListener('click', () => openSavedLesson(L.id));
+      row.querySelector('.delL').addEventListener('click', async () => {
+        try { await fetch(API + '/lessons/' + L.id, { method: 'DELETE' }); } catch (e) {}
+        row.remove();
+        if (!body.children.length) body.innerHTML = '<p class="text-ink/50 text-sm p-8 text-center">' + esc(tr('libEmpty')) + '</p>';
+      });
+      body.appendChild(row);
+    });
+  } catch (e) { body.innerHTML = '<p class="text-red-500 text-sm p-4">' + esc(String(e)) + '</p>'; }
+}
+async function openSavedLesson(id) {
+  try {
+    const L = await (await fetch(API + '/lessons/' + id)).json();
+    hideModal('libraryModal');
+    state.activeId = null;
+    state.messages = [{ role: 'assistant', text: '📚 ' + L.topic, files: L.files || [], citations: L.citations || [] }];
+    $('#subtitle').textContent = L.topic;
+    render();
+  } catch (e) {}
+}
+$('#libraryLink').addEventListener('click', openLibrary);
+$('#libraryClose').addEventListener('click', () => hideModal('libraryModal'));
+$('#libraryModal').addEventListener('click', e => { if (e.target.id === 'libraryModal') hideModal('libraryModal'); });
 $('#setLangSeg').addEventListener('click', e => { const b=e.target.closest('[data-val]'); if(!b)return; state.lang=b.dataset.val; applyLang(); refreshSettingsUI(); saveSettings(); });
 $('#setModeSeg').addEventListener('click', e => { const b=e.target.closest('[data-val]'); if(!b)return; state.defaultIntent=b.dataset.val; markSeg('setModeSeg', state.defaultIntent); saveSettings(); });
 $('#setThemeSeg').addEventListener('click', e => { const b=e.target.closest('[data-val]'); if(!b)return; state.theme=b.dataset.val; applyTheme(); markSeg('setThemeSeg', state.theme); saveSettings(); });

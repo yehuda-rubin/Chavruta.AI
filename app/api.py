@@ -539,6 +539,14 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
     caveats = ([("הערה: ציטוטים בשיעור שלא אומתו מול המקורות — יש לבדוק: «" + "», «".join(bad_q[:2]) + "»")
                 if he else ("Note: quote(s) in the lesson were not found in the sources — verify: «"
                             + "», «".join(bad_q[:2]) + "»")] if bad_q else [])
+    # Persist to the 'My Shiurim' library so the teacher can reopen/reuse it later.
+    if files:
+        try:
+            import uuid
+            db.save_lesson(uuid.uuid4().hex[:12], topic, aud or "", band or "", length, lang,
+                           [f.model_dump() for f in files], [c.model_dump() for c in used])
+        except Exception:
+            pass
     return QueryResponse(answer="", citations=used, grounded=bool(used) or bool(fl.strip()),
                          intent="lesson", caveats=caveats, files=files)
 
@@ -742,3 +750,34 @@ def get_messages(session_id: str):
 def delete_session(session_id: str):
     if not db.delete_session(session_id):
         raise HTTPException(status_code=404, detail="session not found")
+
+
+# ── 'My Shiurim' lesson library ───────────────────────────────────────────────
+
+class SavedLessonOut(BaseModel):
+    id: str
+    topic: str
+    audience: str = ""
+    grade_band: str = ""
+    length: str = ""
+    lang: str = "he"
+    created_at: str
+
+
+@app.get("/lessons", response_model=list[SavedLessonOut])
+def list_lessons():
+    return db.list_lessons()
+
+
+@app.get("/lessons/{lesson_id}")
+def get_lesson(lesson_id: str):
+    lesson = db.get_lesson(lesson_id)
+    if not lesson:
+        raise HTTPException(status_code=404, detail="lesson not found")
+    return lesson
+
+
+@app.delete("/lessons/{lesson_id}", status_code=204)
+def delete_lesson(lesson_id: str):
+    if not db.delete_lesson(lesson_id):
+        raise HTTPException(status_code=404, detail="lesson not found")
