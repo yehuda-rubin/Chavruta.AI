@@ -584,25 +584,39 @@ function renderMessages() {
 
 function renderSources() {
   const box = $('#sources'); box.innerHTML = '';
-  const last = [...state.messages].reverse().find(m => m.role === 'assistant' && (m.citations||[]).length);
-  // drop empty/degenerate citations (no ref, or no text) so no blank "מקור" card is shown
-  const cits = (last ? last.citations : []).filter(c => c && c.ref && ((c.text_he||'').trim() || (c.text_en||'').trim()));
-  if (!cits.length) {
+  // Accumulate the sources of the WHOLE conversation (not just the last turn), deduped by ref and
+  // kept in order of FIRST use. Drop empty/degenerate citations so no blank "מקור" card shows.
+  const order = [];            // unique refs, earliest-first
+  const byRef = new Map();     // ref → the citation object (first non-degenerate occurrence)
+  state.messages.forEach(m => {
+    if (m.role !== 'assistant') return;
+    (m.citations || []).forEach(c => {
+      if (!c || !c.ref) return;
+      if (!((c.text_he||'').trim() || (c.text_en||'').trim())) return;
+      if (!byRef.has(c.ref)) { byRef.set(c.ref, c); order.push(c.ref); }
+    });
+  });
+  if (!order.length) {
     box.appendChild(el('<p class="text-ink/40 text-sm text-center mt-10">' + esc(tr('sourcesHint')) + '</p>'));
     return;
   }
-  cits.forEach((c, i) => {
-    const key = (c.ref || '') + '#' + i;
+  // Stack style: most-recently-introduced on top, the FIRST source used sits at the very bottom.
+  // The ordinal badge (1 = first used) makes the stacking order legible.
+  const stack = order.map((ref, idx) => ({ c: byRef.get(ref), n: idx + 1 })).reverse();
+  stack.forEach(({ c, n }) => {
+    const key = c.ref;         // ref-keyed so expand state is stable across turns
     // When "sources by default = expanded", membership in expandedSrc means "toggled from default".
     const expanded = state.srcDefaultOpen ? !state.expandedSrc.has(key) : state.expandedSrc.has(key);
     const full = state.lang === 'en' ? (c.text_en || c.text_he) : (c.text_he || c.text_en);
-    // Collapsed = name only (commentator + ref). Click reveals the FULL cited source text inline
-    // (no external link — the complete quote we actually used).
+    // Collapsed = name only (ordinal + commentator + ref). Click reveals the FULL cited source text
+    // inline (no external link — the complete quote we actually used).
     const card = el('<div class="block rounded-2xl p-4 shadow-sm transition cursor-pointer ' +
       (expanded ? 'bg-white/85 ring-2 ring-gold/40' : 'bg-white/60 hover:ring-2 hover:ring-gold/30') + '">' +
       '<div class="flex items-start justify-between gap-2">' +
         '<div class="min-w-0">' +
-          '<p class="text-[10px] font-black tracking-widest text-gold uppercase">' + esc(commentatorTag(c)) + '</p>' +
+          '<p class="text-[10px] font-black tracking-widest text-gold uppercase flex items-center gap-1.5">' +
+            '<span class="inline-grid place-items-center h-4 w-4 rounded-full bg-gold/15 text-gold text-[9px] shrink-0">' + n + '</span>' +
+            esc(commentatorTag(c)) + '</p>' +
           '<h4 class="font-serif text-lg font-bold text-tekhelet mt-1 leading-tight break-words">' + esc(c.ref) + '</h4>' +
         '</div>' +
         '<span class="material-symbols-outlined text-ink/40 shrink-0 transition-transform">' + (expanded ? 'expand_less' : 'expand_more') + '</span>' +
