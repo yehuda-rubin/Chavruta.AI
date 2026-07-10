@@ -179,23 +179,45 @@ def _templates_client():
     return _tpl_client
 
 
+_REPO_DIR = Path(__file__).resolve().parents[1]
+
+
+def _attach_template_bodies(pl: dict) -> None:
+    """Load the template's actual .md file bodies (the pedagogical scaffold) from disk into the
+    payload — the RAG manifest only carries metadata, so without this the template files are never
+    read at generation time and the whole template library is dead at runtime."""
+    files = pl.get("files") or {}
+    d = _REPO_DIR / (pl.get("dir") or "")
+    for role in ("full_lesson", "lesson_flow", "source_sheet"):
+        fn = files.get(role)
+        if fn:
+            try:
+                pl[f"_{role}"] = (d / fn).read_text(encoding="utf-8")
+            except Exception:
+                pass
+
+
 def _select_template(topic: str, audience: str | None = None, grade_band: str | None = None):
-    """Pick the best-matching template PAYLOAD from the template RAG (filtered by audience/grade)."""
+    """Pick the best-matching lesson-template PAYLOAD from the template RAG (filtered by
+    audience/grade), with its .md file bodies loaded in."""
     try:
         from qdrant_client import models
         client = _templates_client()
         if not client.collection_exists(_TPL_COLLECTION):
             return None
-        must = []
+        must = [models.FieldCondition(key="mode", match=models.MatchValue(value="lesson"))]  # never a shut template
         if audience:
             must.append(models.FieldCondition(key="audience", match=models.MatchValue(value=audience)))
         if grade_band:
             must.append(models.FieldCondition(key="grade_band", match=models.MatchValue(value=grade_band)))
-        qf = models.Filter(must=must) if must else None
         vec = _get_pipeline().embedding.embed_query(topic).dense
         res = client.query_points(collection_name=_TPL_COLLECTION, query=vec, limit=1,
-                                  query_filter=qf, with_payload=True)
-        return res.points[0].payload if res.points else None
+                                  query_filter=models.Filter(must=must), with_payload=True)
+        if not res.points:
+            return None
+        pl = dict(res.points[0].payload or {})
+        _attach_template_bodies(pl)
+        return pl
     except Exception:
         return None
 
@@ -333,8 +355,15 @@ def _lesson_job_md(question: str, hits, lang: str, *, audience: str | None,
               "התאם/י את הזמנים בשלבי מהלך השיעור כך שיסתכמו לטווח הזה.", ""]
 
     if tpl:
-        lines += ["## SELECTED TEMPLATE (follow its structure)",
-                  f"{tpl.get('title','')} — {tpl.get('structure','')}", ""]
+        lines += ["## SELECTED TEMPLATE — follow THIS structure and pedagogy",
+                  f"{tpl.get('title','')} — מבנה: {tpl.get('structure','')}"]
+        skel = tpl.get("_full_lesson") or ""
+        if skel:
+            skel = re.sub(r"<!--.*?-->", "", skel, flags=re.S).strip()
+            lines += ["", "TEMPLATE SKELETON — follow its stages, headings, timing and pedagogy; replace every "
+                      "[ ] bracket with real content built from the SOURCES (write real prose, not placeholders):",
+                      skel]
+        lines += [""]
 
     lines += ["## TOPIC", question.strip(), "", "## SOURCES"]
     for i, h in enumerate(hits, 1):
@@ -359,32 +388,31 @@ def _lesson_job_md(question: str, hits, lang: str, *, audience: str | None,
     if audience == "school":
         gh = _GRADE_HE.get(grade_band, grade_band or "")
         lines += [
-            f"LESSON_FLOW — a timed CLASSROOM plan for grade band {gh}, following the explicit-instruction "
-            "arc: (0) פתיחה/הוק וחיבור לידע קודם, (1) הקנייה — המורה מדגים (I-Do), (2) תרגול מודרך — יחד "
-            "(We-Do) עם עצירת בדיקה, (3) העמקה, (4) תרגול עצמאי (You-Do) עם הבחנה/דיפרנציאציה, "
-            "(5) סיכום והערכה מעצבת (כרטיס יציאה / שלוש שאלות לחזרה). Give each stage a time estimate and "
-            "the guiding question, and reference the sources by [S#].",
+            f"LESSON_FLOW — a timed CLASSROOM plan for grade band {gh}, following the TEMPLATE SKELETON's stages "
+            "(explicit-instruction arc: hook & prior-knowledge → I-Do → We-Do with a check → deepen → You-Do "
+            "with differentiation → summary + formative assessment). Give each stage a time estimate, its "
+            "guiding question, and reference the sources by [S#].",
             f"FULL_LESSON — the full lesson WRITTEN OUT in age-appropriate prose for {gh}, following that "
-            "arc. Match language and cognitive load to the age band described in AUDIENCE (for young grades: "
-            "simple Hebrew, translate hard words, story/imagery, one idea; for older: מחלוקת/חקירה, טיעון "
-            "מנומק, ניתוח מקור). Explain, ask checking questions, and keep the pupils active. A real "
-            "classroom lesson — not a summary.",
-            "SOURCE PREFERENCE — from the SOURCES, prefer the most age-appropriate ones (the pasuk itself, "
-            "רש\"י, a simple story or midrash, the Mishnah). You MAY use a deep/kabbalistic/chassidic/lamdanic "
-            "source ONLY if you render its idea in simple, concrete terms in the pupils' language — never quote "
-            "such a source verbatim to young pupils. It is fine to use only some of the SOURCES.",
+            "skeleton. Match language and cognitive load to the AUDIENCE band (young grades: simple Hebrew, "
+            "translate hard words, story/imagery, one idea; older: מחלוקת/חקירה, טיעון מנומק, ניתוח מקור). "
+            "Explain, ask checking questions, keep the pupils active. A real classroom lesson — not a summary.",
+            "SOURCE PREFERENCE — prefer the most age-appropriate SOURCES (the pasuk, רש\"י, a simple story or "
+            "midrash, the Mishnah). Use a deep/kabbalistic/chassidic/lamdanic source ONLY if you render its "
+            "idea in simple, concrete terms — never quote it verbatim to young pupils. It is fine to use only "
+            "some of the SOURCES.",
         ]
     else:
         lines += [
-            "LESSON_FLOW — a clear, detailed outline following the classic yeshiva (Har Etzion / Brisk) iyun "
-            "arc: (0) הצגת הסוגיה, (1) העמדת החקירה, (2) שיטות הראשונים, (3) האחרונים, (4) נפקא מינה, "
-            "(5) סיכום. For each stage: the guiding question, which source is brought, and what is asked/answered.",
-            "FULL_LESSON — a full beit-midrash IYUN shiur in the classic yeshiva style (Har Etzion / Brisk), "
-            "written out in depth: (a) **הצגת הסוגיה** — open straight from the source; (b) **העמדת החקירה** — a "
-            "central lamdanic חקירה with TWO clearly-named sides ('צד א׳... לעומת צד ב׳...'); (c) **שיטות "
-            "הראשונים** — bring each rishon, explain it, map it to a side; (d) **העמקה עם האחרונים** — the "
-            "conceptual formulation; (e) **נפקא מינה** — concrete ramifications; (f) **סיכום** — the yesod. "
-            "Present each שיטה, raise קושיות and answer them, and progress step by step. A real, long shiur.",
+            "LESSON_FLOW — a clear, detailed beit-midrash outline that follows the SELECTED TEMPLATE's arc for "
+            "THIS genre (the template dictates the shape — e.g. an iyun חקירה, a הלכה pesak, a מוסר arc on a "
+            "מידה, a חסידות מאמר, a פרשה פשט→דרש→רעיון, an אגדה קושי→פירוש→מסר). For each stage: the guiding "
+            "question, which source is brought, and what is asked/answered.",
+            "FULL_LESSON — a full beit-midrash shiur written out in depth, following THAT template arc — do NOT "
+            "force a gemara-iyun חקירה onto a non-iyun genre (a mussar/chassidut/parasha shiur has no "
+            "'צד א׳/צד ב׳ נפקא מינה'). WHERE the genre is a talmudic/lamdanic sugya: sharpen a central חקירה "
+            "with TWO clearly-named sides, map the ראשונים to the sides, deepen with אחרונים, give נפקא מינה, "
+            "and conclude with the יסוד. Present each שיטה, raise קושיות and answer them; progress step by step. "
+            "A real, full shiur.",
         ]
 
     lines += [

@@ -36,7 +36,7 @@ COMMENTATOR_ALIASES: dict[str, tuple[str, ...]] = {
 # "out-of-corpus question" edge case), instead of returning merely-similar Tanakh hits.
 WORK_ALIASES: dict[str, tuple[str, ...]] = {
     "tanakh": ("tanakh", "tanach", "תנ\"ך", "תנך", "תנ״ך", "מקרא"),
-    "mishnah": ("mishnah", "mishna", "משנה", "מסכת"),
+    "mishnah": ("mishnah", "mishna", "משנה"),
     "talmud": ("talmud", "gemara", "גמרא", "תלמוד", "בבלי", "ירושלמי"),
     "shulchan_aruch": ("shulchan aruch", "שולחן ערוך", "שו\"ע", "שו״ע"),
     # Responsa (שו"ת) — unambiguous terms only; bare "תשובה" means repentance, not a teshuva.
@@ -74,9 +74,12 @@ _COMPARE_PAT = re.compile(
 _EXPLAIN_PAT = re.compile(
     r"\b(explain|meaning of|what does .* mean)\b"
     r"|הסבר|תסביר|באר|פרש\s|מה\s+הפירוש", re.IGNORECASE)
+# Genuine ruling phrasings only — bare 'מותר'/'אסור'/'הלכה' over-triggered the heavy responsa
+# machine on ordinary questions ('מה אסור לפרעה לעשות'). Require an interrogative/pesak context.
 _HALACHA_PAT = re.compile(
-    r"\b(halacha|halakha|is it permitted|is it forbidden|may i|allowed to)\b"
-    r"|הלכה|מותר|אסור|האם\s+מותר|האם\s+אסור|מה\s+הדין", re.IGNORECASE)
+    r"\b(is it permitted|is it forbidden|am i allowed|may i|halachically)\b"
+    r"|האם\s+(מותר|אסור|צריך|חייב|כשר|מחו?יי?ב)|מה\s+הדין|מהי?\s+ההלכה|מה\s+ההלכה"
+    r"|הלכה\s+למעשה|כיצד\s+(נוהגים|יש\s+לנהוג|פוסקים)", re.IGNORECASE)
 
 
 # Lesson/prepare lead-ins to strip from the RETRIEVAL text (they pollute the embedding;
@@ -114,7 +117,9 @@ def _alias_hit(alias: str, text: str, low: str) -> bool:
     if " " in a:                                   # multi-word alias is specific → substring is fine
         return a in low or a in text
     if re.search(f"[{_HEB_CLASS}]", a):
-        return re.search(f"(?<![{_HEB_CLASS}])[והבכלמ]?{re.escape(a)}(?![{_HEB_CLASS}])", text) is not None
+        # allow up to two stacked one-letter prefixes (conjunction+preposition), e.g. 'ולרש"י'
+        # (ש excluded on purpose — it would let 'שרשי' match 'רשי')
+        return re.search(f"(?<![{_HEB_CLASS}])[והבכלמ]{{0,2}}{re.escape(a)}(?![{_HEB_CLASS}])", text) is not None
     return re.search(rf"(?<![a-z]){re.escape(a.lower())}(?![a-z])", low) is not None
 
 
@@ -125,12 +130,15 @@ def detect_commentators(text: str) -> list[str]:
 
 
 def detect_requested_works(text: str) -> list[str]:
-    """Which bodies of work does the question explicitly name? (e.g. 'מה אומרת המשנה…')"""
+    """Which bodies of work does the question explicitly name? (e.g. 'מה אומרת המשנה…'). Uses
+    whole-word matching (like commentators) so 'משנה' does not fire inside 'משנה תורה'/'משנה ברורה'
+    and 'מסכת' does not tag a Talmud tractate as Mishnah."""
     low = text.lower()
-    found = []
-    for work_id, aliases in WORK_ALIASES.items():
-        if any(a in low or a in text for a in aliases):
-            found.append(work_id)
+    found = [work_id for work_id, aliases in WORK_ALIASES.items()
+             if any(_alias_hit(a, text, low) for a in aliases)]
+    # 'משנה' inside 'משנה תורה' / 'משנה ברורה' is the longer work, not the Mishnah itself.
+    if "mishnah" in found and {"mishneh_torah", "mishnah_berurah"} & set(found):
+        found.remove("mishnah")
     return found
 
 

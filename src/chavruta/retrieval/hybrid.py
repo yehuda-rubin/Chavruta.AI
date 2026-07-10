@@ -28,6 +28,10 @@ def _to_hit(h) -> RankedHit:
     )
 
 
+# The load-bearing sources a grounded answer should always be able to reach.
+_FOUNDATIONAL_WORKS = ("tanakh", "mishnah", "talmud_bavli", "halacha", "midrash")
+
+
 class HybridRetriever:
     def __init__(self, embedding, store, profile, *, reranker=None, link_expander=None):
         self.embedding = embedding
@@ -74,6 +78,21 @@ class HybridRetriever:
                 rh = _to_hit(h)
                 rh.score = max(rh.score, 1.0)
                 hits.append(rh)
+
+        # Foundational-source floor: on thematic topics (חגים, מחשבה) derush/Chassidut saturates the
+        # topic vocabulary and crowds out the terse foundational mechanics. Reserve a few slots for
+        # foundational works (pasuk/Mishnah/Gemara/halacha), gently boosted, so the model always has a
+        # grounding source available. Skipped when the query is already scoped to a work/commentator.
+        if not query.work_ids and not query.commentator_ids:
+            try:
+                found = self.store.search(self.profile.collection, hquery, top_k=6,
+                                          filters={"work_id": list(_FOUNDATIONAL_WORKS)})
+                for h in found:
+                    rh = _to_hit(h)
+                    rh.score += 0.05
+                    hits.append(rh)
+            except Exception:
+                pass
 
         # Optional reranking (heavy in cloud / optional local)
         if self.reranker is not None and self.profile.rerank and hits:
