@@ -551,7 +551,7 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
                          intent="lesson", caveats=caveats, files=files)
 
 
-def _chavruta_job_md(question: str, hits, lang: str, history) -> str:
+def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bool = False) -> str:
     """Bridge job: play a Socratic study-partner (chavruta) — learn WITH the user, don't lecture."""
     lines = [f"lang: {lang}", "", "## ROLE",
              "אתה **חברותא** לימודי — אתה לומד יחד עם המשתמש, בגובה העיניים, ולא מרצה מלמעלה.", ""]
@@ -561,7 +561,16 @@ def _chavruta_job_md(question: str, hits, lang: str, history) -> str:
         for h in prior[-8:]:
             lines += [f"- {getattr(h, 'role', 'user')}: {(getattr(h, 'text', '') or '').strip()}"]
         lines += [""]
-    lines += ["## THE LEARNER JUST SAID", question.strip(), "", "## SOURCES"]
+    lines += ["## THE LEARNER JUST SAID", question.strip(), ""]
+    if weak_retrieval:
+        lines += [
+            "## ⚠️ RETRIEVAL CONFIDENCE IS LOW",
+            "The similarity scores for this turn are weak — the SOURCES below likely DO NOT match what the "
+            "learner asked (e.g. an explicit ref that didn't resolve, or a topic the corpus retrieval missed). "
+            "Default to asking the learner for direction this turn rather than forcing an answer on unrelated text.",
+            "",
+        ]
+    lines += ["## SOURCES"]
     for i, h in enumerate(hits, 1):
         who = f" ({h.commentator_id})" if getattr(h, "commentator_id", None) else ""
         lines += [f"### [S{i}] {h.ref}{who}", (getattr(h, "text", "") or "").strip(), ""]
@@ -574,15 +583,26 @@ def _chavruta_job_md(question: str, hits, lang: str, history) -> str:
         "step, one question at a time.",
         "If the learner asked a direct factual question, answer it briefly and grounded, then hand the ball "
         "back with a question.",
+        "**WHEN THE SOURCES DON'T FIT:** if the SOURCES above do not actually cover what the learner asked — "
+        "retrieval missed, they're off-topic, or you lack enough to study honestly — do NOT force a grounded "
+        "answer on unrelated text and do NOT invent the source. Say so warmly in a line, then ASK FOR "
+        "DIRECTION: the exact daf/ref (e.g. 'סנהדרין כג ע\"א'), the text pasted in, or a narrower topic. A real "
+        "chavruta says 'רגע — לא בטוח שעלה לי המקור הנכון, תכוון אותי'. This is encouraged, not a failure.",
         "Ground everything ONLY in the SOURCES; cite by [S#] (stripped from display). Keep it fairly short "
         "(a real chavruta exchange, not an essay). Write in the learner's language. **bold** key terms.",
     ]
     return "\n".join(lines)
 
 
+# Below this top-hit similarity, treat retrieval as unreliable and nudge the chavruta to ask for
+# direction rather than answer on off-topic text (the 'explicit ref didn't resolve' failure mode).
+_CHAVRUTA_WEAK_RETRIEVAL = float(os.environ.get("CHAVRUTA_WEAK_RETRIEVAL", "0.6"))
+
+
 def _run_chavruta(question: str, lang: str, history=None) -> QueryResponse:
     """Socratic study-partner mode: retrieve on the topic, then Claude plays a chavruta that asks
-    questions and learns WITH the user (grounded), rather than lecturing."""
+    questions and learns WITH the user (grounded), rather than lecturing. When retrieval confidence
+    is low, the chavruta is told to ask for direction instead of forcing an answer on off-topic text."""
     pipeline = _get_pipeline()
     user_turns = [(getattr(h, "text", "") or "").strip() for h in (history or [])
                   if getattr(h, "role", "user") == "user" and (getattr(h, "text", "") or "").strip()]
@@ -591,7 +611,9 @@ def _run_chavruta(question: str, lang: str, history=None) -> QueryResponse:
     rq = pipeline._resolve_query(q)
     lang = rq.lang or lang or "he"
     hits = list(pipeline.retriever.retrieve(rq, top_k=10).hits)
-    job = _chavruta_job_md(question, hits, lang, history)
+    top_score = max((getattr(h, "score", 0.0) for h in hits), default=0.0)
+    weak = (not hits) or (top_score < _CHAVRUTA_WEAK_RETRIEVAL)
+    job = _chavruta_job_md(question, hits, lang, history, weak_retrieval=weak)
     raw = pipeline.llm.request(job) if hasattr(pipeline.llm, "request") else ""
     nums, used, seen = [int(n) for n in re.findall(r"\[\s*S(\d+)\s*\]", raw)], [], set()
     for i in nums:
