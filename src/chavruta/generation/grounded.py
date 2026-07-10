@@ -216,6 +216,32 @@ def enforce_citations(
     return clean.strip(), citations, grounded
 
 
+_NIQQUD_RE = re.compile(r"[֑-ׇ]")            # Hebrew vowels + cantillation
+_NONHEB_RE = re.compile(r"[^א-ת]")           # keep only Hebrew letters
+_QUOTE_RE = re.compile(r'["“„״]([^"“”״\n]{12,})["”״]')  # gershayim / quote marks
+
+
+def _heb_skeleton(s: str) -> str:
+    return _NONHEB_RE.sub("", _NIQQUD_RE.sub("", s or ""))
+
+
+def unverified_quotes(text: str, sources, min_len: int = 14) -> list[str]:
+    """Citation-faithfulness guard: return VERBATIM Hebrew quotes in `text` (inside quote marks) whose
+    opening does NOT appear in any retrieved source — a strong sign the quote was fabricated or drifted
+    from its source. Paraphrase is not checked; only quoted spans must actually exist in the corpus.
+    Cheap (string only), so it can run on every grounded answer."""
+    corpus = _heb_skeleton(" ".join((getattr(s, "text", None) or getattr(s, "quote", "") or "")
+                                    for s in (sources or [])))
+    if not corpus:
+        return []
+    bad = []
+    for m in _QUOTE_RE.finditer(text or ""):
+        q = _heb_skeleton(m.group(1))
+        if len(q) >= min_len and q[:min_len] not in corpus:   # opening not found in any source
+            bad.append(m.group(1).strip()[:60])
+    return bad
+
+
 def work_not_loaded_answer(lang: str, missing_works: list[str], intent: Intent) -> Answer:
     """Honest answer when the question asks about a work that is not in the library yet
     (the spec's out-of-corpus edge case). Similar-sounding hits from other works must not

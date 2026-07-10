@@ -533,8 +533,14 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
     # skip any file that came out blank (malformed split) — a blank Word download is worse than 2 good files
     files = [FileOut(name=names[i], title=titles[i], content=c)
              for i, c in enumerate((ss, lf, fl)) if c.strip()]
+    # Citation-faithfulness: flag any verbatim quote in the lesson not found in the retrieved sources.
+    from chavruta.generation.grounded import unverified_quotes
+    bad_q = unverified_quotes(fl + "\n" + ss, hits)
+    caveats = ([("הערה: ציטוטים בשיעור שלא אומתו מול המקורות — יש לבדוק: «" + "», «".join(bad_q[:2]) + "»")
+                if he else ("Note: quote(s) in the lesson were not found in the sources — verify: «"
+                            + "», «".join(bad_q[:2]) + "»")] if bad_q else [])
     return QueryResponse(answer="", citations=used, grounded=bool(used) or bool(fl.strip()),
-                         intent="lesson", files=files)
+                         intent="lesson", caveats=caveats, files=files)
 
 
 def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],

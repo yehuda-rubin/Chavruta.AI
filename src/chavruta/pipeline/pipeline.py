@@ -226,6 +226,12 @@ class ChavrutaPipeline:
             answer.caveats.append("הערה: תשובה זו אינה מעוגנת במקור מצוטט — יש לאמתה."
                                   if query.lang != "en" else
                                   "Note: this answer is not tied to a cited source — verify it.")
+        # Citation-faithfulness: any verbatim quote not found in the retrieved sources is flagged.
+        bad_q = grounded.unverified_quotes(text, result.hits)
+        if bad_q:
+            answer.caveats.append(("הערה: ציטוט/ים שלא נמצאו במקורות שנשלפו: «" + "», «".join(bad_q[:2]) + "» — יש לאמת.")
+                                  if query.lang != "en" else
+                                  ("Note: quote(s) not found in the retrieved sources: «" + "», «".join(bad_q[:2]) + "» — verify."))
         return grounded.maybe_halacha_caveat(answer, query.lang)
 
     def _lesson_answer(self, query, result):
