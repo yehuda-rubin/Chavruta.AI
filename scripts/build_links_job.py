@@ -48,13 +48,26 @@ API = "https://www.sefaria.org/api/links"
 RETRIES = 4
 
 
-def load_corpus(ref_db: Path) -> tuple[set[str], list[str]]:
-    con = sqlite3.connect(f"file:{ref_db}?mode=ro", uri=True)
-    canon = {r[0] for r in con.execute("SELECT DISTINCT canon FROM refidx")}
-    bases = [r[0] for r in con.execute(
-        "SELECT DISTINCT chunk_ref FROM refidx WHERE canon NOT LIKE '% on %'")]
-    con.close()
-    return canon, bases
+class CorpusRefs:
+    """On-disk membership test for 'is this canonical ref in the corpus?' — keeps the job's RAM
+    small (~tens of MB) instead of loading all 2.75M refs into a set. Queried single-threaded from
+    the main loop; a dict cache absorbs the hot targets (Shulchan Arukh etc.)."""
+
+    def __init__(self, ref_db: Path) -> None:
+        self._db = sqlite3.connect(f"file:{ref_db}?mode=ro", uri=True, check_same_thread=False)
+        self._cache: dict[str, bool] = {}
+
+    def has(self, canon: str) -> bool:
+        v = self._cache.get(canon)
+        if v is None:
+            v = self._db.execute(
+                "SELECT 1 FROM refidx WHERE canon=? LIMIT 1", (canon,)).fetchone() is not None
+            self._cache[canon] = v
+        return v
+
+    def bases(self) -> list[str]:
+        return [r[0] for r in self._db.execute(
+            "SELECT DISTINCT chunk_ref FROM refidx WHERE canon NOT LIKE '% on %'")]
 
 
 def fetch_links(ref: str, session) -> tuple[bool, list[dict]]:
@@ -78,7 +91,7 @@ def fetch_links(ref: str, session) -> tuple[bool, list[dict]]:
     return False, []                                  # exhausted retries → retry on next run
 
 
-def enrich(canon: set[str], bases: list[str], workers: int, rate: float) -> tuple[int, int]:
+def enrich(refs: CorpusRefs, bases: list[str], workers: int, rate: float) -> tuple[int, int]:
     done: set[str] = set()
     if DONE.exists():
         with DONE.open(encoding="utf-8") as f:
@@ -114,7 +127,7 @@ def enrich(canon: set[str], bases: list[str], workers: int, rate: float) -> tupl
                 if not to:
                     continue
                 tc = canonical_ref(to)
-                if tc and tc != base_canon and tc in canon:   # usable edge only
+                if tc and tc != base_canon and refs.has(tc):   # usable edge only
                     raw.write(json.dumps({"from_ref": base_canon, "to_ref": tc,
                                           "link_type": lk.get("type", "reference"), "to_work_id": ""},
                                          ensure_ascii=False) + "\n")
@@ -171,12 +184,13 @@ def main() -> None:
             p.unlink(missing_ok=True)
         print("fresh start — cleared checkpoints")
 
-    canon, bases = load_corpus(REF_DB)
+    refs = CorpusRefs(REF_DB)
+    bases = refs.bases()
     if args.sample:
         bases = bases[: args.sample]
-    print(f"corpus: {len(canon):,} canonical refs")
+    print(f"base refs to enrich: {len(bases):,} (corpus membership checked on-disk, low RAM)")
 
-    kept, failed = enrich(canon, bases, args.workers, args.rate)
+    kept, failed = enrich(refs, bases, args.workers, args.rate)
     total_done = len({ln.strip() for ln in DONE.open(encoding='utf-8')} if DONE.exists() else set())
     remaining = len(bases) - total_done
     print(f"\nthis run: kept {kept:,} edges | failed (will retry) {failed:,}")
