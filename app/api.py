@@ -307,7 +307,7 @@ def _is_clarify_answer(text: str) -> bool:
     t = re.sub(
         r"בית.?ספר|בית.?מדרש|ישיב\w*|כית(?:ה|ת|ות)|תיכון|חטיב\w*|יסודי\w*|\bגן\b|בוגר|צעיר"
         r"|קצר\w*|בינונ\w*|ארוכ?\w*|תמציתי|מעמיק\w*|בהרחבה"
-        r"|\bshort\b|\bmedium\b|\blong\b|\bbrief\b|\bschool\b|\byeshiva\w*|beit.?midrash|\bgrade\b|elementary"
+        r"|\bshort\b|\bmedium\b|\blong\b|\bbrief\b|\bschools?\b|\byeshiva\w*|beit.?midrash|\bgrades?\b|elementary"
         r"|\bhigh\b|\bmiddle\b|\b(?:1st|2nd|3rd|\d+th)\b",
         " ", t, flags=re.I)
     t = re.sub(r"(?<![א-ת])[א-טי](?![א-ת])", " ", t)                  # standalone grade letters (ב)
