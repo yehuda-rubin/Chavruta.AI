@@ -4,6 +4,10 @@
 id: general
 title: "סוגיה והלכה — תבנית כללית"
 genre: gemara-halacha
+audience: yeshiva
+grade_band: beit-midrash
+age_range: "16+ — בני ישיבה / לומדי בית מדרש"
+mode: lesson
 description: >
   שיעור בית-מדרש קלאסי הבנוי כסולם מקורות מסורתי: מן המקרא, דרך המשנה והגמרא ורש"י,
   אל הראשונים ונושאי הכלים, ועד השולחן ערוך ופוסקי זמננו. מתאים לבירור סוגיה תלמודית או

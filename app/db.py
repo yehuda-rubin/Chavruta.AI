@@ -61,7 +61,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -97,6 +97,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
             citations     TEXT,
             caveats       TEXT,
             grounded      INTEGER,
+            files         TEXT,
             created_at    TEXT NOT NULL
         );
 
@@ -114,6 +115,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
             # they next receive a message.
             conn.execute("ALTER TABLE sessions ADD COLUMN updated_at TEXT")
             conn.execute("UPDATE sessions SET updated_at = created_at WHERE updated_at IS NULL")
+
+    if version < 3:
+        # LESSON mode persists its 3 generated files with the assistant message so they
+        # survive reloads / switching back to the session (they were in-memory only before).
+        mcols = {r[1] for r in conn.execute("PRAGMA table_info(messages)")}
+        if "files" not in mcols:
+            conn.execute("ALTER TABLE messages ADD COLUMN files TEXT")
 
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
@@ -277,13 +285,14 @@ def save_message(
     citations: list[dict] | None = None,
     caveats: list[str] | None = None,
     grounded: bool | None = None,
+    files: list[dict] | None = None,
 ) -> int:
     now = _now()
     with _tx(get_conn()) as conn:
         cur = conn.execute(
             """INSERT INTO messages
-               (session_id, role, text, intent, citations, caveats, grounded, created_at)
-               VALUES (?,?,?,?,?,?,?,?)""",
+               (session_id, role, text, intent, citations, caveats, grounded, files, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
             (
                 session_id,
                 role,
@@ -292,6 +301,7 @@ def save_message(
                 json.dumps(citations, ensure_ascii=False) if citations is not None else None,
                 json.dumps(caveats, ensure_ascii=False) if caveats is not None else None,
                 int(grounded) if grounded is not None else None,
+                json.dumps(files, ensure_ascii=False) if files else None,
                 now,
             ),
         )
@@ -312,6 +322,7 @@ def get_messages(session_id: str) -> list[dict[str, Any]]:
         d["citations"] = json.loads(d["citations"]) if d["citations"] else []
         d["caveats"] = json.loads(d["caveats"]) if d["caveats"] else []
         d["grounded"] = bool(d["grounded"]) if d["grounded"] is not None else None
+        d["files"] = json.loads(d["files"]) if d.get("files") else []
         out.append(d)
     return out
 

@@ -2,6 +2,10 @@
 id: chassidut
 title: "חסידות — תבנית"
 genre: chassidut
+audience: yeshiva
+grade_band: beit-midrash
+age_range: "16+ — בני ישיבה / לומדי בית מדרש"
+mode: lesson
 description: >
   שיעור בתורת החסידות, הבנוי סביב מאמר חסידי או מושג בעבודת ה'. תחילה נקודת המוצא (פסוק או
   מאמר חז"ל שהמאמר נסמך עליו), אחר כך השאלה או הקושי הפנימי, המאמר החסידי עצמו (בעל שם טוב,

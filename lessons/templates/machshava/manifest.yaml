@@ -2,6 +2,10 @@
 id: machshava
 title: "מחשבה ואמונה — תבנית"
 genre: machshava-emuna
+audience: yeshiva
+grade_band: beit-midrash
+age_range: "16+ — בני ישיבה / לומדי בית מדרש"
+mode: lesson
 description: >
   שיעור במחשבת ישראל ואמונה, הבנוי סביב שאלה רעיונית או קיומית ולא סביב פסק הלכה. תחילה
   ניסוח חד של השאלה, אחר כך המקורות המכוננים (תנ"ך וחז"ל), עמדות הראשונים (רמב"ם, כוזרי,

@@ -94,6 +94,30 @@ tailwind.config = { theme: { extend: {
         </div>
       </div>
 
+      <!-- Lesson options (audience · grade band · length) — shown only in lesson mode -->
+      <div id="lessonOpts" class="px-7 py-2 flex items-center gap-2 flex-wrap border-b border-white/40 bg-white/30 text-xs">
+        <span class="text-ink/50 font-semibold" data-i18n="forWhom">עבור:</span>
+        <select id="audSel" class="rounded-full bg-white/70 px-3 py-1 outline-none cursor-pointer">
+          <option value="" data-i18n="audAuto">אוטומטי (מהפרומט)</option>
+          <option value="yeshiva" data-i18n="audYeshiva">בית מדרש / ישיבה</option>
+          <option value="school" data-i18n="audSchool">בית ספר</option>
+        </select>
+        <select id="bandSel" class="rounded-full bg-white/70 px-3 py-1 outline-none cursor-pointer hidden">
+          <option value="" data-i18n="bandAuto">שכבה — אוטומטי</option>
+          <option value="a-c" data-i18n="band1">כיתות א–ג</option>
+          <option value="d-f" data-i18n="band2">כיתות ד–ו</option>
+          <option value="g-i" data-i18n="band3">כיתות ז–ט</option>
+          <option value="j-l" data-i18n="band4">כיתות י–יב</option>
+        </select>
+        <span class="text-ink/50 font-semibold ms-2" data-i18n="lenLabel">אורך:</span>
+        <select id="lenSel" class="rounded-full bg-white/70 px-3 py-1 outline-none cursor-pointer">
+          <option value="" data-i18n="lenAuto">אוטומטי (מהפרומט)</option>
+          <option value="short" data-i18n="lenShort">קצר</option>
+          <option value="medium" data-i18n="lenMed">בינוני</option>
+          <option value="long" data-i18n="lenLong">ארוך</option>
+        </select>
+      </div>
+
       <div id="messages" class="flex-1 overflow-y-auto px-8 py-8 flex flex-col gap-6 max-w-2xl mx-auto w-full"></div>
 
       <div class="p-5">
@@ -245,7 +269,7 @@ tailwind.config = { theme: { extend: {
 <script>
 // ─── Chavruta.AI — live wiring (vanilla JS over the FastAPI backend) ────────────
 const API = '/api';
-const state = { sessions: [], activeId: null, messages: [], intent: 'lesson', lang: 'he', loading: false, expandedSrc: new Set(), userSources: [], defaultIntent: 'lesson', theme: 'light', srcDefaultOpen: false };
+const state = { sessions: [], activeId: null, messages: [], intent: 'lesson', lang: 'he', loading: false, expandedSrc: new Set(), userSources: [], defaultIntent: 'lesson', theme: 'light', srcDefaultOpen: false, audience: '', gradeBand: '', length: '' };
 
 // ── i18n — the whole UI switches with the language toggle. (Chat titles/content are the
 //    model's output and keep whatever language the model chose.) ─────────────────────────
@@ -255,6 +279,9 @@ const T = {
     noChats:'אין שיחות עדיין', del:'מחק', settingsLink:'⚙ הגדרות', supportLink:'? תמיכה',
     openChats:'פתח שיחות', newChatShort:'דיון חדש', collapse:'כווץ',
     discussionTitle:'דיון עם החברותא', lesson:'שיעור', explain:'הסבר', qa:'שאלה',
+    forWhom:'עבור:', audAuto:'אוטומטי (מהפרומט)', audYeshiva:'בית מדרש / ישיבה', audSchool:'בית ספר',
+    lenLabel:'אורך:', lenAuto:'אוטומטי (מהפרומט)', lenShort:'קצר (~25 דק׳)', lenMed:'בינוני (~45 דק׳)', lenLong:'ארוך (~90 דק׳)',
+    bandAuto:'שכבה — אוטומטי', band1:'כיתות א–ג', band2:'כיתות ד–ו', band3:'כיתות ז–ט', band4:'כיתות י–יב',
     askPlaceholder:'שאל את החברותא…', footer:'נבנה ביראת שמיים · אינו פסיקת הלכה למעשה',
     welcomeTitle:'חברותא AI', welcomeBody:'ברוך הבא ללימוד. שאל שאלה על הסוגיא והחברותא תשיב ממקורות מצוטטים.',
     relatedSources:'מקורות קשורים', sourcesHint:'המקורות יופיעו כאן', noText:'אין טקסט זמין למקור זה.',
@@ -291,6 +318,9 @@ const T = {
     noChats:'No chats yet', del:'Delete', settingsLink:'⚙ Settings', supportLink:'? Support',
     openChats:'Open chats', newChatShort:'New discussion', collapse:'Collapse',
     discussionTitle:'Discussion with the Chavruta', lesson:'Lesson', explain:'Explain', qa:'Q&A',
+    forWhom:'For:', audAuto:'Auto (from prompt)', audYeshiva:'Beit Midrash / Yeshiva', audSchool:'School',
+    lenLabel:'Length:', lenAuto:'Auto (from prompt)', lenShort:'Short (~25 min)', lenMed:'Medium (~45 min)', lenLong:'Long (~90 min)',
+    bandAuto:'Grade — auto', band1:'Grades 1–3', band2:'Grades 4–6', band3:'Grades 7–9', band4:'Grades 10–12',
     askPlaceholder:'Ask the Chavruta…', footer:'Built with reverence · Not a halachic ruling',
     welcomeTitle:'Chavruta AI', welcomeBody:'Welcome to the study. Ask about the sugya and the Chavruta will answer with cited sources.',
     relatedSources:'Related sources', sourcesHint:'Sources will appear here', noText:'No text available for this source.',
@@ -346,7 +376,7 @@ function applyLang() {
 // ── Persist settings across refreshes (localStorage) ─────────────────────────────
 const LS_KEY = 'chavruta.settings';
 function saveSettings(){
-  try { localStorage.setItem(LS_KEY, JSON.stringify({ lang:state.lang, theme:state.theme, defaultIntent:state.defaultIntent, srcDefaultOpen:state.srcDefaultOpen })); } catch(e){}
+  try { localStorage.setItem(LS_KEY, JSON.stringify({ lang:state.lang, theme:state.theme, defaultIntent:state.defaultIntent, srcDefaultOpen:state.srcDefaultOpen, audience:state.audience, gradeBand:state.gradeBand, length:state.length })); } catch(e){}
 }
 function loadSettings(){
   try {
@@ -355,6 +385,9 @@ function loadSettings(){
     if (s.theme) state.theme = s.theme;
     if (s.defaultIntent) { state.defaultIntent = s.defaultIntent; state.intent = s.defaultIntent; }
     if (typeof s.srcDefaultOpen === 'boolean') state.srcDefaultOpen = s.srcDefaultOpen;
+    if (typeof s.audience === 'string') state.audience = s.audience;
+    if (typeof s.gradeBand === 'string') state.gradeBand = s.gradeBand;
+    if (typeof s.length === 'string') state.length = s.length;
   } catch(e){}
 }
 
@@ -631,7 +664,12 @@ async function send(text) {
   state.messages.push({ role:'user', text, citations:[], attachments });
   state.userSources = [];
   state.loading = true; render();
-  const body = JSON.stringify({ question: text, intent: state.intent, lang: state.lang, attachments });
+  // Lesson mode: send the chosen DEFAULTS (empty = "auto"; backend then reads the prompt, and asks
+  // if a field is neither in the prompt nor set here).
+  const lessonFields = state.intent === 'lesson'
+    ? { audience: state.audience, grade_band: state.audience === 'school' ? state.gradeBand : '', length: state.length }
+    : {};
+  const body = JSON.stringify({ question: text, intent: state.intent, lang: state.lang, attachments, ...lessonFields });
   try {
     if (demoMode) throw new Error('demo');
     const sid = state.activeId;
@@ -687,7 +725,18 @@ function setIntent(intent) {
     b.className = 'px-3 py-1.5 rounded-full ' + (b.dataset.intent === intent ? 'grad text-white' : 'text-ink/60');
   });
   $('#goalLabel').textContent = INTENT_LABEL[state.lang][intent];
+  updateLessonOpts();
 }
+// Lesson options bar: visible only in lesson mode; grade-band select shown only for "school".
+function updateLessonOpts() {
+  const bar = $('#lessonOpts'); if (bar) bar.classList.toggle('hidden', state.intent !== 'lesson');
+  const band = $('#bandSel'); if (band) band.classList.toggle('hidden', state.audience !== 'school');
+  const a = $('#audSel'), l = $('#lenSel'), b = $('#bandSel');
+  if (a) a.value = state.audience; if (l) l.value = state.length; if (b) b.value = state.gradeBand;
+}
+$('#audSel')?.addEventListener('change', e => { state.audience = e.target.value; updateLessonOpts(); saveSettings(); });
+$('#bandSel')?.addEventListener('change', e => { state.gradeBand = e.target.value; saveSettings(); });
+$('#lenSel')?.addEventListener('change', e => { state.length = e.target.value; saveSettings(); });
 $('#intentSeg').addEventListener('click', e => {
   const btn = e.target.closest('[data-intent]'); if (!btn) return;
   setIntent(btn.dataset.intent);

@@ -2,6 +2,9 @@
 id: shut-pesak
 title: "שו\"ת — מקור, שיטות והכרעה"
 genre: shut-pesak
+audience: yeshiva
+grade_band: beit-midrash
+age_range: "16+ — בני ישיבה / לומדי בית מדרש"
 mode: shut
 description: >
   תבנית תשובת שו"ת לשאלה המבקשת הוראה למעשה. מהלך התשובה: פתיחה במקור הדין והגדרת הנדון,

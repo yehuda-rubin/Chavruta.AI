@@ -2,6 +2,10 @@
 id: parasha
 title: "פרשת שבוע — תבנית"
 genre: parasha-tanakh
+audience: yeshiva
+grade_band: beit-midrash
+age_range: "16+ — בני ישיבה / לומדי בית מדרש"
+mode: lesson
 description: >
   שיעור על פרשת השבוע או על סוגיה בתנ"ך, הבנוי סביב הפסוקים: תחילה פשוטו של מקרא (רש"י,
   רשב"ם, אבן עזרא), אחר כך קושי או שאלה בכתוב, תשובות הפשטנים, מדרשי חז"ל, מחלוקת המפרשים

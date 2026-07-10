@@ -2,6 +2,10 @@
 id: tefila
 title: "תפילה וברכות — תבנית"
 genre: tefila-berachot
+audience: yeshiva
+grade_band: beit-midrash
+age_range: "16+ — בני ישיבה / לומדי בית מדרש"
+mode: lesson
 description: >
   שיעור על תפילה, ברכה או פרק בסידור, המבקש להבין את הנוסח לעומק ולהתפלל בכוונה. תחילה
   הנוסח עצמו, אחר כך מקורו (גמרא, אנשי כנסת הגדולה, ראשונים), פירוש המילים והמבנה, ההלכות

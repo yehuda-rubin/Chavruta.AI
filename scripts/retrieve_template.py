@@ -34,6 +34,10 @@ def main() -> None:
     ap.add_argument("--k", type=int, default=3)
     ap.add_argument("--mode", choices=["lesson", "shut", "all"], default="all",
                     help="restrict to lesson templates (3 files) or shut templates (single answer)")
+    ap.add_argument("--audience", choices=["yeshiva", "school", "all"], default="all",
+                    help="restrict to yeshiva/beit-midrash templates or school (age-differentiated) templates")
+    ap.add_argument("--grade_band", default=None,
+                    help="restrict to a school age band: a-c / d-f / g-i / j-l")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
 
@@ -47,10 +51,14 @@ def main() -> None:
         print(f"template collection '{COLLECTION}' not found — run scripts/index_templates.py first")
         sys.exit(1)
 
-    qfilter = None
+    must = []
     if args.mode != "all":
-        qfilter = models.Filter(must=[
-            models.FieldCondition(key="mode", match=models.MatchValue(value=args.mode))])
+        must.append(models.FieldCondition(key="mode", match=models.MatchValue(value=args.mode)))
+    if args.audience != "all":
+        must.append(models.FieldCondition(key="audience", match=models.MatchValue(value=args.audience)))
+    if args.grade_band:
+        must.append(models.FieldCondition(key="grade_band", match=models.MatchValue(value=args.grade_band)))
+    qfilter = models.Filter(must=must) if must else None
 
     e = emb.embed_query(args.query)
     res = client.query_points(collection_name=COLLECTION, query=e.dense, limit=args.k,
@@ -64,6 +72,9 @@ def main() -> None:
             "score": round(p.score, 4),
             "id": pl.get("id"),
             "mode": pl.get("mode", "lesson"),
+            "audience": pl.get("audience", "yeshiva"),
+            "grade_band": pl.get("grade_band", ""),
+            "age_range": pl.get("age_range", ""),
             "genre": pl.get("genre"),
             "title": pl.get("title"),
             "dir": pl.get("dir"),
@@ -78,7 +89,8 @@ def main() -> None:
     print(f"\nQUERY: {args.query}\n{'='*60}")
     for i, m in enumerate(matches, 1):
         star = "  ← best match" if i == 1 else ""
-        print(f"\n[{i}] {m['score']}  {m['id']}  [{m['mode']}] ({m['genre']}){star}")
+        band = f"/{m['grade_band']}" if m['grade_band'] else ""
+        print(f"\n[{i}] {m['score']}  {m['id']}  [{m['audience']}{band}·{m['mode']}] ({m['genre']}){star}")
         print(f"    {m['title']}")
         print(f"    דוגמאות: {', '.join(m['example_topics'])}")
         for role, path in m["files"].items():

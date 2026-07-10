@@ -2,6 +2,10 @@
 id: halacha
 title: "הלכה למעשה — תבנית פסיקה"
 genre: halacha-lemaaseh
+audience: yeshiva
+grade_band: beit-midrash
+age_range: "16+ — בני ישיבה / לומדי בית מדרש"
+mode: lesson
 description: >
   שיעור הלכה מעשית היוצא משאלה קונקרטית מן החיים ומוליך אל הכרעה למעשה. תחילה המקרה
   והשאלה, אחר כך שורש הדין (משנה/גמרא), עמדות הראשונים, פסק השולחן ערוך ונושאי כליו (מגן

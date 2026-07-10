@@ -2,6 +2,10 @@
 id: aggada
 title: "אגדה ומדרש — תבנית"
 genre: aggada-midrash
+audience: yeshiva
+grade_band: beit-midrash
+age_range: "16+ — בני ישיבה / לומדי בית מדרש"
+mode: lesson
 description: >
   שיעור על מאמר אגדה או מדרש חז"ל, המבקש לחשוף את עומקו הרעיוני מעבר לפשט התמוה. תחילה
   לשון האגדה/המדרש, אחר כך הקושי (מדוע חז"ל אמרו כך — הרי זה תמוה כפשוטו), פירושי חז"ל
