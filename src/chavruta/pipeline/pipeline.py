@@ -99,12 +99,25 @@ def build_backends(profile: Profile):
 
         reranker = Reranker(profile.rerank_model, device=profile.embedding_device)
 
-    link_graph = LinkGraph.load(f"{profile.qdrant_path}/../links.jsonl")
+    # Prefer the corpus-derived, corpus-aligned graph on disk (LinkStore + ref index — O(1) RAM);
+    # fall back to the legacy in-memory links.jsonl if it isn't built yet.
+    from pathlib import Path as _Path
+    _data = _Path(profile.qdrant_path).parent
+    _graph_db, _ref_db = _data / "links_corpus.db", _data / "ref_index.db"
+    ref_resolver = None
+    if _graph_db.exists() and _ref_db.exists():
+        from chavruta.corpus.links import LinkStore
+        from chavruta.corpus.ref_index import RefIndex
+
+        link_graph = LinkStore(_graph_db)
+        ref_resolver = RefIndex(_ref_db)
+    else:
+        link_graph = LinkGraph.load(f"{profile.qdrant_path}/../links.jsonl")
     link_expander = None
-    if len(link_graph._adj) > 0:
+    if len(link_graph) > 0:
         from chavruta.retrieval.link_expand import LinkExpander
 
-        link_expander = LinkExpander(store, link_graph, profile)
+        link_expander = LinkExpander(store, link_graph, profile, ref_resolver=ref_resolver)
 
     retriever = HybridRetriever(
         embedding, store, profile, reranker=reranker, link_expander=link_expander

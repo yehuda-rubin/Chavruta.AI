@@ -9,6 +9,7 @@ supercommentaries — things vector similarity alone does not encode.
 from __future__ import annotations
 
 import json
+import sqlite3
 from collections import defaultdict
 from pathlib import Path
 
@@ -72,6 +73,9 @@ class LinkGraph:
                          "link_type": link_type, "to_work_id": work_id},
                         ensure_ascii=False) + "\n")
 
+    def __len__(self) -> int:
+        return len(self._adj)
+
     @classmethod
     def load(cls, path: str | Path) -> "LinkGraph":
         g = cls()
@@ -83,3 +87,41 @@ class LinkGraph:
                 d = json.loads(line)
                 g._adj[d["from_ref"]].append((d["to_ref"], d["link_type"], d.get("to_work_id", "")))
         return g
+
+
+class LinkStore:
+    """On-disk (SQLite) canonical link graph — same neighbours()/expand() interface as LinkGraph
+    but O(1) RAM. Built by scripts/build_corpus_links.py into a table ``edges(from_canon, to_canon)``
+    (both directions, indexed on from_canon). Keys are CANONICAL refs (see corpus.refs), so callers
+    must canonicalize before querying — LinkExpander does this.
+    """
+
+    def __init__(self, db_path: str | Path, *, max_reached: int = 200) -> None:
+        self._db = sqlite3.connect(f"file:{Path(db_path)}?mode=ro", uri=True, check_same_thread=False)
+        self._max = max_reached
+
+    def neighbours(self, ref: str, work_ids: list[str] | None = None) -> list[str]:
+        return [r[0] for r in self._db.execute(
+            "SELECT to_canon FROM edges WHERE from_canon=?", (ref,))]
+
+    def expand(self, refs: list[str], depth: int = 1, work_ids: list[str] | None = None) -> list[str]:
+        seen = set(refs)
+        frontier = list(refs)
+        reached: list[str] = []
+        for _ in range(max(0, depth)):
+            nxt = []
+            for ref in frontier:
+                for nb in self.neighbours(ref):
+                    if nb not in seen:
+                        seen.add(nb)
+                        reached.append(nb)
+                        nxt.append(nb)
+                        if len(reached) >= self._max:
+                            return reached
+            frontier = nxt
+            if not frontier:
+                break
+        return reached
+
+    def __len__(self) -> int:
+        return self._db.execute("SELECT COUNT(*) FROM edges").fetchone()[0]

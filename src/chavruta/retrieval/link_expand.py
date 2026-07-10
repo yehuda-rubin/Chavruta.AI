@@ -8,22 +8,39 @@ vector hits by the retriever. Activates the full cross-corpus reach as corpora a
 
 from __future__ import annotations
 
-from chavruta.corpus.links import LinkGraph
+from chavruta.corpus.refs import canonical_ref
 from chavruta.corpus.schema import Query
 from chavruta.retrieval.base import RankedHit
 
 
 class LinkExpander:
-    def __init__(self, store, link_graph: LinkGraph, profile, *, link_score: float = 0.5):
+    def __init__(self, store, link_graph, profile, *, link_score: float = 0.5,
+                 ref_resolver=None, max_refs: int = 60):
         self.store = store
         self.link_graph = link_graph
         self.profile = profile
         self.link_score = link_score  # expanded hits score below direct vector hits
+        # When the graph is keyed by CANONICAL refs (LinkStore), a resolver maps a canonical
+        # neighbour back to the original chunk-ref strings the vector store stores.
+        self.ref_resolver = ref_resolver
+        self.max_refs = max_refs
 
     def expand(self, anchor_refs: list[str], query: Query) -> list[RankedHit]:
-        reached = self.link_graph.expand(
-            anchor_refs, depth=query.expand_depth, work_ids=query.work_ids
-        )
+        if self.ref_resolver is not None:
+            canon = [canonical_ref(r) for r in anchor_refs if r]
+            reached_canon = self.link_graph.expand(canon, depth=query.expand_depth)
+            reached, seen = [], set()
+            for c in reached_canon:
+                for orig in self.ref_resolver.originals(c):
+                    if orig not in seen:
+                        seen.add(orig)
+                        reached.append(orig)
+                if len(reached) >= self.max_refs:
+                    break
+        else:
+            reached = self.link_graph.expand(
+                anchor_refs, depth=query.expand_depth, work_ids=query.work_ids
+            )
         if not reached:
             return []
         filters = {"work_id": list(query.work_ids)} if query.work_ids else None
