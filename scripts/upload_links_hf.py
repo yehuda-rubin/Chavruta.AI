@@ -30,8 +30,9 @@ def main() -> None:
     ap.add_argument("--token", default=os.environ.get("HF_TOKEN"))
     ap.add_argument("--force", action="store_true", help="re-upload even if the file already exists")
     args = ap.parse_args()
+    # token=None → huggingface_hub uses the cached login (huggingface-cli login), which is fine.
     if not args.token:
-        raise SystemExit("no HF token — pass --token or set HF_TOKEN")
+        print("no --token/HF_TOKEN — using cached HF login")
 
     from huggingface_hub import HfApi, create_repo
     api = HfApi()
