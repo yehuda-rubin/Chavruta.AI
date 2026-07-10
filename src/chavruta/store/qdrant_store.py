@@ -238,11 +238,16 @@ class QdrantStore:
         combined = models.Filter(
             must=([*base.must, ref_or_anchor] if base else [ref_or_anchor])
         )
+        # Short timeout: without a payload index on `ref`/`anchor_ref` this scroll is a full scan of
+        # the (large) collection. Fail fast so the caller degrades to base hits in seconds instead of
+        # hanging ~60s on the server-side timeout. (The real fix is a keyword payload index on these
+        # fields — a one-time create_payload_index; see docs/CORPUS.md.)
         points, _ = self._client_().scroll(
             collection_name=name,
             scroll_filter=combined,
             limit=max(len(refs) * 16, 64),
             with_payload=True,
+            timeout=8,
         )
         return [
             Hit(chunk_id=(p.payload or {}).get("chunk_id", str(p.id)), score=1.0, payload=p.payload or {})

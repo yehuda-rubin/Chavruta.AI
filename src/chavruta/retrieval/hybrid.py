@@ -8,9 +8,13 @@ no-source signal that protects Principle I).
 
 from __future__ import annotations
 
+import logging
+
 from chavruta.corpus.schema import Query, UnitType
 from chavruta.retrieval.base import RankedHit, RetrievalResult
 from chavruta.store.base import Filter, HybridQuery
+
+logger = logging.getLogger(__name__)
 
 
 def _to_hit(h) -> RankedHit:
@@ -98,10 +102,15 @@ class HybridRetriever:
         if self.reranker is not None and self.profile.rerank and hits:
             hits = self.reranker.rerank(query.text, hits)
 
-        # Optional link-based expansion (chain of transmission / supercommentary)
+        # Optional link-based expansion (chain of transmission / supercommentary). This is an
+        # ENRICHMENT step — if it fails (e.g. a Qdrant scroll timeout on the large collection) it
+        # must degrade to the base hybrid hits, never crash the whole query.
         anchor_refs = self._anchor_refs(hits)
         if query.expand_links and self.link_expander is not None and anchor_refs:
-            hits = hits + self.link_expander.expand(anchor_refs, query)
+            try:
+                hits = hits + self.link_expander.expand(anchor_refs, query)
+            except Exception as exc:
+                logger.warning("link expansion failed (%s); serving base hits", exc)
 
         hits = self._dedup(hits)
         hits.sort(key=lambda h: h.score, reverse=True)
