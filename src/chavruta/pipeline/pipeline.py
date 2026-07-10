@@ -220,6 +220,12 @@ class ChavrutaPipeline:
         )
         if missing_note:
             answer.caveats.append(missing_note)
+        # An answer that produced no valid [S#] markers isn't citation-enforced — flag it explicitly
+        # rather than presenting it as a normal grounded answer (Principle I: every claim cited).
+        if not is_grounded and text.strip():
+            answer.caveats.append("הערה: תשובה זו אינה מעוגנת במקור מצוטט — יש לאמתה."
+                                  if query.lang != "en" else
+                                  "Note: this answer is not tied to a cited source — verify it.")
         return grounded.maybe_halacha_caveat(answer, query.lang)
 
     def _lesson_answer(self, query, result):

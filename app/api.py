@@ -15,14 +15,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-# Source markers ([S1], [S1, S5], …) are the grounding mechanism — the pipeline maps them to
-# citations, then we strip them from the DISPLAYED text so the answer reads cleanly.
-_MARKER_RE = re.compile(r"\s*\[\s*S\d+(?:\s*,\s*S\d+)*\s*\]")
+# Source markers ([S1], [S1, S5], (S1), 【S1】, …) are the grounding mechanism — the pipeline maps them
+# to citations, then we strip them from the DISPLAYED text so the answer reads cleanly.
+_MARKER_RE = re.compile(r"\s*[\[(（【]\s*S\d+(?:\s*,\s*S\d+)*\s*[\])）】]")
 
 
 def _strip_markers(text: str) -> str:
     t = _MARKER_RE.sub("", text or "")
-    t = re.sub(r"\*\*\s*\*\*", "", t)        # collapse empty bold left where a **[S#]** was stripped
+    t = re.sub(r"\*\*\s*\*\*", "", t)        # collapse empty **bold** left where a **[S#]** was stripped
+    t = re.sub(r"(?<!\*)\*\s*\*(?!\*)", "", t)  # …and empty *italic*
     t = re.sub(r"[ \t]{2,}", " ", t)
     return t.strip()
 
@@ -325,7 +326,8 @@ def _resolve_topic(question: str, history) -> str:
     return subs[-1] if subs else question
 
 
-_LESSON_SPLIT_RE = re.compile(r"^===(SOURCE_SHEET|LESSON_FLOW|FULL_LESSON|ORDER)===\s*$", re.M)
+# Tolerate the model bolding/indenting the delimiter (**===FULL_LESSON===**, leading spaces, RTL marks).
+_LESSON_SPLIT_RE = re.compile(r"^[ \t>*‏‎]*===\s*(SOURCE_SHEET|LESSON_FLOW|FULL_LESSON|ORDER)\s*===[ \t*]*$", re.M)
 
 
 def _lesson_job_md(question: str, hits, lang: str, *, audience: str | None,
@@ -498,9 +500,11 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
     if not (ss or lf or fl):
         fl = raw
 
-    # sources panel order = the model's explicit ORDER list; else the order first cited in the text.
+    # sources panel order = the model's explicit ORDER list; else the order first cited in the LESSON
+    # bodies (full lesson, then flow) — NOT the source sheet, whose listing order ≠ teaching order.
+    body = (fl or "") + "\n" + (lf or "")
     nums = [int(n) for n in re.findall(r"S(\d+)", order)] or \
-           [int(n) for n in re.findall(r"\[\s*S(\d+)\s*\]", raw)]
+           [int(n) for n in re.findall(r"\[\s*S(\d+)\s*\]", body)]
     used, seen = [], set()
     for i in nums:
         if 1 <= i <= len(hits) and i not in seen:
@@ -510,6 +514,11 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
                                     commentator=(getattr(h, "commentator_id", "") or ""),
                                     deep_link=(getattr(h, "deep_link", "") or "")))
     ss, lf, fl = _strip_markers(ss), _strip_markers(lf), _strip_markers(fl)
+
+    # Blank-file safety: if the model omitted/mis-split the SOURCE_SHEET, synthesize one from the cited
+    # sources so the download is never blank.
+    if not ss and used:
+        ss = "\n\n".join(f"**{n}. {c.ref}**\n{c.text_he}" for n, c in enumerate(used, 1))
 
     # audience/grade tag woven into the file titles so downloads are self-describing
     tag = ""
@@ -521,8 +530,11 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
              else ["source_sheet.doc", "lesson_flow.doc", "full_lesson.doc"])
     titles = ([f"דף מקורות — {topic}{tag}", f"מהלך השיעור — {topic}{tag}", f"שיעור מלא — {topic}{tag}"] if he
               else [f"Source Sheet — {topic}{tag}", f"Lesson Flow — {topic}{tag}", f"Full Lesson — {topic}{tag}"])
-    files = [FileOut(name=names[i], title=titles[i], content=[ss, lf, fl][i]) for i in range(3)]
-    return QueryResponse(answer="", citations=used, grounded=bool(used), intent="lesson", files=files)
+    # skip any file that came out blank (malformed split) — a blank Word download is worse than 2 good files
+    files = [FileOut(name=names[i], title=titles[i], content=c)
+             for i, c in enumerate((ss, lf, fl)) if c.strip()]
+    return QueryResponse(answer="", citations=used, grounded=bool(used) or bool(fl.strip()),
+                         intent="lesson", files=files)
 
 
 def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],

@@ -9,23 +9,26 @@ vector store's payloads. Read-only, thread-safe for concurrent FastAPI request t
 from __future__ import annotations
 
 import sqlite3
+from collections import OrderedDict
 from pathlib import Path
 
 
 class RefIndex:
     def __init__(self, db_path: str | Path) -> None:
         self._db = sqlite3.connect(f"file:{Path(db_path)}?mode=ro", uri=True, check_same_thread=False)
-        self._has_cache: dict[str, bool] = {}
+        self._has_cache: "OrderedDict[str, bool]" = OrderedDict()
+        self._cap = 300_000
 
     def has(self, canon: str) -> bool:
-        """Does any corpus chunk have this canonical ref? (cached membership test, bounded RAM.)"""
-        v = self._has_cache.get(canon)
-        if v is None:
-            v = self._db.execute(
-                "SELECT 1 FROM refidx WHERE canon=? LIMIT 1", (canon,)).fetchone() is not None
-            if len(self._has_cache) > 1_500_000:      # keep RAM bounded (shared with the live backend)
-                self._has_cache.clear()
-            self._has_cache[canon] = v
+        """Does any corpus chunk have this canonical ref? (bounded-LRU cached membership test.)"""
+        c = self._has_cache
+        if canon in c:
+            c.move_to_end(canon)
+            return c[canon]
+        v = self._db.execute("SELECT 1 FROM refidx WHERE canon=? LIMIT 1", (canon,)).fetchone() is not None
+        c[canon] = v
+        if len(c) > self._cap:            # evict least-recently-used, not the whole hot cache
+            c.popitem(last=False)
         return v
 
     def originals(self, canon: str, limit: int = 8) -> list[str]:

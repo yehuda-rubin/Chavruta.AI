@@ -73,7 +73,10 @@ class CorpusRefs:
 def fetch_links(ref: str, session) -> tuple[bool, list[dict]]:
     """(ok, links). ok=True means a definitive answer was obtained (mark done). ok=False means the
     request failed after retries — leave it UN-done so a later run retries it."""
-    url = f"{API}/{ref.replace('_', ' ').replace(' ', '%20')}"
+    from urllib.parse import quote
+    # Sefaria refs contain commas/colons/apostrophes — encode them all, else the request 404s
+    # (permanently under-linking every comma/apostrophe ref).
+    url = f"{API}/{quote(ref.replace('_', ' '), safe='')}"
     for attempt in range(RETRIES):
         try:
             r = session.get(url, timeout=25)

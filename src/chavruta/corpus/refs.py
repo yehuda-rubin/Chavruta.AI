@@ -26,10 +26,13 @@ def canonical_ref(s: str | None) -> str:
         return ""
     s = s.strip()
     # Commentary chunks store 'רש"י on Rashi on Chullin 11.3.1' — drop the Hebrew label up to the
-    # first ' on ' so only the clean English Sefaria ref remains.
+    # first ' on ' so only the clean English Sefaria ref remains. A purely-Hebrew ref with no ' on '
+    # is KEPT (normalized) — stripping all its Hebrew would collapse distinct refs to the same empty
+    # skeleton (a silent over-merge / empty join key).
     if _HEB.search(s):
         i = s.find(" on ")
-        s = s[i + 4:] if i != -1 else _HEB.sub("", s)
+        if i != -1:
+            s = s[i + 4:]
     s = _SEP.sub(" ", s)                  # _ . , : ; → space
     s = _WS.sub(" ", s).strip().lower()
     return s

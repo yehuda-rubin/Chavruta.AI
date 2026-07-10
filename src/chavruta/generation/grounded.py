@@ -143,7 +143,9 @@ def _system_for(intent: Intent, lang: str = "en") -> str:
     return SYSTEM_QA
 
 
-MAX_SOURCE_CHARS = 600   # keep prompts small-model-friendly; citations carry the deep-link
+MAX_SOURCE_CHARS = 1500  # Talmud/Rishonim/responsa segments often exceed 600 and the relevant clause
+#                          sits past the cut, starving grounding; the bridge (Claude) and Llama-3.3
+#                          (128k ctx) have ample room. Citations still carry the full text + deep-link.
 
 
 def build_prompt(
