@@ -15,6 +15,18 @@ from pathlib import Path
 class RefIndex:
     def __init__(self, db_path: str | Path) -> None:
         self._db = sqlite3.connect(f"file:{Path(db_path)}?mode=ro", uri=True, check_same_thread=False)
+        self._has_cache: dict[str, bool] = {}
+
+    def has(self, canon: str) -> bool:
+        """Does any corpus chunk have this canonical ref? (cached membership test, bounded RAM.)"""
+        v = self._has_cache.get(canon)
+        if v is None:
+            v = self._db.execute(
+                "SELECT 1 FROM refidx WHERE canon=? LIMIT 1", (canon,)).fetchone() is not None
+            if len(self._has_cache) > 1_500_000:      # keep RAM bounded (shared with the live backend)
+                self._has_cache.clear()
+            self._has_cache[canon] = v
+        return v
 
     def originals(self, canon: str, limit: int = 8) -> list[str]:
         """The original chunk-ref strings whose canonical form is `canon` (bounded)."""
