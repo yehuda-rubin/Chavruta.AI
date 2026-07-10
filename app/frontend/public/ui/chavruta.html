@@ -92,6 +92,7 @@ tailwind.config = { theme: { extend: {
           <button data-intent="explain" class="px-3 py-1.5 rounded-full text-ink/60" data-i18n="explain">הסבר</button>
           <button data-intent="qa" class="px-3 py-1.5 rounded-full text-ink/60" data-i18n="qa">שאלה</button>
           <button data-intent="shut" class="px-3 py-1.5 rounded-full text-ink/60" data-i18n="shutMode">שו"ת</button>
+          <button data-intent="chavruta" class="px-3 py-1.5 rounded-full text-ink/60" data-i18n="chavrutaMode">חברותא</button>
         </div>
       </div>
 
@@ -307,7 +308,7 @@ const T = {
     demoOffline:'‹ מצב הדגמה — השרת אינו מחובר. הפעל את ה-API (uvicorn / docker) כדי לקבל תשובות אמיתיות. ›',
     serverError:'שגיאה בפנייה לשרת: ',
     tagRashi:'רש"י', tagRambam:'רמב"ם', tagTosafot:'תוספות', tagBeitYosef:'בית יוסף', tagGemara:'גמרא', tagSource:'מקור',
-    shutMode:'שו"ת', close:'סגור', save:'שמור',
+    shutMode:'שו"ת', chavrutaMode:'חברותא', close:'סגור', save:'שמור',
     settingsTitle:'הגדרות', setLanguage:'שפת ממשק', setDefaultMode:'מצב ברירת מחדל',
     setTheme:'ערכת נושא', themeLight:'בהיר', themeDark:'כהה', themeAuto:'אוטומטי',
     setSourcesDefault:'מקורות כברירת מחדל', srcCollapsed:'מכווץ', srcExpanded:'מורחב',
@@ -347,7 +348,7 @@ const T = {
     demoOffline:'‹ Demo mode — the server is not connected. Start the API (uvicorn / docker) for real answers. ›',
     serverError:'Server error: ',
     tagRashi:'Rashi', tagRambam:'Rambam', tagTosafot:'Tosafot', tagBeitYosef:'Beit Yosef', tagGemara:'Gemara', tagSource:'Source',
-    shutMode:'Responsa', close:'Close', save:'Save',
+    shutMode:'Responsa', chavrutaMode:'Chavruta', close:'Close', save:'Save',
     settingsTitle:'Settings', setLanguage:'Interface language', setDefaultMode:'Default mode',
     setTheme:'Theme', themeLight:'Light', themeDark:'Dark', themeAuto:'Auto',
     setSourcesDefault:'Sources by default', srcCollapsed:'Collapsed', srcExpanded:'Expanded',
@@ -368,7 +369,7 @@ const T = {
   },
 };
 const tr = (k) => (T[state.lang] && T[state.lang][k] != null) ? T[state.lang][k] : (T.he[k] != null ? T.he[k] : k);
-const INTENT_LABEL = { he:{ lesson:'🎯 שיעור', explain:'🎯 הסבר', qa:'🎯 שאלה', shut:'🎯 שו"ת' }, en:{ lesson:'🎯 Lesson', explain:'🎯 Explain', qa:'🎯 Q&A', shut:'🎯 Responsa' } };
+const INTENT_LABEL = { he:{ lesson:'🎯 שיעור', explain:'🎯 הסבר', qa:'🎯 שאלה', shut:'🎯 שו"ת', chavruta:'🤝 חברותא' }, en:{ lesson:'🎯 Lesson', explain:'🎯 Explain', qa:'🎯 Q&A', shut:'🎯 Responsa', chavruta:'🤝 Chavruta' } };
 function applyLang() {
   const lang = state.lang;
   document.documentElement.lang = lang; document.documentElement.dir = lang === 'he' ? 'rtl' : 'ltr';

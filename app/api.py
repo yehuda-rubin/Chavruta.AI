@@ -551,10 +551,66 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
                          intent="lesson", caveats=caveats, files=files)
 
 
+def _chavruta_job_md(question: str, hits, lang: str, history) -> str:
+    """Bridge job: play a Socratic study-partner (chavruta) — learn WITH the user, don't lecture."""
+    lines = [f"lang: {lang}", "", "## ROLE",
+             "אתה **חברותא** לימודי — אתה לומד יחד עם המשתמש, בגובה העיניים, ולא מרצה מלמעלה.", ""]
+    prior = [h for h in (history or []) if (getattr(h, "text", "") or "").strip()]
+    if prior:
+        lines += ["## CONVERSATION SO FAR"]
+        for h in prior[-8:]:
+            lines += [f"- {getattr(h, 'role', 'user')}: {(getattr(h, 'text', '') or '').strip()}"]
+        lines += [""]
+    lines += ["## THE LEARNER JUST SAID", question.strip(), "", "## SOURCES"]
+    for i, h in enumerate(hits, 1):
+        who = f" ({h.commentator_id})" if getattr(h, "commentator_id", None) else ""
+        lines += [f"### [S{i}] {h.ref}{who}", (getattr(h, "text", "") or "").strip(), ""]
+    lines += [
+        "## INSTRUCTIONS FOR CLAUDE (the chavruta)",
+        "Study b'chavruta — do NOT deliver a lecture or dump the whole sugya. Instead, in ONE short, warm "
+        "turn: bring a small piece of the SOURCE, and ask the learner a guiding/Socratic question that moves "
+        "the study forward. React to what the learner just said — affirm a good point, gently push back on a "
+        "gap ('ומה עם…?', 'למה לדעתך…?'), and probe their reasoning. Build the understanding together, step by "
+        "step, one question at a time.",
+        "If the learner asked a direct factual question, answer it briefly and grounded, then hand the ball "
+        "back with a question.",
+        "Ground everything ONLY in the SOURCES; cite by [S#] (stripped from display). Keep it fairly short "
+        "(a real chavruta exchange, not an essay). Write in the learner's language. **bold** key terms.",
+    ]
+    return "\n".join(lines)
+
+
+def _run_chavruta(question: str, lang: str, history=None) -> QueryResponse:
+    """Socratic study-partner mode: retrieve on the topic, then Claude plays a chavruta that asks
+    questions and learns WITH the user (grounded), rather than lecturing."""
+    pipeline = _get_pipeline()
+    user_turns = [(getattr(h, "text", "") or "").strip() for h in (history or [])
+                  if getattr(h, "role", "user") == "user" and (getattr(h, "text", "") or "").strip()]
+    anchor = (user_turns[0] + " " + question) if user_turns else question   # keep retrieval on the topic
+    q = Query(text=anchor, lang=lang or None, intent=Intent.QA)
+    rq = pipeline._resolve_query(q)
+    lang = rq.lang or lang or "he"
+    hits = list(pipeline.retriever.retrieve(rq, top_k=10).hits)
+    job = _chavruta_job_md(question, hits, lang, history)
+    raw = pipeline.llm.request(job) if hasattr(pipeline.llm, "request") else ""
+    nums, used, seen = [int(n) for n in re.findall(r"\[\s*S(\d+)\s*\]", raw)], [], set()
+    for i in nums:
+        if 1 <= i <= len(hits) and i not in seen:
+            seen.add(i)
+            h = hits[i - 1]
+            used.append(CitationOut(ref=h.ref, text_he=(getattr(h, "text", "") or ""), text_en="",
+                                    commentator=(getattr(h, "commentator_id", "") or ""),
+                                    deep_link=(getattr(h, "deep_link", "") or "")))
+    return QueryResponse(answer=_strip_markers(raw), citations=used, grounded=bool(used),
+                         intent="chavruta", files=[])
+
+
 def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
                audience: str = "", grade_band: str = "", length: str = "") -> QueryResponse:
     if intent_str == "shut":          # UI's responsa mode → HALACHA intent
         intent_str = "halacha"
+    if intent_str == "chavruta":      # Socratic study-partner mode (its own path)
+        return _run_chavruta(question, lang, history=history)
     intent = None
     if intent_str:
         try:
