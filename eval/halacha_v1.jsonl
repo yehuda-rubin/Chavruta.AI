@@ -1,0 +1,14 @@
+# Chavruta.AI halacha / responsa (שו"ת) retrieval eval v1 (Principle V) — extends the gate beyond
+# Tanakh QA to the halachic corpus. Format: {"qid","question","lang","expected_refs":[...],"intent","note"}
+# expected_refs are topic-level anchors in the stored corpus ref scheme (segment-prefix matched by the
+# harness). expected_refs == [] ⇒ an out-of-corpus posek is named → honest no-source must hold (SC-002);
+# these are pinned via the registry (a modern work the router tags but the corpus has not loaded), NOT via
+# an empty retrieval, so they are deterministic. Baseline: retrieval@K 100% (5/5), honesty 100% (2/2).
+# Run:  python scripts/run_eval.py --retrieval-only --dataset eval/halacha_v1.jsonl
+{"qid": "hal-001-he", "question": "האם מותר לאכול בשר עוף בחלב", "lang": "he", "expected_refs": ["Mishneh_Torah,_Forbidden_Foods.9", "Responsa_Chatam_Sofer,_Yoreh_De'ah.19"], "intent": "halacha", "note": "meat & milk — Rambam Ma'achalot Assurot 9 / Chatam Sofer responsa (exercises שו\"ת retrieval)"}
+{"qid": "hal-002-he", "question": "האם מותר לטלטל מוקצה בשבת", "lang": "he", "expected_refs": ["Chayyei_Adam,_Shabbat_and_Festivals.65"], "intent": "halacha", "note": "muktzeh on Shabbat — Chayyei Adam"}
+{"qid": "hal-003-he", "question": "מה הדין בברכת שהחיינו על פרי חדש", "lang": "he", "expected_refs": ["Peninei_Halakhah,_Berakhot.17", "Mateh_Efrayim.600"], "intent": "halacha", "note": "Shehecheyanu on new fruit"}
+{"qid": "hal-004-he", "question": "מהי ההלכה לגבי הדלקת נרות שבת", "lang": "he", "expected_refs": ["Beur_HaGra_on_Shulchan_Arukh,_Orach_Chayim.261", "Biur_Halacha.261"], "intent": "halacha", "note": "Shabbat candle lighting — OC 261"}
+{"qid": "hal-005-he", "question": "מה דין כיבוד אב ואם", "lang": "he", "expected_refs": ["Peninei_Halakhah,_Family.1", "Deuteronomy.27"], "intent": "halacha", "note": "honoring parents"}
+{"qid": "hal-uns-001-he", "question": "מה פוסק הרב סולוביצ'יק על שמירת שבת", "lang": "he", "expected_refs": [], "intent": "halacha", "note": "Soloveitchik — modern work the registry has not loaded; honest no-source"}
+{"qid": "hal-uns-002-he", "question": "מה מלמד הראי\"ה קוק על התשובה בספרו אורות התשובה", "lang": "he", "expected_refs": [], "intent": "halacha", "note": "Rav Kook / Orot — tagged modern_torah, not loaded; honest no-source"}
