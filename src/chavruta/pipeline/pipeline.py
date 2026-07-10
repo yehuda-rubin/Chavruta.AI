@@ -143,6 +143,7 @@ class ChavrutaPipeline:
                 )
             router = Router(planner=planner)
         self.router = router
+        self._wire_bridge_source_fetcher()
 
     @classmethod
     def from_backends(cls, profile: Profile, *, embedding, store, llm, retriever,
@@ -157,7 +158,41 @@ class ChavrutaPipeline:
 
             router = Router()
         self.router = router
+        self._wire_bridge_source_fetcher()
         return self
+
+    def _wire_bridge_source_fetcher(self) -> None:
+        """Give the bridge LLM a way to pull more sources on its own: when the model replies with a
+        ===NEED_SOURCES=== block, these follow-up queries are retrieved and appended to the job. Only
+        applies to a backend that exposes `source_fetcher` (BridgeLLM); a no-op otherwise."""
+        llm = getattr(self, "llm", None)
+        if llm is None or not hasattr(llm, "source_fetcher"):
+            return
+        from chavruta.llm.base import SourceBlock
+
+        def fetch(queries: list[str]) -> list[SourceBlock]:
+            out: list[SourceBlock] = []
+            seen: set[str] = set()
+            for q in (queries or [])[:5]:
+                if not (q or "").strip():
+                    continue
+                try:
+                    rq = self._resolve_query(Query(text=q, intent=Intent.QA))
+                    hits = self.retriever.retrieve(rq, top_k=8).hits
+                except Exception:
+                    continue
+                for h in hits:
+                    ref = getattr(h, "ref", "") or ""
+                    if ref and ref not in seen:
+                        seen.add(ref)
+                        out.append(SourceBlock(marker="", ref=ref,
+                                               commentator_id=getattr(h, "commentator_id", None),
+                                               text=getattr(h, "text", "") or ""))
+                if len(out) >= 24:
+                    break
+            return out[:24]
+
+        llm.source_fetcher = fetch
 
     def _resolve_query(self, request: Query) -> Query:
         if request.lang is None or request.lang == "":

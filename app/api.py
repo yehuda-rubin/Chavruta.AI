@@ -375,6 +375,12 @@ def _lesson_job_md(question: str, hits, lang: str, *, audience: str | None,
     # ── Clarify gate (applies to every audience) ──
     lines += [
         "## INSTRUCTIONS FOR CLAUDE",
+        "STEP 0 — If the SOURCES are thin or off-topic for the requested lesson, do NOT build the lesson "
+        "on unrelated material. First try to fetch better ones: reply with ONLY a block starting with the "
+        "EXACT line '===NEED_SOURCES===' followed by 1–5 focused search queries (one per line — the "
+        "sugya, key refs, the מצווה, related ראשונים/פוסקים), and STOP. The system will retrieve them and "
+        "re-send this job with the extra sources appended. Do this before STEP 1.",
+        "",
         "STEP 1 — Decide if you have enough to build a FOCUSED lesson. If the topic is too broad or "
         "vague (e.g. 'שבת' or 'תפילה' with no angle), or a detail that materially changes the lesson "
         "is missing (for school: the grade band if not given; the specific parasha/sugya/מצווה; the "
@@ -489,7 +495,11 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
 
     job = _lesson_job_md(topic, hits, lang, audience=aud, grade_band=band, length=length,
                          tpl=tpl, history=history)
-    raw = pipeline.llm.request(job) if hasattr(pipeline.llm, "request") else ""
+    raw = pipeline.llm.request(job, lang=lang) if hasattr(pipeline.llm, "request") else ""
+    # Agentic retrieval may have appended sources (===NEED_SOURCES===); include them so their [S#]
+    # citations resolve. They continue the marker numbering after the original hits, so a plain
+    # append keeps hits[i-1] aligned with [S{i}].
+    hits = hits + list(getattr(pipeline.llm, "fetched_sources", []) or [])
 
     # Clarify gate — the model decided it needs more info: surface the questions, no files yet.
     if "===CLARIFY===" in raw:
@@ -585,9 +595,12 @@ def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bo
         "back with a question.",
         "**WHEN THE SOURCES DON'T FIT:** if the SOURCES above do not actually cover what the learner asked — "
         "retrieval missed, they're off-topic, or you lack enough to study honestly — do NOT force a grounded "
-        "answer on unrelated text and do NOT invent the source. Say so warmly in a line, then ASK FOR "
-        "DIRECTION: the exact daf/ref (e.g. 'סנהדרין כג ע\"א'), the text pasted in, or a narrower topic. A real "
-        "chavruta says 'רגע — לא בטוח שעלה לי המקור הנכון, תכוון אותי'. This is encouraged, not a failure.",
+        "answer on unrelated text and do NOT invent the source. FIRST try to fetch better sources yourself: "
+        "reply with ONLY a block starting with the EXACT line '===NEED_SOURCES===' followed by 1–5 focused "
+        "search queries (one per line — e.g. the exact daf/sugya, a ref, the topic), and STOP; the system "
+        "retrieves them and re-sends this job with the sources appended. ONLY if that still comes back empty, "
+        "say so warmly and ASK THE LEARNER for direction (the exact daf/ref, the text pasted in, a narrower "
+        "topic) — 'רגע — לא עלה לי המקור הנכון, תכוון אותי'. Both are encouraged, not a failure.",
         "Ground everything ONLY in the SOURCES; cite by [S#] (stripped from display). Keep it fairly short "
         "(a real chavruta exchange, not an essay). Write in the learner's language. **bold** key terms.",
     ]
@@ -614,7 +627,8 @@ def _run_chavruta(question: str, lang: str, history=None) -> QueryResponse:
     top_score = max((getattr(h, "score", 0.0) for h in hits), default=0.0)
     weak = (not hits) or (top_score < _CHAVRUTA_WEAK_RETRIEVAL)
     job = _chavruta_job_md(question, hits, lang, history, weak_retrieval=weak)
-    raw = pipeline.llm.request(job) if hasattr(pipeline.llm, "request") else ""
+    raw = pipeline.llm.request(job, lang=lang) if hasattr(pipeline.llm, "request") else ""
+    hits = hits + list(getattr(pipeline.llm, "fetched_sources", []) or [])   # include agentically-fetched
     nums, used, seen = [int(n) for n in re.findall(r"\[\s*S(\d+)\s*\]", raw)], [], set()
     for i in nums:
         if 1 <= i <= len(hits) and i not in seen:
