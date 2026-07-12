@@ -14,12 +14,21 @@ from chavruta.llm.base import GroundedPrompt, LLMResult, render_messages
 
 class CloudLLM:
     profile = "cloud"
+    source_fetcher = None       # injected by the pipeline for agentic retrieval
+    fetched_sources: list = []
 
     def __init__(self, model_id: str, base_url: str, api_key: str):
         self.model_id = model_id
         self.base_url = base_url
         self.api_key = api_key
         self._client = None  # lazy
+
+    def request(self, body_md: str, *, lang: str = "he") -> str:
+        """Answer a pre-formatted job (markdown) — the lesson/chavruta path. Runs the same agentic
+        ===NEED_SOURCES=== retrieval loop as the bridge, over completion calls."""
+        from chavruta.llm.agentic import agentic_request
+
+        return agentic_request(self, body_md, lang=lang)
 
     def _client_(self):
         if self._client is None:

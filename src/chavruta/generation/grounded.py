@@ -202,13 +202,14 @@ def enforce_citations(
 
     citations = [
         Citation(
-            chunk_id=h.chunk_id,
+            # marker_map values may be RankedHit / Citation / SourceBlock (agentically-fetched) —
+            # read every field defensively so any of them resolves.
+            chunk_id=getattr(h, "chunk_id", "") or "",
             ref=h.ref,
-            deep_link=h.deep_link,
-            # marker_map values may be RankedHit (.text) or Citation (.quote).
+            deep_link=getattr(h, "deep_link", "") or "",
             # Full source text (no truncation) — the UI shows the complete quote on expand.
             quote=source_body(getattr(h, "text", None) or getattr(h, "quote", "") or ""),
-            commentator_id=h.commentator_id,
+            commentator_id=getattr(h, "commentator_id", None),
         )
         for h in used.values()
     ]

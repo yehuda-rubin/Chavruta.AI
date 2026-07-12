@@ -249,6 +249,11 @@ class ChavrutaPipeline:
             max_tokens=_max_tokens_for(query.intent, self.profile),
             temperature=self.profile.llm_temperature,
         )
+        # Agentic retrieval may have appended sources during generation; extend the marker map
+        # (continuing the S# numbering) so their [S#] citations resolve instead of being dropped as
+        # fabricated. No-op when the backend fetched nothing.
+        for i, s in enumerate(getattr(self.llm, "fetched_sources", []) or [], len(marker_map) + 1):
+            marker_map.setdefault(f"S{i}", s)
         text, citations, is_grounded = grounded.enforce_citations(llm_out.text, marker_map)
         answer = Answer(
             text=text, citations=citations, grounded=is_grounded,

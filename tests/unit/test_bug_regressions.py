@@ -291,3 +291,38 @@ def test_per_hit_dense_floor_prunes_noise_keeps_lexical():
     assert "Shabbat 12a" in refs                              # sparse/lexical hit (not in dense map) kept
     assert "Mishnah Kilayim 8.1" not in refs                  # dense-surfaced sub-threshold noise pruned
     assert not res.is_empty                                   # top dense cosine 0.70 ≥ threshold
+
+
+# ── Tier0 (2026-07 audit): the agentic ===NEED_SOURCES=== loop is now backend-agnostic ───────────
+# It was a private method on BridgeLLM only; hoisted to chavruta.llm.agentic so cloud/local get it too.
+
+from chavruta.llm.agentic import run_agentic_loop, parse_need_sources  # noqa: E402
+from chavruta.llm.base import SourceBlock  # noqa: E402
+
+
+def test_parse_need_sources_variants():
+    assert parse_need_sources("===NEED_SOURCES===\nסנהדרין כג\nזה בורר") == ["סנהדרין כג", "זה בורר"]
+    assert parse_need_sources("a normal answer with [S1]") == []
+    assert parse_need_sources("x\n=== NEED SOURCES ===\n- one\n- two\n===END===") == ["one", "two"]
+
+
+def test_agentic_loop_fetches_then_answers():
+    """The loop: model asks for sources → fetcher supplies them → model answers. Fetched sources are
+    returned in order and the appended job carried them with continued [S#] markers."""
+    seen_jobs = []
+    replies = iter(["===NEED_SOURCES===\nזה בורר לו אחד", "התשובה המלאה [S2]"])
+
+    def send(job_md):
+        seen_jobs.append(job_md)
+        return next(replies)
+
+    fetched_block = [SourceBlock(marker="", ref="Mishnah Sanhedrin 3.1", commentator_id=None, text="זה בורר")]
+    text, fetched = run_agentic_loop(send, "## SOURCES\n### [S1] X\nbody", lambda qs: fetched_block, "he")
+    assert text == "התשובה המלאה [S2]"
+    assert [s.ref for s in fetched] == ["Mishnah Sanhedrin 3.1"]
+    assert "ADDITIONAL SOURCES" in seen_jobs[1] and "[S2]" in seen_jobs[1]   # round 2 carried the fetch
+
+
+def test_agentic_loop_no_fetcher_returns_answer_directly():
+    text, fetched = run_agentic_loop(lambda j: "תשובה [S1]", "job", None, "he")
+    assert text == "תשובה [S1]" and fetched == []
