@@ -38,6 +38,7 @@ from pydantic import BaseModel, Field
 
 from chavruta.config.profile import Profile
 from chavruta.corpus.schema import Intent, Query, Turn
+from chavruta.llm.agentic import is_degrade_message
 
 import app.db as db
 
@@ -508,6 +509,12 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
     job = _lesson_job_md(topic, hits, lang, audience=aud, grade_band=band, length=length,
                          tpl=tpl, history=history)
     raw, fetched = pipeline.llm.request(job, lang=lang)
+    # A loop degrade/timeout ('please try again' / 'couldn't retrieve') or empty answer must NOT be
+    # packaged as a downloadable lesson marked grounded — surface it as a plain honest message.
+    if is_degrade_message(raw):
+        msg = raw.strip() or ("לא הצלחתי לבנות את השיעור כרגע — נסו שוב." if he
+                              else "Couldn't build the lesson right now — please try again.")
+        return QueryResponse(answer=msg, citations=[], grounded=False, intent="lesson", files=[])
     # Agentic retrieval may have appended sources (===NEED_SOURCES===); include them so their [S#]
     # citations resolve. They continue the marker numbering after the original hits, so a plain
     # append keeps hits[i-1] aligned with [S{i}].

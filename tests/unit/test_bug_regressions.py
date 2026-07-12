@@ -338,6 +338,15 @@ def test_agentic_loop_no_fetcher_returns_answer_directly():
     assert text == "תשובה [S1]" and fetched == []
 
 
+def test_is_degrade_message_detects_sentinels_and_empty():
+    from chavruta.llm.agentic import is_degrade_message, DEGRADE_MESSAGES
+    assert is_degrade_message("")                                   # empty ⇒ not a real answer
+    assert is_degrade_message("   ")
+    for m in DEGRADE_MESSAGES:
+        assert is_degrade_message(m)                                # each timeout/no-fetch sentinel
+    assert not is_degrade_message("שיעור מלא על שניים אוחזין [S1]")  # a real lesson is NOT a degrade
+
+
 def test_agentic_request_degrades_when_generate_raises():
     """Re-audit fix A: a completion backend raises on any API error/timeout; the request path must
     degrade gracefully (like the bridge's None) instead of propagating a 500."""

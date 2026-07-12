@@ -29,6 +29,21 @@ SOURCE_REQUEST_INSTRUCTION = (
 
 _NEED_RE = re.compile(r"^\s*={2,}\s*NEED[ _]SOURCES\s*={2,}\s*$", re.M | re.I)
 
+# The loop's graceful-degrade sentinels (timeout / couldn't-fetch). Callers use is_degrade_message()
+# to avoid packaging one of these as a real answer (e.g. a downloadable "lesson" file).
+_TIMEOUT_MSG = {"he": "לא התקבלה תשובה מהמודל בזמן. נסה שוב.",
+                "en": "No answer from the model in time. Please try again."}
+_NOFETCH_MSG = {"he": "לא הצלחתי להשיג מקורות מתאימים דרך הראג. נסה לנסח מחדש או לציין מקור מדויק.",
+                "en": "I couldn't retrieve suitable sources via the RAG. "
+                      "Try rephrasing or naming a precise source."}
+DEGRADE_MESSAGES = frozenset(_TIMEOUT_MSG.values()) | frozenset(_NOFETCH_MSG.values())
+
+
+def is_degrade_message(text: str) -> bool:
+    """True if `text` is one of the loop's graceful-degrade sentinels (or empty) — i.e. not a real
+    grounded answer, so it must not be emitted as a lesson file / marked grounded."""
+    return not (text or "").strip() or (text or "").strip() in DEGRADE_MESSAGES
+
 
 def parse_need_sources(text: str) -> list[str]:
     """If the answer is a source-request, return its query lines (else [])."""
@@ -74,16 +89,12 @@ def run_agentic_loop(send: Callable[[str], str | None], job_md: str,
     for round_i in range(MAX_RETRIEVAL_ROUNDS):
         answer = send(job_md)
         if answer is None:
-            return (("לא התקבלה תשובה מהמודל בזמן. נסה שוב." if lang == "he"
-                     else "No answer from the model in time. Please try again."), fetched)
+            return _TIMEOUT_MSG.get(lang, _TIMEOUT_MSG["en"]), fetched
         queries = parse_need_sources(answer)
         last_round = round_i == MAX_RETRIEVAL_ROUNDS - 1
         if not queries or source_fetcher is None or last_round:
             if queries:            # asked but we can't fetch again — don't surface a raw marker
-                return (("לא הצלחתי להשיג מקורות מתאימים דרך הראג. נסה לנסח מחדש או לציין מקור מדויק."
-                         if lang == "he"
-                         else "I couldn't retrieve suitable sources via the RAG. "
-                              "Try rephrasing or naming a precise source."), fetched)
+                return _NOFETCH_MSG.get(lang, _NOFETCH_MSG["en"]), fetched
             return answer, fetched
         try:
             more = source_fetcher(queries) or []
