@@ -234,6 +234,16 @@ def test_canon_corpus_ref(ref, expected):
     assert ChavrutaPipeline._canon_corpus_ref(ref) == expected
 
 
+def test_with_ref_variants_covers_dot_space_and_chapter_opening():
+    from chavruta.corpus.refs import with_ref_variants
+    # verse-level: dot + corpus-space forms so anchoring matches whichever the store uses
+    assert with_ref_variants(["Genesis.1.1"]) == ["Genesis.1.1", "Genesis 1.1"]
+    # chapter-level: also the opening verse, since base texts are stored per-verse
+    assert with_ref_variants(["Exodus.20"]) == ["Exodus.20", "Exodus 20", "Exodus 20.1"]
+    # already-spaced ref (Mishnah) isn't corrupted or duplicated
+    assert with_ref_variants(["Mishnah Sukkah 3.5"]) == ["Mishnah Sukkah 3.5"]
+
+
 def test_base_sources_for_refs_canonicalises_dedups_and_scores(monkeypatch):
     """base_sources_for_refs must look up the canonical ref, return RankedHits at score 1.0, and dedup."""
     calls = []

@@ -16,6 +16,7 @@ from collections.abc import Iterator
 
 from chavruta.config.profile import Profile
 from chavruta.corpus.links import LinkGraph
+from chavruta.corpus.refs import canon_corpus_ref
 from chavruta.corpus.registry import CorpusRegistry, default_registry
 from chavruta.corpus.schema import Answer, Intent, Query, Turn
 from chavruta.generation import grounded
@@ -370,13 +371,9 @@ class ChavrutaPipeline:
         except Exception:
             return []
 
-    @staticmethod
-    def _canon_corpus_ref(ref: str) -> str:
-        """Router refs use dots ('Genesis.1.1'); the corpus stores Tanakh verses as 'Genesis 1.1'
-        (a space after the book name). Convert only the book↔chapter dot — a dot preceded by a
-        non-digit and followed by a digit — to a space. This leaves the chapter.verse dot alone and
-        does NOT corrupt an already-corpus-format ref ('Mishnah Bava Metzia 1.1' stays unchanged)."""
-        return re.sub(r"(?<=\D)\.(?=\d)", " ", ref or "", count=1)
+    # kept as a thin delegate so callers/tests have one name; the canonical implementation lives in
+    # corpus.refs (shared with the retriever's anchoring path).
+    _canon_corpus_ref = staticmethod(canon_corpus_ref)
 
     def base_sources_for_refs(self, refs):
         """The primary-source chunks (unit_type=source) for explicit refs — so a lesson leads from

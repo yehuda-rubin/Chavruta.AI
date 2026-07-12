@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 
+from chavruta.corpus.refs import with_ref_variants
 from chavruta.corpus.schema import Query, UnitType
 from chavruta.retrieval.base import RankedHit, RetrievalResult
 from chavruta.store.base import Filter, HybridQuery
@@ -99,9 +100,12 @@ class HybridRetriever:
             # Named commentators → fetch them *specifically* on the ref (small, never
             # truncated), guaranteeing e.g. Rashi AND Ramban on Genesis.1.1. No named
             # commentator → fetch the verse + all its commentaries (work scope) for context.
+            # The router emits dotted refs ('Genesis.1.1') but the corpus stores base texts with a
+            # space ('Genesis 1.1'); pass BOTH forms so the anchor actually resolves (without this the
+            # exact match silently returned 0 → the base pasuk/daf never anchored).
             anchor_filter = self._filters(query) if query.commentator_ids else self._work_filter(query)
             anchored = self.store.fetch_by_refs(
-                self.profile.collection, query.named_refs, filters=anchor_filter
+                self.profile.collection, with_ref_variants(query.named_refs), filters=anchor_filter
             )
             for h in anchored:
                 rh = _to_hit(h)

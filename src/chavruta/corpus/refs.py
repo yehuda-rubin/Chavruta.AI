@@ -20,6 +20,38 @@ _SEP = re.compile(r"[_.,:;]+")           # Sefaria depth/segment separators, tre
 _WS = re.compile(r"\s+")
 
 
+def canon_corpus_ref(ref: str | None) -> str:
+    """Exact router→corpus ref form for an EXACT Qdrant `ref` lookup — distinct from `canonical_ref`
+    (a loose lowercased join key). The router emits dotted refs ('Genesis.1.1'), but the corpus stores
+    Tanakh/Talmud/Mishnah base texts with a space after the book name ('Genesis 1.1', 'Kiddushin 82.4',
+    'Mishnah Sukkah 3.5'). Convert only the book↔chapter dot — a dot preceded by a non-digit and
+    followed by a digit — to a space, preserving case and the chapter.verse dot. Already-spaced refs
+    pass through unchanged. Verified against the live collection across tanakh/mishnah/talmud_bavli."""
+    if not ref:
+        return ""
+    return re.sub(r"(?<=\D)\.(?=\d)", " ", ref, count=1)
+
+
+def with_ref_variants(refs) -> list[str]:
+    """The original + corpus-canonical form of each ref (deduped, order-preserving), so an exact
+    `fetch_by_refs` lookup matches whichever spelling the stored `ref`/`anchor_ref` uses. A chapter-
+    level ref ('Exodus.20' → 'Exodus 20') also yields its opening verse ('Exodus 20.1'), since base
+    texts are stored per-verse and a chapter has no single stored chunk."""
+    out: list[str] = []
+
+    def _add(v: str) -> None:
+        if v and v not in out:
+            out.append(v)
+
+    for r in refs or []:
+        _add(r)
+        canon = canon_corpus_ref(r)
+        _add(canon)
+        if re.fullmatch(r".+\s\d+", canon):        # chapter-level (no verse) → opening verse
+            _add(canon + ".1")
+    return out
+
+
 def canonical_ref(s: str | None) -> str:
     """Loose, separator-agnostic join key for a Sefaria-style ref (empty string for falsy input)."""
     if not s:
