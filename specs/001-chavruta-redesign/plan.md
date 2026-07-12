@@ -173,7 +173,7 @@ src/chavruta/
 └── eval/              # evaluation harness + datasets + scoring
 
 app/
-└── streamlit_app.py   # chat UI (RTL-aware, clickable citations, in-session context)
+└── api.py             # FastAPI service (the UI is app/frontend/, a React+Vite SPA — NOT Streamlit)
 
 scripts/               # fetch_corpus, embed_corpus_gpu, load_to_store, ask (CLI), run_eval
 #                        ingest_job (Nebius GPU factory: build+publish), bootstrap_rag (user download)

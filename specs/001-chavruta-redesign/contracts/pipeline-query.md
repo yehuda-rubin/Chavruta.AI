@@ -1,5 +1,11 @@
 # Contract: Pipeline (query → grounded answer)
 
+> ⚠️ **Partly historical (2026-07).** This describes the internal `ChavrutaPipeline` library shape at
+> spec time. The SHIPPED code differs: `pipeline.ask(request: Query, *, history) -> Answer`; the HTTP
+> surface (`app/api.py`) uses `QueryRequest`/`QueryResponse` (with `files`, `lesson_plan`); live intents
+> are `qa | explain | compare | lesson | halacha | chavruta` (halacha/שו"ת is IMPLEMENTED, not reserved —
+> its corpus is loaded). See the README "Modes" table for the authoritative list.
+
 The top-level contract the UI/CLI call. Orchestrates intent → retrieve → generate → cite,
 and is the single place grounding is enforced. Same call in both profiles.
 

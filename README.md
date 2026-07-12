@@ -68,6 +68,21 @@ The app is a **React + Vite SPA** talking to a **FastAPI** backend, with **SQLit
 Conversation history is stored in `chavruta.db` (path overridable via `CHAVRUTA_DB_PATH`; mounted to
 a volume in `docker-compose.yml` so it persists). See [app/frontend/README.md](app/frontend/README.md).
 
+### Modes (the `intent` field)
+
+| intent | what it does |
+|--------|--------------|
+| `qa` | grounded question → cited answer |
+| `explain` | a commentator's take on a source |
+| `compare` | contrast two commentators / positions |
+| `lesson` | build a full beit-midrash / classroom shiur → 3 downloadable `.doc` files (source sheet · flow · full), age-adapted via the lesson-template library (`chavruta_templates`) |
+| `halacha` (`shut`) | a responsa-style pesak walkthrough |
+| `chavruta` | Socratic study-partner — brings a source and asks a guiding question, learning *with* the user |
+
+Two cross-cutting behaviours: **agentic retrieval** — the model may reply with a `===NEED_SOURCES===`
+block to pull more sources mid-answer when retrieval was thin (`chavruta.llm.agentic`); and a
+**citation-faithfulness** guard that flags any verbatim quote not found in the retrieved sources.
+
 ---
 
 ## Corpus — the whole bookshelf
@@ -162,7 +177,10 @@ cd app\frontend ; npm install ; npm run dev
 ### The trust gate — run the evaluation harness (Principle V)
 
 ```powershell
-python scripts/run_eval.py --profile local --dataset eval/tanakh_v1.jsonl
+# corpus-aware gates for the full bookshelf (retrieval@K + honesty):
+python scripts/run_eval.py --retrieval-only --dataset eval/halacha_v1.jsonl
+python scripts/run_eval.py --retrieval-only --dataset eval/lessons_v1.jsonl
+# eval/tanakh_v1.jsonl is the HISTORICAL Tanakh-only baseline (see its header) — not a full-corpus gate
 ```
 
 ---
