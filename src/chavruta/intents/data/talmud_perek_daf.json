@@ -1,0 +1,488 @@
+{
+ "Berakhot": {
+  "he": "ברכות",
+  "perakim": [
+   "Berakhot 3.1",
+   "Berakhot 25.1",
+   "Berakhot 34.1",
+   "Berakhot 51.1",
+   "Berakhot 60.1",
+   "Berakhot 69.1",
+   "Berakhot 89.1",
+   "Berakhot 102.1",
+   "Berakhot 107.1"
+  ]
+ },
+ "Shabbat": {
+  "he": "שבת",
+  "perakim": [
+   "Shabbat 3.1",
+   "Shabbat 40.1",
+   "Shabbat 72.1",
+   "Shabbat 94.1",
+   "Shabbat 102.1",
+   "Shabbat 113.1",
+   "Shabbat 134.1",
+   "Shabbat 152.1",
+   "Shabbat 163.1",
+   "Shabbat 180.1",
+   "Shabbat 191.1",
+   "Shabbat 204.1",
+   "Shabbat 209.1",
+   "Shabbat 213.1",
+   "Shabbat 222.1",
+   "Shabbat 229.1",
+   "Shabbat 244.1",
+   "Shabbat 252.1",
+   "Shabbat 259.1",
+   "Shabbat 274.1",
+   "Shabbat 282.1",
+   "Shabbat 286.1",
+   "Shabbat 295.1",
+   "Shabbat 305.1"
+  ]
+ },
+ "Eruvin": {
+  "he": "עירובין",
+  "perakim": [
+   "Eruvin 3.1",
+   "Eruvin 34.1",
+   "Eruvin 52.1",
+   "Eruvin 82.1",
+   "Eruvin 104.1",
+   "Eruvin 122.1",
+   "Eruvin 151.1",
+   "Eruvin 163.1",
+   "Eruvin 177.1",
+   "Eruvin 189.1"
+  ]
+ },
+ "Pesachim": {
+  "he": "פסחים",
+  "perakim": [
+   "Pesachim 3.1",
+   "Pesachim 41.1",
+   "Pesachim 83.1",
+   "Pesachim 99.1",
+   "Pesachim 115.1",
+   "Pesachim 130.1",
+   "Pesachim 147.1",
+   "Pesachim 173.1",
+   "Pesachim 184.1",
+   "Pesachim 198.1"
+  ]
+ },
+ "Rosh Hashanah": {
+  "he": "ראש השנה",
+  "perakim": [
+   "Rosh Hashanah 3.1",
+   "Rosh Hashanah 43.1",
+   "Rosh Hashanah 50.1",
+   "Rosh Hashanah 58.1"
+  ]
+ },
+ "Yoma": {
+  "he": "יומא",
+  "perakim": [
+   "Yoma 3.1",
+   "Yoma 43.1",
+   "Yoma 55.1",
+   "Yoma 77.1",
+   "Yoma 93.1",
+   "Yoma 123.1",
+   "Yoma 136.1",
+   "Yoma 146.1"
+  ]
+ },
+ "Sukkah": {
+  "he": "סוכה",
+  "perakim": [
+   "Sukkah 3.1",
+   "Sukkah 40.1",
+   "Sukkah 58.1",
+   "Sukkah 84.1",
+   "Sukkah 99.1"
+  ]
+ },
+ "Beitzah": {
+  "he": "ביצה",
+  "perakim": [
+   "Beitzah 3.1",
+   "Beitzah 30.1",
+   "Beitzah 46.1",
+   "Beitzah 58.1",
+   "Beitzah 70.1"
+  ]
+ },
+ "Taanit": {
+  "he": "תענית",
+  "perakim": [
+   "Taanit 3.1",
+   "Taanit 29.1",
+   "Taanit 36.1",
+   "Taanit 51.1"
+  ]
+ },
+ "Megillah": {
+  "he": "מגילה",
+  "perakim": [
+   "Megillah 3.1",
+   "Megillah 33.1",
+   "Megillah 41.1",
+   "Megillah 50.1"
+  ]
+ },
+ "Moed Katan": {
+  "he": "מועד קטן",
+  "perakim": [
+   "Moed Katan 3.1",
+   "Moed Katan 22.1",
+   "Moed Katan 26.1"
+  ]
+ },
+ "Chagigah": {
+  "he": "חגיגה",
+  "perakim": [
+   "Chagigah 3.1",
+   "Chagigah 22.1",
+   "Chagigah 40.1"
+  ]
+ },
+ "Yevamot": {
+  "he": "יבמות",
+  "perakim": [
+   "Yevamot 3.1",
+   "Yevamot 33.1",
+   "Yevamot 51.1",
+   "Yevamot 70.1",
+   "Yevamot 99.1",
+   "Yevamot 106.1",
+   "Yevamot 131.1",
+   "Yevamot 139.1",
+   "Yevamot 167.1",
+   "Yevamot 174.1",
+   "Yevamot 193.1",
+   "Yevamot 201.1",
+   "Yevamot 213.1",
+   "Yevamot 224.1",
+   "Yevamot 228.1",
+   "Yevamot 237.1"
+  ]
+ },
+ "Ketubot": {
+  "he": "כתובות",
+  "perakim": [
+   "Ketubot 3.1",
+   "Ketubot 30.1",
+   "Ketubot 57.1",
+   "Ketubot 82.1",
+   "Ketubot 108.1",
+   "Ketubot 130.1",
+   "Ketubot 139.1",
+   "Ketubot 155.1",
+   "Ketubot 165.1",
+   "Ketubot 179.1",
+   "Ketubot 190.1",
+   "Ketubot 202.1",
+   "Ketubot 208.1"
+  ]
+ },
+ "Nedarim": {
+  "he": "נדרים",
+  "perakim": [
+   "Nedarim 3.1",
+   "Nedarim 26.1",
+   "Nedarim 40.1",
+   "Nedarim 64.1",
+   "Nedarim 90.1",
+   "Nedarim 97.1",
+   "Nedarim 107.1",
+   "Nedarim 119.1",
+   "Nedarim 127.1",
+   "Nedarim 132.1",
+   "Nedarim 157.1"
+  ]
+ },
+ "Nazir": {
+  "he": "נזיר",
+  "perakim": [
+   "Nazir 3.1",
+   "Nazir 17.1",
+   "Nazir 31.1",
+   "Nazir 40.1",
+   "Nazir 60.1",
+   "Nazir 67.1",
+   "Nazir 93.1",
+   "Nazir 113.1",
+   "Nazir 121.1"
+  ]
+ },
+ "Sotah": {
+  "he": "סוטה",
+  "perakim": [
+   "Sotah 3.1",
+   "Sotah 27.1",
+   "Sotah 37.1",
+   "Sotah 46.1",
+   "Sotah 54.1",
+   "Sotah 61.1",
+   "Sotah 63.1",
+   "Sotah 83.1",
+   "Sotah 88.1"
+  ]
+ },
+ "Gittin": {
+  "he": "גיטין",
+  "perakim": [
+   "Gittin 3.1",
+   "Gittin 29.1",
+   "Gittin 47.1",
+   "Gittin 63.1",
+   "Gittin 96.1",
+   "Gittin 124.1",
+   "Gittin 134.1",
+   "Gittin 153.1",
+   "Gittin 163.1"
+  ]
+ },
+ "Kiddushin": {
+  "he": "קידושין",
+  "perakim": [
+   "Kiddushin 3.1",
+   "Kiddushin 81.1",
+   "Kiddushin 116.1",
+   "Kiddushin 137.1"
+  ]
+ },
+ "Bava Kamma": {
+  "he": "בבא קמא",
+  "perakim": [
+   "Bava Kamma 3.1",
+   "Bava Kamma 33.1",
+   "Bava Kamma 53.1",
+   "Bava Kamma 71.1",
+   "Bava Kamma 91.1",
+   "Bava Kamma 110.1",
+   "Bava Kamma 124.1",
+   "Bava Kamma 166.1",
+   "Bava Kamma 186.1",
+   "Bava Kamma 222.1"
+  ]
+ },
+ "Bava Metzia": {
+  "he": "בבא מציעא",
+  "perakim": [
+   "Bava Metzia 3.1",
+   "Bava Metzia 41.1",
+   "Bava Metzia 66.1",
+   "Bava Metzia 87.1",
+   "Bava Metzia 120.1",
+   "Bava Metzia 150.1",
+   "Bava Metzia 165.1",
+   "Bava Metzia 187.1",
+   "Bava Metzia 205.1",
+   "Bava Metzia 232.1"
+  ]
+ },
+ "Bava Batra": {
+  "he": "בבא בתרא",
+  "perakim": [
+   "Bava Batra 3.1",
+   "Bava Batra 33.1",
+   "Bava Batra 55.1",
+   "Bava Batra 121.1",
+   "Bava Batra 145.1",
+   "Bava Batra 183.1",
+   "Bava Batra 204.1",
+   "Bava Batra 215.1",
+   "Bava Batra 278.1",
+   "Bava Batra 319.1"
+  ]
+ },
+ "Sanhedrin": {
+  "he": "סנהדרין",
+  "perakim": [
+   "Sanhedrin 3.1",
+   "Sanhedrin 35.1",
+   "Sanhedrin 45.1",
+   "Sanhedrin 63.1",
+   "Sanhedrin 79.1",
+   "Sanhedrin 84.1",
+   "Sanhedrin 98.1",
+   "Sanhedrin 136.1",
+   "Sanhedrin 149.1",
+   "Sanhedrin 168.1",
+   "Sanhedrin 179.1"
+  ]
+ },
+ "Makkot": {
+  "he": "מכות",
+  "perakim": [
+   "Makkot 3.1",
+   "Makkot 13.1",
+   "Makkot 25.1"
+  ]
+ },
+ "Shevuot": {
+  "he": "שבועות",
+  "perakim": [
+   "Shevuot 3.1",
+   "Shevuot 27.1",
+   "Shevuot 38.1",
+   "Shevuot 59.1",
+   "Shevuot 72.1",
+   "Shevuot 76.1",
+   "Shevuot 88.1",
+   "Shevuot 97.1"
+  ]
+ },
+ "Avodah Zarah": {
+  "he": "עבודה זרה",
+  "perakim": [
+   "Avodah Zarah 3.1",
+   "Avodah Zarah 43.1",
+   "Avodah Zarah 80.1",
+   "Avodah Zarah 98.1",
+   "Avodah Zarah 123.1"
+  ]
+ },
+ "Horayot": {
+  "he": "הוריות",
+  "perakim": [
+   "Horayot 3.1",
+   "Horayot 12.1",
+   "Horayot 18.1"
+  ]
+ },
+ "Zevachim": {
+  "he": "זבחים",
+  "perakim": [
+   "Zevachim 3.1",
+   "Zevachim 30.1",
+   "Zevachim 62.1",
+   "Zevachim 72.1",
+   "Zevachim 93.1",
+   "Zevachim 115.1",
+   "Zevachim 131.1",
+   "Zevachim 140.1",
+   "Zevachim 165.1",
+   "Zevachim 177.1",
+   "Zevachim 183.1",
+   "Zevachim 196.1",
+   "Zevachim 211.1",
+   "Zevachim 223.1"
+  ]
+ },
+ "Menachot": {
+  "he": "מנחות",
+  "perakim": [
+   "Menachot 3.1",
+   "Menachot 25.1",
+   "Menachot 33.1",
+   "Menachot 75.1",
+   "Menachot 104.1",
+   "Menachot 126.1",
+   "Menachot 144.1",
+   "Menachot 152.1",
+   "Menachot 166.1",
+   "Menachot 173.1",
+   "Menachot 187.1",
+   "Menachot 200.1",
+   "Menachot 208.1"
+  ]
+ },
+ "Chullin": {
+  "he": "חולין",
+  "perakim": [
+   "Chullin 3.1",
+   "Chullin 53.1",
+   "Chullin 83.1",
+   "Chullin 135.1",
+   "Chullin 155.1",
+   "Chullin 166.1",
+   "Chullin 178.1",
+   "Chullin 206.1",
+   "Chullin 234.1",
+   "Chullin 259.1",
+   "Chullin 269.1",
+   "Chullin 276.1"
+  ]
+ },
+ "Bekhorot": {
+  "he": "בכורות",
+  "perakim": [
+   "Bekhorot 3.1",
+   "Bekhorot 25.1",
+   "Bekhorot 38.1",
+   "Bekhorot 52.1",
+   "Bekhorot 61.1",
+   "Bekhorot 73.1",
+   "Bekhorot 85.1",
+   "Bekhorot 91.1",
+   "Bekhorot 105.1"
+  ]
+ },
+ "Arakhin": {
+  "he": "ערכין",
+  "perakim": [
+   "Arakhin 3.1",
+   "Arakhin 14.1",
+   "Arakhin 26.1",
+   "Arakhin 33.1",
+   "Arakhin 37.1",
+   "Arakhin 42.1",
+   "Arakhin 47.1",
+   "Arakhin 53.1",
+   "Arakhin 58.1"
+  ]
+ },
+ "Temurah": {
+  "he": "תמורה",
+  "perakim": [
+   "Temurah 3.1",
+   "Temurah 27.1",
+   "Temurah 34.1",
+   "Temurah 42.1",
+   "Temurah 48.1",
+   "Temurah 55.1",
+   "Temurah 61.1"
+  ]
+ },
+ "Keritot": {
+  "he": "כריתות",
+  "perakim": [
+   "Keritot 3.1",
+   "Keritot 16.1",
+   "Keritot 22.1",
+   "Keritot 33.1",
+   "Keritot 40.1",
+   "Keritot 46.1"
+  ]
+ },
+ "Meilah": {
+  "he": "מעילה",
+  "perakim": [
+   "Meilah 3.1",
+   "Meilah 15.1",
+   "Meilah 20.1",
+   "Meilah 29.1",
+   "Meilah 35.1",
+   "Meilah 39.1"
+  ]
+ },
+ "Niddah": {
+  "he": "נדה",
+  "perakim": [
+   "Niddah 3.1",
+   "Niddah 25.1",
+   "Niddah 41.1",
+   "Niddah 62.1",
+   "Niddah 79.1",
+   "Niddah 95.1",
+   "Niddah 108.1",
+   "Niddah 114.1",
+   "Niddah 118.1",
+   "Niddah 128.1"
+  ]
+ }
+}

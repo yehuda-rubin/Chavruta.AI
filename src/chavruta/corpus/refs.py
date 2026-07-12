@@ -32,11 +32,26 @@ def canon_corpus_ref(ref: str | None) -> str:
     return re.sub(r"(?<=\D)\.(?=\d)", " ", ref, count=1)
 
 
+# A Talmud daf in amud form: 'Bava Metzia 2a', 'Sanhedrin 23b'. The corpus stores Talmud base texts
+# with a FLAT amud-linear number instead of the amud letter: N = 2·daf − 1 (amud a) / 2·daf (amud b)
+# — verified against the live collection (2a→3, 23a→45). So an amud ref anchors on 'Tractate N.1'.
+_AMUD_RE = re.compile(r"^(?P<t>.+?)[ .](?P<daf>\d+)(?P<amud>[ab])$")
+
+
+def _amud_to_corpus(ref: str) -> str | None:
+    m = _AMUD_RE.match(ref or "")
+    if not m:
+        return None
+    n = 2 * int(m.group("daf")) - (1 if m.group("amud") == "a" else 0)
+    return f"{m.group('t')} {n}.1"
+
+
 def with_ref_variants(refs) -> list[str]:
     """The original + corpus-canonical form of each ref (deduped, order-preserving), so an exact
-    `fetch_by_refs` lookup matches whichever spelling the stored `ref`/`anchor_ref` uses. A chapter-
-    level ref ('Exodus.20' → 'Exodus 20') also yields its opening verse ('Exodus 20.1'), since base
-    texts are stored per-verse and a chapter has no single stored chunk."""
+    `fetch_by_refs` lookup matches whichever spelling the stored `ref`/`anchor_ref` uses:
+      • dotted↔space book boundary ('Genesis.1.1' ↔ 'Genesis 1.1'),
+      • chapter-level → opening verse ('Exodus.20' → 'Exodus 20.1'),
+      • Talmud amud form → the corpus amud-linear opening ref ('Sanhedrin.23a' → 'Sanhedrin 45.1')."""
     out: list[str] = []
 
     def _add(v: str) -> None:
@@ -47,7 +62,10 @@ def with_ref_variants(refs) -> list[str]:
         _add(r)
         canon = canon_corpus_ref(r)
         _add(canon)
-        if re.fullmatch(r".+\s\d+", canon):        # chapter-level (no verse) → opening verse
+        amud = _amud_to_corpus(canon)              # Talmud daf → corpus amud-linear opening segment
+        if amud:
+            _add(amud)
+        elif re.fullmatch(r".+\s\d+", canon):      # chapter-level (no verse) → opening verse
             _add(canon + ".1")
     return out
 

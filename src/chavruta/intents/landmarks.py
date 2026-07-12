@@ -11,9 +11,36 @@ Two layers: a curated absolute map (famous passages) and relative patterns
 
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 
-from chavruta.intents.hebrew_refs import HE_BOOKS, HE_TRACTATES, _book_alt
+from chavruta.intents.hebrew_refs import HE_BOOKS, HE_TRACTATES, _book_alt, gematria
+
+# Talmud perek → opening ref in the CORPUS format (built from Sefaria by
+# scripts/build_talmud_perek_index.py). {English tractate: {"he":…, "perakim":[ref per perek]}}.
+try:
+    _PEREK_INDEX = json.loads(
+        (Path(__file__).parent / "data" / "talmud_perek_daf.json").read_text(encoding="utf-8"))
+except Exception:
+    _PEREK_INDEX = {}
+
+# Hebrew ordinal words → number (perek names). Higher perakim are addressed by gematria/digits.
+_HE_ORDINALS = {
+    "ראשון": 1, "שני": 2, "שלישי": 3, "רביעי": 4, "חמישי": 5, "שישי": 6, "ששי": 6,
+    "שביעי": 7, "שמיני": 8, "תשיעי": 9, "עשירי": 10,
+}
+_ORD_ALT = "|".join(sorted(_HE_ORDINALS, key=len, reverse=True))
+
+
+def _perek_num(token: str) -> int | None:
+    token = token.strip().rstrip("'׳")
+    if token in _HE_ORDINALS:
+        return _HE_ORDINALS[token]
+    if token.isdigit():
+        return int(token)
+    g = gematria(token)                       # gematria letters (ג=3, י"א=11 …)
+    return g or None
 
 # ── Absolute landmarks: famous passages with a fixed ref ─────────────────────────
 ABSOLUTE_LANDMARKS: dict[str, str] = {
@@ -59,6 +86,12 @@ _FIRST_DAF_RE = re.compile(
     rf"(?:מסכת\s+|ב|של\s+)?(?P<tractate>{_HE_TRACTATE_ALT})"
 )
 
+# "פרק שלישי בסנהדרין" / "פרק ג' בבבא מציעא" / "פרק 3 בגיטין" (prefix-tolerant: "הדף הראשון בפרק…").
+_PEREK_RE = re.compile(
+    rf"פרק\s+(?P<ord>{_ORD_ALT}|[א-ת]{{1,3}}['׳]?|\d+)\s+"
+    rf"(?:ב|של\s+|ב?מסכת\s+|ד)?(?P<tractate>{_HE_TRACTATE_ALT})"
+)
+
 
 def resolve_landmarks(text: str) -> list[str]:
     """All landmark refs found in the question, de-duplicated, order-preserving."""
@@ -80,7 +113,17 @@ def resolve_landmarks(text: str) -> list[str]:
     for m in _FIRST_VERSE_RE.finditer(text):
         add(f"{HE_BOOKS[m.group('book')]}.1.1")
 
+    # First daf of a tractate → its opening daf 2a (amud form; the anchoring path converts it to the
+    # corpus amud-linear ref via with_ref_variants).
     for m in _FIRST_DAF_RE.finditer(text):
         add(f"{HE_TRACTATES[m.group('tractate')]}.2a")
+
+    # "פרק <ordinal> ב<מסכת>" → the perek's opening ref from the Sefaria-built index.
+    for m in _PEREK_RE.finditer(text):
+        tractate = HE_TRACTATES.get(m.group("tractate"))
+        n = _perek_num(m.group("ord"))
+        perak = (_PEREK_INDEX.get(tractate) or {}).get("perakim") or []
+        if tractate and n and 1 <= n <= len(perak) and perak[n - 1]:
+            add(perak[n - 1])
 
     return refs

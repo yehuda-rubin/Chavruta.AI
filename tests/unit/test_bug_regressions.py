@@ -244,6 +244,32 @@ def test_with_ref_variants_covers_dot_space_and_chapter_opening():
     assert with_ref_variants(["Mishnah Sukkah 3.5"]) == ["Mishnah Sukkah 3.5"]
 
 
+# ── Tier1 (2026-07): Talmud daf amud form → corpus amud-linear ref (N = 2·daf − 1/2·daf) ──────────
+@pytest.mark.parametrize("ref,corpus", [
+    ("Sanhedrin.23a", "Sanhedrin 45.1"),     # 23a → 2·23−1 = 45  (perek 3 'זה בורר')
+    ("Bava Metzia.2a", "Bava Metzia 3.1"),   # 2a  → 3           ('שנים אוחזין')
+    ("Berakhot.2b", "Berakhot 4.1"),         # 2b  → 2·2 = 4
+])
+def test_amud_to_corpus_in_variants(ref, corpus):
+    from chavruta.corpus.refs import with_ref_variants
+    assert corpus in with_ref_variants([ref])
+
+
+# ── Tier1 (2026-07): perek-ordinal → opening-daf resolution (Sefaria-built index) ────────────────
+@pytest.mark.parametrize("text,expected", [
+    ("אני רוצה ללמוד את הדף הראשון בפרק שלישי בסנהדרין", "Sanhedrin 45.1"),  # the motivating example
+    ("פרק ג' בבבא מציעא", "Bava Metzia 66.1"),
+    ("פרק שני בברכות", None),                 # resolves to *some* Berakhot ref (index-dependent)
+])
+def test_perek_ordinal_resolves(text, expected):
+    from chavruta.intents.landmarks import resolve_landmarks
+    refs = resolve_landmarks(text)
+    if expected:
+        assert expected in refs
+    else:
+        assert any(r.startswith("Berakhot ") for r in refs)
+
+
 def test_base_sources_for_refs_canonicalises_dedups_and_scores(monkeypatch):
     """base_sources_for_refs must look up the canonical ref, return RankedHits at score 1.0, and dedup."""
     calls = []
