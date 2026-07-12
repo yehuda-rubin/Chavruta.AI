@@ -2,6 +2,14 @@
 # Format: {"qid", "question", "lang", "expected_refs": [...], "intent", "note"}
 # expected_refs == [] means the item is UNANSWERABLE from the Tanakh corpus — the honest
 # "no grounded source" path must hold (SC-002). Refs use the corpus format "Book.Chapter.Verse".
+#
+# ⚠️ HISTORICAL — this set was authored for a TANAKH-ONLY collection. It is NOT a valid gate for the
+# current full 2.75M-chunk bookshelf: (a) its 73.6% retrieval@K baseline assumed no commentary/midrash
+# competed with the base verse; on the full corpus terse verses are out-ranked unless anchored. (b) its
+# "unanswerable" honesty items (uns-001 Mishnah, uns-002 Shulchan Aruch, uns-003 Gemara, …) reference
+# works that ARE NOW LOADED, so they are answerable and (correctly) fail the honesty check. Use the
+# corpus-aware eval/halacha_v1.jsonl + eval/lessons_v1.jsonl as the live gates; keep this for the
+# Tanakh-only profile / historical comparison only. (2026-07)
 {"qid": "gen-001-he", "question": "מה נאמר בפסוק הראשון של התורה על בריאת העולם?", "lang": "he", "expected_refs": ["Genesis.1.1"], "intent": "qa", "note": "HE/EN pair with gen-001-en (SC-003)"}
 {"qid": "gen-001-en", "question": "What does the first verse of the Torah say about the creation of the world?", "lang": "en", "expected_refs": ["Genesis.1.1"], "intent": "qa", "note": "HE/EN pair with gen-001-he"}
 {"qid": "gen-002-he", "question": "מה אומר רש\"י על בראשית ברא?", "lang": "he", "expected_refs": ["Genesis.1.1"], "intent": "explain", "note": "Rashi's famous opening comment"}
