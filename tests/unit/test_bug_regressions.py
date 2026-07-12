@@ -281,7 +281,7 @@ def test_amud_to_corpus_ignores_volume_numbered_works():
     assert with_ref_variants(["Zohar.1.15a"]) == ["Zohar.1.15a", "Zohar 1.15a"]   # no bogus 'Zohar 1 29.1'
 
 
-# ── Tier1 (2026-07 round-3): English landmark resolution so English queries anchor too ───────────
+# ── Tier1 (2026-07 round-3/4): English landmark resolution — word-boundary, no substring collisions ──
 @pytest.mark.parametrize("text,expected", [
     ("What does the Torah say about the binding of Isaac?", "Genesis.22"),
     ("Explain the Shema", "Deuteronomy.6.4"),
@@ -291,6 +291,16 @@ def test_amud_to_corpus_ignores_volume_numbered_works():
 def test_english_landmarks(text, expected):
     from chavruta.intents.landmarks import resolve_landmarks
     assert expected in resolve_landmarks(text)
+
+
+@pytest.mark.parametrize("text", [
+    "Who was the prophet Shemaiah?",          # 'shema' must NOT match inside 'Shemaiah'
+    "In the beginning of tractate Bava Kamma",  # discourse phrase, not Genesis 1:1
+    "the flooding of the field",              # not the Genesis flood
+])
+def test_english_landmarks_no_false_positive(text):
+    from chavruta.intents.landmarks import resolve_landmarks
+    assert resolve_landmarks(text) == []
 
 
 # ── Tier1 (2026-07): END-TO-END anchoring through the retriever with the real corpus ref-format ──

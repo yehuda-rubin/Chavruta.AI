@@ -96,6 +96,7 @@ class HybridRetriever:
 
         # Named-ref anchoring: the question explicitly names a verse → fetch that verse and
         # everything anchored on it (exact, score above the relevance threshold by design).
+        anchored_ids: set[str] = set()   # true named-ref anchors — the honest is_empty signal below
         if query.named_refs:
             # Named commentators → fetch them *specifically* on the ref (small, never
             # truncated), guaranteeing e.g. Rashi AND Ramban on Genesis.1.1. No named
@@ -110,21 +111,27 @@ class HybridRetriever:
             for h in anchored:
                 rh = _to_hit(h)
                 rh.score = max(rh.score, 1.0)
+                anchored_ids.add(rh.chunk_id)          # explicit anchor set (see has_anchor below)
                 hits.append(rh)
 
         # Base-source floor: within the foundational works, COMMENTARY chunks vastly outnumber base
         # (unit_type=source) chunks, so a thematic / free-form / English query can fill every
         # foundational slot with derush and never surface the actual pasuk/mishnah/daf. Reserve a few
-        # slots specifically for base texts (a filter commentary cannot satisfy), gently boosted.
+        # slots specifically for base texts (a filter commentary cannot satisfy) — but ONLY ones that
+        # are genuinely relevant (dense cosine ≥ threshold): the filtered sub-search's RRF is not a
+        # cosine and would otherwise promote off-topic pesukim un-prunably.
         if not query.work_ids and not query.commentator_ids:
             try:
-                base = self.store.search(self.profile.collection, hquery, top_k=3,
-                                         filters={"work_id": list(_FOUNDATIONAL_WORKS),
-                                                  "unit_type": "source"})
+                bfilt = {"work_id": list(_FOUNDATIONAL_WORKS), "unit_type": "source"}
+                base = self.store.search(self.profile.collection, hquery, top_k=3, filters=bfilt)
+                bmap = self.store.dense_scores(self.profile.collection, emb.dense, bfilt, top_k=3) \
+                    if use_sparse else {}
+                thr = self.profile.relevance_threshold
                 for h in base:
                     rh = _to_hit(h)
-                    rh.score += 0.05
-                    hits.append(rh)
+                    if not use_sparse or bmap.get(rh.chunk_id, 0.0) >= thr:
+                        rh.score = min(rh.score, 0.99)   # never masquerade as a named-ref anchor
+                        hits.append(rh)
             except Exception:
                 pass
 
@@ -138,7 +145,7 @@ class HybridRetriever:
                                           filters={"work_id": list(_FOUNDATIONAL_WORKS)})
                 for h in found:
                     rh = _to_hit(h)
-                    rh.score += 0.05
+                    rh.score = min(rh.score + 0.05, 0.99)   # boost, but never reach the anchor sentinel
                     hits.append(rh)
             except Exception:
                 pass
@@ -162,9 +169,10 @@ class HybridRetriever:
         hits = hits[:top_k]
 
         # Relevance / honesty gate. hits[0].score is a COSINE only in dense-only mode; in hybrid it is
-        # an RRF fusion score on a different scale, so we probe the raw dense cosine instead. Exact
-        # named-ref anchors (score ≥ 1.0) are always relevant.
-        has_anchor = any(h.score >= 1.0 for h in hits)
+        # an RRF fusion score on a different scale, so we probe the raw dense cosine instead. A genuine
+        # named-ref anchor is always relevant — tracked by chunk_id in `anchored_ids` (NOT `score ≥ 1.0`,
+        # which a boosted floor hit could trip and a reranker's sigmoid could erase).
+        has_anchor = any(h.chunk_id in anchored_ids for h in hits)
         if not hits:
             is_empty = True
         elif has_anchor:
