@@ -152,3 +152,23 @@ passes both spellings (plus the chapter→opening-verse `.1`); the retriever's a
 lesson primary-source floor both use them. Do NOT confuse this with `canonical_ref`, the loose
 lowercased join key used by the link graph. (There is no populated `search_he` payload field — its
 lexical index is empty, so a `MatchText` on it will time out; the live path uses dense + `fetch_by_refs`.)
+
+### 7.3 Talmud amud-linear numbering & perek→daf
+
+Talmud base texts are NOT stored with the amud letter. The corpus uses a FLAT amud-linear number:
+
+```
+corpus N = 2·daf − 1   (amud a)      # e.g. Sanhedrin 2a → 'Sanhedrin 3.1', 23a → 'Sanhedrin 45.1'
+corpus N = 2·daf       (amud b)      # e.g. Berakhot 2b  → 'Berakhot 4.1'
+```
+
+and the within-amud segment index mirrors Sefaria's 1:1 (so Sefaria `Berakhot 17b:12` → corpus
+`Berakhot 34.12`). The single source of truth for the formula is
+`corpus/refs.py::daf_amud_to_corpus_n`; `with_ref_variants` converts an amud ref (`Sanhedrin.23a`)
+to its corpus opening ref so explicit dapim, first-daf landmarks, and the perek resolver all anchor.
+
+`scripts/build_talmud_perek_index.py` fetches every Bavli tractate's perek boundaries from Sefaria
+(`alt_structs.Chapters`) and writes `src/chavruta/intents/data/talmud_perek_daf.json` (perek → opening
+ref, in the corpus format above). `intents/landmarks.py` then resolves `פרק <ordinal|gematria|digit>
+ב<מסכת>` → that ref. **Rebuild the JSON (`python scripts/build_talmud_perek_index.py`) if the corpus
+ingest convention or Sefaria's perek structure changes.**

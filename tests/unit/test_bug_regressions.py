@@ -293,6 +293,59 @@ def test_english_landmarks(text, expected):
     assert expected in resolve_landmarks(text)
 
 
+# ── Tier1 (2026-07): END-TO-END anchoring through the retriever with the real corpus ref-format ──
+# The corpus stores base verses SPACE-form ('Genesis 1.3') but the router emits DOTTED named_refs
+# ('Genesis.1.3'). This exercises with_ref_variants THROUGH HybridRetriever.retrieve — it fails if the
+# anchoring path stops canonicalising (the exact regression that measured Tanakh recall at ~13%).
+def test_anchoring_resolves_dotted_named_ref_against_space_form_corpus():
+    from chavruta.retrieval.hybrid import HybridRetriever
+
+    class _Emb:
+        def embed_query(self, text):
+            return SimpleNamespace(dense=[0.1, 0.2], sparse={1: 0.5})
+
+    class _Store:
+        def search(self, name, q, top_k, filters=None):        # main + floors surface only commentary
+            if filters:
+                return []
+            return [Hit(chunk_id="c1", score=0.05,
+                        payload={"chunk_id": "c1", "ref": "Rashi on Genesis 1.3", "text": "פירוש",
+                                 "commentator_id": "rashi", "unit_type": "commentary"})]
+
+        def fetch_by_refs(self, name, refs, filters=None):     # base verse stored SPACE-form only
+            if "Genesis 1.3" in refs:
+                return [Hit(chunk_id="g13", score=1.0,
+                            payload={"chunk_id": "g13", "ref": "Genesis 1.3", "text": "ויאמר אלהים יהי אור",
+                                     "unit_type": "source", "work_id": "tanakh"})]
+            return []
+
+        def dense_scores(self, name, dense, filters=None, top_k=30):
+            return {}
+
+    prof = SimpleNamespace(hybrid=True, collection="c", relevance_threshold=0.5, rerank=False)
+    q = Query(text="מה נאמר בפסוק?")
+    q.named_refs = ["Genesis.1.3"]                              # dotted, as the router emits
+    res = HybridRetriever(_Emb(), _Store(), prof).retrieve(q, top_k=8)
+    anchored = [h for h in res.hits if h.ref == "Genesis 1.3"]
+    assert anchored and anchored[0].score >= 1.0               # the base pasuk anchored despite dot↔space
+
+
+# ── Tier1 (2026-07): the api _run_query graceful-error wrapper (degrade, not 500; keep real 4xx) ──
+def test_run_query_degrades_on_backend_exception(monkeypatch):
+    monkeypatch.setattr(api, "_run_query_impl",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("qdrant down")))
+    resp = api._run_query("שאלה", "he", "qa", [])
+    assert resp.grounded is False and resp.intent == "qa" and "שגיאה" in resp.answer
+
+
+def test_run_query_propagates_http_exception(monkeypatch):
+    from fastapi import HTTPException
+    monkeypatch.setattr(api, "_run_query_impl",
+                        lambda *a, **k: (_ for _ in ()).throw(HTTPException(status_code=422, detail="x")))
+    with pytest.raises(HTTPException):
+        api._run_query("שאלה", "he", "nonsense-intent", [])
+
+
 def test_base_sources_for_refs_canonicalises_dedups_and_scores(monkeypatch):
     """base_sources_for_refs must look up the canonical ref, return RankedHits at score 1.0, and dedup."""
     calls = []
