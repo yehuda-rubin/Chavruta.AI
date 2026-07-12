@@ -281,6 +281,18 @@ def test_amud_to_corpus_ignores_volume_numbered_works():
     assert with_ref_variants(["Zohar.1.15a"]) == ["Zohar.1.15a", "Zohar 1.15a"]   # no bogus 'Zohar 1 29.1'
 
 
+# ── Tier1 (2026-07 round-3): English landmark resolution so English queries anchor too ───────────
+@pytest.mark.parametrize("text,expected", [
+    ("What does the Torah say about the binding of Isaac?", "Genesis.22"),
+    ("Explain the Shema", "Deuteronomy.6.4"),
+    ("the ten commandments", "Exodus.20"),
+    ("love your neighbor as yourself", "Leviticus.19.18"),
+])
+def test_english_landmarks(text, expected):
+    from chavruta.intents.landmarks import resolve_landmarks
+    assert expected in resolve_landmarks(text)
+
+
 def test_base_sources_for_refs_canonicalises_dedups_and_scores(monkeypatch):
     """base_sources_for_refs must look up the canonical ref, return RankedHits at score 1.0, and dedup."""
     calls = []

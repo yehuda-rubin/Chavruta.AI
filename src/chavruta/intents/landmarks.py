@@ -69,6 +69,20 @@ ABSOLUTE_LANDMARKS: dict[str, str] = {
     "ברכת כהנים": "Numbers.6.24",
 }
 
+# English famous-passage map — English queries otherwise ride entirely on cross-lingual dense (which
+# buries the terse Hebrew base verse). Matched case-insensitively as a substring. Extendable as data.
+ENGLISH_LANDMARKS: dict[str, str] = {
+    "shema yisrael": "Deuteronomy.6.4", "shema": "Deuteronomy.6.4",
+    "ten commandments": "Exodus.20", "decalogue": "Exodus.20",
+    "binding of isaac": "Genesis.22", "akedah": "Genesis.22", "the akeda": "Genesis.22",
+    "creation of the world": "Genesis.1.1", "first verse of the torah": "Genesis.1.1",
+    "in the beginning": "Genesis.1.1",
+    "love your neighbor": "Leviticus.19.18", "love your fellow": "Leviticus.19.18",
+    "song of the sea": "Exodus.15", "priestly blessing": "Numbers.6.24",
+    "garden of eden": "Genesis.2", "the flood": "Genesis.7", "tower of babel": "Genesis.11",
+    "the golden calf": "Exodus.32", "the spies": "Numbers.13",
+}
+
 # ── Relative landmarks: pattern → resolver ───────────────────────────────────────
 _HE_BOOK_ALT = _book_alt(HE_BOOKS)
 _HE_TRACTATE_ALT = _book_alt(HE_TRACTATES)
@@ -115,6 +129,12 @@ def resolve_landmarks(text: str) -> list[str]:
     for phrase in sorted(ABSOLUTE_LANDMARKS, key=len, reverse=True):
         if phrase in text:
             add(ABSOLUTE_LANDMARKS[phrase])
+
+    # English famous passages (case-insensitive; longest first to prefer the more specific match)
+    low = text.lower()
+    for phrase in sorted(ENGLISH_LANDMARKS, key=len, reverse=True):
+        if phrase in low:
+            add(ENGLISH_LANDMARKS[phrase])
 
     for m in _FIRST_VERSE_RE.finditer(text):
         add(f"{HE_BOOKS[m.group('book')]}.1.1")

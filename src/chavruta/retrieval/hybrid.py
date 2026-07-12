@@ -112,6 +112,22 @@ class HybridRetriever:
                 rh.score = max(rh.score, 1.0)
                 hits.append(rh)
 
+        # Base-source floor: within the foundational works, COMMENTARY chunks vastly outnumber base
+        # (unit_type=source) chunks, so a thematic / free-form / English query can fill every
+        # foundational slot with derush and never surface the actual pasuk/mishnah/daf. Reserve a few
+        # slots specifically for base texts (a filter commentary cannot satisfy), gently boosted.
+        if not query.work_ids and not query.commentator_ids:
+            try:
+                base = self.store.search(self.profile.collection, hquery, top_k=3,
+                                         filters={"work_id": list(_FOUNDATIONAL_WORKS),
+                                                  "unit_type": "source"})
+                for h in base:
+                    rh = _to_hit(h)
+                    rh.score += 0.05
+                    hits.append(rh)
+            except Exception:
+                pass
+
         # Foundational-source floor: on thematic topics (חגים, מחשבה) derush/Chassidut saturates the
         # topic vocabulary and crowds out the terse foundational mechanics. Reserve a few slots for
         # foundational works (pasuk/Mishnah/Gemara/halacha), gently boosted, so the model always has a
