@@ -607,11 +607,6 @@ def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bo
     return "\n".join(lines)
 
 
-# Below this top-hit similarity, treat retrieval as unreliable and nudge the chavruta to ask for
-# direction rather than answer on off-topic text (the 'explicit ref didn't resolve' failure mode).
-_CHAVRUTA_WEAK_RETRIEVAL = float(os.environ.get("CHAVRUTA_WEAK_RETRIEVAL", "0.6"))
-
-
 def _run_chavruta(question: str, lang: str, history=None) -> QueryResponse:
     """Socratic study-partner mode: retrieve on the topic, then Claude plays a chavruta that asks
     questions and learns WITH the user (grounded), rather than lecturing. When retrieval confidence
@@ -623,9 +618,13 @@ def _run_chavruta(question: str, lang: str, history=None) -> QueryResponse:
     q = Query(text=anchor, lang=lang or None, intent=Intent.QA)
     rq = pipeline._resolve_query(q)
     lang = rq.lang or lang or "he"
-    hits = list(pipeline.retriever.retrieve(rq, top_k=10).hits)
-    top_score = max((getattr(h, "score", 0.0) for h in hits), default=0.0)
-    weak = (not hits) or (top_score < _CHAVRUTA_WEAK_RETRIEVAL)
+    result = pipeline.retriever.retrieve(rq, top_k=10)
+    hits = list(result.hits)
+    # weak = retrieval didn't clear the relevance bar. Use the retriever's own dense-cosine gate
+    # (result.is_empty), NOT the raw hit .score — in hybrid mode .score is an RRF fusion value
+    # (~0.02-0.06) on a different scale than relevance_threshold, so comparing them lit 'weak' on
+    # EVERY hybrid turn and nudged the chavruta to stall instead of teach.
+    weak = result.is_empty
     job = _chavruta_job_md(question, hits, lang, history, weak_retrieval=weak)
     raw = pipeline.llm.request(job, lang=lang) if hasattr(pipeline.llm, "request") else ""
     hits = hits + list(getattr(pipeline.llm, "fetched_sources", []) or [])   # include agentically-fetched

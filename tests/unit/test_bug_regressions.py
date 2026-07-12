@@ -170,3 +170,45 @@ def test_grade_band_detection(text, band):
 ])
 def test_school_audience_detected(text):
     assert api._detect_school(text)
+
+
+# ── Tier0 (2026-07 audit): chavruta weak-retrieval must use the dense-cosine gate, not the RRF score ──
+# Bug: `_run_chavruta` compared the raw hit .score (an RRF fusion value ~0.03 in hybrid mode) to a 0.6
+# cosine threshold, so "retrieval is weak" fired on EVERY hybrid turn and nudged the chavruta to stall.
+
+from types import SimpleNamespace  # noqa: E402
+
+from chavruta.retrieval.base import RankedHit, RetrievalResult  # noqa: E402
+
+
+def _fake_pipeline(result, captured):
+    class _Retriever:
+        def retrieve(self, rq, top_k):
+            return result
+
+    class _LLM:
+        fetched_sources: list = []
+
+        def request(self, body_md, *, lang="he"):
+            captured["job"] = body_md
+            return "תשובה מעוגנת [S1]" if result.hits else "רגע, תכוון אותי"
+
+    return SimpleNamespace(retriever=_Retriever(), llm=_LLM(), _resolve_query=lambda q: q)
+
+
+def test_chavruta_not_weak_on_good_hybrid_retrieval(monkeypatch):
+    captured = {}
+    hit = RankedHit(chunk_id="a", ref="Bava Metzia.2a", text="שנים אוחזין בטלית", score=0.03)  # RRF scale
+    result = RetrievalResult(hits=[hit], is_empty=False)
+    monkeypatch.setattr(api, "_get_pipeline", lambda: _fake_pipeline(result, captured))
+    resp = api._run_chavruta("נלמד את סוגיית שניים אוחזין", "he", history=[])
+    assert "RETRIEVAL CONFIDENCE IS LOW" not in captured["job"]   # good retrieval ⇒ NOT weak
+    assert resp.intent == "chavruta"
+
+
+def test_chavruta_weak_only_when_retrieval_empty(monkeypatch):
+    captured = {}
+    result = RetrievalResult(hits=[], is_empty=True)          # nothing cleared the relevance bar
+    monkeypatch.setattr(api, "_get_pipeline", lambda: _fake_pipeline(result, captured))
+    api._run_chavruta("שאלה על משהו שלא בקורפוס", "he", history=[])
+    assert "RETRIEVAL CONFIDENCE IS LOW" in captured["job"]    # genuinely thin ⇒ weak banner shown
