@@ -11,6 +11,7 @@ Grounding is enforced here and in `generation.grounded`, never trusted to the mo
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 
 from chavruta.config.profile import Profile
@@ -321,14 +322,16 @@ class ChavrutaPipeline:
 
                 opening = template.opening
                 # Stage-aware opening (spec 003 Phase 4): a lesson must START at the sugya's
-                # primary source. If the main retrieval surfaced only commentaries, fetch the
-                # primary source (unit_type=source) for the topic and lead with it.
+                # primary source. If the main retrieval surfaced only commentaries, prepend the
+                # base source(s) for the resolved refs (canonicalised to the corpus ref format).
                 if opening and not any(hit_kind(h) in opening.source_kinds for h in hits):
-                    src = self._retrieve_opening_source(search, opening.source_kinds)
-                    if src is not None:
-                        hits = [src, *hits]
+                    have = {h.ref for h in hits}
+                    base = [b for b in self.base_sources_for_refs(list(query.named_refs or []) +
+                                                                  list(anchor_refs or [])) if b.ref not in have]
+                    if base:
+                        hits = [*base, *hits]
                         if not anchor_refs:
-                            anchor_refs = [src.anchor_ref or src.ref]
+                            anchor_refs = [base[0].anchor_ref or base[0].ref]
 
                 # Pull the connected meforshim (and their supercommentaries) of EVERY primary
                 # source we have, via the links graph up to query.expand_depth (2 for lessons)
@@ -357,54 +360,44 @@ class ChavrutaPipeline:
         except Exception:
             return []
 
-    # Map a template's opening source_kinds → the corpus work_ids that hold those sources,
-    # so the opening retrieval looks in the RIGHT books (a gemara sugya opens from
-    # mishnah/talmud, not from a semantically-near Tanakh verse).
-    _KIND_WORK = {"pasuk": "tanakh", "mishnah": "mishnah", "gemara": "talmud_bavli",
-                  "midrash": "midrash"}
+    @staticmethod
+    def _canon_corpus_ref(ref: str) -> str:
+        """Router refs use dots ('Genesis.1.1'); the corpus stores Tanakh verses as 'Genesis 1.1'
+        (a space after the book name). Convert only the book↔chapter dot — a dot preceded by a
+        non-digit and followed by a digit — to a space. This leaves the chapter.verse dot alone and
+        does NOT corrupt an already-corpus-format ref ('Mishnah Bava Metzia 1.1' stays unchanged)."""
+        return re.sub(r"(?<=\D)\.(?=\d)", " ", ref or "", count=1)
 
-    def _retrieve_opening_source(self, topic, source_kinds=None):
-        """Targeted retrieval of the primary source (the sugya's start) for a lesson opening,
-        scoped to the works that match the opening stage's kinds.
+    def base_sources_for_refs(self, refs):
+        """The primary-source chunks (unit_type=source) for explicit refs — so a lesson leads from
+        its base pasuk/daf/mishnah, not only its commentaries. Uses the indexed `ref` field (fast,
+        no scan), canonicalises the router→corpus ref format, and falls back to the opening verse
+        for a chapter-level ref. Returns RankedHits (score 1.0 — a resolved base source is certain)."""
+        from chavruta.retrieval.hybrid import _to_hit
 
-        A named sugya's topic IS its opening words ("שניים אוחזין" = Mishnah BM 1.1), so we
-        first try a nikud/ktiv-insensitive full-text match (search_he) — which the diluted
-        dense/sparse vectors miss — and fall back to vector search when there's no literal hit.
-        """
-        from chavruta.corpus.normalize import normalize_he
-
-        works = [self._KIND_WORK[k] for k in (source_kinds or []) if k in self._KIND_WORK]
-        norm = normalize_he(topic)
-
-        # Try each preferred work IN ORDER (a talmudic sugya opens from its MISHNA, not from
-        # a gemara segment that merely quotes it), lexical-first: a literal nikud/ktiv match on
-        # the opening words beats the diluted vectors. Fall back to vector over all works.
-        for w in works:
-            if norm:
-                hit = self._search_source(topic, {"unit_type": "source", "work_id": [w],
-                                                  "search_he": {"$text": norm}})
-                if hit is not None:
-                    return hit
-        base = {"unit_type": "source"}
-        if works:
-            base["work_id"] = works
-        return self._search_source(topic, base)
-
-    def _search_source(self, topic, filters):
-        """Hybrid search for one source under `filters`; best hit or None."""
-        try:
-            from chavruta.retrieval.hybrid import _to_hit
-            from chavruta.store.base import HybridQuery
-
-            emb = self.embedding.embed_query(topic)
-            sparse = emb.sparse if (self.profile.hybrid and emb.sparse) else None
-            raw = self.store.search(
-                self.profile.collection, HybridQuery(dense=emb.dense, sparse=sparse),
-                top_k=4, filters=filters,
-            )
-            return _to_hit(raw[0]) if raw else None
-        except Exception:
-            return None
+        out, seen = [], set()
+        for r in (refs or []):
+            if not r:
+                continue
+            canon = self._canon_corpus_ref(r)
+            candidates = [canon]
+            if re.fullmatch(r".+\s\d+", canon):          # chapter-level (no verse) → opening verse
+                candidates.append(canon + ".1")
+            for c in candidates:
+                try:
+                    raw = self.store.fetch_by_refs(self.profile.collection, [c],
+                                                   filters={"unit_type": "source"})
+                except Exception:
+                    raw = []
+                if raw:
+                    for h in raw:
+                        hit = _to_hit(h)
+                        if hit.ref and hit.ref not in seen:
+                            seen.add(hit.ref)
+                            hit.score = 1.0
+                            out.append(hit)
+                    break                                # first candidate that resolves wins
+        return out
 
     def ask_stream(self, request: Query, *, history: list[Turn] | None = None) -> Iterator[str]:
         query = self._resolve_query(request)

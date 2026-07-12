@@ -488,7 +488,17 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
     # simple midrash) to curate from — not only whatever esoteric material scored highest. The
     # SOURCE PREFERENCE instruction in the job then steers curation toward age-appropriate sources.
     pool_k = ln["top_k"] + (10 if aud == "school" else 0)
-    hits = list(pipeline.retriever.retrieve(rq, top_k=pool_k).hits)
+    result = pipeline.retriever.retrieve(rq, top_k=pool_k)
+    hits = list(result.hits)
+    # Primary-source floor (spec 003): a lesson must LEAD from its base pasuk/daf/mishnah, not only
+    # its commentaries. Fetch the base source for the resolved refs (canonicalised to the corpus ref
+    # format) and PROMOTE it to the front — whether it was missing or merely out-ranked by a
+    # commentary/essay. No-op for topics that resolved no ref. (base_sources_for_refs returns only
+    # refs that actually resolve to a unit_type=source chunk, so commentary anchors are ignored.)
+    floor = pipeline.base_sources_for_refs(list(rq.named_refs or []) + list(result.anchor_refs or [])[:8])
+    if floor:
+        fset = {b.ref for b in floor}
+        hits = floor + [h for h in hits if h.ref not in fset]
     if not hits:
         msg = "לא נמצאו מקורות לנושא זה." if he else "No sources found for this topic."
         return QueryResponse(answer=msg, citations=[], grounded=False, intent="lesson", files=[])

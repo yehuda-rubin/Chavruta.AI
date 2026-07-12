@@ -212,3 +212,45 @@ def test_chavruta_weak_only_when_retrieval_empty(monkeypatch):
     monkeypatch.setattr(api, "_get_pipeline", lambda: _fake_pipeline(result, captured))
     api._run_chavruta("שאלה על משהו שלא בקורפוס", "he", history=[])
     assert "RETRIEVAL CONFIDENCE IS LOW" in captured["job"]    # genuinely thin ⇒ weak banner shown
+
+
+# ── Tier0 (2026-07 audit): lesson primary-source floor — router↔corpus ref canonicalisation ──────
+# The corpus stores Tanakh verses as 'Genesis 1.1' (space after the book) but the router emits
+# 'Genesis.1.1' (dots), so an exact-ref base-source lookup silently found nothing → the base pasuk
+# never led the lesson. _canon_corpus_ref bridges the gap WITHOUT corrupting already-spaced refs.
+
+from chavruta.pipeline.pipeline import ChavrutaPipeline  # noqa: E402
+
+
+@pytest.mark.parametrize("ref,expected", [
+    ("Genesis.1.1", "Genesis 1.1"),          # verse-level router ref → corpus form
+    ("Exodus.20", "Exodus 20"),              # chapter-level
+    ("I Samuel.3.10", "I Samuel 3.10"),      # book name with a space
+    ("Song of Songs.1.1", "Song of Songs 1.1"),
+    ("Mishnah Bava Metzia 1.1", "Mishnah Bava Metzia 1.1"),  # already corpus form — MUST NOT corrupt
+    ("Berakhot 2a", "Berakhot 2a"),          # no dot-before-digit at the book boundary — unchanged
+])
+def test_canon_corpus_ref(ref, expected):
+    assert ChavrutaPipeline._canon_corpus_ref(ref) == expected
+
+
+def test_base_sources_for_refs_canonicalises_dedups_and_scores(monkeypatch):
+    """base_sources_for_refs must look up the canonical ref, return RankedHits at score 1.0, and dedup."""
+    calls = []
+
+    class _Store:
+        def fetch_by_refs(self, name, refs, filters=None):
+            calls.append((refs, filters))
+            # emulate the corpus: the base verse exists under the SPACE form only
+            if refs == ["Genesis 1.1"]:
+                return [SimpleNamespace(chunk_id="g11", score=1.0,
+                                        payload={"ref": "Genesis 1.1", "text": "בראשית",
+                                                 "unit_type": "source", "work_id": "tanakh"})]
+            return []
+
+    pipe = SimpleNamespace(store=_Store(), profile=SimpleNamespace(collection="chavruta"),
+                           _canon_corpus_ref=ChavrutaPipeline._canon_corpus_ref)
+    out = ChavrutaPipeline.base_sources_for_refs(pipe, ["Genesis.1.1", "Genesis.1.1", "Nonexistent.9.9"])
+    assert [h.ref for h in out] == ["Genesis 1.1"]            # canonicalised, deduped, missing dropped
+    assert out[0].score == 1.0                                # a resolved base source is a certain anchor
+    assert calls[0] == (["Genesis 1.1"], {"unit_type": "source"})  # queried the corpus form + source filter
