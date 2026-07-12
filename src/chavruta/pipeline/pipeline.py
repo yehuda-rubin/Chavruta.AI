@@ -292,6 +292,11 @@ class ChavrutaPipeline:
             max_tokens=_max_tokens_for(query.intent, self.profile),
             temperature=self.profile.llm_temperature,
         )
+        # Agentic retrieval may have appended sources during generation (bridge runs the loop inside
+        # generate) — extend the marker map so a responsa/lesson that fetched its own sources keeps
+        # those [S#] citations (and prune_lesson_to_cited doesn't then delete the sections citing them).
+        for i, s in enumerate(getattr(llm_out, "fetched_sources", None) or [], len(marker_map) + 1):
+            marker_map.setdefault(f"S{i}", s)
         text, citations, is_grounded = grounded.enforce_citations(llm_out.text, marker_map)
         if plan.sections:
             plan = grounded.prune_lesson_to_cited(plan, citations)
