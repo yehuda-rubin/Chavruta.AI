@@ -35,4 +35,4 @@ if (-not $m) { throw "NEBIUS_API_KEY not found in .env" }
 $env:CHAVRUTA_LLM_API_KEY = $m.Matches[0].Groups[1].Value.Trim().Trim('"')
 
 Write-Host "Starting Chavruta backend on http://localhost:8080 (qdrant=server, hybrid, Llama-3.3-70B)..."
-& .\.venv\Scripts\python.exe -m uvicorn app.api:app --host 0.0.0.0 --port 8080
+& .\.venv\Scripts\python.exe -m uvicorn app.api:app --host 127.0.0.1 --port 8080

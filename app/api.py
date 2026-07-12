@@ -4,11 +4,12 @@
 REST wrapper over ChavrutaPipeline for deployment as a Nebius Serverless Endpoint.
 The pipeline is loaded once at startup and shared across requests.
 
-    uvicorn app.api:app --host 0.0.0.0 --port 8080
+    uvicorn app.api:app --host 127.0.0.1 --port 8080
 """
 
 from __future__ import annotations
 
+import logging
 import re
 import sys
 from pathlib import Path
@@ -33,7 +34,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from chavruta.config.profile import Profile
 from chavruta.corpus.schema import Intent, Query, Turn
@@ -43,6 +44,7 @@ import app.db as db
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 
+_log = logging.getLogger("chavruta.api")
 _pipeline = None
 
 
@@ -652,6 +654,23 @@ def _run_chavruta(question: str, lang: str, history=None) -> QueryResponse:
 
 def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
                audience: str = "", grade_band: str = "", length: str = "") -> QueryResponse:
+    """Safety wrapper: a retrieval/LLM/backend failure degrades to an honest error response instead
+    of a 500 for the whole request (real HTTPExceptions — e.g. 422 bad intent — still propagate)."""
+    try:
+        return _run_query_impl(question, lang, intent_str, history, audience, grade_band, length)
+    except HTTPException:
+        raise
+    except Exception:
+        _log.exception("query processing failed (intent=%r)", intent_str)
+        he = (lang or "") != "en"
+        return QueryResponse(
+            answer=("אירעה שגיאה בעיבוד הבקשה — נסו שוב." if he
+                    else "An error occurred processing the request — please try again."),
+            citations=[], grounded=False, intent=(intent_str or "qa"), files=[])
+
+
+def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Turn],
+                    audience: str = "", grade_band: str = "", length: str = "") -> QueryResponse:
     if intent_str == "shut":          # UI's responsa mode → HALACHA intent
         intent_str = "halacha"
     if intent_str == "chavruta":      # Socratic study-partner mode (its own path)
@@ -724,9 +743,11 @@ def health():
 # ── Stateless query (backward-compatible) ────────────────────────────────────
 
 class QueryRequest(BaseModel):
-    question: str
-    lang: str = ""
-    intent: str = ""
+    # Bounded so a giant body can't blow up the bridge job files / prompt tokens (a 422 is returned
+    # for over-length input). 8k chars is far beyond any real question incl. a pasted source.
+    question: str = Field(max_length=8000)
+    lang: str = Field(default="", max_length=8)
+    intent: str = Field(default="", max_length=32)
     audience: str = ""       # lesson mode: "" (auto) | "yeshiva" | "school"
     grade_band: str = ""     # school lessons: a-c | d-f | g-i | j-l
     length: str = ""         # "" (medium) | "short" | "medium" | "long"

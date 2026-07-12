@@ -17,4 +17,4 @@ $env:CHAVRUTA_QUERY_PLANNER        = "heuristic"   # no LLM planner in bridge mo
 $env:CHAVRUTA_LLM_BACKEND          = "bridge"      # Claude answers pending jobs; no Nebius/external API
 
 Write-Host "Starting Chavruta backend (BRIDGE) on http://localhost:8080 (qdrant=server, hybrid)..."
-& .\.venv\Scripts\python.exe -m uvicorn app.api:app --host 0.0.0.0 --port 8080
+& .\.venv\Scripts\python.exe -m uvicorn app.api:app --host 127.0.0.1 --port 8080
