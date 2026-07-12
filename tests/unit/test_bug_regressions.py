@@ -254,3 +254,40 @@ def test_base_sources_for_refs_canonicalises_dedups_and_scores(monkeypatch):
     assert [h.ref for h in out] == ["Genesis 1.1"]            # canonicalised, deduped, missing dropped
     assert out[0].score == 1.0                                # a resolved base source is a certain anchor
     assert calls[0] == (["Genesis 1.1"], {"unit_type": "source"})  # queried the corpus form + source filter
+
+
+# ── Tier0 (2026-07 audit): per-hit relevance floor prunes dense semantic noise, keeps lexical hits ──
+# Bug: the honesty gate was all-or-nothing (top hit only), so off-topic-but-similar sources (Kilayim
+# for a Shabbat question) shipped to the model. The floor drops a hit ONLY if dense retrieval itself
+# surfaced it below threshold — sparse/lexical-driven hits (absent from the dense map) are kept.
+
+from chavruta.store.base import Hit  # noqa: E402
+
+
+def test_per_hit_dense_floor_prunes_noise_keeps_lexical():
+    from chavruta.retrieval.hybrid import HybridRetriever
+
+    class _Emb:
+        def embed_query(self, text):
+            return SimpleNamespace(dense=[0.1, 0.2], sparse={1: 0.5})
+
+    class _Store:
+        def search(self, name, q, top_k, filters=None):
+            if filters and "work_id" in filters:            # foundational-floor probe → nothing extra
+                return []
+            return [
+                Hit(chunk_id="good", score=0.05, payload={"chunk_id": "good", "ref": "Berakhot 2a", "text": "t"}),
+                Hit(chunk_id="noise", score=0.049, payload={"chunk_id": "noise", "ref": "Mishnah Kilayim 8.1", "text": "t"}),
+                Hit(chunk_id="lex", score=0.048, payload={"chunk_id": "lex", "ref": "Shabbat 12a", "text": "t"}),
+            ]
+
+        def dense_scores(self, name, dense, filters=None, top_k=30):
+            return {"good": 0.70, "noise": 0.42}             # 'lex' absent → sparse-driven, must survive
+
+    prof = SimpleNamespace(hybrid=True, collection="c", relevance_threshold=0.55, rerank=False)
+    res = HybridRetriever(_Emb(), _Store(), prof).retrieve(Query(text="הלכות שבת"), top_k=5)
+    refs = [h.ref for h in res.hits]
+    assert "Berakhot 2a" in refs                              # on-topic dense hit kept
+    assert "Shabbat 12a" in refs                              # sparse/lexical hit (not in dense map) kept
+    assert "Mishnah Kilayim 8.1" not in refs                  # dense-surfaced sub-threshold noise pruned
+    assert not res.is_empty                                   # top dense cosine 0.70 ≥ threshold

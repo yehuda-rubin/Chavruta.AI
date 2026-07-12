@@ -204,6 +204,19 @@ class QdrantStore:
         )
         return res.points[0].score if res.points else 0.0
 
+    def dense_scores(self, name: str, dense, filters: Optional[Filter] = None,
+                     top_k: int = 30) -> dict[str, float]:
+        """{chunk_id: dense cosine} for the top-`top_k` DENSE candidates. Serves both the honesty
+        gate (max value) and the per-hit relevance floor (in hybrid mode, the RRF fusion score is not
+        a cosine, so a hit's *true* dense similarity has to be read from a dense-only query). A hit
+        absent from this map was NOT a dense candidate — i.e. it is sparse/lexical-driven — and must
+        NOT be pruned by a dense floor, or exact-term matches would be lost."""
+        res = self._client_().query_points(
+            collection_name=name, query=list(dense), using="dense", limit=top_k,
+            query_filter=self._build_filter(filters), with_payload=True,
+        )
+        return {(p.payload or {}).get("chunk_id", str(p.id)): p.score for p in res.points}
+
     def count(self, name: str, filters: Optional[Filter] = None) -> int:
         res = self._client_().count(
             collection_name=name, count_filter=self._build_filter(filters), exact=True

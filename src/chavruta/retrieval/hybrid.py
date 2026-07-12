@@ -68,6 +68,25 @@ class HybridRetriever:
         )
         hits = [_to_hit(h) for h in raw]
 
+        # Per-hit relevance floor (hybrid only): prune off-topic-but-similar noise (e.g. Kilayim
+        # sources surfacing for a Shabbat question). The RRF fusion score is NOT a cosine, so we read
+        # each candidate's true DENSE cosine from a dense-only probe (`dense_map`, also reused for the
+        # honesty gate below). We drop a hit ONLY if dense retrieval surfaced it with a sub-threshold
+        # cosine — sparse/lexical-driven hits (absent from the dense map) and anchors/enrichment added
+        # later are never pruned, so exact-term recall is preserved.
+        dense_map: dict[str, float] = {}
+        if use_sparse:
+            try:
+                dense_map = self.store.dense_scores(
+                    self.profile.collection, emb.dense, self._filters(query), top_k=top_k * 3)
+                thr = self.profile.relevance_threshold
+                pruned = [h for h in hits
+                          if not (h.chunk_id in dense_map and dense_map[h.chunk_id] < thr)]
+                if pruned:                    # never let the floor alone empty the pool
+                    hits = pruned
+            except Exception:
+                dense_map = {}
+
         # Named-ref anchoring: the question explicitly names a verse → fetch that verse and
         # everything anchored on it (exact, score above the relevance threshold by design).
         if query.named_refs:
@@ -125,7 +144,11 @@ class HybridRetriever:
         elif has_anchor:
             is_empty = False
         elif use_sparse:
-            top_dense = self.store.top_dense_score(self.profile.collection, emb.dense, self._filters(query))
+            # reuse the dense probe from the per-hit floor (max cosine = top-1 dense score); fall back
+            # to a fresh top-1 probe only if the map is unavailable.
+            top_dense = (max(dense_map.values()) if dense_map
+                         else self.store.top_dense_score(self.profile.collection, emb.dense,
+                                                         self._filters(query)))
             is_empty = top_dense < self.profile.relevance_threshold
         else:
             is_empty = hits[0].score < self.profile.relevance_threshold
