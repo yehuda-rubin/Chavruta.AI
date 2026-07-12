@@ -123,3 +123,32 @@
 | second_temple | [chavruta-index-second_temple](https://huggingface.co/datasets/Yehuda-Rubin/chavruta-index-second_temple) |
 
 **דאטה לאימון LoRA:** [chavruta-torah-mixed](https://huggingface.co/datasets/Yehuda-Rubin/chavruta-torah-mixed).
+
+## 7. Serving prerequisites — payload indexes & ref format
+
+After loading the collection into a Qdrant **server** (the full-scale hybrid mode), two things are
+load-bearing for retrieval:
+
+### 7.1 Keyword payload indexes (required)
+Run once against the live collection:
+
+```
+python scripts/create_payload_indexes.py     # keyword indexes on ref + anchor_ref
+```
+
+Without them, `fetch_by_refs` (named-ref anchoring, link expansion, the lesson primary-source
+floor) does a **full scan** of ~2.75M points and the Qdrant scroll **times out at 60s** → those
+features silently degrade. `ensure_text_index` auto-creates only the `search_he` text index; the
+`ref`/`anchor_ref` **keyword** indexes are NOT auto-created. Re-run the script whenever the
+collection is rebuilt (indexes don't survive a fresh collection).
+
+### 7.2 Reference format (dotted router refs vs space-form corpus refs)
+The intent router emits **dotted** refs — `Genesis.1.1`, `Exodus.20`, `Bava Metzia.2a` — but the
+corpus stores base-text `ref` payloads with a **space after the book name**: `Genesis 1.1`,
+`Kiddushin 82.4`, `Mishnah Sukkah 3.5` (base Tanakh verses also carry `anchor_ref = null`;
+`unit_type ∈ {source, commentary}`). An **exact** `MatchAny` lookup therefore needs the space form.
+`corpus/refs.py::canon_corpus_ref` converts the book↔chapter dot to a space, and `with_ref_variants`
+passes both spellings (plus the chapter→opening-verse `.1`); the retriever's anchoring path and the
+lesson primary-source floor both use them. Do NOT confuse this with `canonical_ref`, the loose
+lowercased join key used by the link graph. (There is no populated `search_he` payload field — its
+lexical index is empty, so a `MatchText` on it will time out; the live path uses dense + `fetch_by_refs`.)

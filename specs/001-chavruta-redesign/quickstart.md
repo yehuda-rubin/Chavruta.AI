@@ -7,7 +7,7 @@ and that the trust gate runs. Commands are Windows PowerShell (the project's she
 
 - Python 3.13 venv at `.venv` (exists).
 - Ollama installed, with the local model pulled (DictaLM-2.0 Q4, ~4.4GB):
-  `ollama pull dictalm2.0-instruct:q4_k_m`  *(model id is config-driven; swap if RAM-tight)*
+  `ollama pull hf.co/dicta-il/DictaLM-3.0-1.7B-Thinking-GGUF:Q8_0`  *(model id is config-driven; swap if RAM-tight)*
 - The Tanakh corpus already fetched (`data/processed/…`) and embedded vectors available.
 - Profile set to local (default): `$env:CHAVRUTA_PROFILE = "local"`.
 

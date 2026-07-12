@@ -1,6 +1,6 @@
 """LocalLLM — offline generation via Ollama (research D1).
 
-Default model: DictaLM-2.0-Instruct Q4 (~4.4GB), Hebrew-specialized, fits the laptop RAM
+Default model: DictaLM-3.0-1.7B-Thinking Q8 (Hebrew-specialized; overridden by CHAVRUTA_LLM_MODEL /
 budget. Model id is config-driven (swap to Q3 / a 3B model if RAM is tight). No external
 knowledge or tools at generate time (offline, FR-017). `ollama` is imported lazily.
 """
@@ -16,7 +16,7 @@ class LocalLLM:
     profile = "local"
     source_fetcher = None       # injected by the pipeline for agentic retrieval
 
-    def __init__(self, model_id: str = "dictalm2.0-instruct:q4_k_m",
+    def __init__(self, model_id: str = "hf.co/dicta-il/DictaLM-3.0-1.7B-Thinking-GGUF:Q8_0",
                  base_url: str = "http://localhost:11434"):
         self.model_id = model_id
         self.base_url = base_url

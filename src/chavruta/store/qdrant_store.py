@@ -254,7 +254,7 @@ class QdrantStore:
         # Short timeout: without a payload index on `ref`/`anchor_ref` this scroll is a full scan of
         # the (large) collection. Fail fast so the caller degrades to base hits in seconds instead of
         # hanging ~60s on the server-side timeout. (The real fix is a keyword payload index on these
-        # fields — a one-time create_payload_index; see docs/CORPUS.md.)
+        # fields — run scripts/create_payload_indexes.py once; see docs/CORPUS.md §7.1.)
         points, _ = self._client_().scroll(
             collection_name=name,
             scroll_filter=combined,

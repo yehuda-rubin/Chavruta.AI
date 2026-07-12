@@ -132,7 +132,7 @@ python scripts/fetch_corpus.py
 python scripts/load_to_store.py --profile local
 
 # 4. Pull a local model (one-time) and ask
-ollama pull dictalm2.0-instruct:q4_k_m
+ollama pull hf.co/dicta-il/DictaLM-3.0-1.7B-Thinking-GGUF:Q8_0
 python scripts/ask.py "What does Rashi say about the creation of light?"
 python scripts/ask.py "מה אומר רד\"ק על ספר יונה?"
 ```
@@ -143,12 +143,20 @@ python scripts/ask.py "מה אומר רד\"ק על ספר יונה?"
 # 1. Start the Qdrant server holding the hybrid index
 docker compose --profile server up -d qdrant
 
-# 2. Backend (FastAPI on :8080) — reads NEBIUS_API_KEY from .env
+# 1b. One-time after loading the collection: keyword payload indexes on ref/anchor_ref
+#     (required — without them named-ref anchoring & link expansion time out; see docs/CORPUS.md §7.1)
+python scripts\create_payload_indexes.py
+
+# 2. Backend (FastAPI on :8080). Two serving modes:
+#    • Cloud LLM (Nebius Llama-3.3-70B, reads NEBIUS_API_KEY from .env):
 powershell -ExecutionPolicy Bypass -File scripts\serve.ps1
+#    • Bridge mode — NO external API; the model is Claude answering the grounded jobs written to
+#      data/llm_bridge/pending/ in-session (CHAVRUTA_LLM_BACKEND=bridge):
+powershell -ExecutionPolicy Bypass -File scripts\serve_bridge.ps1
 
 # 3. Frontend (Vite dev server on :5173, separate terminal)
 cd app\frontend ; npm install ; npm run dev
-#    → open http://localhost:5173   (toggle HE / EN in the top bar)
+#    → open http://localhost:5173/ui/chavruta.html   (toggle HE / EN in the top bar)
 ```
 
 ### The trust gate — run the evaluation harness (Principle V)
