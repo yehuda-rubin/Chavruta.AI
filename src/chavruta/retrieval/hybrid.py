@@ -63,9 +63,15 @@ class HybridRetriever:
         use_sparse = self.profile.hybrid and bool(emb.sparse)
         hquery = HybridQuery(dense=emb.dense, sparse=emb.sparse if use_sparse else None)
 
-        raw = self.store.search(
-            self.profile.collection, hquery, top_k=top_k * 3, filters=self._filters(query)
-        )
+        try:
+            raw = self.store.search(
+                self.profile.collection, hquery, top_k=top_k * 3, filters=self._filters(query)
+            )
+        except Exception as exc:
+            # A backend failure (e.g. a Qdrant search timeout under load) must degrade to an honest
+            # "no grounded source" rather than 500 the whole request.
+            logger.warning("main retrieval search failed (%s); returning empty result", exc)
+            return RetrievalResult(hits=[], anchor_refs=[], is_empty=True)
         hits = [_to_hit(h) for h in raw]
 
         # Per-hit relevance floor (hybrid only): prune off-topic-but-similar noise (e.g. Kilayim

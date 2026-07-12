@@ -187,11 +187,11 @@ def _fake_pipeline(result, captured):
             return result
 
     class _LLM:
-        fetched_sources: list = []
+        source_fetcher = None
 
         def request(self, body_md, *, lang="he"):
             captured["job"] = body_md
-            return "תשובה מעוגנת [S1]" if result.hits else "רגע, תכוון אותי"
+            return ("תשובה מעוגנת [S1]" if result.hits else "רגע, תכוון אותי"), []
 
     return SimpleNamespace(retriever=_Retriever(), llm=_LLM(), _resolve_query=lambda q: q)
 
@@ -326,3 +326,18 @@ def test_agentic_loop_fetches_then_answers():
 def test_agentic_loop_no_fetcher_returns_answer_directly():
     text, fetched = run_agentic_loop(lambda j: "תשובה [S1]", "job", None, "he")
     assert text == "תשובה [S1]" and fetched == []
+
+
+def test_agentic_request_degrades_when_generate_raises():
+    """Re-audit fix A: a completion backend raises on any API error/timeout; the request path must
+    degrade gracefully (like the bridge's None) instead of propagating a 500."""
+    from chavruta.llm.agentic import agentic_request
+
+    class _Boom:
+        source_fetcher = None
+
+        def generate(self, prompt, *, lang, max_tokens, temperature):
+            raise RuntimeError("Nebius 429 rate limit")
+
+    text, fetched = agentic_request(_Boom(), "job", lang="he")
+    assert "לא התקבלה" in text and fetched == []          # graceful timeout message, no exception

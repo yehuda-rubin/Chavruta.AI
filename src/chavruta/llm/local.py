@@ -15,7 +15,6 @@ from chavruta.llm.base import GroundedPrompt, LLMResult, render_messages
 class LocalLLM:
     profile = "local"
     source_fetcher = None       # injected by the pipeline for agentic retrieval
-    fetched_sources: list = []
 
     def __init__(self, model_id: str = "dictalm2.0-instruct:q4_k_m",
                  base_url: str = "http://localhost:11434"):
@@ -23,9 +22,9 @@ class LocalLLM:
         self.base_url = base_url
         self._client = None  # lazy
 
-    def request(self, body_md: str, *, lang: str = "he") -> str:
+    def request(self, body_md: str, *, lang: str = "he"):
         """Answer a pre-formatted job (markdown) — the lesson/chavruta path. Runs the same agentic
-        ===NEED_SOURCES=== retrieval loop as the bridge, over local completion calls."""
+        ===NEED_SOURCES=== loop as the bridge, over local completion calls. Returns (answer, fetched)."""
         from chavruta.llm.agentic import agentic_request
 
         return agentic_request(self, body_md, lang=lang)

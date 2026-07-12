@@ -104,14 +104,20 @@ _REQUEST_SYSTEM = ("You are a grounded Torah study assistant. Follow the job bel
                    "contains the sources (each tagged [S#]) and the instructions. Cite by [S#].")
 
 
-def agentic_request(llm, body_md: str, *, lang: str = "he", max_tokens: int = 8000) -> str:
+def agentic_request(llm, body_md: str, *, lang: str = "he",
+                    max_tokens: int = 8000) -> tuple[str, list[SourceBlock]]:
     """Run the agentic loop for a completion backend (CloudLLM/LocalLLM): each round sends the whole
-    job markdown as one grounded prompt and returns the model's completion. Records fetched sources on
-    `llm.fetched_sources` (like the bridge) so callers align citations uniformly."""
+    job markdown as one grounded prompt and returns the model's completion. Returns
+    (answer, fetched_sources) so the caller aligns citations without any shared per-call state."""
     def _send(job_md: str) -> str | None:
         prompt = GroundedPrompt(system=_REQUEST_SYSTEM, sources=[], question=job_md)
-        return llm.generate(prompt, lang=lang, max_tokens=max_tokens, temperature=0.3).text or None
+        try:
+            # Unlike the bridge's file-poll transport (which returns None on timeout and never
+            # raises), a real completion backend raises on any API error / timeout / rate-limit /
+            # Ollama-not-running. Treat that like a timeout so the loop degrades gracefully instead
+            # of 500-ing the whole request.
+            return llm.generate(prompt, lang=lang, max_tokens=max_tokens, temperature=0.3).text or None
+        except Exception:
+            return None
 
-    text, fetched = run_agentic_loop(_send, body_md, getattr(llm, "source_fetcher", None), lang)
-    llm.fetched_sources = fetched
-    return text
+    return run_agentic_loop(_send, body_md, getattr(llm, "source_fetcher", None), lang)

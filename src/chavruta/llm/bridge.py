@@ -70,17 +70,16 @@ class BridgeLLM:
             pass
         return None
 
-    def _dispatch(self, header: str, job_md: str, lang: str) -> str:
+    def _dispatch(self, header: str, job_md: str, lang: str):
         """Run the shared agentic-retrieval loop over the file-handshake transport: each round writes
-        a fresh job to pending/ and waits for the answer. Sources fetched during the loop are recorded
-        on `self.fetched_sources` (in [S#] order) so the caller can align its citation mapping."""
+        a fresh job to pending/ and waits for the answer. Returns (answer, fetched_sources) — fetched
+        in [S#] order — so the caller aligns citations without any shared per-call state."""
         def _send(jmd: str) -> str | None:
             jid = uuid.uuid4().hex[:12]
             (PENDING / f"{jid}.md").write_text(f"{header} {jid}\n\n{jmd}", encoding="utf-8")
             return self._await(jid)
 
-        text, self.fetched_sources = run_agentic_loop(_send, job_md, self.source_fetcher, lang)
-        return text
+        return run_agentic_loop(_send, job_md, self.source_fetcher, lang)
 
     # ── LLMBackend interface ─────────────────────────────────────────────────────
     def _write_job_md(self, prompt: GroundedPrompt) -> str:
@@ -102,14 +101,14 @@ class BridgeLLM:
 
     def generate(self, prompt: GroundedPrompt, *, lang: str, max_tokens: int,
                  temperature: float) -> LLMResult:
-        text = self._dispatch("# job", self._write_job_md(prompt), lang)
-        return LLMResult(text=text, finish_reason="stop" if text else "timeout")
+        text, fetched = self._dispatch("# job", self._write_job_md(prompt), lang)
+        return LLMResult(text=text, finish_reason="stop" if text else "timeout", fetched_sources=fetched)
 
     def stream(self, prompt: GroundedPrompt, *, lang: str, max_tokens: int,
                temperature: float) -> Iterator[str]:
         yield self.generate(prompt, lang=lang, max_tokens=max_tokens, temperature=temperature).text
 
-    def request(self, body_md: str, *, lang: str = "he") -> str:
+    def request(self, body_md: str, *, lang: str = "he"):
         """Low-level bridge: write an arbitrary already-formatted job (markdown) and return Claude's
-        raw answer. Used by the lesson / chavruta paths. Runs the same agentic-retrieval loop."""
+        (answer, fetched_sources). Used by the lesson / chavruta paths. Runs the agentic loop."""
         return self._dispatch("# lesson job", body_md, lang)

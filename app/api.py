@@ -505,11 +505,11 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
 
     job = _lesson_job_md(topic, hits, lang, audience=aud, grade_band=band, length=length,
                          tpl=tpl, history=history)
-    raw = pipeline.llm.request(job, lang=lang) if hasattr(pipeline.llm, "request") else ""
+    raw, fetched = pipeline.llm.request(job, lang=lang)
     # Agentic retrieval may have appended sources (===NEED_SOURCES===); include them so their [S#]
     # citations resolve. They continue the marker numbering after the original hits, so a plain
     # append keeps hits[i-1] aligned with [S{i}].
-    hits = hits + list(getattr(pipeline.llm, "fetched_sources", []) or [])
+    hits = hits + list(fetched or [])
 
     # Clarify gate — the model decided it needs more info: surface the questions, no files yet.
     if "===CLARIFY===" in raw:
@@ -636,8 +636,8 @@ def _run_chavruta(question: str, lang: str, history=None) -> QueryResponse:
     # EVERY hybrid turn and nudged the chavruta to stall instead of teach.
     weak = result.is_empty
     job = _chavruta_job_md(question, hits, lang, history, weak_retrieval=weak)
-    raw = pipeline.llm.request(job, lang=lang) if hasattr(pipeline.llm, "request") else ""
-    hits = hits + list(getattr(pipeline.llm, "fetched_sources", []) or [])   # include agentically-fetched
+    raw, fetched = pipeline.llm.request(job, lang=lang)
+    hits = hits + list(fetched or [])   # include agentically-fetched so their [S#] resolve
     nums, used, seen = [int(n) for n in re.findall(r"\[\s*S(\d+)\s*\]", raw)], [], set()
     for i in nums:
         if 1 <= i <= len(hits) and i not in seen:

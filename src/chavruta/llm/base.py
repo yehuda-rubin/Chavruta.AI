@@ -7,7 +7,7 @@ chosen by config. Grounding is enforced by the pipeline, not trusted to the mode
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
@@ -40,6 +40,9 @@ class GroundedPrompt:
 class LLMResult:
     text: str
     finish_reason: str = "stop"
+    # Sources the model pulled itself during agentic retrieval (===NEED_SOURCES===), in [S#] order.
+    # Returned per-call (never stashed on the shared backend) so callers align citations race-free.
+    fetched_sources: list = field(default_factory=list)
 
 
 def render_messages(prompt: GroundedPrompt, lang: str) -> list[dict]:
@@ -83,7 +86,10 @@ def render_messages(prompt: GroundedPrompt, lang: str) -> list[dict]:
 @runtime_checkable
 class LLMBackend(Protocol):
     model_id: str
-    profile: str         # "local" | "cloud"
+    profile: str         # "local" | "cloud" | "bridge"
+    # Agentic retrieval: the pipeline injects a fetcher; the model may pull its own sources via a
+    # ===NEED_SOURCES=== block (see chavruta.llm.agentic). Part of the contract, not duck-typed.
+    source_fetcher: Callable[[list[str]], list[SourceBlock]] | None
 
     def generate(
         self, prompt: GroundedPrompt, *, lang: str, max_tokens: int, temperature: float
@@ -92,3 +98,8 @@ class LLMBackend(Protocol):
     def stream(
         self, prompt: GroundedPrompt, *, lang: str, max_tokens: int, temperature: float
     ) -> Iterator[str]: ...
+
+    def request(self, body_md: str, *, lang: str = "he") -> tuple[str, list[SourceBlock]]:
+        """Answer a pre-formatted job (markdown) — the lesson/chavruta path — running the agentic
+        loop. Returns (answer, fetched_sources) so callers align citations without shared state."""
+        ...
