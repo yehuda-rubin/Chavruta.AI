@@ -17,6 +17,9 @@ import time
 import urllib.request
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from chavruta.corpus.refs import daf_amud_to_corpus_n  # single source of truth for N = 2·daf ∓ 1
+
 # Standard 37 Bavli tractates (Sefaria English titles → Hebrew names for the router).
 TRACTATES = {
     "Berakhot": "ברכות", "Shabbat": "שבת", "Eruvin": "עירובין", "Pesachim": "פסחים",
@@ -28,14 +31,11 @@ TRACTATES = {
     "Makkot": "מכות", "Shevuot": "שבועות", "Avodah Zarah": "עבודה זרה", "Horayot": "הוריות",
     "Zevachim": "זבחים", "Menachot": "מנחות", "Chullin": "חולין", "Bekhorot": "בכורות",
     "Arakhin": "ערכין", "Temurah": "תמורה", "Keritot": "כריתות", "Meilah": "מעילה",
-    "Niddah": "נדה",
+    "Tamid": "תמיד", "Niddah": "נדה",
 }
 
-_DAF_RE = re.compile(r"\b(\d+)([ab])\b")
-
-
-def _corpus_n(daf: int, amud: str) -> int:
-    return 2 * daf - (1 if amud == "a" else 0)
+# Opening of a perek's wholeRef: 'Sanhedrin 23a:1-31b:21' / 'Berakhot 17b:12-26a:10' → daf, amud, seg.
+_OPEN_RE = re.compile(r"\b(\d+)([ab]):(\d+)")
 
 
 def _fetch(url: str) -> dict:
@@ -53,12 +53,14 @@ def main() -> int:
             perakim: list[str] = []
             for n in nodes:
                 whole = n.get("wholeRef") or ""
-                m = _DAF_RE.search(whole)                 # opening daf of the perek
+                m = _OPEN_RE.search(whole)                # opening daf:amud:segment of the perek
                 if not m:
                     perakim.append("")
                     continue
-                daf, amud = int(m.group(1)), m.group(2)
-                perakim.append(f"{en} {_corpus_n(daf, amud)}.1")
+                daf, amud, seg = int(m.group(1)), m.group(2), int(m.group(3))
+                # corpus segment index mirrors Sefaria's within-amud index 1:1 (verified live), so the
+                # perek opens at 'Tractate N.seg' — NOT '.1' (69% of perakim open mid-amud).
+                perakim.append(f"{en} {daf_amud_to_corpus_n(daf, amud)}.{seg}")
             if perakim:
                 out[en] = {"he": he, "perakim": perakim}
                 print(f"  {en}: {len(perakim)} perakim  (perek3={perakim[2] if len(perakim) > 2 else '-'})")

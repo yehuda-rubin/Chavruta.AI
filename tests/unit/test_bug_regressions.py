@@ -256,18 +256,29 @@ def test_amud_to_corpus_in_variants(ref, corpus):
 
 
 # ── Tier1 (2026-07): perek-ordinal → opening-daf resolution (Sefaria-built index) ────────────────
+# The opening SEGMENT matters: a perek usually opens mid-amud (Berakhot 3 = 17b:12 → 'Berakhot 34.12',
+# NOT '.1' which is the previous perek's aggadic tail). Exact refs, verified against the live corpus.
 @pytest.mark.parametrize("text,expected", [
     ("אני רוצה ללמוד את הדף הראשון בפרק שלישי בסנהדרין", "Sanhedrin 45.1"),  # the motivating example
-    ("פרק ג' בבבא מציעא", "Bava Metzia 66.1"),
-    ("פרק שני בברכות", None),                 # resolves to *some* Berakhot ref (index-dependent)
+    ("פרק שלישי בברכות", "Berakhot 34.12"),   # opens mid-amud (17b:12) — 'מי שמתו', not the '.1' tail
+    ("פרק ג' בבבא מציעא", "Bava Metzia 66.7"),  # 'המפקיד'
 ])
 def test_perek_ordinal_resolves(text, expected):
     from chavruta.intents.landmarks import resolve_landmarks
-    refs = resolve_landmarks(text)
-    if expected:
-        assert expected in refs
-    else:
-        assert any(r.startswith("Berakhot ") for r in refs)
+    assert expected in resolve_landmarks(text)
+
+
+@pytest.mark.parametrize("text", ["פרק זה בשבת", "בפרק זה במסכת שבת", "פרק הוא בגיטין"])
+def test_perek_demonstrative_not_gematria(text):
+    """'פרק זה' = 'THIS chapter' — gematria('זה')=12 must NOT fabricate a perek number/daf."""
+    from chavruta.intents.landmarks import resolve_landmarks
+    assert not any(r.split()[0] in ("Shabbat", "Gittin") and r[-2:] != "2a" for r in resolve_landmarks(text))
+
+
+def test_amud_to_corpus_ignores_volume_numbered_works():
+    """Talmud amud→corpus must not fire on volume-numbered refs like the Zohar ('Zohar 1.15a')."""
+    from chavruta.corpus.refs import with_ref_variants
+    assert with_ref_variants(["Zohar.1.15a"]) == ["Zohar.1.15a", "Zohar 1.15a"]   # no bogus 'Zohar 1 29.1'
 
 
 def test_base_sources_for_refs_canonicalises_dedups_and_scores(monkeypatch):
@@ -289,7 +300,7 @@ def test_base_sources_for_refs_canonicalises_dedups_and_scores(monkeypatch):
     out = ChavrutaPipeline.base_sources_for_refs(pipe, ["Genesis.1.1", "Genesis.1.1", "Nonexistent.9.9"])
     assert [h.ref for h in out] == ["Genesis 1.1"]            # canonicalised, deduped, missing dropped
     assert out[0].score == 1.0                                # a resolved base source is a certain anchor
-    assert calls[0] == (["Genesis 1.1"], {"unit_type": "source"})  # queried the corpus form + source filter
+    assert (["Genesis 1.1"], {"unit_type": "source"}) in calls  # queried the corpus form + source filter
 
 
 # ── Tier0 (2026-07 audit): per-hit relevance floor prunes dense semantic noise, keeps lexical hits ──

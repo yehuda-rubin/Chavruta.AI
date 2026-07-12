@@ -34,13 +34,19 @@ _ORD_ALT = "|".join(sorted(_HE_ORDINALS, key=len, reverse=True))
 
 
 def _perek_num(token: str) -> int | None:
-    token = token.strip().rstrip("'׳")
+    token = token.strip()
     if token in _HE_ORDINALS:
         return _HE_ORDINALS[token]
-    if token.isdigit():
-        return int(token)
-    g = gematria(token)                       # gematria letters (ג=3, י"א=11 …)
-    return g or None
+    core = token.rstrip("'׳\"״")
+    if core.isdigit():
+        return int(core)
+    # A Hebrew numeral counts only if it's a SINGLE letter ('ג') or carries a geresh/gershayim
+    # ('ג׳', 'י״א'); a bare multi-letter token is rejected — otherwise demonstratives like 'זה'/'הוא'
+    # ('פרק זה' = "this chapter") gematria-sum to a bogus perek number and anchor the wrong daf.
+    marked = any(c in token for c in "'׳\"״")
+    if core and all("א" <= c <= "ת" for c in core) and (len(core) == 1 or marked):
+        return gematria(core) or None
+    return None
 
 # ── Absolute landmarks: famous passages with a fixed ref ─────────────────────────
 ABSOLUTE_LANDMARKS: dict[str, str] = {

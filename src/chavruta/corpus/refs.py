@@ -38,12 +38,20 @@ def canon_corpus_ref(ref: str | None) -> str:
 _AMUD_RE = re.compile(r"^(?P<t>.+?)[ .](?P<daf>\d+)(?P<amud>[ab])$")
 
 
+def daf_amud_to_corpus_n(daf: int, amud: str) -> int:
+    """The corpus's flat amud-linear daf number: N = 2·daf − 1 (amud a) / 2·daf (amud b). This IS the
+    corpus's Talmud storage convention — the single source of truth (the offline perek-index builder
+    imports it too, so runtime and index never drift)."""
+    return 2 * int(daf) - (1 if amud == "a" else 0)
+
+
 def _amud_to_corpus(ref: str) -> str | None:
     m = _AMUD_RE.match(ref or "")
-    if not m:
+    # Only a bare tractate name + daf + amud is Talmud ('Sanhedrin 23a'). A digit in the name means a
+    # volume-numbered work like the Zohar ('Zohar 1.15a') that is NOT amud-linear — don't fabricate a ref.
+    if not m or any(ch.isdigit() for ch in m.group("t")):
         return None
-    n = 2 * int(m.group("daf")) - (1 if m.group("amud") == "a" else 0)
-    return f"{m.group('t')} {n}.1"
+    return f"{m.group('t')} {daf_amud_to_corpus_n(int(m.group('daf')), m.group('amud'))}.1"
 
 
 def with_ref_variants(refs) -> list[str]:

@@ -16,7 +16,7 @@ from collections.abc import Iterator
 
 from chavruta.config.profile import Profile
 from chavruta.corpus.links import LinkGraph
-from chavruta.corpus.refs import canon_corpus_ref
+from chavruta.corpus.refs import canon_corpus_ref, with_ref_variants
 from chavruta.corpus.registry import CorpusRegistry, default_registry
 from chavruta.corpus.schema import Answer, Intent, Query, Turn
 from chavruta.generation import grounded
@@ -378,19 +378,16 @@ class ChavrutaPipeline:
     def base_sources_for_refs(self, refs):
         """The primary-source chunks (unit_type=source) for explicit refs — so a lesson leads from
         its base pasuk/daf/mishnah, not only its commentaries. Uses the indexed `ref` field (fast,
-        no scan), canonicalises the router→corpus ref format, and falls back to the opening verse
-        for a chapter-level ref. Returns RankedHits (score 1.0 — a resolved base source is certain)."""
+        no scan) and the SAME `with_ref_variants` normaliser as the retriever's anchoring path (dot↔
+        space, chapter→opening-verse, Talmud amud→corpus) so the two never disagree on which refs
+        resolve. Returns RankedHits (score 1.0 — a resolved base source is certain)."""
         from chavruta.retrieval.hybrid import _to_hit
 
         out, seen = [], set()
         for r in (refs or []):
             if not r:
                 continue
-            canon = self._canon_corpus_ref(r)
-            candidates = [canon]
-            if re.fullmatch(r".+\s\d+", canon):          # chapter-level (no verse) → opening verse
-                candidates.append(canon + ".1")
-            for c in candidates:
+            for c in with_ref_variants([r]):             # first variant that resolves wins
                 try:
                     raw = self.store.fetch_by_refs(self.profile.collection, [c],
                                                    filters={"unit_type": "source"})
@@ -403,7 +400,7 @@ class ChavrutaPipeline:
                             seen.add(hit.ref)
                             hit.score = 1.0
                             out.append(hit)
-                    break                                # first candidate that resolves wins
+                    break
         return out
 
     def ask_stream(self, request: Query, *, history: list[Turn] | None = None) -> Iterator[str]:
