@@ -460,8 +460,10 @@ def _lesson_job_md(question: str, hits, lang: str, *, audience: str | None,
         "",
         "Rules: ground everything ONLY in the SOURCES; cite by [S#] (the markers build the sources panel and "
         "are stripped from the shown text); write in the question's language; **bold** key terms. "
-        "כתוב אך ורק בעברית תקנית ומלאה — אסור בהחלט לשלב מילים בשפה זרה (אנגלית, סינית, רוסית, ויאטנמית וכו'); "
-        "אם חסרה לך מילה, כתוב אותה בעברית. "
+        "LANGUAGE: write ONLY in the question's language and do NOT mix in words from any OTHER language — "
+        "no stray English/Chinese/Russian words inside a Hebrew lesson (write 'בעל הבית', never 'employer'), "
+        "and no stray Hebrew/foreign words inside an English one. If a word is missing, express it in that "
+        "same language. "
         "IMPORTANT: when you mention a source in prose, NAME it (e.g. 'רש\"י מדייק…', 'פניני הלכה מלמד…') and "
         "append its [S#] tag — NEVER make a bare [S#] the subject of a sentence, because the tags are removed "
         "from the display and would leave a dangling reference.",
@@ -667,8 +669,9 @@ def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bo
         "sources are already present above.",
         "Ground everything ONLY in the SOURCES; cite by [S#] (stripped from display). Keep it fairly short "
         "(a real chavruta exchange, not an essay). Write in the learner's language. **bold** key terms. "
-        "כתוב אך ורק בעברית תקנית — אסור לשלב מילים בשפה זרה (אנגלית/סינית/רוסית וכו'). למשל: כתוב 'בעל הבית', "
-        "לא 'employer'.",
+        "LANGUAGE: write ONLY in the learner's language, with NO words from another language mixed in — in a "
+        "Hebrew turn write 'בעל הבית', never 'employer' (and no stray Chinese/Russian either); in an English "
+        "turn keep it English.",
     ]
     return "\n".join(lines)
 

@@ -78,8 +78,9 @@ def render_messages(prompt: GroundedPrompt, lang: str) -> list[dict]:
             f"SOURCES (the only knowledge you may use):\n{sources_block}\n\n"
             f"QUESTION: {prompt.question}\n\n"
             f"Answer in English clearly and fully — explain and develop your answer, do not reply with a "
-            f"single terse sentence. Cite every claim by its source marker like [S1]. Quote the Hebrew "
-            f"source text where relevant. If the sources do not contain the answer, say so plainly and do not invent."
+            f"single terse sentence. Write the explanation in English (you may quote the Hebrew source text), "
+            f"but do NOT mix in stray words from other languages (no Chinese/Russian/etc.). Cite every claim by "
+            f"its source marker like [S1]. If the sources do not contain the answer, say so plainly and do not invent."
         )
     messages.append({"role": "user", "content": user})
     return messages
