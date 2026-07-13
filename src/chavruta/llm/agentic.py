@@ -38,6 +38,15 @@ _NOFETCH_MSG = {"he": "לא הצלחתי להשיג מקורות מתאימים 
                       "Try rephrasing or naming a precise source."}
 DEGRADE_MESSAGES = frozenset(_TIMEOUT_MSG.values()) | frozenset(_NOFETCH_MSG.values())
 
+# Appended to the job on the FINAL retrieval round to force a real answer out of a model that keeps
+# replying ===NEED_SOURCES=== (rather than dead-ending in a degrade when sources were actually found).
+_FINAL_ANSWER_NOTE = {
+    "he": "\n\n## הוראה אחרונה — חובה\nלא ניתן למשוך מקורות נוספים. כתוב עכשיו את התשובה/השיעור המלא על "
+          "סמך המקורות שכבר ניתנו למעלה בלבד. אל תשיב שוב ב-===NEED_SOURCES===.",
+    "en": "\n\n## FINAL INSTRUCTION — REQUIRED\nNo more sources can be fetched. Write the full answer/lesson "
+          "NOW using ONLY the sources already provided above. Do NOT reply with ===NEED_SOURCES=== again.",
+}
+
 
 def is_degrade_message(text: str) -> bool:
     """True if `text` is one of the loop's graceful-degrade sentinels (or empty) — i.e. not a real
@@ -92,15 +101,21 @@ def run_agentic_loop(send: Callable[[str], str | None], job_md: str,
     align its citation mapping. `send(job_md)` returns the model's answer text, or None on timeout."""
     fetched: list[SourceBlock] = []
     for round_i in range(MAX_RETRIEVAL_ROUNDS):
-        answer = send(job_md)
+        last_round = round_i == MAX_RETRIEVAL_ROUNDS - 1
+        # On the FINAL round, append a hard instruction so a model that keeps over-asking commits to
+        # writing from the sources it already has — otherwise it dead-ends in a "couldn't get sources"
+        # degrade even though good sources were retrieved (observed with strong models on scattered
+        # topics). A model that asked once and got sources is unaffected.
+        answer = send(job_md + _FINAL_ANSWER_NOTE.get(lang, _FINAL_ANSWER_NOTE["en"]) if last_round else job_md)
         if answer is None:
             return _TIMEOUT_MSG.get(lang, _TIMEOUT_MSG["en"]), fetched
         queries = parse_need_sources(answer)
-        last_round = round_i == MAX_RETRIEVAL_ROUNDS - 1
-        if not queries or source_fetcher is None or last_round:
-            if queries:            # asked but we can't fetch again — don't surface a raw marker
-                return _NOFETCH_MSG.get(lang, _NOFETCH_MSG["en"]), fetched
-            return answer, fetched
+        if not queries:
+            return answer, fetched              # the model wrote a real answer
+        if last_round:
+            return answer, fetched              # forced final round — take what it wrote (marker stripped downstream)
+        if source_fetcher is None:              # asked, rounds remain, but there is no fetcher to call
+            return _NOFETCH_MSG.get(lang, _NOFETCH_MSG["en"]), fetched
         try:
             more = source_fetcher(queries) or []
         except Exception:

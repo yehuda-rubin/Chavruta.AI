@@ -484,6 +484,23 @@ def test_agentic_loop_no_fetcher_returns_answer_directly():
     assert text == "תשובה [S1]" and fetched == []
 
 
+def test_agentic_loop_forces_answer_on_final_round():
+    """Fix (2026-07-13): a model that keeps replying ===NEED_SOURCES=== every round must be FORCED to
+    write a real answer on the last round (via the appended FINAL instruction), not dead-end in a
+    'couldn't get sources' degrade — observed with strong cloud models on source-scattered topics."""
+    from chavruta.llm.agentic import is_degrade_message
+    block = [SourceBlock(marker="", ref="Sanhedrin 3.1", commentator_id=None, text="t")]
+
+    def send(job):                       # obeys only once the final-round instruction is present
+        if "הוראה אחרונה" in job or "FINAL INSTRUCTION" in job:
+            return "השיעור המלא על דיני ממונות בשלושה [S1]"
+        return "===NEED_SOURCES===\nעוד מקור על סנהדרין"
+
+    text, fetched = run_agentic_loop(send, "## SOURCES\n### [S1] X\nbody", lambda qs: block, "he")
+    assert text == "השיעור המלא על דיני ממונות בשלושה [S1]"
+    assert not is_degrade_message(text)      # a real lesson, NOT the degrade message
+
+
 def test_is_degrade_message_detects_sentinels_and_empty():
     from chavruta.llm.agentic import is_degrade_message, DEGRADE_MESSAGES
     assert is_degrade_message("")                                   # empty ⇒ not a real answer
