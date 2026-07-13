@@ -173,7 +173,7 @@ python scripts/ask.py "What does Rashi say about the creation of light?"
 python scripts/ask.py "מה אומר רד\"ק על ספר יונה?"
 ```
 
-### Run the full app (hybrid retrieval + chat UI)
+### Run EVERYTHING (full stack)
 
 **Prerequisites:** the corpus/index is already embedded and loaded into the local Qdrant (15 tiers,
 ~2.93M points), and `.env` holds `NEBIUS_API_KEY` (write access not needed for serving). If so, the
@@ -199,6 +199,43 @@ powershell -ExecutionPolicy Bypass -File scripts\serve_bridge.ps1
 cd app\frontend ; npm install ; npm run dev
 #    → open http://localhost:5173/ui/chavruta.html   (toggle HE / EN in the top bar)
 ```
+
+### Run only a PART of it
+
+**Just one component** — each is independent once its dependency is up, so start only what you need:
+
+```powershell
+# • Qdrant only (the data layer — start it, use the CLI/API against it)
+docker compose --profile server up -d qdrant           # stop: docker compose stop qdrant
+
+# • Backend only (needs Qdrant up) — the API on :8080, no UI. Good for scripts/curl:
+powershell -ExecutionPolicy Bypass -File scripts\serve.ps1
+
+# • Frontend only (needs the backend up) — the static UI proxies /api to :8080:
+cd app\frontend ; npm run dev
+```
+
+**Load only SOME corpus tiers** (the collection is a set of tiers; each is a separate HF index repo,
+loaded incrementally — build a smaller RAG with just the ones you want):
+
+```powershell
+# A minimal collection = Tanakh + Bavli only. First load RECREATES; each --append adds on top:
+python scripts\bootstrap_rag.py --repo Yehuda-Rubin/chavruta-index-tanakh --out out_tanakh              # no --append ⇒ (re)create
+python scripts\bootstrap_rag.py --repo Yehuda-Rubin/chavruta-index-gemara --out out_gemara --append
+python scripts\create_payload_indexes.py                                                                # after loading
+# add another tier later, on top, WITHOUT touching the rest:
+python scripts\bootstrap_rag.py --repo Yehuda-Rubin/chavruta-index-yerushalmi --out out_yerushalmi --append
+```
+
+**Switch the generation backend** (a config "part", set before serving):
+
+| backend | how | notes |
+|---------|-----|-------|
+| Nebius API (default) | `scripts\serve.ps1` | Qwen3-235B; needs `NEBIUS_API_KEY` in `.env` |
+| Bridge (no API) | `scripts\serve_bridge.ps1` | Claude answers `data/llm_bridge/pending/` in-session |
+| Local DictaLM | `CHAVRUTA_LLM_BACKEND=ollama` + `ollama pull …DictaLM…` | fully offline |
+
+**Stop everything:** Ctrl-C (or kill) the backend + frontend, then `docker compose stop qdrant`.
 
 ### The trust gate — run the evaluation harness (Principle V)
 
