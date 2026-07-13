@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import re
 import sys
+import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -47,13 +48,19 @@ import app.db as db
 
 _log = logging.getLogger("chavruta.api")
 _pipeline = None
+# FastAPI runs sync endpoints in a threadpool, so the lazy singletons below can be raced by concurrent
+# first requests (each building a heavy embedder / Qdrant client, leaking all but one). Guard with a
+# double-checked lock. The pipeline is normally warmed in lifespan; the templates client is not.
+_init_lock = threading.Lock()
 
 
 def _get_pipeline():
     global _pipeline
     if _pipeline is None:
-        from chavruta.pipeline.pipeline import ChavrutaPipeline
-        _pipeline = ChavrutaPipeline(Profile.from_env())
+        with _init_lock:
+            if _pipeline is None:
+                from chavruta.pipeline.pipeline import ChavrutaPipeline
+                _pipeline = ChavrutaPipeline(Profile.from_env())
     return _pipeline
 
 
@@ -177,9 +184,11 @@ def _length_minutes(length: str, audience: str | None, grade_band: str | None) -
 def _templates_client():
     global _tpl_client
     if _tpl_client is None:
-        from qdrant_client import QdrantClient
-        url = os.environ.get("CHAVRUTA_QDRANT_URL", "http://localhost:6333")
-        _tpl_client = QdrantClient(url=url, timeout=60)
+        with _init_lock:
+            if _tpl_client is None:
+                from qdrant_client import QdrantClient
+                url = os.environ.get("CHAVRUTA_QDRANT_URL", "http://localhost:6333")
+                _tpl_client = QdrantClient(url=url, timeout=60)
     return _tpl_client
 
 
@@ -568,6 +577,11 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
     caveats = ([("הערה: ציטוטים בשיעור שלא אומתו מול המקורות — יש לבדוק: «" + "», «".join(bad_q[:2]) + "»")
                 if he else ("Note: quote(s) in the lesson were not found in the sources — verify: «"
                             + "», «".join(bad_q[:2]) + "»")] if bad_q else [])
+    # Honesty gate (mirrors the QA path): a lesson body with no resolved [S#] citation isn't tied to a
+    # cited source — warn the teacher rather than presenting it as source-grounded.
+    if fl.strip() and not used:
+        caveats.append("הערה: השיעור אינו קשור למקור מצוטט — יש לוודא מול המקורות." if he
+                       else "Note: this lesson is not tied to a cited source — verify against the sources.")
     # Persist to the 'My Shiurim' library so the teacher can reopen/reuse it later.
     if files:
         try:
@@ -576,7 +590,7 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
                            [f.model_dump() for f in files], [c.model_dump() for c in used])
         except Exception:
             pass
-    return QueryResponse(answer="", citations=used, grounded=bool(used) or bool(fl.strip()),
+    return QueryResponse(answer="", citations=used, grounded=bool(used),
                          intent="lesson", caveats=caveats, files=files)
 
 

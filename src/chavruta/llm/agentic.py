@@ -62,7 +62,12 @@ def parse_need_sources(text: str) -> list[str]:
 
 
 def max_marker(job_md: str) -> int:
-    nums = [int(n) for n in re.findall(r"\[\s*S(\d+)\s*\]", job_md)]
+    # Count ONLY source-header markers — every source block is emitted as `### [S#] <ref>` at line
+    # start (api job builders, bridge._write_job_md, append_sources below). A bare `[S30]` inside the
+    # question / conversation history / a source body must NOT count: it would inflate the append
+    # offset and knock the caller's positional `hits + fetched` citation mapping out of alignment
+    # (misattributing or dropping the model's cited source).
+    nums = [int(n) for n in re.findall(r"(?m)^\s*#{1,4}\s*\[\s*S(\d+)\s*\]", job_md)]
     return max(nums) if nums else 0
 
 

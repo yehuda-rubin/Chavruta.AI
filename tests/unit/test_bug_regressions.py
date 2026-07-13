@@ -472,3 +472,61 @@ def test_agentic_request_degrades_when_generate_raises():
 
     text, fetched = agentic_request(_Boom(), "job", lang="he")
     assert "לא התקבלה" in text and fetched == []          # graceful timeout message, no exception
+
+
+# ── Tier1 (2026-07 round-5 audit): marker-space poisoning — the append offset must count only source
+# headers, never a [S#] token that appears in the user's question / history / a source body. Otherwise
+# the fetched-source numbering shifts and the caller's positional `hits + fetched` mapping misattributes
+# (or drops) the model's cited source.
+def test_max_marker_counts_only_source_headers():
+    from chavruta.llm.agentic import max_marker
+    job = ("## QUESTION\nהסבר את מה שראיתי ב[S30]\n\n## SOURCES\n"
+           "### [S1] Genesis 1.1\nבראשית\n### [S2] Rashi on Genesis 1.1\nפירוש")
+    assert max_marker(job) == 2                # the two ### [S#] headers — NOT the inline [S30] in the question
+    assert max_marker("nothing here") == 0
+
+
+def test_agentic_append_offset_immune_to_user_text_marker():
+    replies = iter(["===NEED_SOURCES===\nזה בורר", "answer [S2]"])
+    seen = []
+
+    def send(job):
+        seen.append(job)
+        return next(replies)
+
+    job = "## QUESTION\nמה המקור ל[S30]?\n\n## SOURCES\n### [S1] X\nbody"
+    block = [SourceBlock(marker="", ref="Mishnah Sanhedrin 3.1", commentator_id=None, text="זה בורר")]
+    _, fetched = run_agentic_loop(send, job, lambda qs: block, "he")
+    assert "### [S2] Mishnah Sanhedrin 3.1" in seen[1]   # continues from the ONE real header, not [S31]
+    assert "[S31]" not in seen[1]
+
+
+# ── Tier1 (2026-07 round-5 audit): dense-only honesty gate must read the RAW top-1 dense cosine, not
+# hits[0].score — the foundational floor boosts by +0.05, which could otherwise lift an off-topic hit
+# over the threshold and dishonestly flip is_empty to False.
+def test_dense_only_gate_ignores_floor_boost():
+    from chavruta.retrieval.hybrid import HybridRetriever
+
+    class _Emb:
+        def embed_query(self, text):
+            return SimpleNamespace(dense=[0.1, 0.2], sparse={})        # no sparse ⇒ dense-only mode
+
+    class _Store:
+        def search(self, name, q, top_k, filters=None):
+            if filters and "work_id" in filters:
+                if "unit_type" in filters:
+                    return []                                          # base-source floor: nothing
+                return [Hit(chunk_id="found", score=0.48,              # foundational floor hit → +0.05
+                            payload={"chunk_id": "found", "ref": "Genesis 1.1", "text": "t", "work_id": "tanakh"})]
+            return [Hit(chunk_id="main", score=0.40,
+                        payload={"chunk_id": "main", "ref": "Off Topic 1", "text": "t"})]
+
+        def dense_scores(self, name, dense, filters=None, top_k=30):
+            return {}
+
+        def top_dense_score(self, name, dense, filters=None):
+            return 0.40                                                # true top cosine, below threshold
+
+    prof = SimpleNamespace(hybrid=False, collection="c", relevance_threshold=0.5, rerank=False)
+    res = HybridRetriever(_Emb(), _Store(), prof).retrieve(Query(text="off topic"), top_k=5)
+    assert res.is_empty          # floor hit boosted 0.48→0.53 (≥thr) but true cosine 0.40 < 0.50 ⇒ honest empty

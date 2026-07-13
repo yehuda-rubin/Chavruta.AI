@@ -168,8 +168,9 @@ class HybridRetriever:
         hits.sort(key=lambda h: h.score, reverse=True)
         hits = hits[:top_k]
 
-        # Relevance / honesty gate. hits[0].score is a COSINE only in dense-only mode; in hybrid it is
-        # an RRF fusion score on a different scale, so we probe the raw dense cosine instead. A genuine
+        # Relevance / honesty gate. hits[0].score is never a clean cosine here (hybrid → RRF fusion
+        # score; dense-only → possibly floor-boosted/capped), so both non-anchor branches probe the raw
+        # top-1 dense cosine instead of trusting the ranked score. A genuine
         # named-ref anchor is always relevant — tracked by chunk_id in `anchored_ids` (NOT `score ≥ 1.0`,
         # which a boosted floor hit could trip and a reranker's sigmoid could erase).
         has_anchor = any(h.chunk_id in anchored_ids for h in hits)
@@ -185,7 +186,12 @@ class HybridRetriever:
                                                          self._filters(query)))
             is_empty = top_dense < self.profile.relevance_threshold
         else:
-            is_empty = hits[0].score < self.profile.relevance_threshold
+            # dense-only: hits[0].score is NOT a clean cosine — the foundational floor boosts by +0.05
+            # and the base-source floor caps at 0.99, either of which could lift an off-topic hit over
+            # the threshold and flip is_empty to False dishonestly. Probe the true top-1 dense cosine.
+            top_dense = self.store.top_dense_score(self.profile.collection, emb.dense,
+                                                   self._filters(query))
+            is_empty = top_dense < self.profile.relevance_threshold
         return RetrievalResult(
             hits=[] if is_empty else hits,
             anchor_refs=self._anchor_refs(hits),
