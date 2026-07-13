@@ -789,6 +789,7 @@ class SessionOut(BaseModel):
     first_q: str
     created_at: str
     updated_at: str | None = None
+    mode: str | None = None          # the chat's locked mode (intent from its first turn)
 
 
 class SessionCreateOut(SessionOut):
@@ -808,7 +809,8 @@ def create_session(req: QueryRequest):
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
 
-    sid = db.create_session(req.question.strip())
+    # Lock the chat's mode to the intent chosen on this first turn; every follow-up stays in it.
+    sid = db.create_session(req.question.strip(), mode=req.intent or None)
     db.save_message(sid, "user", req.question)
 
     result = _run_query(req.question, req.lang, req.intent, [],
@@ -852,7 +854,12 @@ def session_query(session_id: str, req: QueryRequest):
 
     db.save_message(session_id, "user", req.question)
 
-    result = _run_query(req.question, req.lang, req.intent, history,
+    # Sticky mode: a chat stays in the mode chosen on its first turn — ignore any intent the client
+    # sends on later turns. Legacy sessions (mode=NULL) fall back to the per-request intent.
+    locked_mode = db.get_session_mode(session_id)
+    intent = locked_mode or req.intent
+
+    result = _run_query(req.question, req.lang, intent, history,
                         audience=req.audience, grade_band=req.grade_band, length=req.length)
 
     db.save_message(

@@ -649,7 +649,20 @@ function renderUserSources() {
   if (btn) btn.textContent = tr('addSource') + (state.userSources.length ? ' (' + state.userSources.length + ')' : '');
 }
 
-function render() { renderSessions(); renderMessages(); renderSources(); renderUserSources(); }
+function render() { renderSessions(); renderMessages(); renderSources(); renderUserSources(); updateIntentLock(); }
+
+// A chat's mode is locked to the intent chosen on its first turn — once it has messages, the mode
+// segment is frozen (the backend enforces this too; the UI just reflects it so it's not confusing).
+function intentLocked() { return !!state.activeId && state.messages.length > 0; }
+function updateIntentLock() {
+  const seg = $('#intentSeg'); if (!seg) return;
+  const locked = intentLocked();
+  // Inline styles (not Tailwind utilities) so the freeze works with the pre-built offline CSS.
+  seg.style.opacity = locked ? '0.45' : '';
+  seg.style.pointerEvents = locked ? 'none' : '';
+  seg.setAttribute('title', locked ? (state.lang === 'he' ? 'המצב ננעל לפי ההודעה הראשונה בצ׳אט'
+                                                          : 'Mode is locked to the chat\'s first message') : '');
+}
 
 // ── Actions ─────────────────────────────────────────────────────────────────────
 async function loadSessions(autoSelect) {
@@ -670,6 +683,7 @@ async function selectSession(id) {
   catch { state.messages = []; }
   const s = state.sessions.find(x => x.id === id);
   $('#subtitle').textContent = s ? s.first_q : '';
+  if (s && s.mode) setIntent(s.mode);   // restore this chat's locked mode (segment is then frozen by render)
   render();
 }
 function newDiscussion() { state.activeId = null; state.messages = []; $('#subtitle').textContent = ''; setIntent(state.defaultIntent); render(); $('#input').focus(); }
@@ -698,7 +712,7 @@ async function send(text) {
       // canonical messages (robust regardless of the create-response shape).
       const r = await api('/sessions', { method:'POST', body });
       state.activeId = r.id;
-      state.sessions.unshift({ id:r.id, first_q:r.first_q, created_at:r.created_at });
+      state.sessions.unshift({ id:r.id, first_q:r.first_q, created_at:r.created_at, mode:state.intent });
       $('#subtitle').textContent = r.first_q;
       // Use the returned result directly — it carries `files` (lesson mode), which /messages omits.
       state.messages.push({ role:'assistant', text:r.result.answer, citations:r.result.citations||[], caveats:r.result.caveats||[], grounded:r.result.grounded, files:r.result.files });
@@ -758,6 +772,7 @@ $('#audSel')?.addEventListener('change', e => { state.audience = e.target.value;
 $('#bandSel')?.addEventListener('change', e => { state.gradeBand = e.target.value; saveSettings(); });
 $('#lenSel')?.addEventListener('change', e => { state.length = e.target.value; saveSettings(); });
 $('#intentSeg').addEventListener('click', e => {
+  if (intentLocked()) return;               // frozen once the chat has started
   const btn = e.target.closest('[data-intent]'); if (!btn) return;
   setIntent(btn.dataset.intent);
 });

@@ -530,3 +530,40 @@ def test_dense_only_gate_ignores_floor_boost():
     prof = SimpleNamespace(hybrid=False, collection="c", relevance_threshold=0.5, rerank=False)
     res = HybridRetriever(_Emb(), _Store(), prof).retrieve(Query(text="off topic"), top_k=5)
     assert res.is_empty          # floor hit boosted 0.48→0.53 (≥thr) but true cosine 0.40 < 0.50 ⇒ honest empty
+
+
+# ── Feature (2026-07-13): sticky chat mode — a chat stays in the intent chosen on its first turn.
+# session_query must IGNORE any intent the client sends on later turns and replay the session's locked
+# mode (legacy sessions with mode=None fall back to the per-request intent).
+def test_session_query_locks_mode_to_first_turn(monkeypatch):
+    from app.api import QueryRequest
+    captured = {}
+
+    monkeypatch.setattr(api.db, "get_messages", lambda sid: [{"role": "user", "text": "q1"}])
+    monkeypatch.setattr(api.db, "save_message", lambda *a, **k: 1)
+    monkeypatch.setattr(api.db, "get_session_mode", lambda sid: "chavruta")   # locked on turn 1
+
+    def _fake_run_query(question, lang, intent, history, **kw):
+        captured["intent"] = intent
+        return api.QueryResponse(answer="ok", citations=[], grounded=True, intent=intent, files=[])
+
+    monkeypatch.setattr(api, "_run_query", _fake_run_query)
+    # client tries to switch to 'lesson' mid-chat — must be ignored in favour of the locked 'chavruta'
+    api.session_query("sid-1", QueryRequest(question="follow-up", lang="he", intent="lesson"))
+    assert captured["intent"] == "chavruta"
+
+
+def test_session_query_legacy_session_falls_back_to_request_intent(monkeypatch):
+    from app.api import QueryRequest
+    captured = {}
+    monkeypatch.setattr(api.db, "get_messages", lambda sid: [{"role": "user", "text": "q1"}])
+    monkeypatch.setattr(api.db, "save_message", lambda *a, **k: 1)
+    monkeypatch.setattr(api.db, "get_session_mode", lambda sid: None)         # legacy: no locked mode
+
+    def _fake_run_query(question, lang, intent, history, **kw):
+        captured["intent"] = intent
+        return api.QueryResponse(answer="ok", citations=[], grounded=True, intent=intent, files=[])
+
+    monkeypatch.setattr(api, "_run_query", _fake_run_query)
+    api.session_query("sid-legacy", QueryRequest(question="q", lang="he", intent="qa"))
+    assert captured["intent"] == "qa"

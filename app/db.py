@@ -61,7 +61,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -85,7 +85,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
             id           TEXT PRIMARY KEY,
             first_q      TEXT NOT NULL,
             created_at   TEXT NOT NULL,
-            updated_at   TEXT
+            updated_at   TEXT,
+            mode         TEXT          -- the chat's locked mode (intent chosen on the first turn)
         );
 
         CREATE TABLE IF NOT EXISTS messages (
@@ -137,6 +138,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
         mcols = {r[1] for r in conn.execute("PRAGMA table_info(messages)")}
         if "files" not in mcols:
             conn.execute("ALTER TABLE messages ADD COLUMN files TEXT")
+
+    if version < 5:
+        # A chat's mode (lesson/explain/qa/shut/chavruta) is now locked to whatever was chosen on the
+        # first turn — subsequent turns stay in that mode. Older sessions get NULL and fall back to the
+        # per-request intent (unchanged behaviour) until they next start a fresh chat.
+        scols = {r[1] for r in conn.execute("PRAGMA table_info(sessions)")}
+        if "mode" not in scols:
+            conn.execute("ALTER TABLE sessions ADD COLUMN mode TEXT")
 
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
@@ -260,15 +269,22 @@ def _seed_demo(conn: sqlite3.Connection) -> None:
 
 # ── Sessions ──────────────────────────────────────────────────────────────────
 
-def create_session(first_q: str) -> str:
+def create_session(first_q: str, mode: str | None = None) -> str:
     sid = str(uuid.uuid4())
     now = _now()
     with _tx(get_conn()) as conn:
         conn.execute(
-            "INSERT INTO sessions (id, first_q, created_at, updated_at) VALUES (?,?,?,?)",
-            (sid, first_q, now, now),
+            "INSERT INTO sessions (id, first_q, created_at, updated_at, mode) VALUES (?,?,?,?,?)",
+            (sid, first_q, now, now, mode or None),
         )
     return sid
+
+
+def get_session_mode(sid: str) -> str | None:
+    """The chat's locked mode (the intent chosen on its first turn), or None for legacy sessions."""
+    with _LOCK:
+        r = get_conn().execute("SELECT mode FROM sessions WHERE id=?", (sid,)).fetchone()
+    return (r["mode"] if r else None) or None
 
 
 def list_sessions() -> list[dict[str, Any]]:
@@ -276,7 +292,7 @@ def list_sessions() -> list[dict[str, Any]]:
         # Order by last activity so a conversation you return to bubbles to the
         # top; fall back to created_at for rows that predate updated_at.
         rows = get_conn().execute(
-            """SELECT id, first_q, created_at, updated_at
+            """SELECT id, first_q, created_at, updated_at, mode
                FROM sessions
                ORDER BY COALESCE(updated_at, created_at) DESC
                LIMIT 100"""
