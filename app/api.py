@@ -635,6 +635,16 @@ def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bo
             "Default to asking the learner for direction this turn rather than forcing an answer on unrelated text.",
             "",
         ]
+    else:
+        lines += [
+            "## ✅ YOU HAVE RELEVANT SOURCES — START LEARNING",
+            "The SOURCES below were retrieved for this topic and are relevant. READ THEIR TEXT (not only the "
+            "ref line) to identify the sugya, then begin the chavruta immediately. Do NOT ask the learner to "
+            "name a daf/perek/source and do NOT reply that the source 'didn't come up' — you already have the "
+            "sugya in hand. Note: refs use amud-linear numbering (e.g. 'Bava Metzia 151.2'), so identify the "
+            "sugya from the source TEXT itself, never from the ref number.",
+            "",
+        ]
     lines += ["## SOURCES"]
     for i, h in enumerate(hits, 1):
         who = f" ({h.commentator_id})" if getattr(h, "commentator_id", None) else ""
@@ -648,16 +658,17 @@ def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bo
         "step, one question at a time.",
         "If the learner asked a direct factual question, answer it briefly and grounded, then hand the ball "
         "back with a question.",
-        "**WHEN THE SOURCES DON'T FIT:** if the SOURCES above do not actually cover what the learner asked — "
-        "retrieval missed, they're off-topic, or you lack enough to study honestly — do NOT force a grounded "
-        "answer on unrelated text and do NOT invent the source. FIRST try to fetch better sources yourself: "
-        "reply with ONLY a block starting with the EXACT line '===NEED_SOURCES===' followed by 1–5 focused "
-        "search queries (one per line — e.g. the exact daf/sugya, a ref, the topic), and STOP; the system "
-        "retrieves them and re-sends this job with the sources appended. ONLY if that still comes back empty, "
-        "say so warmly and ASK THE LEARNER for direction (the exact daf/ref, the text pasted in, a narrower "
-        "topic) — 'רגע — לא עלה לי המקור הנכון, תכוון אותי'. Both are encouraged, not a failure.",
+        "**ONLY WHEN THE SOURCES GENUINELY DON'T FIT** (a LAST resort — if ANY source above touches the topic, "
+        "learn with it and do NOT stall): if the sources truly do not cover what the learner asked, do NOT "
+        "invent a source. FIRST try to fetch better ones yourself — reply with ONLY a block starting with the "
+        "EXACT line '===NEED_SOURCES===' followed by 1–5 focused search queries (one per line), and STOP. ONLY "
+        "if that STILL comes back with nothing relevant, ask the learner warmly for direction — "
+        "'רגע — לא עלה לי המקור הנכון, תכוון אותי'. Do NOT ask the learner to name a daf when relevant "
+        "sources are already present above.",
         "Ground everything ONLY in the SOURCES; cite by [S#] (stripped from display). Keep it fairly short "
-        "(a real chavruta exchange, not an essay). Write in the learner's language. **bold** key terms.",
+        "(a real chavruta exchange, not an essay). Write in the learner's language. **bold** key terms. "
+        "כתוב אך ורק בעברית תקנית — אסור לשלב מילים בשפה זרה (אנגלית/סינית/רוסית וכו'). למשל: כתוב 'בעל הבית', "
+        "לא 'employer'.",
     ]
     return "\n".join(lines)
 
