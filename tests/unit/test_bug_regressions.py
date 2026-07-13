@@ -172,6 +172,18 @@ def test_school_audience_detected(text):
     assert api._detect_school(text)
 
 
+# ── Fix (2026-07-13): strip model multilingual bleed (CJK / Cyrillic / Vietnamese) from output,
+# keeping Hebrew glued to a foreign char; legit Hebrew + English are untouched.
+@pytest.mark.parametrize("raw,expected", [
+    ("בזדון违反 שבת", "בזדון שבת"),                          # CJK glued to Hebrew → Hebrew kept
+    ("לא требуется הסכמה", "לא הסכמה"),                       # whole Cyrillic word removed
+    ("נבראו השמים והארץ", "נבראו השמים והארץ"),              # clean Hebrew untouched
+    ("Rashi explains thus", "Rashi explains thus"),          # English untouched
+])
+def test_strip_foreign_removes_bleed(raw, expected):
+    assert api._strip_foreign(raw) == expected
+
+
 # ── Tier0 (2026-07 audit): chavruta weak-retrieval must use the dense-cosine gate, not the RRF score ──
 # Bug: `_run_chavruta` compared the raw hit .score (an RRF fusion value ~0.03 in hybrid mode) to a 0.6
 # cosine threshold, so "retrieval is weak" fired on EVERY hybrid turn and nudged the chavruta to stall.

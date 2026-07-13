@@ -22,8 +22,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 _MARKER_RE = re.compile(r"\s*[\[(（【]\s*S\d+(?:\s*,\s*S\d+)*\s*[\])）】]")
 
 
+# CJK / Japanese-kana / Cyrillic / Vietnamese-diacritic characters — model multilingual bleed (Qwen
+# occasionally injects '违反', 'требуется', 'giải' into Hebrew text). Torah Hebrew/English/punctuation
+# never use these ranges. Strip the CHARS (not whole tokens) so Hebrew glued to a foreign char — e.g.
+# 'בזדון违反' — keeps 'בזדון'. A fully-foreign word collapses to nothing; the double space is cleaned.
+_FOREIGN_CHAR_RE = re.compile(r"[Ѐ-ӿ぀-ヿ㐀-䶿一-鿿Ạ-ỿ]+")
+
+
+def _strip_foreign(text: str) -> str:
+    if not text:
+        return text
+    return re.sub(r"[ \t]{2,}", " ", _FOREIGN_CHAR_RE.sub("", text))
+
+
 def _strip_markers(text: str) -> str:
     t = _MARKER_RE.sub("", text or "")
+    t = _strip_foreign(t)                    # drop stray foreign-script tokens (model multilingual bleed)
     t = re.sub(r"\*\*\s*\*\*", "", t)        # collapse empty **bold** left where a **[S#]** was stripped
     t = re.sub(r"(?<!\*)\*\s*\*(?!\*)", "", t)  # …and empty *italic*
     t = re.sub(r"[ \t]{2,}", " ", t)
@@ -160,16 +174,18 @@ _BAND_PED = {
 # Minutes scale with the audience: a school lesson is bounded by the class period (and by the
 # age band), a beit-midrash iyun can run longer.
 _LENGTHS = {
-    "short":  {"top_k": 10, "he": "קצר",  "yeshiva_min": "25–35 דק׳",
+    "short":  {"top_k": 10, "he": "קצר",  "yeshiva_min": "25–35 דק׳", "words": "700–1000",
                "school_min": {"a-c": "15–20 דק׳", "d-f": "25–30 דק׳", "g-i": "25–30 דק׳", "j-l": "30–35 דק׳"},
-               "depth": "שיעור קצר וממוקד: מעט מקורות, מהלך תמציתי ושיעור מלא קצר יחסית."},
-    "medium": {"top_k": 16, "he": "בינוני", "yeshiva_min": "45–60 דק׳",
+               "depth": "שיעור קצר וממוקד, אך כתוב במלואו: מעט מקורות, מהלך תמציתי, ושיעור מלא של כ-700–1000 מילים."},
+    "medium": {"top_k": 16, "he": "בינוני", "yeshiva_min": "45–60 דק׳", "words": "1600–2400",
                "school_min": {"a-c": "30 דק׳", "d-f": "45 דק׳", "g-i": "45 דק׳", "j-l": "45–50 דק׳"},
-               "depth": "שיעור באורך בינוני: כיסוי מאוזן של המקורות והמהלך."},
-    "long":   {"top_k": 26, "he": "ארוך",  "yeshiva_min": "75–90 דק׳",
+               "depth": "שיעור באורך בינוני, מפורט ומלא: כיסוי מאוזן ומעמיק של המקורות והמהלך. השיעור המלא "
+                        "צריך להיות **לפחות 1600–2400 מילים** — פַתח כל שלב לעומק, אל תסכם ואל תקצר."},
+    "long":   {"top_k": 26, "he": "ארוך",  "yeshiva_min": "75–90 דק׳", "words": "3000–4500",
                "school_min": {"a-c": "40 דק׳ (בשני חלקים)", "d-f": "60–90 דק׳ (שיעור כפול)",
                               "g-i": "60–90 דק׳ (שיעור כפול)", "j-l": "90 דק׳ (שיעור כפול)"},
-               "depth": "שיעור ארוך ומעמיק: מקורות רבים, מהלך מפורט ושיעור מלא ארוך ומעמיק."},
+               "depth": "שיעור ארוך ומעמיק: מקורות רבים, מהלך מפורט, ושיעור מלא ומקיף של **3000–4500 מילים** — "
+                        "פַתח כל שיטה במלואה, הקשה ותרץ, נתח כל צד של החקירה לעומק."},
 }
 
 
@@ -366,7 +382,9 @@ def _lesson_job_md(question: str, hits, lang: str, *, audience: str | None,
 
     mins = _length_minutes(length, audience, grade_band)
     lines += ["## LENGTH", f"{ln['he']} — כ־{mins} סה\"כ. {ln['depth']} "
-              "התאם/י את הזמנים בשלבי מהלך השיעור כך שיסתכמו לטווח הזה.", ""]
+              f"היקף היעד של השיעור המלא: **{ln.get('words','1600–2400')} מילים**. "
+              "התאם/י את הזמנים בשלבי מהלך השיעור כך שיסתכמו לטווח הזה. "
+              "שיעור קצר מהיעד אינו מקובל — כתוב במלואו ובהרחבה.", ""]
 
     if tpl:
         lines += ["## SELECTED TEMPLATE — follow THIS structure and pedagogy",
@@ -442,6 +460,8 @@ def _lesson_job_md(question: str, hits, lang: str, *, audience: str | None,
         "",
         "Rules: ground everything ONLY in the SOURCES; cite by [S#] (the markers build the sources panel and "
         "are stripped from the shown text); write in the question's language; **bold** key terms. "
+        "כתוב אך ורק בעברית תקנית ומלאה — אסור בהחלט לשלב מילים בשפה זרה (אנגלית, סינית, רוסית, ויאטנמית וכו'); "
+        "אם חסרה לך מילה, כתוב אותה בעברית. "
         "IMPORTANT: when you mention a source in prose, NAME it (e.g. 'רש\"י מדייק…', 'פניני הלכה מלמד…') and "
         "append its [S#] tag — NEVER make a bare [S#] the subject of a sentence, because the tags are removed "
         "from the display and would leave a dangling reference.",
@@ -553,9 +573,11 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
                                     deep_link=(getattr(h, "deep_link", "") or "")))
     ss, lf, fl = _strip_markers(ss), _strip_markers(lf), _strip_markers(fl)
 
-    # Blank-file safety: if the model omitted/mis-split the SOURCE_SHEET, synthesize one from the cited
-    # sources so the download is never blank.
-    if not ss and used:
+    # Source sheet = the FULL retrieved source texts, in teaching order — ALWAYS built mechanically from
+    # the cited sources (which carry the complete RAG text), NOT from the model's SOURCE_SHEET prose.
+    # Models truncate the source texts ("…") when asked to reproduce them; the RAG already has the full
+    # text, so we assemble it directly and guarantee complete, verbatim sources.
+    if used:
         ss = "\n\n".join(f"**{n}. {c.ref}**\n{c.text_he}" for n, c in enumerate(used, 1))
 
     # audience/grade tag woven into the file titles so downloads are self-describing
