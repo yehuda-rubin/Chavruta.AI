@@ -28,8 +28,8 @@ $env:CHAVRUTA_QUERY_PLANNER        = "heuristic"  # LLM planner hallucinated wro
                                                   # the wrong tractate → 0 sources. Heuristic is reliable.
 $env:CHAVRUTA_LLM_BACKEND          = "nebius"
 $env:CHAVRUTA_LLM_BASE_URL         = "https://api.studio.nebius.ai/v1"
-$env:CHAVRUTA_LLM_MODEL            = "zai-org/GLM-5.2"   # stronger + longer output than Llama-3.3-70B
-                                                        # (slower — a full lesson can take a few minutes)
+$env:CHAVRUTA_LLM_MODEL            = "Qwen/Qwen3-235B-A22B-Instruct-2507"  # strong 235B non-thinking
+    # instruct: long + high-quality output AND fast (~8s vs GLM-5.2's ~146s, which timed out on lessons).
 $env:CHAVRUTA_LLM_MAX_TOKENS       = "1024"   # per-intent caps (qa 3000 / lesson 30000 / compare 10000) override this in pipeline
 
 # Read the Nebius key from .env (keeps the secret out of this script)
