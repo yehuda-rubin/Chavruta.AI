@@ -88,7 +88,11 @@
 
 ## 5. סקריפטי משיכה (scripts/)
 - `fetch_corpus.py` — תנ"ך (הבסיס).
-- `fetch_full_dynamic.py` — משיכה מחדש עם **כל** המפרשים של Sefaria (תנ"ך/גמרא/משנה).
+- `fetch_full_dynamic.py` — משיכה מחדש עם **כל** המפרשים של Sefaria. Domains: `tanakh`/`gemara`/`mishnah`
+  ו-`yerushalmi` (**תלמוד ירושלמי** — 39 מסכתות + כל מפרשיו: פני משה, קרבן העדה, ביאור הגר"א, מראה
+  הפנים, סיריליו, רידב"ז… → tier `talmud_yerushalmi`, קובץ `yerushalmi_chunks.jsonl`, מחברת אמבדינג
+  `notebooks/embed_yerushalmi_kaggle.ipynb`). טען עם `load_to_store.py --no-recreate` (מוסיף שכבה, לא
+  דורס), ואז `create_payload_indexes.py`.
 - `fetch_category.py` — משיכת קטגוריה שלמה (כל 14 הקטגוריות).
 - `fetch_mishnah.py` · `fetch_gemara.py` · `fetch_halacha.py` · `fetch_shut.py` — משיכות ייעודיות.
 - `fix_daf_shift.py` — תיקון היסט הדף בתלמוד.

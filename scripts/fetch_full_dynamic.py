@@ -11,15 +11,18 @@ Shlomo, … whatever Sefaria has. The result overwrites the existing HF file for
 Per the user: ignore the existing data — build each domain fresh, then upload it in place.
 
 Output (matches the names the notebook's EXTRA_SOURCES expects):
-    tanakh  → all_chunks_full.json   (JSON object {metadata, chunks})
-    gemara  → gemara_chunks.jsonl    (JSONL)
-    mishnah → mishnah_chunks.json    (JSON object)
+    tanakh     → all_chunks_full.json    (JSON object {metadata, chunks})
+    gemara     → gemara_chunks.jsonl     (JSONL)          work_tag talmud_bavli
+    mishnah    → mishnah_chunks.json     (JSON object)
+    yerushalmi → yerushalmi_chunks.jsonl (JSONL)          work_tag talmud_yerushalmi (Talmud Yerushalmi
+                 — 39 tractates + all its meforshim: Penei Moshe, Korban HaEdah, Gra, Mareh HaPanim, …)
 
 Resumable: a working JSONL + a .done set of finished base texts; re-run to continue.
 
 Run:
-    python scripts/fetch_full_dynamic.py --domain mishnah   # one domain
-    python scripts/fetch_full_dynamic.py --domain all       # tanakh, gemara, mishnah
+    python scripts/fetch_full_dynamic.py --domain mishnah      # one domain
+    python scripts/fetch_full_dynamic.py --domain all          # tanakh, gemara, mishnah
+    python scripts/fetch_full_dynamic.py --domain yerushalmi   # Talmud Yerushalmi (new tier)
     python scripts/fetch_full_dynamic.py --domain gemara --no-upload   # build only, don't push
 """
 
@@ -76,13 +79,27 @@ MISHNAH_TRACTATES = [
     "Makhshirin", "Zavim", "Tevul Yom", "Yadayim", "Uktzin",
 ]
 
+# Talmud Yerushalmi — 39 tractates (Sefaria title "Jerusalem Talmud <Tractate>"). Base structure is
+# chapter:halakha:segment (depth 3), so `flatten` yields refs like "Jerusalem Talmud Berakhot 1.1.1".
+YERUSHALMI_TRACTATES = [
+    "Berakhot", "Peah", "Demai", "Kilayim", "Sheviit", "Terumot", "Maasrot",
+    "Maaser Sheni", "Challah", "Orlah", "Bikkurim",
+    "Shabbat", "Eruvin", "Pesachim", "Yoma", "Shekalim", "Sukkah", "Rosh Hashanah",
+    "Beitzah", "Taanit", "Megillah", "Chagigah", "Moed Katan",
+    "Yevamot", "Sotah", "Ketubot", "Nedarim", "Nazir", "Gittin", "Kiddushin",
+    "Bava Kamma", "Bava Metzia", "Bava Batra", "Sanhedrin", "Shevuot", "Avodah Zarah",
+    "Makkot", "Horayot", "Niddah",
+]
+
 # domain → (base_title_fn, output_filename, output_is_jsonl, work_tag)
 DOMAINS = {
-    "tanakh":  (lambda t: t,                "all_chunks_full.json", False, "tanakh"),
-    "gemara":  (lambda t: t,                "gemara_chunks.jsonl",  True,  "talmud_bavli"),
-    "mishnah": (lambda t: f"Mishnah {t}",   "mishnah_chunks.json",  False, "mishnah"),
+    "tanakh":     (lambda t: t,                          "all_chunks_full.json",   False, "tanakh"),
+    "gemara":     (lambda t: t,                          "gemara_chunks.jsonl",    True,  "talmud_bavli"),
+    "mishnah":    (lambda t: f"Mishnah {t}",             "mishnah_chunks.json",    False, "mishnah"),
+    "yerushalmi": (lambda t: f"Jerusalem Talmud {t}",    "yerushalmi_chunks.jsonl", True,  "talmud_yerushalmi"),
 }
-DOMAIN_BASES = {"tanakh": TANAKH_BOOKS, "gemara": GEMARA_TRACTATES, "mishnah": MISHNAH_TRACTATES}
+DOMAIN_BASES = {"tanakh": TANAKH_BOOKS, "gemara": GEMARA_TRACTATES,
+                "mishnah": MISHNAH_TRACTATES, "yerushalmi": YERUSHALMI_TRACTATES}
 
 # ── Sefaria API ───────────────────────────────────────────────────────────────
 
@@ -303,7 +320,7 @@ def build_domain(domain, include_quoting, do_upload, hf_token):
 def main():
     import os
     ap = argparse.ArgumentParser()
-    ap.add_argument("--domain", choices=["tanakh", "gemara", "mishnah", "all"], required=True)
+    ap.add_argument("--domain", choices=["tanakh", "gemara", "mishnah", "yerushalmi", "all"], required=True)
     ap.add_argument("--include-quoting", action="store_true",
                     help="גם 'Quoting Commentary' (עין יעקב וכו'), לא רק 'Commentary'")
     ap.add_argument("--no-upload", action="store_true", help="בנה בלבד, אל תעלה ל-HF")
