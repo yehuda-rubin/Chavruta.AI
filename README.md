@@ -59,7 +59,11 @@ question (he / en)
 
 The serving setup ([scripts/serve.ps1](scripts/serve.ps1)) runs **hybrid** retrieval against a
 Qdrant **server** (embedded mode cannot do hybrid at this scale) with generation on Nebius
-(`Llama-3.3-70B-Instruct`). Every knob is a `CHAVRUTA_*` env var (see `src/chavruta/config/profile.py`).
+(`Qwen/Qwen3-235B-A22B-Instruct-2507`). This is the **default runtime even locally** — local CPU
+embedding + local Qdrant + the Nebius API for generation (`CHAVRUTA_LLM_BACKEND=nebius`, key from
+`.env`); `CHAVRUTA_QUERY_PLANNER=heuristic` (the LLM planner hallucinated wrong refs). The **bridge**
+backend (Claude in-session, no external API — [scripts/serve_bridge.ps1](scripts/serve_bridge.ps1)) and
+local DictaLM remain available. Every knob is a `CHAVRUTA_*` env var (see `src/chavruta/config/profile.py`).
 
 ---
 
@@ -106,13 +110,22 @@ Fetched from [Sefaria](https://www.sefaria.org) (free, open API + bulk export). 
 | Commentary (Rashi, Ramban, Ibn Ezra, Radak, Sforno, Rashbam, Or HaChaim, Malbim, Metzudat David/Zion, Onkelos, Targum Jonathan) | 103,532 |
 | **Total** | **126,738** |
 
-**Expanded to the full Sefaria bookshelf** (all 14 categories — Tanakh, Mishnah, Talmud, Halacha,
-Midrash, Responsa/Shut, Kabbalah, Liturgy, and more), fetched via `scripts/fetch_*.py`, embedded in
-**Nebius GPU jobs**, and distributed as **per-category Hugging Face index repos** (see
-[docs/CORPUS.md](docs/CORPUS.md) and [docs/NEBIUS_HALACHA_JOB.md](docs/NEBIUS_HALACHA_JOB.md)). The
-**live served hybrid index** currently holds **~449k points** (Tanakh + Mishnah + Talmud + Responsa);
-the Halacha library (~594k segments incl. Shulchan Aruch + Mishnah Berura) is embedded and loaded
-incrementally without re-embedding what is already in the store.
+**Expanded to the full Sefaria bookshelf**, fetched via `scripts/fetch_*.py`, embedded on GPU
+(Nebius / Kaggle / Lightning), and distributed on **Hugging Face** in two repos:
+
+- 📦 **Source chunks** (raw JSONL per domain — `gemara_chunks.jsonl`, `yerushalmi_chunks.jsonl`, …):
+  [`Yehuda-Rubin/chavruta-torah-mixed`](https://huggingface.co/datasets/Yehuda-Rubin/chavruta-torah-mixed)
+- 🧠 **Prebuilt indexes** (embedded vectors + sparse + meta, one repo per tier —
+  `chavruta-index-yerushalmi`, `chavruta-index-halacha`, …):
+  [`Yehuda-Rubin/chavruta-index-*`](https://huggingface.co/Yehuda-Rubin) · load with
+  `scripts/bootstrap_rag.py --repo Yehuda-Rubin/chavruta-index-<tier> --append`
+
+See [docs/CORPUS.md](docs/CORPUS.md) and [docs/NEBIUS_HALACHA_JOB.md](docs/NEBIUS_HALACHA_JOB.md). The
+**live served hybrid index** now holds **~2.93M points across 15 tiers**: `talmud_bavli` (614k),
+`halacha` (594k), `tanakh` (268k), `mishnah` (196k), `midrash`, **`talmud_yerushalmi` (~188k — the
+Talmud Yerushalmi + all its meforshim, added 2026-07-13)**, `chasidut`, `jewish_thought`, `responsa`,
+`liturgy`, `kabbalah`, `tosefta`, `reference`, `musar`, `second_temple`. New tiers load incrementally
+(`bootstrap_rag.py --append`) without re-embedding what is already in the store.
 
 Embedded with **`BAAI/bge-m3`** (multilingual, 1024-dim) — a Hebrew query and its English
 translation land close in vector space, so you can ask in either language.
@@ -162,8 +175,12 @@ python scripts/ask.py "מה אומר רד\"ק על ספר יונה?"
 
 ### Run the full app (hybrid retrieval + chat UI)
 
+**Prerequisites:** the corpus/index is already embedded and loaded into the local Qdrant (15 tiers,
+~2.93M points), and `.env` holds `NEBIUS_API_KEY` (write access not needed for serving). If so, the
+whole system is just **three commands** — Qdrant → backend → frontend — then open the UI:
+
 ```powershell
-# 1. Start the Qdrant server holding the hybrid index
+# 1. Start the Qdrant server holding the hybrid index (data persists on disk between restarts)
 docker compose --profile server up -d qdrant
 
 # 1b. One-time after loading the collection: keyword payload indexes on ref/anchor_ref
@@ -171,7 +188,8 @@ docker compose --profile server up -d qdrant
 python scripts\create_payload_indexes.py
 
 # 2. Backend (FastAPI on :8080). Two serving modes:
-#    • Cloud LLM (Nebius Llama-3.3-70B, reads NEBIUS_API_KEY from .env):
+#    • DEFAULT — Nebius API (Qwen3-235B-A22B-Instruct), reads NEBIUS_API_KEY from .env. Local infra
+#      (CPU embedding + local Qdrant) + generation on the API; CHAVRUTA_QUERY_PLANNER=heuristic:
 powershell -ExecutionPolicy Bypass -File scripts\serve.ps1
 #    • Bridge mode — NO external API; the model is Claude answering the grounded jobs written to
 #      data/llm_bridge/pending/ in-session (CHAVRUTA_LLM_BACKEND=bridge):
@@ -240,10 +258,12 @@ docs/                    CORPUS.md · NEBIUS_HALACHA_JOB.md · screenshots/
 The `src/chavruta/` core implements the MVP capabilities — grounded Q&A, explain/compare
 commentators (incl. supercommentary anchor chains), and structured lesson prep — behind
 config-swappable backends, with a test suite and a versioned evaluation harness. The corpus has
-grown from the validated Tanakh baseline (126k chunks) to the full Sefaria bookshelf, embedded on
-Nebius and served from a ~449k-point hybrid Qdrant index. The React SPA + FastAPI app ships with
-persistent SQLite chat history and full Hebrew/English UI. Halachic *rulings* remain advisory only,
-never a substitute for a competent rav (Constitution Principle VIII).
+grown from the validated Tanakh baseline (126k chunks) to the full Sefaria bookshelf — **~2.93M points
+across 15 tiers, incl. the Talmud Yerushalmi** — served from a hybrid Qdrant index with generation on
+the Nebius API (Qwen3-235B). The **static offline UI** ([app/frontend/public/ui/chavruta.html](app/frontend/public/ui/chavruta.html);
+the React SPA is deprecated) + FastAPI app ship with persistent SQLite chat history and full
+Hebrew/English UI. Halachic *rulings* remain advisory only, never a substitute for a competent rav
+(Constitution Principle VIII).
 
 ---
 
