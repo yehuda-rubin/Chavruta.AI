@@ -29,15 +29,23 @@ a deployment-agnostic core of **pluggable backends** selected purely by configur
 ```
 question (he / en)
    │
-   ▼  ① Route        detect language + intent (qa / explain / compare / lesson),
-   │                 named commentators ("רש"י"), explicit refs ("Genesis 1:3")
-   ▼  ② Retrieve     hybrid search (bge-m3 dense+sparse, RRF in Qdrant)
-   │                 + link expansion: anchor chains → commentaries → supercommentaries,
-   │                 and across corpora along the chain of transmission
-   ▼  ③ Rank         anchored, per-commentator, dedup, optional rerank
-   ▼  ④ Generate     grounded prompt = ONLY retrieved sources → local DictaLM / Nebius
-   ▼  ⑤ Enforce      citation gate: every claim maps to a real retrieved chunk;
-                     fabricated markers stripped; honest "no source found" path
+   ▼  ① Route        language + intent (qa / explain / compare / lesson / halacha / chavruta),
+   │                 named commentators ("רש"י"), explicit refs, and INDIRECT refs → landmarks:
+   │                 "עשרת הדיברות"→Exodus 20, "פרק שלישי בסנהדרין"→Sanhedrin 45.1 (perek→daf),
+   │                 English famous passages ("the binding of Isaac"→Genesis 22)
+   ▼  ② Retrieve     hybrid search (bge-m3 dense+sparse, RRF in Qdrant), then:
+   │                 • named-ref ANCHORING — fetch the base pasuk/daf + its commentaries. Refs are
+   │                   canonicalised to the corpus format ('Genesis.1.1'→'Genesis 1.1', Talmud
+   │                   amud→amud-linear) or the anchor silently misses.
+   │                 • per-hit relevance floor — prune dense off-topic noise, keep lexical hits
+   │                 • base-source floor — reserve slots for base texts (commentary can't crowd out)
+   │                 • link expansion: anchor chains → commentaries → supercommentaries
+   ▼  ③ Rank         anchored (explicit anchor set), dedup, optional rerank; honest is_empty gate
+   ▼  ④ Generate     grounded prompt = ONLY retrieved sources → DictaLM / Nebius / **bridge** (Claude
+   │                 in-session, no external API). Agentic: the model may reply ===NEED_SOURCES===
+   │                 to pull more sources mid-answer when retrieval was thin.
+   ▼  ⑤ Enforce      citation gate: every claim maps to a real chunk; fabricated markers stripped;
+                     verbatim-quote faithfulness check; honest "no source found" path
 ```
 
 **Two deployment profiles — same code, chosen by `CHAVRUTA_PROFILE`:**
