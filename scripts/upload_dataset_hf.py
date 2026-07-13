@@ -29,12 +29,22 @@ def main():
                     help="העלה גם את all_chunks.json (107MB) כדי לאפשר רגנרציה")
     ap.add_argument("--full", action="store_true",
                     help="העלה רק את all_chunks_full.json (הקורפוס המלא — תנ\"ך + מפרשים)")
+    ap.add_argument("--shut", action="store_true",
+                    help="העלה רק את shut_chunks.jsonl (ספריית השו\"ת — לקאגל)")
+    ap.add_argument("--file", default=None,
+                    help="העלה קובץ כלשהו (נתיב מקומי) — למשל חלק הלכה")
+    ap.add_argument("--name", default=None,
+                    help="שם היעד ב-repo (ברירת מחדל: שם הקובץ)")
     args = ap.parse_args()
 
     from huggingface_hub import HfApi, create_repo
 
     # הקבצים שמהם המחברת תמשוך
-    if args.full:
+    if args.file:
+        files = [(args.file, args.name or Path(args.file).name)]
+    elif args.shut:
+        files = [("data/processed/shut_chunks.jsonl", "shut_chunks.jsonl")]
+    elif args.full:
         files = [("data/processed/all_chunks_full.json", "all_chunks_full.json")]
     else:
         files = [

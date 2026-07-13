@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chavruta.AI · בית מדרש — זכוכית חמה</title>
+<!-- Local, OFFLINE assets — no CDN (identical look). Fonts self-hosted; Tailwind pre-built from the
+     same config. To rebuild after adding classes:  cd app/frontend/public/ui &&
+     npx tailwindcss@3 -c tailwind.config.cjs -i tw-input.css -o assets/chavruta.tw.css --minify -->
+<link rel="stylesheet" href="assets/fonts.local.css">
+<link rel="stylesheet" href="assets/chavruta.tw.css">
+<style>
+  body{ background:
+    radial-gradient(120% 80% at 85% -10%, #e7eefc 0%, transparent 45%),
+    radial-gradient(100% 70% at 0% 110%, #faf2dd 0%, transparent 50%), #fdfbf6; }
+  ::-webkit-scrollbar{width:8px} ::-webkit-scrollbar-thumb{background:#e3d8c2;border-radius:8px}
+  .glass{ background:rgba(255,255,255,.55); backdrop-filter:blur(14px);
+    -webkit-backdrop-filter:blur(14px); border:1px solid rgba(255,255,255,.7);
+    box-shadow:0 1px 2px rgba(28,26,23,.04), 0 16px 40px -24px rgba(26,54,93,.35); }
+  .grad{ background:linear-gradient(135deg,#002045,#3a5ba0); }
+  .material-symbols-outlined{ font-variation-settings:'FILL' 0,'wght' 400,'GRAD' 0,'opsz' 20; vertical-align:middle; }
+  .he{ direction:rtl } .en{ direction:ltr }
+  /* Dark theme (Settings → Theme). Curated overrides over the light "Modern Glass" palette. */
+  body.theme-dark{ background:
+    radial-gradient(120% 80% at 85% -10%, #1b2740 0%, transparent 45%),
+    radial-gradient(100% 70% at 0% 110%, #2a2418 0%, transparent 50%), #12151b; color:#e6e4df; }
+  body.theme-dark .glass{ background:rgba(28,33,43,.62); border-color:rgba(255,255,255,.08);
+    box-shadow:0 1px 2px rgba(0,0,0,.35),0 16px 40px -24px rgba(0,0,0,.7); }
+  body.theme-dark .text-tekhelet{ color:#a9c2f0 !important; }
+  body.theme-dark [class*="text-ink"]{ color:#e6e4df !important; }
+  body.theme-dark [class*="text-gold"]{ color:#d9b45a !important; }
+  body.theme-dark [class*="bg-white"]{ background-color:rgba(44,50,63,.5) !important; }
+  body.theme-dark [class*="border-white"], body.theme-dark [class*="border-line"]{ border-color:rgba(255,255,255,.1) !important; }
+  body.theme-dark ::-webkit-scrollbar-thumb{ background:#3a4150 }
+</style>
+</head>
+<body class="font-sans text-ink h-screen overflow-hidden">
+<div class="flex flex-col h-screen">
+  <header class="h-[70px] flex items-center justify-between px-8 shrink-0">
+    <div class="flex items-center gap-3">
+      <div class="h-11 w-11 rounded-2xl grad grid place-items-center text-white font-serif text-xl font-black shadow-lg shadow-tekhelet/20">ח</div>
+      <h1 class="font-serif text-2xl font-bold text-tekhelet" data-i18n="brand">חברותא</h1>
+    </div>
+    <div class="flex items-center gap-2">
+      <button id="langBtn" class="px-4 py-2 rounded-full glass text-ink/70 text-sm">עברית · EN</button>
+      <button id="settingsBtn" class="h-10 w-10 rounded-full glass grid place-items-center" title="הגדרות" data-i18n-title="settings"><span class="material-symbols-outlined">settings</span></button>
+      <div class="h-10 w-10 rounded-full grad grid place-items-center text-white font-bold">א</div>
+    </div>
+  </header>
+
+  <div class="flex flex-1 overflow-hidden px-4 pb-4 gap-4">
+    <!-- Sessions rail (collapsed) -->
+    <div id="sessionsRail" class="hidden w-14 shrink-0 glass rounded-[28px] p-2 flex-col items-center gap-3">
+      <button id="sessionsExpand" class="h-10 w-10 rounded-2xl glass grid place-items-center text-tekhelet hover:bg-white/60 transition" title="פתח שיחות" data-i18n-title="openChats"><span class="material-symbols-outlined">chevron_left</span></button>
+      <button class="h-10 w-10 rounded-2xl grad text-white grid place-items-center hover:opacity-95 transition" title="דיון חדש" data-i18n-title="newChatShort" onclick="newDiscussion()"><span class="material-symbols-outlined">add</span></button>
+      <span class="material-symbols-outlined text-ink/35 mt-1">forum</span>
+    </div>
+
+    <!-- Sessions -->
+    <aside id="sessionsPanel" class="w-72 shrink-0 glass rounded-[28px] p-4 flex flex-col">
+      <div class="flex items-center gap-2 mb-3">
+        <button id="newBtn" class="flex-1 grad text-white py-3 rounded-2xl font-serif text-lg font-bold hover:opacity-95 transition shadow-lg shadow-tekhelet/20" data-i18n="newChat">+ דיון חדש</button>
+        <button id="sessionsCollapse" class="h-10 w-10 rounded-2xl glass grid place-items-center text-ink/50 hover:text-tekhelet shrink-0 transition" title="כווץ" data-i18n-title="collapse"><span class="material-symbols-outlined">chevron_right</span></button>
+      </div>
+      <p class="text-[11px] tracking-widest text-ink/40 font-bold uppercase mt-3 mb-2 px-2" data-i18n="recentChats">שיחות אחרונות</p>
+      <nav id="sessions" class="flex flex-col gap-1.5 overflow-y-auto"></nav>
+      <div class="mt-auto pt-3 flex flex-col gap-2">
+        <button id="libraryLink" class="w-full px-4 py-2.5 rounded-2xl glass text-ink/70 font-semibold text-sm hover:bg-white/60 hover:text-tekhelet transition flex items-center gap-2 cursor-pointer"><span class="material-symbols-outlined text-[19px]">auto_stories</span><span data-i18n="myShiurim">השיעורים שלי</span></button>
+        <button id="settingsLink" class="w-full px-4 py-2.5 rounded-2xl glass text-ink/70 font-semibold text-sm hover:bg-white/60 hover:text-tekhelet transition flex items-center gap-2 cursor-pointer"><span class="material-symbols-outlined text-[19px]">settings</span><span data-i18n="settingsTitle">הגדרות</span></button>
+        <button id="supportLink" class="w-full px-4 py-2.5 rounded-2xl glass text-ink/70 font-semibold text-sm hover:bg-white/60 hover:text-tekhelet transition flex items-center gap-2 cursor-pointer"><span class="material-symbols-outlined text-[19px]">help</span><span data-i18n="supportTitle">תמיכה</span></button>
+      </div>
+    </aside>
+
+    <!-- Chat -->
+    <main class="flex-1 glass rounded-[28px] flex flex-col overflow-hidden">
+      <div class="h-16 px-7 flex items-center justify-between border-b border-white/60">
+        <div class="min-w-0">
+          <h2 class="font-serif text-lg font-bold text-tekhelet" data-i18n="discussionTitle">דיון עם החברותא</h2>
+          <p id="subtitle" class="text-[10px] tracking-widest text-gold font-bold uppercase truncate">בבא מציעא ב׳ ע״א</p>
+        </div>
+        <div id="intentSeg" class="flex bg-white/50 rounded-full p-1 text-xs font-semibold">
+          <button data-intent="lesson" class="px-3 py-1.5 rounded-full grad text-white" data-i18n="lesson">שיעור</button>
+          <button data-intent="explain" class="px-3 py-1.5 rounded-full text-ink/60" data-i18n="explain">הסבר</button>
+          <button data-intent="qa" class="px-3 py-1.5 rounded-full text-ink/60" data-i18n="qa">שאלה</button>
+          <button data-intent="shut" class="px-3 py-1.5 rounded-full text-ink/60" data-i18n="shutMode">שו"ת</button>
+          <button data-intent="chavruta" class="px-3 py-1.5 rounded-full text-ink/60" data-i18n="chavrutaMode">חברותא</button>
+        </div>
+      </div>
+
+      <!-- Lesson options (audience · grade band · length) — shown only in lesson mode -->
+      <div id="lessonOpts" class="px-7 py-2 flex items-center gap-2 flex-wrap border-b border-white/40 bg-white/30 text-xs">
+        <span class="text-ink/50 font-semibold" data-i18n="forWhom">עבור:</span>
+        <select id="audSel" class="rounded-full bg-white/70 px-3 py-1 outline-none cursor-pointer">
+          <option value="" data-i18n="audAuto">אוטומטי (מהפרומט)</option>
+          <option value="yeshiva" data-i18n="audYeshiva">בית מדרש / ישיבה</option>
+          <option value="school" data-i18n="audSchool">בית ספר</option>
+        </select>
+        <select id="bandSel" class="rounded-full bg-white/70 px-3 py-1 outline-none cursor-pointer hidden">
+          <option value="" data-i18n="bandAuto">שכבה — אוטומטי</option>
+          <option value="a-c" data-i18n="band1">כיתות א–ג</option>
+          <option value="d-f" data-i18n="band2">כיתות ד–ו</option>
+          <option value="g-i" data-i18n="band3">כיתות ז–ט</option>
+          <option value="j-l" data-i18n="band4">כיתות י–יב</option>
+        </select>
+        <span class="text-ink/50 font-semibold ms-2" data-i18n="lenLabel">אורך:</span>
+        <select id="lenSel" class="rounded-full bg-white/70 px-3 py-1 outline-none cursor-pointer">
+          <option value="" data-i18n="lenAuto">אוטומטי (מהפרומט)</option>
+          <option value="short" data-i18n="lenShort">קצר</option>
+          <option value="medium" data-i18n="lenMed">בינוני</option>
+          <option value="long" data-i18n="lenLong">ארוך</option>
+        </select>
+      </div>
+
+      <div id="messages" class="flex-1 overflow-y-auto px-8 py-8 flex flex-col gap-6 max-w-2xl mx-auto w-full"></div>
+
+      <div class="p-5">
+        <form id="composer" class="max-w-2xl mx-auto flex items-center gap-2 glass rounded-full px-3 py-2 focus-within:ring-2 focus-within:ring-indigo/30">
+          <span id="goalLabel" class="text-gold font-bold text-sm px-3 py-1.5 rounded-full select-none whitespace-nowrap">🎯 שיעור</span>
+          <textarea id="input" rows="1" class="flex-1 bg-transparent outline-none font-serif text-[16px] placeholder:text-ink/35 resize-none leading-relaxed max-h-32 py-1" placeholder="שאל את החברותא…" data-i18n-ph="askPlaceholder"></textarea>
+          <button id="sendBtn" type="submit" class="h-10 w-10 rounded-full grad text-white grid place-items-center hover:opacity-95 shadow-lg shadow-tekhelet/20 disabled:opacity-40">↑</button>
+        </form>
+        <p class="text-center text-[10px] text-ink/35 mt-2.5" data-i18n="footer">נבנה ביראת שמיים · אינו פסיקת הלכה למעשה</p>
+      </div>
+    </main>
+
+    <!-- Sources -->
+    <aside id="sourcesPanel" class="w-80 shrink-0 glass rounded-[28px] flex flex-col overflow-hidden">
+      <div class="p-5 border-b border-white/60 flex items-center justify-between gap-2">
+        <button id="sourcesCollapse" class="h-9 w-9 rounded-xl glass grid place-items-center text-ink/50 hover:text-tekhelet shrink-0 transition" title="כווץ" data-i18n-title="collapse"><span class="material-symbols-outlined">chevron_left</span></button>
+        <h3 class="font-serif text-xl font-bold text-tekhelet" data-i18n="relatedSources">מקורות קשורים</h3>
+      </div>
+      <div id="sources" class="flex-1 overflow-y-auto p-4 flex flex-col gap-3"></div>
+      <div class="p-4 border-t border-white/60 flex flex-col gap-2">
+        <div id="userSources" class="flex flex-col gap-2"></div>
+        <button id="addSrcBtn" class="w-full py-2.5 rounded-full grad text-white font-bold text-sm hover:opacity-95 transition shadow-lg shadow-tekhelet/20">+ הוסף מקור</button>
+      </div>
+    </aside>
+
+    <!-- Sources rail (collapsed) -->
+    <div id="sourcesRail" class="hidden w-14 shrink-0 glass rounded-[28px] p-2 flex-col items-center gap-3">
+      <button id="sourcesExpand" class="h-10 w-10 rounded-2xl glass grid place-items-center text-tekhelet hover:bg-white/60 transition" title="פתח מקורות" data-i18n-title="openSources"><span class="material-symbols-outlined">chevron_right</span></button>
+      <span class="material-symbols-outlined text-ink/35 mt-1">menu_book</span>
+    </div>
+  </div>
+</div>
+
+<!-- Add-source modal: paste text or upload image / PDF / Word → sent to the model -->
+<div id="addSrcModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-ink/30 backdrop-blur-sm p-4">
+  <div id="addSrcCard" class="glass rounded-[28px] p-6 w-full max-w-md flex flex-col gap-4">
+    <div class="flex items-center justify-between">
+      <h3 class="font-serif text-xl font-bold text-tekhelet" data-i18n="addSrcTitle">הוסף מקור למודל</h3>
+      <button id="addSrcClose" class="h-8 w-8 rounded-full glass grid place-items-center text-ink/60 hover:text-tekhelet">✕</button>
+    </div>
+    <p class="text-xs text-ink/55 leading-relaxed" data-i18n="addSrcDesc">הדבק טקסט מקור, או העלה קובץ — תמונה, PDF או Word. המקורות שתוסיף יישלחו למודל יחד עם השאלה הבאה.</p>
+    <textarea id="addSrcText" rows="4" class="w-full glass rounded-2xl p-3 font-serif text-[15px] outline-none focus:ring-2 focus:ring-indigo/30 resize-none" placeholder="הדבק כאן טקסט של מקור…" data-i18n-ph="addSrcPlaceholder"></textarea>
+    <label class="w-full py-3 rounded-2xl glass text-ink/70 font-semibold text-sm text-center cursor-pointer hover:bg-white/60 transition flex items-center justify-center gap-2">
+      <span class="material-symbols-outlined">upload_file</span>
+      <span data-i18n="uploadFile">העלה קובץ · תמונה, PDF או Word</span>
+      <input id="addSrcFile" type="file" accept="image/*,.pdf,.doc,.docx,.txt" class="hidden" multiple>
+    </label>
+    <div class="flex gap-2">
+      <button id="addSrcSave" class="flex-1 py-3 rounded-full grad text-white font-bold text-sm hover:opacity-95 transition" data-i18n="add">הוסף</button>
+      <button id="addSrcCancel" class="px-5 py-3 rounded-full glass text-ink/70 font-semibold text-sm hover:bg-white/60 transition" data-i18n="cancel">ביטול</button>
+    </div>
+  </div>
+</div>
+
+<!-- File preview: view a lesson file (Word) inside the interface, with a download option -->
+<div id="filePreview" class="fixed inset-0 z-50 hidden items-center justify-center bg-ink/40 backdrop-blur-sm p-4">
+  <div id="filePreviewCard" class="glass rounded-[28px] w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+    <div class="p-5 border-b border-white/60 flex items-center justify-between gap-3 shrink-0">
+      <h3 id="filePreviewTitle" class="font-serif text-xl font-bold text-tekhelet truncate"></h3>
+      <div class="flex items-center gap-2 shrink-0">
+        <button id="filePreviewDownload" class="px-4 py-2 rounded-full grad text-white font-bold text-sm hover:opacity-95 transition flex items-center gap-1"><span class="material-symbols-outlined text-[18px]">download</span><span data-i18n="downloadWord">הורד Word</span></button>
+        <button id="filePreviewClose" class="h-9 w-9 rounded-full glass grid place-items-center text-ink/60 hover:text-tekhelet">✕</button>
+      </div>
+    </div>
+    <div id="filePreviewBody" class="p-7 overflow-y-auto bg-white/40 font-serif text-[16px] leading-relaxed text-ink/85" dir="rtl" style="white-space:pre-wrap"></div>
+  </div>
+</div>
+
+<!-- Settings modal -->
+<div id="settingsModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-ink/40 backdrop-blur-sm p-4">
+  <div id="settingsCard" class="glass rounded-[28px] p-6 w-full max-w-md max-h-[85vh] overflow-y-auto flex flex-col gap-4">
+    <div class="flex items-center justify-between">
+      <h3 class="font-serif text-xl font-bold text-tekhelet" data-i18n="settingsTitle">הגדרות</h3>
+      <button id="settingsClose" class="h-8 w-8 rounded-full glass grid place-items-center text-ink/60 hover:text-tekhelet">✕</button>
+    </div>
+    <div class="flex flex-col gap-1.5">
+      <label class="text-xs font-bold text-ink/55" data-i18n="setLanguage">שפת ממשק</label>
+      <div id="setLangSeg" class="flex bg-white/50 rounded-full p-1 text-sm font-semibold gap-1">
+        <button data-val="he" class="flex-1 px-3 py-1.5 rounded-full">עברית</button>
+        <button data-val="en" class="flex-1 px-3 py-1.5 rounded-full">English</button>
+      </div>
+    </div>
+    <div class="flex flex-col gap-1.5">
+      <label class="text-xs font-bold text-ink/55" data-i18n="setDefaultMode">מצב ברירת מחדל</label>
+      <div id="setModeSeg" class="flex bg-white/50 rounded-2xl p-1 text-sm font-semibold gap-1">
+        <button data-val="lesson" class="flex-1 px-2 py-1.5 rounded-full" data-i18n="lesson">שיעור</button>
+        <button data-val="explain" class="flex-1 px-2 py-1.5 rounded-full" data-i18n="explain">הסבר</button>
+        <button data-val="qa" class="flex-1 px-2 py-1.5 rounded-full" data-i18n="qa">שאלה</button>
+        <button data-val="shut" class="flex-1 px-2 py-1.5 rounded-full" data-i18n="shutMode">שו"ת</button>
+      </div>
+    </div>
+    <div class="flex flex-col gap-1.5">
+      <label class="text-xs font-bold text-ink/55" data-i18n="setTheme">ערכת נושא</label>
+      <div id="setThemeSeg" class="flex bg-white/50 rounded-full p-1 text-sm font-semibold gap-1">
+        <button data-val="light" class="flex-1 px-3 py-1.5 rounded-full" data-i18n="themeLight">בהיר</button>
+        <button data-val="dark" class="flex-1 px-3 py-1.5 rounded-full" data-i18n="themeDark">כהה</button>
+        <button data-val="auto" class="flex-1 px-3 py-1.5 rounded-full" data-i18n="themeAuto">אוטומטי</button>
+      </div>
+    </div>
+    <div class="flex flex-col gap-1.5">
+      <label class="text-xs font-bold text-ink/55" data-i18n="setSourcesDefault">מקורות כברירת מחדל</label>
+      <div id="setSrcSeg" class="flex bg-white/50 rounded-full p-1 text-sm font-semibold gap-1">
+        <button data-val="collapsed" class="flex-1 px-3 py-1.5 rounded-full" data-i18n="srcCollapsed">מכווץ</button>
+        <button data-val="expanded" class="flex-1 px-3 py-1.5 rounded-full" data-i18n="srcExpanded">מורחב</button>
+      </div>
+    </div>
+    <div class="flex flex-col gap-1.5">
+      <label class="text-xs font-bold text-ink/55" data-i18n="setHistory">היסטוריית שיחות</label>
+      <button id="setClear" class="w-full py-2.5 rounded-2xl glass text-red-500 font-semibold text-sm hover:bg-red-500/10 transition" data-i18n="clearAll">נקה הכל</button>
+    </div>
+    <div class="pt-3 border-t border-white/60">
+      <p class="text-xs text-ink/55 leading-relaxed" data-i18n="aboutText">חברותא AI</p>
+      <p class="text-[11px] text-ink/40 mt-1" data-i18n="version">גרסה 0.1</p>
+    </div>
+  </div>
+</div>
+
+<!-- Support modal -->
+<!-- 'My Shiurim' — saved-lesson library -->
+<div id="libraryModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-ink/40 backdrop-blur-sm p-4">
+  <div class="glass rounded-[28px] w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+    <div class="flex items-center justify-between p-6 pb-3">
+      <h3 class="font-serif text-xl font-bold text-tekhelet flex items-center gap-2"><span class="material-symbols-outlined">auto_stories</span><span data-i18n="myShiurim">השיעורים שלי</span></h3>
+      <button id="libraryClose" class="h-9 w-9 rounded-full glass grid place-items-center text-ink/60 hover:text-tekhelet">✕</button>
+    </div>
+    <div id="libraryBody" class="px-6 pb-6 overflow-y-auto flex flex-col gap-2"></div>
+  </div>
+</div>
+
+<div id="supportModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-ink/40 backdrop-blur-sm p-4">
+  <div id="supportCard" class="glass rounded-[28px] p-6 w-full max-w-lg max-h-[85vh] overflow-y-auto flex flex-col gap-4">
+    <div class="flex items-center justify-between">
+      <h3 class="font-serif text-xl font-bold text-tekhelet" data-i18n="supportTitle">תמיכה</h3>
+      <button id="supportClose" class="h-8 w-8 rounded-full glass grid place-items-center text-ink/60 hover:text-tekhelet">✕</button>
+    </div>
+    <p class="text-sm text-ink/70 leading-relaxed" data-i18n="supIntro"></p>
+    <div>
+      <h4 class="font-serif font-bold text-tekhelet mb-1.5" data-i18n="supGuideTitle">מדריך שימוש מהיר</h4>
+      <ul class="text-sm text-ink/70 leading-relaxed list-disc list-inside flex flex-col gap-1">
+        <li data-i18n="supGuideModes"></li>
+        <li data-i18n="supGuideAdd"></li>
+        <li data-i18n="supGuidePanels"></li>
+      </ul>
+    </div>
+    <div class="p-3.5 rounded-2xl bg-gold/10 ring-1 ring-gold/20">
+      <h4 class="font-serif font-bold text-gold mb-1" data-i18n="supHalachaTitle">הבהרה הלכתית</h4>
+      <p class="text-sm text-ink/75 leading-relaxed" data-i18n="supHalacha"></p>
+    </div>
+    <div class="p-3.5 rounded-2xl bg-red-500/5 ring-1 ring-red-500/15">
+      <h4 class="font-serif font-bold text-red-500/90 mb-1" data-i18n="supLimitsTitle">מגבלות ואחריות</h4>
+      <p class="text-sm text-ink/75 leading-relaxed" data-i18n="supLimits"></p>
+    </div>
+    <div>
+      <h4 class="font-serif font-bold text-tekhelet mb-1" data-i18n="supContactTitle">יצירת קשר</h4>
+      <p class="text-sm text-ink/70"><span data-i18n="supContact">לשאלות ומשוב:</span> <a href="mailto:rubinyehuda8@gmail.com" class="text-indigo font-semibold hover:underline" dir="ltr">rubinyehuda8@gmail.com</a></p>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── Chavruta.AI — live wiring (vanilla JS over the FastAPI backend) ────────────
+const API = '/api';
+const state = { sessions: [], activeId: null, messages: [], intent: 'lesson', lang: 'he', loading: false, expandedSrc: new Set(), userSources: [], defaultIntent: 'lesson', theme: 'light', srcDefaultOpen: false, audience: '', gradeBand: '', length: '' };
+
+// ── i18n — the whole UI switches with the language toggle. (Chat titles/content are the
+//    model's output and keep whatever language the model chose.) ─────────────────────────
+const T = {
+  he: {
+    brand:'חברותא', settings:'הגדרות', newChat:'+ דיון חדש', recentChats:'שיחות אחרונות',
+    noChats:'אין שיחות עדיין', del:'מחק', settingsLink:'⚙ הגדרות', supportLink:'? תמיכה',
+    myShiurim:'השיעורים שלי', libEmpty:'עדיין לא נשמרו שיעורים. כל שיעור שתכין יישמר כאן אוטומטית.',
+    openChats:'פתח שיחות', newChatShort:'דיון חדש', collapse:'כווץ',
+    discussionTitle:'דיון עם החברותא', lesson:'שיעור', explain:'הסבר', qa:'שאלה',
+    forWhom:'עבור:', audAuto:'אוטומטי (מהפרומט)', audYeshiva:'בית מדרש / ישיבה', audSchool:'בית ספר',
+    lenLabel:'אורך:', lenAuto:'אוטומטי (מהפרומט)', lenShort:'קצר (~25 דק׳)', lenMed:'בינוני (~45 דק׳)', lenLong:'ארוך (~90 דק׳)',
+    bandAuto:'שכבה — אוטומטי', band1:'כיתות א–ג', band2:'כיתות ד–ו', band3:'כיתות ז–ט', band4:'כיתות י–יב',
+    askPlaceholder:'שאל את החברותא…', footer:'נבנה ביראת שמיים · אינו פסיקת הלכה למעשה',
+    welcomeTitle:'חברותא AI', welcomeBody:'ברוך הבא ללימוד. שאל שאלה על הסוגיא והחברותא תשיב ממקורות מצוטטים.',
+    relatedSources:'מקורות קשורים', sourcesHint:'המקורות יופיעו כאן', noText:'אין טקסט זמין למקור זה.',
+    openSources:'פתח מקורות', addSource:'+ הוסף מקור', remove:'הסר',
+    kindText:'טקסט', kindImage:'תמונה', kindPdf:'PDF', kindWord:'Word',
+    addSrcTitle:'הוסף מקור למודל', addSrcDesc:'הדבק טקסט מקור, או העלה קובץ — תמונה, PDF או Word. המקורות שתוסיף יישלחו למודל יחד עם השאלה הבאה.',
+    addSrcPlaceholder:'הדבק כאן טקסט של מקור…', uploadFile:'העלה קובץ · תמונה, PDF או Word', add:'הוסף', cancel:'ביטול',
+    clickView:'Word · לחץ לתצוגה', view:'תצוגה', download:'הורד Word', lessonThreeFiles:'שיעור · שלושה קבצים',
+    downloadWord:'הורד Word', noContent:'אין תוכן זמין.', lessonReady:'הנה השיעור שלך — שלושה קבצי Word מוכנים להורדה:',
+    demoOffline:'‹ מצב הדגמה — השרת אינו מחובר. הפעל את ה-API (uvicorn / docker) כדי לקבל תשובות אמיתיות. ›',
+    serverError:'שגיאה בפנייה לשרת: ',
+    tagRashi:'רש"י', tagRambam:'רמב"ם', tagTosafot:'תוספות', tagBeitYosef:'בית יוסף', tagGemara:'גמרא', tagSource:'מקור',
+    shutMode:'שו"ת', chavrutaMode:'חברותא', close:'סגור', save:'שמור',
+    settingsTitle:'הגדרות', setLanguage:'שפת ממשק', setDefaultMode:'מצב ברירת מחדל',
+    setTheme:'ערכת נושא', themeLight:'בהיר', themeDark:'כהה', themeAuto:'אוטומטי',
+    setSourcesDefault:'מקורות כברירת מחדל', srcCollapsed:'מכווץ', srcExpanded:'מורחב',
+    setHistory:'היסטוריית שיחות', clearAll:'נקה הכל', exportData:'ייצוא', confirmClear:'למחוק את כל השיחות?',
+    setAbout:'אודות', aboutText:'חברותא AI · מבוסס על הראג של Chavruta.AI (bge-m3 + Qdrant)', version:'גרסה 0.1',
+    supportTitle:'תמיכה',
+    supIntro:'חברותא AI היא שותפה ללימוד תורה המשיבה ממקורות מצוטטים — תנ"ך, משנה, גמרא, ראשונים ופוסקים — הנשלפים ממאגר של כ-2.75 מיליון מקורות.',
+    supGuideTitle:'מדריך שימוש מהיר',
+    supGuideModes:'בחר מצב: שיעור → שלושה קבצי Word · הסבר/שאלה → מלל · שו"ת → תשובה הלכתית.',
+    supGuideAdd:'הוסף מקור משלך (טקסט / תמונה / PDF / Word) שיישלח למודל עם שאלתך.',
+    supGuidePanels:'כווץ או פתח את עמודות הצד, והחלף שפה בכפתור שבראש המסך.',
+    supHalachaTitle:'הבהרה הלכתית',
+    supHalacha:'התשובות אינן פסיקת הלכה למעשה ואינן תחליף לרב מוסמך. יש לאמת כל מקור.',
+    supLimitsTitle:'מגבלות ואחריות',
+    supLimits:'התוכן נוצר על-ידי בינה מלאכותית ועלול לטעות. המחבר אינו נושא באחריות לתשובות או לשימוש בהן — השימוש על אחריות המשתמש בלבד.',
+    supContactTitle:'יצירת קשר',
+    supContact:'לשאלות ומשוב:',
+  },
+  en: {
+    brand:'Chavruta', settings:'Settings', newChat:'+ New discussion', recentChats:'Recent chats',
+    noChats:'No chats yet', del:'Delete', settingsLink:'⚙ Settings', supportLink:'? Support',
+    myShiurim:'My Shiurim', libEmpty:'No saved lessons yet. Every lesson you build is saved here automatically.',
+    openChats:'Open chats', newChatShort:'New discussion', collapse:'Collapse',
+    discussionTitle:'Discussion with the Chavruta', lesson:'Lesson', explain:'Explain', qa:'Q&A',
+    forWhom:'For:', audAuto:'Auto (from prompt)', audYeshiva:'Beit Midrash / Yeshiva', audSchool:'School',
+    lenLabel:'Length:', lenAuto:'Auto (from prompt)', lenShort:'Short (~25 min)', lenMed:'Medium (~45 min)', lenLong:'Long (~90 min)',
+    bandAuto:'Grade — auto', band1:'Grades 1–3', band2:'Grades 4–6', band3:'Grades 7–9', band4:'Grades 10–12',
+    askPlaceholder:'Ask the Chavruta…', footer:'Built with reverence · Not a halachic ruling',
+    welcomeTitle:'Chavruta AI', welcomeBody:'Welcome to the study. Ask about the sugya and the Chavruta will answer with cited sources.',
+    relatedSources:'Related sources', sourcesHint:'Sources will appear here', noText:'No text available for this source.',
+    openSources:'Open sources', addSource:'+ Add source', remove:'Remove',
+    kindText:'Text', kindImage:'Image', kindPdf:'PDF', kindWord:'Word',
+    addSrcTitle:'Add a source for the model', addSrcDesc:'Paste source text, or upload a file — image, PDF or Word. The sources you add are sent to the model with your next question.',
+    addSrcPlaceholder:'Paste source text here…', uploadFile:'Upload a file · Image, PDF or Word', add:'Add', cancel:'Cancel',
+    clickView:'Word · click to view', view:'View', download:'Download Word', lessonThreeFiles:'Lesson · three files',
+    downloadWord:'Download Word', noContent:'No content available.', lessonReady:'Here is your lesson — three Word files ready to download:',
+    demoOffline:'‹ Demo mode — the server is not connected. Start the API (uvicorn / docker) for real answers. ›',
+    serverError:'Server error: ',
+    tagRashi:'Rashi', tagRambam:'Rambam', tagTosafot:'Tosafot', tagBeitYosef:'Beit Yosef', tagGemara:'Gemara', tagSource:'Source',
+    shutMode:'Responsa', chavrutaMode:'Chavruta', close:'Close', save:'Save',
+    settingsTitle:'Settings', setLanguage:'Interface language', setDefaultMode:'Default mode',
+    setTheme:'Theme', themeLight:'Light', themeDark:'Dark', themeAuto:'Auto',
+    setSourcesDefault:'Sources by default', srcCollapsed:'Collapsed', srcExpanded:'Expanded',
+    setHistory:'Chat history', clearAll:'Clear all', exportData:'Export', confirmClear:'Delete all chats?',
+    setAbout:'About', aboutText:'Chavruta AI · powered by the Chavruta.AI RAG (bge-m3 + Qdrant)', version:'Version 0.1',
+    supportTitle:'Support',
+    supIntro:'Chavruta AI is a Torah study partner that answers with cited sources — Tanakh, Mishnah, Gemara, Rishonim and Poskim — retrieved from a corpus of ~2.75 million sources.',
+    supGuideTitle:'Quick guide',
+    supGuideModes:'Choose a mode: Lesson → three Word files · Explain/Q&A → text · Responsa → a halachic answer.',
+    supGuideAdd:'Add your own source (text / image / PDF / Word) to send to the model with your question.',
+    supGuidePanels:'Collapse or open the side panels, and switch language with the button at the top.',
+    supHalachaTitle:'Halachic disclaimer',
+    supHalacha:'Answers are not a halachic ruling and are no substitute for a qualified rabbi. Verify every source.',
+    supLimitsTitle:'Limitations & liability',
+    supLimits:'Content is generated by AI and may be wrong. The author bears no responsibility for the answers or their use — use is at your own risk.',
+    supContactTitle:'Contact',
+    supContact:'Questions & feedback:',
+  },
+};
+const tr = (k) => (T[state.lang] && T[state.lang][k] != null) ? T[state.lang][k] : (T.he[k] != null ? T.he[k] : k);
+const INTENT_LABEL = { he:{ lesson:'🎯 שיעור', explain:'🎯 הסבר', qa:'🎯 שאלה', shut:'🎯 שו"ת', chavruta:'🤝 חברותא' }, en:{ lesson:'🎯 Lesson', explain:'🎯 Explain', qa:'🎯 Q&A', shut:'🎯 Responsa', chavruta:'🤝 Chavruta' } };
+function applyLang() {
+  const lang = state.lang;
+  document.documentElement.lang = lang; document.documentElement.dir = lang === 'he' ? 'rtl' : 'ltr';
+  $('#langBtn').textContent = lang === 'he' ? 'עברית · EN' : 'EN · עברית';
+  document.querySelectorAll('[data-i18n]').forEach(e => { e.textContent = tr(e.dataset.i18n); });
+  document.querySelectorAll('[data-i18n-ph]').forEach(e => { e.setAttribute('placeholder', tr(e.dataset.i18nPh)); });
+  document.querySelectorAll('[data-i18n-title]').forEach(e => { e.setAttribute('title', tr(e.dataset.i18nTitle)); });
+  $('#goalLabel').textContent = INTENT_LABEL[lang][state.intent];
+  // Collapse/expand chevrons point toward the panel's outer edge — flip with text direction.
+  const rtl = lang === 'he';
+  const setIcon = (sel, icon) => { const e = $(sel + ' span'); if (e) e.textContent = icon; };
+  setIcon('#sessionsCollapse', rtl ? 'chevron_right' : 'chevron_left');
+  setIcon('#sessionsExpand',   rtl ? 'chevron_left'  : 'chevron_right');
+  setIcon('#sourcesCollapse',  rtl ? 'chevron_left'  : 'chevron_right');
+  setIcon('#sourcesExpand',    rtl ? 'chevron_right' : 'chevron_left');
+  render();
+}
+
+// ── Persist settings across refreshes (localStorage) ─────────────────────────────
+const LS_KEY = 'chavruta.settings';
+function saveSettings(){
+  try { localStorage.setItem(LS_KEY, JSON.stringify({ lang:state.lang, theme:state.theme, defaultIntent:state.defaultIntent, srcDefaultOpen:state.srcDefaultOpen, audience:state.audience, gradeBand:state.gradeBand, length:state.length })); } catch(e){}
+}
+function loadSettings(){
+  try {
+    const s = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+    if (s.lang) state.lang = s.lang;
+    if (s.theme) state.theme = s.theme;
+    if (s.defaultIntent) { state.defaultIntent = s.defaultIntent; state.intent = s.defaultIntent; }
+    if (typeof s.srcDefaultOpen === 'boolean') state.srcDefaultOpen = s.srcDefaultOpen;
+    if (typeof s.audience === 'string') state.audience = s.audience;
+    if (typeof s.gradeBand === 'string') state.gradeBand = s.gradeBand;
+    if (typeof s.length === 'string') state.length = s.length;
+  } catch(e){}
+}
+
+const $ = sel => document.querySelector(sel);
+const el = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; };
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// Escape first, then render simple markdown bold (**text** → <strong>).
+const fmt = (s) => esc(s).replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+
+async function api(path, opts) {
+  const res = await fetch(API + path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  if (!res.ok) throw new Error('API ' + res.status + ': ' + await res.text());
+  return res.status === 204 ? null : res.json();
+}
+
+// ── Demo fallback (shown only if the backend is unreachable) ───────────────────
+const DEMO_SESSIONS = [
+  { id: 'demo-1', first_q: 'סוגיית שניים אוחזין', created_at: new Date().toISOString() },
+  { id: 'demo-2', first_q: 'דיני שומרים — בבא מציעא', created_at: new Date().toISOString() },
+  { id: 'demo-3', first_q: 'מצוות תלמוד תורה לרמב"ם', created_at: new Date().toISOString() },
+  { id: 'demo-4', first_q: 'קניין חצר וארבע אמות', created_at: new Date().toISOString() },
+];
+const DEMO_MESSAGES = [
+  { role:'assistant', text:'המשנה הפותחת את בבא מציעא: "שנים אוחזין בטלית". נעיין בלשון המשנה עצמה, ואחר כך בביאור הרמב"ם והבית יוסף לשבועה?',
+    citations:[{ ref:'בבא מציעא ב׳ ע״א', commentator:'Gemara', deep_link:'',
+      text_he:'שנים אוחזין בטלית — זה אומר אני מצאתיה וזה אומר אני מצאתיה, זה אומר כולה שלי וזה אומר כולה שלי. זה ישבע שאין לו בה פחות מחציה, וזה ישבע שאין לו בה פחות מחציה, ויחלוקו. זה אומר כולה שלי וזה אומר חציה שלי — האומר כולה שלי ישבע שאין לו בה פחות משלושה חלקים, והאומר חציה שלי ישבע שאין לו בה פחות מרביע; זה נוטל שלושה חלקים וזה נוטל רביע.', text_en:'' }] },
+  { role:'user', text:'למה בכלל צריך שבועה? למה לא "כל דאלים גבר"?', citations:[] },
+  { role:'assistant', text:'השבועה היא תקנת חכמים — כדי שלא יהא כל אחד תופס בטליתו של חבירו ונוטל בלא שבועה. כך מבאר הבית יוסף, והרמב"ם בפירוש המשנה מרחיב בגדרי האחיזה, החלוקה והשבועה.',
+    citations:[
+      { ref:'בית יוסף, חו״מ סימן קל״ח', commentator:'Beit Yosef', deep_link:'',
+        text_he:'שנים המוחזקים בדבר, ריש בבא מציעא: שנים אוחזין בטלית, זה אומר כולה שלי וזה אומר כולה שלי — זה ישבע שאין לו בה פחות מחציה וזה ישבע שאין לו בה פחות מחציה ויחלוקו. ושבועה זו תקנת חכמים היא, כדי שלא יהא כל אחד תופס בטליתו של חבירו ונוטל בלא שבועה. ופריך בגמרא על נוסח שבועה זו, שהבא לישבע וליטול חציה ודאי צריך לישבע שיש לו בה חציה — אמר רב הונא: שבועה שיש לי בה, ואין לי בה פחות מחציה.', text_en:'' },
+      { ref:'רמב"ם על המשנה, בבא מציעא א׳:א׳', commentator:'Rambam', deep_link:'',
+        text_he:'שנים אוחזין בטלית — זה הדין הוא כשאוחז כל אחד משניהם בחוטי שפת הטלית, אבל אם תפס כל אחד מהם לעצמו בחלק ממנו, יש לכל אחד משניהם מה שתפס והחזיק בו, והנשאר מן הטלית יחלקו אותו בשוה אחר שישבעו שניהם. ומעיקרנו כי הנשבע הנוטל שום דבר בשבועתו לא ישבע על יותר ממה שראוי ליטול באותה שבועה, ולפיכך ישבע שאין לו בה פחות מחציה ולא ישבע שהיא כולה שלו, מאחר שאינו נוטל אלא חציה — ועל אלו הדינים כולם תקיש ותדין.', text_en:'' },
+      { ref:'בבא מציעא ב׳ ע״א', commentator:'Gemara', deep_link:'',
+        text_he:'שנים אוחזין בטלית, זה אומר אני מצאתיה וזה אומר אני מצאתיה — זה ישבע שאין לו בה פחות מחציה וזה ישבע שאין לו בה פחות מחציה ויחלוקו.', text_en:'' },
+    ] },
+];
+let demoMode = false;
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+function commentatorTag(c) {
+  const s = (c.commentator || '').toLowerCase();
+  if (s.includes('rashi') || s.includes('רש')) return tr('tagRashi');
+  if (s.includes('rambam') || s.includes('רמב')) return tr('tagRambam');
+  if (s.includes('tosafot') || s.includes('תוספ')) return tr('tagTosafot');
+  if (s.includes('yosef') || s.includes('יוסף')) return tr('tagBeitYosef');
+  if (s.includes('gemara') || s.includes('גמרא') || s.includes('talmud') || s.includes('mishnah') || s.includes('משנה')) return tr('tagGemara');
+  return c.commentator || tr('tagSource');
+}
+function isHe(t){ const h=(t.match(/[א-ת]/g)||[]).length, e=(t.match(/[a-zA-Z]/g)||[]).length; return h>=e; }
+
+// ── Word (.doc) generation, client-side (HTML-based; opens in Word/Docs) ─────────
+function downloadDoc(filename, title, bodyText) {
+  const paras = String(bodyText || '').split('\n')
+    .map(line => line.trim() ? '<p>' + fmt(line) + '</p>' : '<p>&nbsp;</p>').join('');
+  const html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" ' +
+    'xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>' + esc(title) + '</title></head>' +
+    '<body dir="rtl" style="font-family:\'Frank Ruhl Libre\',\'David\',serif;font-size:13pt;line-height:1.7;color:#1c1a17;">' +
+    '<h1 style="color:#002045;font-size:20pt">' + esc(title) + '</h1>' + paras + '</body></html>';
+  const blob = new Blob(['﻿', html], { type: 'application/msword' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+// Demo lesson (3 files) shown when the backend is offline; real content comes from the model.
+function demoLessonFiles(q) {
+  if (state.lang === 'en') {
+    const n = '\n\n— Demo mode: with the server connected, the full content is written here by the model from the sources retrieved from the RAG (no external API).';
+    return [
+      { name:'source_sheet.doc', title:'Source Sheet — ' + q, content:'Gate 1 — Scripture\nGate 2 — Mishnah\nGate 3 — Gemara & Rashi\nGate 4 — Rishonim\nGate 5 — Commentaries\nGate 6 — Shulchan Arukh & Poskim' + n },
+      { name:'lesson_flow.doc', title:'Lesson Flow — ' + q, content:'0. Opening — the driving question\n1. Foundation — Scripture & Mishnah\n2. The sugya — Gemara & Rashi\n3. Rishonim\n4. Analysis\n5. Practical halacha\n6. Summary & review' + n },
+      { name:'full_lesson.doc', title:'Full Lesson — ' + q, content:'Opening\n\nPart 1 — Foundation\n\nPart 2 — The sugya\n\nPart 3 — Rishonim\n\nPart 4 — Analysis\n\nPart 5 — Practical halacha\n\nSummary' + n },
+    ];
+  }
+  const note = '\n\n— מצב הדגמה: עם השרת המחובר, כאן ייכתב התוכן המלא ע"י המודל מתוך המקורות שנשלפו מהראג (ללא API חיצוני).';
+  return [
+    { name: 'דף_מקורות.doc', title: 'דף מקורות — ' + q, content:
+      'שער א׳ — מקרא\nשער ב׳ — משנה\nשער ג׳ — גמרא ורש"י\nשער ד׳ — ראשונים\nשער ה׳ — נושאי כלים\nשער ו׳ — שולחן ערוך ופוסקים' + note },
+    { name: 'מהלך_השיעור.doc', title: 'מהלך השיעור — ' + q, content:
+      '0. פתיחה — השאלה המניעה\n1. היסוד — מקרא ומשנה\n2. הסוגיה — גמרא ורש"י\n3. הראשונים\n4. הליבון\n5. הלכה למעשה\n6. סיכום ושאלות חזרה' + note },
+    { name: 'השיעור_המלא.doc', title: 'שיעור מלא — ' + q, content:
+      'פתיחה\n\nחלק א׳ — היסוד\n\nחלק ב׳ — הסוגיה\n\nחלק ג׳ — הראשונים\n\nחלק ד׳ — הליבון\n\nחלק ה׳ — הלכה למעשה\n\nסיכום' + note },
+  ];
+}
+
+// ── Renderers (markup identical to the approved mockup) ─────────────────────────
+function renderSessions() {
+  const nav = $('#sessions'); nav.innerHTML = '';
+  if (!state.sessions.length) {
+    nav.appendChild(el('<p class="text-ink/40 text-xs text-center mt-6">' + esc(tr('noChats')) + '</p>'));
+    return;
+  }
+  for (const s of state.sessions) {
+    const active = s.id === state.activeId;
+    const item = el('<a class="group px-4 py-3 rounded-2xl transition cursor-pointer flex items-center gap-2 ' +
+      (active ? 'bg-white/70 font-bold text-tekhelet shadow-sm ring-1 ring-tekhelet/10' : 'hover:bg-white/50 text-ink/65') + '">' +
+        '<span class="flex-1 truncate">' + esc(s.first_q) + '</span>' +
+        '<span class="del opacity-0 group-hover:opacity-100 text-ink/40 hover:text-red-500 text-xs shrink-0" title="' + esc(tr('del')) + '">✕</span>' +
+      '</a>');
+    item.addEventListener('click', e => {
+      if (e.target.classList.contains('del')) { e.stopPropagation(); deleteSession(s.id); return; }
+      selectSession(s.id);
+    });
+    nav.appendChild(item);
+  }
+}
+
+function bubble(m) {
+  const tags = (m.role === 'assistant' ? [...new Set((m.citations||[]).map(commentatorTag))].slice(0,4) : []);
+  const tagHtml = tags.length ? '<div class="mt-3 flex flex-wrap gap-2">' +
+    tags.map(t => '<span class="text-[10px] font-bold px-2.5 py-1 rounded-full bg-tekhelet/8 text-tekhelet">' + esc(t) + '</span>').join('') + '</div>' : '';
+  const dir = isHe(m.text) ? 'he' : 'en';
+  if (m.role === 'user') {
+    const att = (m.attachments && m.attachments.length) ? ('<div class="mt-2.5 flex flex-wrap gap-1.5">' +
+      m.attachments.map(a => '<span class="inline-flex items-center gap-1 text-[11px] font-semibold bg-white/20 rounded-full px-2.5 py-1"><span class="material-symbols-outlined text-[14px]">attach_file</span>' + esc(a.name) + '</span>').join('') + '</div>') : '';
+    return el('<div class="flex gap-3.5 flex-row-reverse">' +
+      '<div class="h-9 w-9 rounded-2xl grad grid place-items-center text-white font-bold shrink-0">א</div>' +
+      '<div class="grad text-white rounded-3xl rounded-tl-md p-5 shadow-lg shadow-tekhelet/20 max-w-[80%]">' +
+        '<p class="font-serif text-[17px] leading-loose ' + dir + '" style="white-space:pre-wrap">' + esc(m.text) + '</p>' + att +
+      '</div></div>');
+  }
+  // Lesson mode → the model's output is 3 Word files (source sheet · lesson flow · full lesson).
+  if (m.files && m.files.length) {
+    const cards = m.files.map((f, idx) =>
+      '<div class="fileCard flex items-center gap-3 w-full text-right bg-white/70 hover:bg-white/95 ring-1 ring-line/70 rounded-2xl p-3.5 transition cursor-pointer" data-fi="' + idx + '">' +
+        '<span class="h-10 w-10 rounded-xl grad grid place-items-center text-white shrink-0"><span class="material-symbols-outlined">description</span></span>' +
+        '<span class="flex-1 min-w-0"><span class="block font-serif font-bold text-tekhelet truncate">' + esc(f.name) + '</span><span class="block text-[11px] text-ink/50">' + esc(tr('clickView')) + '</span></span>' +
+        '<button class="viewFile h-8 w-8 rounded-lg hover:bg-white grid place-items-center text-tekhelet shrink-0" title="' + esc(tr('view')) + '"><span class="material-symbols-outlined text-[20px]">visibility</span></button>' +
+        '<button class="dlFile h-8 w-8 rounded-lg hover:bg-white grid place-items-center text-gold shrink-0" title="' + esc(tr('download')) + '"><span class="material-symbols-outlined text-[20px]">download</span></button>' +
+      '</div>').join('');
+    const node = el('<div class="flex gap-3.5">' +
+      '<div class="h-9 w-9 rounded-2xl bg-white/80 grid place-items-center text-tekhelet font-serif font-black shrink-0 shadow-sm">ח</div>' +
+      '<div class="bg-white/70 rounded-3xl rounded-tr-md p-5 shadow-sm ring-1 ring-white/60 max-w-[85%] w-full">' +
+        (m.text ? '<p class="font-serif text-[17px] leading-loose ' + dir + ' mb-3" style="white-space:pre-wrap">' + fmt(m.text) + '</p>' : '') +
+        '<p class="text-[11px] tracking-widest text-gold font-bold uppercase mb-2">' + esc(tr('lessonThreeFiles')) + '</p>' +
+        '<div class="flex flex-col gap-2">' + cards + '</div>' +
+      '</div></div>');
+    node.querySelectorAll('.fileCard').forEach(card => {
+      const f = m.files[+card.dataset.fi];
+      const open = () => openFilePreview(f);
+      card.addEventListener('click', open);
+      card.querySelector('.viewFile').addEventListener('click', e => { e.stopPropagation(); open(); });
+      card.querySelector('.dlFile').addEventListener('click', e => {
+        e.stopPropagation();
+        downloadDoc(f.name, f.title || f.name.replace(/\.docx?$/, ''), f.content || '');
+      });
+    });
+    return node;
+  }
+  return el('<div class="flex gap-3.5">' +
+    '<div class="h-9 w-9 rounded-2xl bg-white/80 grid place-items-center text-tekhelet font-serif font-black shrink-0 shadow-sm">ח</div>' +
+    '<div class="bg-white/70 rounded-3xl rounded-tr-md p-5 shadow-sm ring-1 ring-white/60">' +
+      '<p class="font-serif text-[18px] leading-loose ' + dir + '" style="white-space:pre-wrap">' + fmt(m.text) + '</p>' + tagHtml +
+    '</div></div>');
+}
+
+function renderMessages() {
+  const box = $('#messages'); box.innerHTML = '';
+  if (!state.messages.length && !state.loading) {
+    box.appendChild(el('<div class="flex flex-col items-center justify-center my-auto text-center gap-4 py-10">' +
+      '<div class="h-14 w-14 rounded-2xl grad grid place-items-center text-2xl shadow-lg shadow-tekhelet/20">🕍</div>' +
+      '<h1 class="font-serif text-xl font-bold text-tekhelet">' + esc(tr('welcomeTitle')) + '</h1>' +
+      '<p class="text-ink/55 text-sm max-w-md leading-relaxed font-serif p-4 glass rounded-2xl">' + esc(tr('welcomeBody')) + '</p>' +
+    '</div>'));
+    return;
+  }
+  state.messages.forEach(m => box.appendChild(bubble(m)));
+  if (state.loading) {
+    box.appendChild(el('<div class="flex gap-3.5">' +
+      '<div class="h-9 w-9 rounded-2xl bg-white/80 grid place-items-center text-tekhelet font-serif font-black shrink-0 shadow-sm">ח</div>' +
+      '<div class="bg-white/70 rounded-3xl rounded-tr-md p-5 shadow-sm ring-1 ring-white/60 flex gap-1.5 items-center">' +
+        '<span class="h-2 w-2 bg-gold rounded-full animate-bounce"></span>' +
+        '<span class="h-2 w-2 bg-gold rounded-full animate-bounce" style="animation-delay:.15s"></span>' +
+        '<span class="h-2 w-2 bg-gold rounded-full animate-bounce" style="animation-delay:.3s"></span>' +
+      '</div></div>'));
+  }
+  box.scrollTop = box.scrollHeight;
+}
+
+function renderSources() {
+  const box = $('#sources'); box.innerHTML = '';
+  // Accumulate the sources of the WHOLE conversation (not just the last turn), deduped by ref and
+  // kept in order of FIRST use. Drop empty/degenerate citations so no blank "מקור" card shows.
+  const order = [];            // unique refs, earliest-first
+  const byRef = new Map();     // ref → the citation object (first non-degenerate occurrence)
+  state.messages.forEach(m => {
+    if (m.role !== 'assistant') return;
+    (m.citations || []).forEach(c => {
+      if (!c || !c.ref) return;
+      if (!((c.text_he||'').trim() || (c.text_en||'').trim())) return;
+      if (!byRef.has(c.ref)) { byRef.set(c.ref, c); order.push(c.ref); }
+    });
+  });
+  if (!order.length) {
+    box.appendChild(el('<p class="text-ink/40 text-sm text-center mt-10">' + esc(tr('sourcesHint')) + '</p>'));
+    return;
+  }
+  // Stack style: most-recently-introduced on top, the FIRST source used sits at the very bottom.
+  // The ordinal badge (1 = first used) makes the stacking order legible.
+  const stack = order.map((ref, idx) => ({ c: byRef.get(ref), n: idx + 1 })).reverse();
+  stack.forEach(({ c, n }) => {
+    const key = c.ref;         // ref-keyed so expand state is stable across turns
+    // When "sources by default = expanded", membership in expandedSrc means "toggled from default".
+    const expanded = state.srcDefaultOpen ? !state.expandedSrc.has(key) : state.expandedSrc.has(key);
+    const full = state.lang === 'en' ? (c.text_en || c.text_he) : (c.text_he || c.text_en);
+    // Collapsed = name only (ordinal + commentator + ref). Click reveals the FULL cited source text
+    // inline (no external link — the complete quote we actually used).
+    const card = el('<div class="block rounded-2xl p-4 shadow-sm transition cursor-pointer ' +
+      (expanded ? 'bg-white/85 ring-2 ring-gold/40' : 'bg-white/60 hover:ring-2 hover:ring-gold/30') + '">' +
+      '<div class="flex items-start justify-between gap-2">' +
+        '<div class="min-w-0">' +
+          '<p class="text-[10px] font-black tracking-widest text-gold uppercase flex items-center gap-1.5">' +
+            '<span class="inline-grid place-items-center h-4 w-4 rounded-full bg-gold/15 text-gold text-[9px] shrink-0">' + n + '</span>' +
+            esc(commentatorTag(c)) + '</p>' +
+          '<h4 class="font-serif text-lg font-bold text-tekhelet mt-1 leading-tight break-words">' + esc(c.ref) + '</h4>' +
+        '</div>' +
+        '<span class="material-symbols-outlined text-ink/40 shrink-0 transition-transform">' + (expanded ? 'expand_less' : 'expand_more') + '</span>' +
+      '</div>' +
+      (expanded ? ('<div class="mt-3 pt-3 border-t border-line/60">' +
+          '<p class="text-[15px] text-ink/85 font-serif leading-relaxed break-words" style="white-space:pre-wrap;overflow-wrap:anywhere" dir="' + (isHe(full||'')?'rtl':'ltr') + '">' + esc(full || tr('noText')) + '</p>' +
+        '</div>') : '') +
+    '</div>');
+    card.addEventListener('click', () => {
+      if (expanded) state.expandedSrc.delete(key); else state.expandedSrc.add(key);
+      renderSources();
+    });
+    box.appendChild(card);
+  });
+}
+
+// User-added sources (text / image / PDF / Word) that will be sent to the model.
+function fileKind(name) {
+  const n = (name || '').toLowerCase();
+  if (/\.(png|jpe?g|gif|webp|bmp|heic)$/.test(n)) return { icon:'image', label:tr('kindImage') };
+  if (n.endsWith('.pdf')) return { icon:'picture_as_pdf', label:tr('kindPdf') };
+  if (/\.(docx?|rtf|odt)$/.test(n)) return { icon:'description', label:tr('kindWord') };
+  return { icon:'draft', label:tr('kindText') };
+}
+function renderUserSources() {
+  const box = $('#userSources'); if (!box) return; box.innerHTML = '';
+  state.userSources.forEach((s, i) => {
+    const k = s.kind === 'text' ? { icon:'notes', label:tr('kindText') } : fileKind(s.name);
+    const chip = el('<div class="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/70 ring-1 ring-line/70 text-sm">' +
+      '<span class="material-symbols-outlined text-[18px] text-indigo shrink-0">' + k.icon + '</span>' +
+      '<span class="flex-1 truncate text-ink/75" title="' + esc(s.name) + '">' + esc(s.name) + '</span>' +
+      '<span class="text-[10px] font-bold text-gold uppercase shrink-0">' + k.label + '</span>' +
+      '<button class="rm text-ink/40 hover:text-red-500 shrink-0" title="' + esc(tr('remove')) + '">✕</button>' +
+    '</div>');
+    chip.querySelector('.rm').addEventListener('click', () => { state.userSources.splice(i,1); renderUserSources(); });
+    box.appendChild(chip);
+  });
+  const btn = $('#addSrcBtn');
+  if (btn) btn.textContent = tr('addSource') + (state.userSources.length ? ' (' + state.userSources.length + ')' : '');
+}
+
+function render() { renderSessions(); renderMessages(); renderSources(); renderUserSources(); updateIntentLock(); }
+
+// A chat's mode is locked to the intent chosen on its first turn — once it has messages, the mode
+// segment is frozen (the backend enforces this too; the UI just reflects it so it's not confusing).
+function intentLocked() { return !!state.activeId && state.messages.length > 0; }
+function updateIntentLock() {
+  const seg = $('#intentSeg'); if (!seg) return;
+  const locked = intentLocked();
+  // Inline styles (not Tailwind utilities) so the freeze works with the pre-built offline CSS.
+  seg.style.opacity = locked ? '0.45' : '';
+  seg.style.pointerEvents = locked ? 'none' : '';
+  seg.setAttribute('title', locked ? (state.lang === 'he' ? 'המצב ננעל לפי ההודעה הראשונה בצ׳אט'
+                                                          : 'Mode is locked to the chat\'s first message') : '');
+}
+
+// ── Actions ─────────────────────────────────────────────────────────────────────
+async function loadSessions(autoSelect) {
+  try {
+    state.sessions = await api('/sessions');
+    if (autoSelect && state.sessions.length) await selectSession(state.sessions[0].id);
+    else render();
+  } catch (e) {
+    demoMode = true;
+    state.sessions = DEMO_SESSIONS; state.activeId = DEMO_SESSIONS[0].id; state.messages = DEMO_MESSAGES;
+    render();
+  }
+}
+async function selectSession(id) {
+  state.activeId = id;
+  if (demoMode) { state.messages = DEMO_MESSAGES; render(); return; }
+  try { state.messages = await api('/sessions/' + id + '/messages'); }
+  catch { state.messages = []; }
+  const s = state.sessions.find(x => x.id === id);
+  $('#subtitle').textContent = s ? s.first_q : '';
+  if (s && s.mode) setIntent(s.mode);   // restore this chat's locked mode (segment is then frozen by render)
+  render();
+}
+function newDiscussion() { state.activeId = null; state.messages = []; $('#subtitle').textContent = ''; setIntent(state.defaultIntent); render(); $('#input').focus(); }
+async function deleteSession(id) {
+  if (!demoMode) { try { await api('/sessions/' + id, { method:'DELETE' }); } catch (e) {} }
+  state.sessions = state.sessions.filter(s => s.id !== id);
+  if (state.activeId === id) { state.activeId = null; state.messages = []; }
+  render();
+}
+async function send(text) {
+  const attachments = state.userSources.slice();  // user-uploaded sources → sent to the model
+  state.messages.push({ role:'user', text, citations:[], attachments });
+  state.userSources = [];
+  state.loading = true; render();
+  // Lesson mode: send the chosen DEFAULTS (empty = "auto"; backend then reads the prompt, and asks
+  // if a field is neither in the prompt nor set here).
+  const lessonFields = state.intent === 'lesson'
+    ? { audience: state.audience, grade_band: state.audience === 'school' ? state.gradeBand : '', length: state.length }
+    : {};
+  const body = JSON.stringify({ question: text, intent: state.intent, lang: state.lang, attachments, ...lessonFields });
+  try {
+    if (demoMode) throw new Error('demo');
+    const sid = state.activeId;
+    if (!sid) {
+      // New session: backend creates it + runs the first query, then we reload the
+      // canonical messages (robust regardless of the create-response shape).
+      const r = await api('/sessions', { method:'POST', body });
+      state.activeId = r.id;
+      state.sessions.unshift({ id:r.id, first_q:r.first_q, created_at:r.created_at, mode:state.intent });
+      $('#subtitle').textContent = r.first_q;
+      // Use the returned result directly — it carries `files` (lesson mode), which /messages omits.
+      state.messages.push({ role:'assistant', text:r.result.answer, citations:r.result.citations||[], caveats:r.result.caveats||[], grounded:r.result.grounded, files:r.result.files });
+    } else {
+      const result = await api('/sessions/' + sid + '/query', { method:'POST', body });
+      // Lesson mode → the backend returns 3 lesson files; other modes → plain text answer.
+      state.messages.push({ role:'assistant', text:result.answer, citations:result.citations||[], caveats:result.caveats||[], grounded:result.grounded, files: result.files });
+    }
+  } catch (e) {
+    if (demoMode && state.intent === 'lesson') {
+      state.messages.push({ role:'assistant', text:tr('lessonReady'), files: demoLessonFiles(text), citations:[] });
+    } else {
+      state.messages.push({ role:'assistant', text: demoMode ? tr('demoOffline') : (tr('serverError') + e.message), citations:[] });
+    }
+  } finally {
+    state.loading = false; render();
+  }
+}
+
+// ── Wire up controls ─────────────────────────────────────────────────────────────
+function autogrow(t){ t.style.height='auto'; t.style.height=Math.min(t.scrollHeight,128)+'px'; }
+$('#composer').addEventListener('submit', e => {
+  e.preventDefault();
+  const v = $('#input').value.trim();
+  if (!v || state.loading) return;
+  $('#input').value = ''; $('#input').style.height='auto';
+  send(v);
+});
+$('#input').addEventListener('input', e => autogrow(e.target));
+$('#input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {   // Enter sends · Shift+Enter = newline
+    e.preventDefault();
+    $('#composer').requestSubmit ? $('#composer').requestSubmit() : $('#composer').dispatchEvent(new Event('submit', {cancelable:true}));
+  }
+});
+$('#newBtn').addEventListener('click', newDiscussion);
+$('#langBtn').addEventListener('click', () => {
+  state.lang = state.lang === 'he' ? 'en' : 'he';
+  applyLang(); saveSettings();
+});
+function setIntent(intent) {
+  state.intent = intent;
+  [...$('#intentSeg').children].forEach(b => {
+    b.className = 'px-3 py-1.5 rounded-full ' + (b.dataset.intent === intent ? 'grad text-white' : 'text-ink/60');
+  });
+  $('#goalLabel').textContent = INTENT_LABEL[state.lang][intent];
+  updateLessonOpts();
+}
+// Lesson options bar: visible only in lesson mode; grade-band select shown only for "school".
+function updateLessonOpts() {
+  const bar = $('#lessonOpts'); if (bar) bar.classList.toggle('hidden', state.intent !== 'lesson');
+  const band = $('#bandSel'); if (band) band.classList.toggle('hidden', state.audience !== 'school');
+  const a = $('#audSel'), l = $('#lenSel'), b = $('#bandSel');
+  if (a) a.value = state.audience; if (l) l.value = state.length; if (b) b.value = state.gradeBand;
+}
+$('#audSel')?.addEventListener('change', e => { state.audience = e.target.value; updateLessonOpts(); saveSettings(); });
+$('#bandSel')?.addEventListener('change', e => { state.gradeBand = e.target.value; saveSettings(); });
+$('#lenSel')?.addEventListener('change', e => { state.length = e.target.value; saveSettings(); });
+$('#intentSeg').addEventListener('click', e => {
+  if (intentLocked()) return;               // frozen once the chat has started
+  const btn = e.target.closest('[data-intent]'); if (!btn) return;
+  setIntent(btn.dataset.intent);
+});
+
+// ── Add-source modal ────────────────────────────────────────────────────────────
+function openAddSrc()  { $('#addSrcModal').classList.remove('hidden'); $('#addSrcModal').classList.add('flex'); $('#addSrcText').focus(); }
+function closeAddSrc() { $('#addSrcModal').classList.add('hidden'); $('#addSrcModal').classList.remove('flex'); $('#addSrcText').value = ''; }
+const readFile = (file) => new Promise((res) => {
+  const isImg = /^image\//.test(file.type);
+  const isTxt = /\.txt$/i.test(file.name) || file.type === 'text/plain';
+  if (!isImg && !isTxt) { res({ kind:'file', name:file.name, mime:file.type, size:file.size, content:null }); return; }
+  const r = new FileReader();
+  r.onload = () => res({ kind: isImg ? 'image' : 'text', name:file.name, mime:file.type, size:file.size, content:r.result });
+  isImg ? r.readAsDataURL(file) : r.readAsText(file);
+});
+$('#addSrcBtn').addEventListener('click', openAddSrc);
+$('#addSrcClose').addEventListener('click', closeAddSrc);
+$('#addSrcCancel').addEventListener('click', closeAddSrc);
+$('#addSrcModal').addEventListener('click', e => { if (e.target.id === 'addSrcModal') closeAddSrc(); });
+$('#addSrcCard').addEventListener('click', e => e.stopPropagation());
+$('#addSrcFile').addEventListener('change', async e => {
+  for (const f of [...e.target.files]) state.userSources.push(await readFile(f));
+  e.target.value = ''; renderUserSources();
+});
+$('#addSrcSave').addEventListener('click', () => {
+  const txt = $('#addSrcText').value.trim();
+  if (txt) state.userSources.push({ kind:'text', name: txt.slice(0, 40) + (txt.length > 40 ? '…' : ''), content: txt });
+  closeAddSrc(); renderUserSources();
+});
+
+// ── Collapsible side panels ──────────────────────────────────────────────────────
+function setPanel(open, panelId, railId) {
+  const panel = $('#' + panelId), rail = $('#' + railId);
+  if (open) { panel.classList.remove('hidden'); panel.classList.add('flex'); rail.classList.add('hidden'); rail.classList.remove('flex'); }
+  else      { panel.classList.add('hidden'); panel.classList.remove('flex'); rail.classList.remove('hidden'); rail.classList.add('flex'); }
+}
+$('#sessionsCollapse').addEventListener('click', () => setPanel(false, 'sessionsPanel', 'sessionsRail'));
+$('#sessionsExpand').addEventListener('click',   () => setPanel(true,  'sessionsPanel', 'sessionsRail'));
+$('#sourcesCollapse').addEventListener('click',  () => setPanel(false, 'sourcesPanel', 'sourcesRail'));
+$('#sourcesExpand').addEventListener('click',    () => setPanel(true,  'sourcesPanel', 'sourcesRail'));
+
+// ── File preview (view a lesson Word file inside the interface) ───────────────────
+let previewFile = null;
+function openFilePreview(f) {
+  previewFile = f;
+  $('#filePreviewTitle').textContent = f.title || f.name;
+  $('#filePreviewBody').innerHTML = fmt(f.content || tr('noContent'));
+  $('#filePreview').classList.remove('hidden'); $('#filePreview').classList.add('flex');
+}
+function closeFilePreview() { $('#filePreview').classList.add('hidden'); $('#filePreview').classList.remove('flex'); previewFile = null; }
+$('#filePreviewClose').addEventListener('click', closeFilePreview);
+$('#filePreview').addEventListener('click', e => { if (e.target.id === 'filePreview') closeFilePreview(); });
+$('#filePreviewCard').addEventListener('click', e => e.stopPropagation());
+$('#filePreviewDownload').addEventListener('click', () => { if (previewFile) downloadDoc(previewFile.name, previewFile.title || previewFile.name.replace(/\.docx?$/, ''), previewFile.content || ''); });
+
+// ── Settings & Support ───────────────────────────────────────────────────────────
+function showModal(id){ const m=$('#'+id); m.classList.remove('hidden'); m.classList.add('flex'); }
+function hideModal(id){ const m=$('#'+id); m.classList.add('hidden'); m.classList.remove('flex'); }
+function applyTheme(){
+  const dark = state.theme === 'dark' || (state.theme === 'auto' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  document.body.classList.toggle('theme-dark', dark);
+}
+function markSeg(segId, val){
+  [...$('#'+segId).children].forEach(b => {
+    const base = b.className.replace(/\s*(grad|text-white|text-ink\/60)\b/g,'').trim();
+    b.className = base + (b.dataset.val === val ? ' grad text-white' : ' text-ink/60');
+  });
+}
+function refreshSettingsUI(){
+  markSeg('setLangSeg', state.lang);
+  markSeg('setModeSeg', state.defaultIntent);
+  markSeg('setThemeSeg', state.theme);
+  markSeg('setSrcSeg', state.srcDefaultOpen ? 'expanded' : 'collapsed');
+}
+async function clearAllSessions(){
+  if (!confirm(tr('confirmClear'))) return;
+  if (!demoMode) { for (const s of state.sessions.slice()) { try { await api('/sessions/'+s.id, {method:'DELETE'}); } catch(e){} } }
+  state.sessions=[]; state.activeId=null; state.messages=[]; hideModal('settingsModal'); render();
+}
+$('#settingsBtn').addEventListener('click', () => { refreshSettingsUI(); showModal('settingsModal'); });
+$('#settingsLink').addEventListener('click', () => { refreshSettingsUI(); showModal('settingsModal'); });
+$('#settingsClose').addEventListener('click', () => hideModal('settingsModal'));
+$('#settingsModal').addEventListener('click', e => { if (e.target.id==='settingsModal') hideModal('settingsModal'); });
+$('#supportLink').addEventListener('click', () => showModal('supportModal'));
+$('#supportClose').addEventListener('click', () => hideModal('supportModal'));
+$('#supportModal').addEventListener('click', e => { if (e.target.id==='supportModal') hideModal('supportModal'); });
+
+// ── 'My Shiurim' saved-lesson library ─────────────────────────────────────────
+async function openLibrary() {
+  showModal('libraryModal');
+  const body = $('#libraryBody');
+  body.innerHTML = '<p class="text-ink/40 text-sm p-4">…</p>';
+  try {
+    const list = await (await fetch(API + '/lessons')).json();
+    if (!list.length) { body.innerHTML = '<p class="text-ink/50 text-sm p-8 text-center">' + esc(tr('libEmpty')) + '</p>'; return; }
+    body.innerHTML = '';
+    list.forEach(L => {
+      const aud = L.audience === 'school' ? ('בית ספר ' + (L.grade_band || '')) : (L.audience === 'yeshiva' ? 'בית מדרש' : '');
+      const meta = [aud, L.length, (L.created_at || '').slice(0, 10)].filter(Boolean).join(' · ');
+      const row = el('<div class="flex items-center gap-3 bg-white/70 hover:bg-white/95 ring-1 ring-line/70 rounded-2xl p-3.5 transition"></div>');
+      row.innerHTML =
+        '<button class="openL flex-1 min-w-0 text-right"><span class="block font-serif font-bold text-tekhelet truncate">' + esc(L.topic) + '</span><span class="block text-[11px] text-ink/50">' + esc(meta) + '</span></button>' +
+        '<button class="delL h-8 w-8 rounded-lg hover:bg-white grid place-items-center text-ink/40 hover:text-red-500 shrink-0" title="' + esc(tr('del')) + '"><span class="material-symbols-outlined text-[20px]">delete</span></button>';
+      row.querySelector('.openL').addEventListener('click', () => openSavedLesson(L.id));
+      row.querySelector('.delL').addEventListener('click', async () => {
+        try { await fetch(API + '/lessons/' + L.id, { method: 'DELETE' }); } catch (e) {}
+        row.remove();
+        if (!body.children.length) body.innerHTML = '<p class="text-ink/50 text-sm p-8 text-center">' + esc(tr('libEmpty')) + '</p>';
+      });
+      body.appendChild(row);
+    });
+  } catch (e) { body.innerHTML = '<p class="text-red-500 text-sm p-4">' + esc(String(e)) + '</p>'; }
+}
+async function openSavedLesson(id) {
+  try {
+    const L = await (await fetch(API + '/lessons/' + id)).json();
+    hideModal('libraryModal');
+    state.activeId = null;
+    state.messages = [{ role: 'assistant', text: '📚 ' + L.topic, files: L.files || [], citations: L.citations || [] }];
+    $('#subtitle').textContent = L.topic;
+    render();
+  } catch (e) {}
+}
+$('#libraryLink').addEventListener('click', openLibrary);
+$('#libraryClose').addEventListener('click', () => hideModal('libraryModal'));
+$('#libraryModal').addEventListener('click', e => { if (e.target.id === 'libraryModal') hideModal('libraryModal'); });
+$('#setLangSeg').addEventListener('click', e => { const b=e.target.closest('[data-val]'); if(!b)return; state.lang=b.dataset.val; applyLang(); refreshSettingsUI(); saveSettings(); });
+$('#setModeSeg').addEventListener('click', e => { const b=e.target.closest('[data-val]'); if(!b)return; state.defaultIntent=b.dataset.val; markSeg('setModeSeg', state.defaultIntent); saveSettings(); });
+$('#setThemeSeg').addEventListener('click', e => { const b=e.target.closest('[data-val]'); if(!b)return; state.theme=b.dataset.val; applyTheme(); markSeg('setThemeSeg', state.theme); saveSettings(); });
+$('#setSrcSeg').addEventListener('click', e => { const b=e.target.closest('[data-val]'); if(!b)return; state.srcDefaultOpen=(b.dataset.val==='expanded'); state.expandedSrc.clear(); markSeg('setSrcSeg', b.dataset.val); renderSources(); saveSettings(); });
+$('#setClear').addEventListener('click', clearAllSessions);
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+loadSettings();
+applyTheme();
+applyLang();
+setIntent(state.defaultIntent);
+loadSessions(true);
+</script>
+</body>
+</html>

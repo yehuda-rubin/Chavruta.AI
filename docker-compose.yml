@@ -1,0 +1,117 @@
+# Chavruta.AI — full local stack in Docker.
+#
+#   docker compose up --build         # start the whole app (api + web)
+#   open http://localhost:5173        # the UI
+#   docker compose down               # stop (conversation DB + caches persist)
+#
+# Architecture (the LLM runs on Nebius; everything else is local containers):
+#   web (nginx)  ──/api──▶  api (FastAPI + bge-m3, CPU)  ──▶  Nebius (Qwen, generation)
+#                                       │
+#                                       └─▶ embedded Qdrant index (mounted ./data/qdrant)
+#
+# Generation uses the Nebius API — put NEBIUS_API_KEY in a .env file beside this
+# one (copy from .env.example). The retrieval index is the existing embedded
+# Qdrant store under ./data/qdrant (1.6GB, collection "chavruta"); it is mounted,
+# not baked into the image, and not re-ingested.
+#
+# Want a standalone Qdrant SERVER instead of the embedded store? Start the
+# profiled services and flip the api env (see the `qdrant` / `ingest` services
+# and comments at the bottom).
+
+services:
+  # ── Backend: FastAPI RAG query service ───────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.endpoint
+    container_name: chavruta-api
+    restart: unless-stopped
+    environment:
+      # Local deployment, but generation is delegated to Nebius.
+      CHAVRUTA_PROFILE: local
+      CHAVRUTA_EMBEDDING_DEVICE: cpu
+
+      # Retrieval — HYBRID against the Qdrant SERVER (449k-point dense+sparse index).
+      # Embedded mode cannot do hybrid at this scale (brute force → timeouts).
+      CHAVRUTA_QDRANT_MODE: server
+      CHAVRUTA_QDRANT_URL: http://qdrant:6333
+      CHAVRUTA_COLLECTION: chavruta
+      CHAVRUTA_HYBRID: "true"
+      CHAVRUTA_RERANK: "false"
+      CHAVRUTA_RELEVANCE_THRESHOLD: "0.0"
+
+      # Generation — Nebius Token Factory (OpenAI-compatible). Llama-3.3-70B by default;
+      # the Qwen3 "thinking" model returns empty content under a tight token budget.
+      CHAVRUTA_LLM_BACKEND: nebius
+      CHAVRUTA_LLM_MODEL: ${CHAVRUTA_LLM_MODEL:-meta-llama/Llama-3.3-70B-Instruct}
+      CHAVRUTA_LLM_BASE_URL: ${CHAVRUTA_LLM_BASE_URL:-https://api.studio.nebius.ai/v1}
+      CHAVRUTA_LLM_API_KEY: ${NEBIUS_API_KEY:-}
+
+      # Chat history — persisted to the named volume below.
+      CHAVRUTA_DB_PATH: /app-data/chavruta.db
+    volumes:
+      - chavruta_db:/app-data             # SQLite conversation history (persists)
+      - hf_cache:/root/.cache/huggingface # bge-m3 / model cache
+    depends_on:
+      - qdrant
+    expose:
+      - "8080"
+    ports:
+      - "8080:8080"                       # exposed for direct debugging (optional)
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s                  # bge-m3 load + first warm-up
+      retries: 3
+
+  # ── Frontend: React SPA served by nginx, proxying /api → api:8080 ────────────
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+    container_name: chavruta-web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "5173:80"                         # open http://localhost:5173
+
+  # ── OPTIONAL: standalone Qdrant SERVER (profile "server") ────────────────────
+  # Use instead of the embedded index for real HNSW indexes / concurrency.
+  # Start with:  docker compose --profile server up -d qdrant
+  # Then set on `api`:  CHAVRUTA_QDRANT_MODE=server, CHAVRUTA_QDRANT_URL=http://qdrant:6333
+  # (the server starts EMPTY — run the `ingest` service once to populate it).
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: chavruta-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+
+  # ── OPTIONAL: one-shot corpus ingestion into the Qdrant SERVER (profile "ingest")
+  # Embeds the prebuilt corpus (no Sefaria refetch) and loads it into the server.
+  # Long-running on CPU. Start with:  docker compose --profile ingest run --rm ingest
+  ingest:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.job
+    profiles: ["ingest"]
+    environment:
+      CHAVRUTA_PROFILE: local
+      CHAVRUTA_EMBEDDING_DEVICE: cpu
+      CHAVRUTA_QDRANT_MODE: server
+      CHAVRUTA_QDRANT_URL: http://qdrant:6333
+      CHAVRUTA_COLLECTION: chavruta
+      INGEST_CHUNKS_PATH: /data/processed/all_chunks_full.json
+    volumes:
+      - ./data:/data                      # prebuilt corpus (read) — see data/processed/
+
+volumes:
+  chavruta_db:
+  hf_cache:
+  qdrant_storage:

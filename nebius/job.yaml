@@ -1,0 +1,64 @@
+# Chavruta.AI — Nebius Serverless Job manifest (the RAG "factory")
+#
+# Builds the prebuilt RAG index on a Nebius GPU and publishes it:
+#   fetch corpus (local → HF → Sefaria) → embed (bge-m3 on GPU)
+#     → publish prebuilt index to Hugging Face → (optional) load Qdrant Cloud
+#
+# The Job is run by the maintainer (initial build + every corpus update) and by anyone
+# embedding their own corpus. Regular users do NOT run it — they download the published
+# index with scripts/bootstrap_rag.py. See specs/.../plan.md "Index build & distribution".
+#
+# Prerequisites:
+#   1. docker build -f docker/Dockerfile.job -t YOUR_REGISTRY/chavruta-ingest:latest .
+#   2. docker push YOUR_REGISTRY/chavruta-ingest:latest
+#   3. Fill in image, HF_TOKEN, INGEST_INDEX_HF_REPO below.
+#      Optionally CHAVRUTA_QDRANT_URL/_API_KEY to also load Qdrant Cloud for the Endpoint.
+#
+# Submit:
+#   nebius ai serverless job run --spec nebius/job.yaml
+#
+# Estimated runtime: ~45–90 min on H100 (126k chunks × bge-m3)
+# Estimated cost:    ~$1–2 on Nebius H100 (check current rates)
+
+name: chavruta-ingest-v1
+
+container:
+  image: docker.io/YOUR_DOCKERHUB_USER/chavruta-ingest:latest
+  # To use Nebius Container Registry instead:
+  # image: cr.eu-north1.nebius.cloud/YOUR_REGISTRY_ID/chavruta-ingest:latest
+
+resources:
+  gpu: 1
+  gpu_type: h100-80gb    # or: l4, a100-80gb
+  memory_gb: 32
+  cpu: 8
+
+timeout_seconds: 10800   # 3 hours hard limit
+
+environment:
+  CHAVRUTA_PROFILE: cloud
+  CHAVRUTA_EMBEDDING_DEVICE: cuda
+  INGEST_BATCH: "128"                          # H100 can handle larger batches
+
+  # ── Corpus source (step 1) ──
+  # Pull the prebuilt corpus from a HF dataset (recommended: fast, reproducible, no Sefaria).
+  # Leave both unset to fall back to a live Sefaria fetch (slow; used to rebuild from source).
+  INGEST_CORPUS_HF_REPO: "YOUR_HF_USER/chavruta-corpus"
+  INGEST_CORPUS_HF_FILE: "all_chunks_full.json"
+
+  # ── Publish the prebuilt index (step 3) — the artifact end users download ──
+  INGEST_INDEX_HF_REPO: "YOUR_HF_USER/chavruta-index"
+  HF_TOKEN: "your-hf-write-token"
+
+  # ── Optional: also load Qdrant Cloud so the live Endpoint has data (step 4) ──
+  # Omit these for a publish-only run (HF index without a cloud Endpoint).
+  CHAVRUTA_QDRANT_MODE: server
+  CHAVRUTA_QDRANT_URL: "https://YOUR-CLUSTER.cloud.qdrant.io:6333"
+  CHAVRUTA_QDRANT_API_KEY: "your-qdrant-api-key"
+  CHAVRUTA_COLLECTION: chavruta
+
+  # Optional: test with a single book first (Sefaria fallback only)
+  # INGEST_BOOKS: "Genesis"
+
+  # Optional: skip fetch entirely if chunks JSON is pre-baked at this path in the container
+  # INGEST_CHUNKS_PATH: /data/all_chunks_full.json

@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="660" viewBox="0 0 1040 660" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <marker id="a2" markerWidth="12" markerHeight="12" refX="9" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <style>
+      .card  { fill:#f8fafc; stroke:#cbd5e1; stroke-width:2; rx:12; }
+      .num   { font-size:18px; font-weight:800; fill:#ffffff; }
+      .ncirc { fill:#2563eb; }
+      .ttl   { font-size:15px; font-weight:700; fill:#0f172a; }
+      .cmd   { font-family:Consolas, monospace; font-size:11.5px; fill:#334155; }
+      .note  { font-size:12px; fill:#64748b; }
+      .cam   { fill:#fef2f2; stroke:#ef4444; stroke-width:1.5; rx:8; }
+      .camtx { font-size:11.5px; fill:#b91c1c; font-weight:600; }
+      .edge  { stroke:#475569; stroke-width:2.5; fill:none; }
+      .tag   { fill:#dcfce7; stroke:#16a34a; }
+      .tagtx { font-size:11px; fill:#15803d; font-weight:700; }
+    </style>
+  </defs>
+  <rect x="0" y="0" width="1040" height="660" fill="#ffffff"/>
+  <text x="520" y="32" text-anchor="middle" font-size="20" font-weight="800" fill="#0f172a">No-Docker Nebius Job · steps and 📸 when to screenshot</text>
+  <text x="520" y="53" text-anchor="middle" font-size="12.5" fill="#64748b">Public PyTorch image runs one standalone script pulled from your public repo — no build, no push, no registry</text>
+
+  <!-- step 0 (prereq) -->
+  <rect class="card" x="40" y="76" width="620" height="78" rx="12"/>
+  <circle class="ncirc" cx="72" cy="115" r="18" fill="#7c3aed"/><text class="num" x="72" y="121" text-anchor="middle">0</text>
+  <text class="ttl" x="104" y="104">One-time prerequisites</text>
+  <text class="note" x="104" y="126">• HF write token: huggingface.co/settings/tokens</text>
+  <text class="note" x="104" y="144">• push scripts/nebius_embed_halacha_standalone.py to main (so the job can curl it)</text>
+  <rect class="cam" x="688" y="90" width="312" height="50"/>
+  <text class="camtx" x="704" y="110">📸 #0  the raw GitHub URL opening</text>
+  <text class="camtx" x="704" y="128">     (proves the script is reachable)</text>
+
+  <line class="edge" x1="350" y1="154" x2="350" y2="178" marker-end="url(#a2)"/>
+
+  <!-- step 1 -->
+  <rect class="card" x="40" y="180" width="620" height="116" rx="12"/>
+  <circle class="ncirc" cx="72" cy="226" r="18"/><text class="num" x="72" y="232" text-anchor="middle">1</text>
+  <text class="ttl" x="104" y="206">Nebius console → Jobs → Create job</text>
+  <text class="cmd" x="104" y="228">Image:   pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime</text>
+  <text class="cmd" x="104" y="246">Command: bash      Args: -c  «pip install pinned … &amp;&amp; python embed.py»</text>
+  <text class="cmd" x="104" y="264">Env:     HF_TOKEN = hf_…</text>
+  <text class="note" x="104" y="284">GPU: 1× H100 · Timeout: 3h     (exact command → docs)</text>
+  <rect class="cam" x="688" y="194" width="312" height="50"/>
+  <text class="camtx" x="704" y="214">📸 #1  the filled Create-Job form</text>
+  <text class="camtx" x="704" y="232">     (image + command + HF_TOKEN)</text>
+
+  <line class="edge" x1="350" y1="296" x2="350" y2="320" marker-end="url(#a2)"/>
+
+  <!-- step 2 -->
+  <rect class="card" x="40" y="322" width="620" height="100" rx="12"/>
+  <circle class="ncirc" cx="72" cy="368" r="18"/><text class="num" x="72" y="374" text-anchor="middle">2</text>
+  <text class="ttl" x="104" y="348">Run &amp; watch the logs (~35–65 min)</text>
+  <text class="cmd" x="104" y="370">[merge]  44 shards …   [embed] bge-m3 on CUDA …</text>
+  <text class="cmd" x="104" y="388">[publish] → huggingface.co/datasets/…/chavruta-index-halacha ✅</text>
+  <text class="note" x="104" y="410">GPU utilisation ≈ 100% during embed</text>
+  <rect class="cam" x="688" y="336" width="312" height="72"/>
+  <text class="camtx" x="704" y="356">📸 #2a  logs at [embed]</text>
+  <text class="camtx" x="704" y="374">📸 #2b  GPU/metrics tab (~100%)</text>
+  <text class="camtx" x="704" y="392">📸 #2c  [publish] ✅ line</text>
+
+  <line class="edge" x1="350" y1="422" x2="350" y2="446" marker-end="url(#a2)"/>
+
+  <!-- step 3 -->
+  <rect class="card" x="40" y="448" width="620" height="78" rx="12"/>
+  <circle class="ncirc" cx="72" cy="487" r="18"/><text class="num" x="72" y="493" text-anchor="middle">3</text>
+  <text class="ttl" x="104" y="476">Job SUCCEEDED → verify the warehouse</text>
+  <text class="note" x="104" y="498">open huggingface.co/datasets/&lt;you&gt;/chavruta-index-halacha</text>
+  <text class="note" x="104" y="516">3 files: corpus_vectors.npy · _sparse.jsonl · _meta.jsonl</text>
+  <rect class="cam" x="688" y="462" width="312" height="50"/>
+  <text class="camtx" x="704" y="482">📸 #3  Job status SUCCEEDED +</text>
+  <text class="camtx" x="704" y="500">     HF dataset page with 3 files</text>
+
+  <line class="edge" x1="350" y1="526" x2="350" y2="550" marker-end="url(#a2)"/>
+
+  <!-- step 4 -->
+  <rect class="card" x="40" y="552" width="620" height="86" rx="12"/>
+  <circle class="ncirc" cx="72" cy="598" r="18"/><text class="num" x="72" y="604" text-anchor="middle">4</text>
+  <rect class="tag" x="596" y="566" width="52" height="22" rx="8"/><text class="tagtx" x="622" y="581" text-anchor="middle">local</text>
+  <text class="ttl" x="104" y="578">Download &amp; APPEND into Docker Qdrant (one cmd)</text>
+  <text class="cmd" x="104" y="600">python scripts/bootstrap_rag.py --repo &lt;you&gt;/chavruta-index-halacha \</text>
+  <text class="cmd" x="120" y="618">--out out_halacha --append --profile local   # --append = do NOT drop</text>
+  <rect class="cam" x="688" y="566" width="312" height="50"/>
+  <text class="camtx" x="704" y="586">📸 #4  terminal "✅ ready — N chunks"</text>
+  <text class="camtx" x="704" y="604">     + new Qdrant points_count</text>
+</svg>

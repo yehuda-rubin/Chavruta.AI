@@ -2,7 +2,8 @@
 # Chavruta.AI — Dependencies
 # ===========================
 
-# Embeddings (bge-m3, multilingual HE+EN)
+# Embeddings (bge-m3, multilingual HE+EN — dense + learned sparse for hybrid retrieval)
+FlagEmbedding>=1.2.10
 sentence-transformers>=3.0.0
 numpy>=1.26
 
@@ -14,7 +15,7 @@ requests==2.32.3
 huggingface_hub>=0.23
 tqdm==4.66.4
 
-# Local LLM generation (Ollama: granite4.1:3b)
+# Local LLM generation (Ollama: DictaLM-2.0-Instruct Q4 by default; model id is config-driven)
 ollama>=0.3.0
 
 # Cloud generation (Nebius Token Factory — OpenAI-compatible; used only in the cloud profile)
@@ -26,6 +27,7 @@ streamlit==1.36.0
 # Dev / config
 python-dotenv==1.0.1
 pytest==8.2.2
+ruff>=0.5.0
 
 # ── Legacy (Torah MVP — superseded by Qdrant; kept for scripts/build_vectordb.py) ──
 chromadb==0.5.3

@@ -1,0 +1,28 @@
+.venv
+.git
+.github
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.ruff_cache
+*.egg-info
+
+# node / frontend build artifacts (the web image runs `npm ci` + build itself)
+node_modules/
+**/node_modules/
+app/frontend/dist/
+
+# local data — not baked into the image (mounted at runtime instead)
+data/
+out/
+
+# dev tooling
+.env
+.env.*
+!.env.example
+
+# docs / specs
+specs/
+tests/
+notebooks/

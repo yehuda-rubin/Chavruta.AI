@@ -1,0 +1,67 @@
+# Chavruta.AI — Nebius Serverless Job manifest: embed the FULL Halakhah library
+#
+# MODE: PUBLISH-ONLY (local workflow). The Job embeds on a Nebius GPU and publishes ONE
+# index to a Hugging Face dataset. It does NOT touch any Qdrant — you pull the index to
+# your machine afterwards and APPEND it into your local Docker Qdrant (see docs below).
+# Because the Qdrant block at the bottom stays COMMENTED OUT, step_load auto-skips.
+#
+# One unified Job: pulls all 44 halacha_partNN.jsonl shards from HF, merges them,
+# embeds 594K chunks with bge-m3 on GPU, and publishes ONE index to a dedicated HF repo.
+# (Merge mode = INGEST_CORPUS_HF_PREFIX; see scripts/ingest_job.py step_fetch a2.)
+#
+# Prerequisites (once):
+#   1. docker build -f docker/Dockerfile.job -t chavruta-ingest:latest .   (✅ done locally)
+#   2. docker tag + docker push  <registry>/chavruta-ingest:latest
+#   3. Fill in `image` and `HF_TOKEN` below.
+#
+# Submit:
+#   nebius ai serverless job run --spec nebius/job.halacha.yaml
+#
+# Then LOCALLY (does NOT drop your existing collection):
+#   python scripts/bootstrap_rag.py --repo <you>/chavruta-index-halacha \
+#       --out out_halacha --append --profile local
+#
+# Full walkthrough with diagrams + screenshot points: docs/NEBIUS_HALACHA_JOB.md
+#
+# Estimated runtime: ~35–65 min on H100 (594k chunks × bge-m3 dense+sparse)
+# Estimated cost:    ~$1–3 on Nebius H100 (check current rates)
+
+name: chavruta-ingest-halacha
+
+container:
+  image: docker.io/YOUR_DOCKERHUB_USER/chavruta-ingest:latest
+  # Nebius Container Registry alternative:
+  # image: cr.eu-north1.nebius.cloud/YOUR_REGISTRY_ID/chavruta-ingest:latest
+
+resources:
+  gpu: 1
+  gpu_type: h100-80gb       # or: a100-80gb, l40s
+  memory_gb: 48             # merged 1.5GB jsonl + ~2.4GB dense vectors + sparse in RAM
+  cpu: 8
+
+timeout_seconds: 10800      # 3h hard limit (run needs far less)
+
+environment:
+  CHAVRUTA_PROFILE: cloud
+  CHAVRUTA_EMBEDDING_DEVICE: cuda
+  INGEST_BATCH: "128"
+
+  # ── Corpus source: MERGE all halacha shards from the HF dataset ──
+  INGEST_CORPUS_HF_REPO: "Yehuda-Rubin/chavruta-torah-mixed"
+  INGEST_CORPUS_HF_PREFIX: "halacha_part"          # → halacha_part01.jsonl … part44.jsonl
+  INGEST_CHUNKS_PATH: "/app/halacha_merged.jsonl"  # MUST end in .jsonl (merge writes here)
+
+  # ── Publish the prebuilt index → DEDICATED repo (won't clobber the Tanakh index) ──
+  INGEST_INDEX_HF_REPO: "Yehuda-Rubin/chavruta-index-halacha"
+  HF_TOKEN: "your-hf-write-token"
+
+  # ── Optional: also upsert into Qdrant Cloud for the live Endpoint ──
+  # APPEND to the existing collection (Tanakh+Mishnah+Gemara+שו"ת) — do NOT drop it:
+  # INGEST_RECREATE: "false"
+  # CHAVRUTA_QDRANT_MODE: server
+  # CHAVRUTA_QDRANT_URL: "https://YOUR-CLUSTER.cloud.qdrant.io:6333"
+  # CHAVRUTA_QDRANT_API_KEY: "your-qdrant-api-key"
+  # CHAVRUTA_COLLECTION: chavruta
+  #
+  # Omit the Qdrant block for a publish-only run (index lands on HF; load locally later
+  # with: python scripts/load_to_store.py --in out_halacha --no-recreate --profile local)

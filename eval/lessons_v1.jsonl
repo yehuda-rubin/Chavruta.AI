@@ -1,0 +1,20 @@
+# Chavruta.AI lesson-retrieval eval v1 (Principle V) — extends the Tanakh QA gate to LESSON intent.
+# Format: {"qid","question","lang","expected_refs":[...],"intent","note"}
+# For lessons the "expected ref" is the sugya/parasha PRIMARY SOURCE the opening should rest on;
+# expected_refs == [] ⇒ the topic names an out-of-corpus work and the honest no-source path must hold.
+#
+# BASELINE IS INTENTIONALLY LOW (~40% retrieval@K), and that is the measurement, not a bug to game:
+# lesson retrieval is commentary-heavy — for a generic topic the base pasuk/daf is often out-ranked by
+# meforshim/aggadah, and the harness's segment-prefix match cannot match "X on Y" commentary refs at all.
+# Landmark-anchored topics (עשרת הדיברות→Exodus.20) DO surface their base ref; free-topic ones expose the
+# recall gap. Do NOT "fix" this by loosening refs to whatever surfaced — a rising score here is real signal
+# that primary-source recall for lessons improved.  Run:
+#   python scripts/run_eval.py --retrieval-only --dataset eval/lessons_v1.jsonl
+{"qid": "les-001-he", "question": "הכן שיעור על עשרת הדיברות", "lang": "he", "expected_refs": ["Exodus.20", "Deuteronomy.4"], "intent": "lesson", "note": "landmark anchor → Exodus 20 (Deut 4/5 parallel ok)"}
+{"qid": "les-001-en", "question": "prepare a lesson on the Ten Commandments", "lang": "en", "expected_refs": ["Exodus.20", "Deuteronomy.4"], "intent": "lesson", "note": "HE/EN pair — EN anchors to the Deut Decalogue parallel"}
+{"qid": "les-002-he", "question": "שיעור על הפסוק הראשון בתורה", "lang": "he", "expected_refs": ["Genesis.1.1"], "intent": "lesson", "note": "creation — landmark Genesis 1:1; base pasuk recall gap (commentary-heavy)"}
+{"qid": "les-003-he", "question": "בנה שיעור על קריאת שמע", "lang": "he", "expected_refs": ["Deuteronomy.6.4"], "intent": "lesson", "note": "Shema — landmark Deut 6:4; base pasuk recall gap"}
+{"qid": "les-004-he", "question": "הכן שיעור על שניים אוחזין בטלית", "lang": "he", "expected_refs": ["Bava Metzia", "Tosefta_Bava_Metzia.1.1"], "intent": "lesson", "note": "opening sugya of Bava Metzia (retrieved as commentary-on-daf; base daf recall gap)"}
+{"qid": "les-005-he", "question": "שיעור על סיפור יוסף ואחיו", "lang": "he", "expected_refs": ["Genesis.50", "Genesis.46"], "intent": "lesson", "note": "Yosef narrative — Genesis 46-50 (anchors well)"}
+{"qid": "les-006-he", "question": "תכין שיעור על עשרת המכות", "lang": "he", "expected_refs": ["Exodus.7", "Exodus.8", "Exodus.10"], "intent": "lesson", "note": "Ten Plagues — Exodus 7-12; base pasuk recall gap (surfaces Maharal/aggadah)"}
+{"qid": "les-uns-001-he", "question": "הכן שיעור על תורת הרב סולוביצ'יק באיש ההלכה", "lang": "he", "expected_refs": [], "intent": "lesson", "note": "Soloveitchik — modern work not in corpus; honest no-source"}

@@ -48,11 +48,17 @@ fetch_sefaria.log
 
 # ---- Data & artifacts ----
 data/
+# Keep the template configs (small, essential — they are code, not bulk data)
+!data/lesson_templates.yaml
+!data/shut_templates.yaml
 *.csv
 *.tsv
 *.parquet
 *.feather
 *.jsonl
+# Keep the versioned evaluation datasets (Principle V — trustworthiness is measured)
+!eval/
+!eval/**/*.jsonl
 
 # ---- Vector DB / embeddings / indexes ----
 *.faiss
@@ -108,3 +114,25 @@ coverage.xml
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# ---- Private notes (not for GitHub) ----
+.private/
+
+# ---- Frontend (Node) ----
+app/frontend/node_modules/
+app/frontend/dist/
+
+# ---- SQLite side files (WAL/SHM) ----
+*.db-shm
+*.db-wal
+
+# ---- Scratch / diagnostics output ----
+diag_*.txt
+/null
+
+# ---- Generated sample lessons (local artifacts, not for the repo) ----
+sample_lessons/
+
+# ---- Claude Code local settings (permission allowlist may capture secrets) ----
+.claude/settings.json
+.claude/settings.local.json

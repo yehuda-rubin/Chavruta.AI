@@ -1,0 +1,43 @@
+# Chavruta.AI — Nebius Serverless Endpoint (FastAPI RAG query service)
+#
+# Serves grounded Q&A over the pre-indexed Jewish bookshelf via:
+#   - bge-m3 for query embedding (CPU)
+#   - Qdrant Cloud for hybrid retrieval
+#   - Nebius Token Factory (Qwen-72B) for generation
+#
+# Build:
+#   docker build -f docker/Dockerfile.endpoint -t chavruta-endpoint:latest .
+#
+# Run locally:
+#   docker run -p 8080:8080 --env-file .env.cloud chavruta-endpoint:latest
+#
+# Deploy to Nebius:
+#   See nebius/endpoint.yaml
+
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    CHAVRUTA_PROFILE=cloud
+
+WORKDIR /app
+
+COPY docker/requirements.endpoint.txt ./requirements.endpoint.txt
+RUN pip install --upgrade pip && pip install -r requirements.endpoint.txt
+
+COPY src/ ./src/
+COPY app/ ./app/
+COPY pyproject.toml ./
+
+RUN pip install -e . --no-deps
+
+# Pre-download bge-m3 weights so the first request isn't slow
+RUN python3 -c "from FlagEmbedding import BGEM3FlagModel; BGEM3FlagModel('BAAI/bge-m3', use_fp16=False)"
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+CMD ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]

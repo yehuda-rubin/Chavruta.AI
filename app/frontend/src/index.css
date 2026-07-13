@@ -1,0 +1,183 @@
+@import "tailwindcss";
+
+@theme {
+  /* Fonts — matches the mockup: Heebo (UI/sans) + Frank Ruhl Libre (content/serif) */
+  --font-sans: "Heebo", system-ui, -apple-system, sans-serif;
+  --font-serif: "Frank Ruhl Libre", Georgia, serif;
+
+  /* Layout widths (mockup: w-72 sidebar, w-80 sources) */
+  --spacing-sidebar: 288px;
+  --spacing-sources: 320px;
+
+  /* Color mapping to dynamic CSS variables based on DESIGN.md */
+  --color-background: var(--bg-app);
+  --color-primary: var(--color-primary-brand);
+  --color-accent: var(--color-accent-brand);
+  --color-accent-hover: var(--color-accent-brand-hover);
+  
+  --color-panel: var(--bg-panel);
+  --color-card: var(--bg-card);
+  --color-border-subtle: var(--color-border);
+  
+  --color-text-main: var(--color-text-primary);
+  --color-text-muted: var(--color-text-secondary);
+}
+
+:root {
+  /* Light Mode (Sacred Scholarly · "Modern Glass") */
+  --bg-app: #fdfbf6; /* Cream/Light Paper background to reduce eye strain */
+  --color-primary-brand: #002045; /* Tallit Deep Blue */
+  --color-accent-brand: #8a6510; /* Gold/Copper Accent */
+  --color-accent-brand-hover: #5d4200;
+  --bg-panel: #f5f3ef; /* surface-container-low for sidebars */
+  --bg-card: #ffffff; /* surface-container-lowest for cards */
+  --color-border: #ece2cf; /* 1px panel lines */
+  --color-text-primary: #1b1c1a; /* on-surface */
+  --color-text-secondary: #43474e; /* on-surface-variant */
+
+  /* Brand gradient (tekhelet → indigo) — used on logo, primary buttons, user bubble */
+  --grad-from: #002045;
+  --grad-to: #3a5ba0;
+  /* Tinted app background (radial washes) */
+  --app-tint-1: rgba(58, 91, 160, 0.10);  /* blue wash, top */
+  --app-tint-2: rgba(184, 143, 46, 0.10); /* gold wash, bottom */
+  /* Translucent "glass" surfaces */
+  --glass-bg: rgba(255, 255, 255, 0.55);
+  --glass-border: rgba(255, 255, 255, 0.70);
+  --glass-shadow: 0 1px 2px rgba(28,26,23,.04), 0 16px 40px -24px rgba(26,54,93,.35);
+}
+
+.dark {
+  /* Dark Mode (Midnight Yeshiva - Slate Contrast) */
+  --bg-app: #0F172A;
+  --color-primary-brand: #adc7f7; /* Light blue contrast */
+  --color-accent-brand: #fdc34d; /* Golden accent */
+  --color-accent-brand-hover: #f7bd48;
+  --bg-panel: #1E293B;
+  --bg-card: #1F2937;
+  --color-border: #334155;
+  --color-text-primary: #f2f0ed;
+  --color-text-secondary: #94A3B8;
+
+  /* Keep the gradient deep enough for white text in dark mode */
+  --grad-from: #16335f;
+  --grad-to: #3a5ba0;
+  --app-tint-1: rgba(58, 91, 160, 0.18);
+  --app-tint-2: rgba(253, 195, 77, 0.06);
+  --glass-bg: rgba(30, 41, 59, 0.55);
+  --glass-border: rgba(148, 163, 184, 0.18);
+  --glass-shadow: 0 1px 2px rgba(0,0,0,.2), 0 16px 40px -24px rgba(0,0,0,.6);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.15s ease;
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-background);
+  background-image:
+    radial-gradient(120% 80% at 85% -10%, var(--app-tint-1) 0%, transparent 45%),
+    radial-gradient(100% 70% at 0% 110%, var(--app-tint-2) 0%, transparent 50%);
+  background-attachment: fixed;
+  color: var(--color-text-main);
+  height: 100dvh;
+  overflow: hidden;
+}
+
+/* ── "Modern Glass" surface + brand-gradient utilities ──────────────────── */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+}
+.grad {
+  background-image: linear-gradient(135deg, var(--grad-from), var(--grad-to));
+}
+.grad-text {
+  background-image: linear-gradient(135deg, var(--grad-from), var(--grad-to));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.shadow-glass { box-shadow: var(--glass-shadow); }
+
+#root {
+  height: 100dvh;
+}
+
+/* Direction-aware helper classes */
+.he {
+  font-family: var(--font-serif);
+  direction: rtl;
+  unicode-bidi: isolate;
+}
+.en {
+  font-family: var(--font-sans);
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+/* Scrollbar styles */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-subtle);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-accent);
+}
+
+/* Animations */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out forwards;
+}
+
+@keyframes slide-in-left {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
+}
+@keyframes slide-in-right {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+.animate-slide-in-left {
+  animation: slide-in-left 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.animate-slide-in-right {
+  animation: slide-in-right 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Material Symbols icon styling */
+.material-symbols-outlined {
+  font-family: "Material Symbols Outlined";
+  font-weight: normal;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+}
