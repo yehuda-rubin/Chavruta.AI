@@ -3,9 +3,11 @@
 היקף הטקסטים שהמערכת מאחזרת מהם. מקור: **Sefaria** (API + bulk export). כל טקסט נשמר
 **בעברית ובאנגלית** (דרישה #5).
 
-> **מצב נוכחי (עודכן 2026-06-29):** הקורפוס גדל מבסיס התנ"ך המאומת אל **כל ספריית Sefaria
-> (14 קטגוריות)**. השליפה בצד שרת מתבצעת מ-**אינדקס Qdrant היברידי חי בן ~449k נקודות**
-> (תנ"ך + משנה + תלמוד + שו"ת), וההלכה נטענת בהדרגה. ראה §0 ו-§6.
+> **מצב נוכחי (עודכן 2026-07-13):** הקורפוס גדל מבסיס התנ"ך המאומת אל **כל ספריית Sefaria**.
+> השליפה בצד שרת מתבצעת מ-**אינדקס Qdrant היברידי חי בן ~2.93M נקודות ב-15 שכבות (work_id)** —
+> talmud_bavli · halacha · tanakh · mishnah · midrash · **talmud_yerushalmi (התלמוד הירושלמי + כל
+> מפרשיו, נוסף 2026-07-13)** · chasidut · jewish_thought · responsa · liturgy · kabbalah · tosefta ·
+> reference · musar · second_temple. שכבות חדשות נטענות בהדרגה (`bootstrap_rag.py --append`). ראה §0 ו-§6.
 
 ---
 
@@ -125,8 +127,10 @@
 | tosefta | [chavruta-index-tosefta](https://huggingface.co/datasets/Yehuda-Rubin/chavruta-index-tosefta) |
 | reference | [chavruta-index-reference](https://huggingface.co/datasets/Yehuda-Rubin/chavruta-index-reference) |
 | second_temple | [chavruta-index-second_temple](https://huggingface.co/datasets/Yehuda-Rubin/chavruta-index-second_temple) |
+| **talmud_yerushalmi** | [**chavruta-index-yerushalmi**](https://huggingface.co/datasets/Yehuda-Rubin/chavruta-index-yerushalmi) (התלמוד הירושלמי + מפרשיו, 2026-07-13) |
 
-**דאטה לאימון LoRA:** [chavruta-torah-mixed](https://huggingface.co/datasets/Yehuda-Rubin/chavruta-torah-mixed).
+**מאגר המקור (chunks גולמיים — `gemara_chunks.jsonl`, `yerushalmi_chunks.jsonl`, … + דאטה לאימון LoRA):**
+[🤗 chavruta-torah-mixed](https://huggingface.co/datasets/Yehuda-Rubin/chavruta-torah-mixed).
 
 ## 7. Serving prerequisites — payload indexes & ref format
 
