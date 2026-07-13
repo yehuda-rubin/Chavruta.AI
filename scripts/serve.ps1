@@ -23,7 +23,9 @@ $env:CHAVRUTA_HYBRID               = "true"
 $env:CHAVRUTA_RERANK               = "false"  # cross-encoder is GPU-only in practice (too slow on CPU)
 $env:CHAVRUTA_RELEVANCE_THRESHOLD  = "0.0"
 $env:CHAVRUTA_TOP_K                = "16"
-$env:CHAVRUTA_QUERY_PLANNER        = "llm"    # LLM fallback for indirect questions the heuristics miss
+$env:CHAVRUTA_QUERY_PLANNER        = "heuristic"  # LLM planner hallucinated wrong named_refs (e.g. Bava
+                                                  # Metzia for a Sanhedrin topic) which scoped retrieval to
+                                                  # the wrong tractate → 0 sources. Heuristic is reliable.
 $env:CHAVRUTA_LLM_BACKEND          = "nebius"
 $env:CHAVRUTA_LLM_BASE_URL         = "https://api.studio.nebius.ai/v1"
 $env:CHAVRUTA_LLM_MODEL            = "meta-llama/Llama-3.3-70B-Instruct"
