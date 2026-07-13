@@ -4,20 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Chavruta.AI · בית מדרש — זכוכית חמה</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;700;900&family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" rel="stylesheet">
-<script>
-tailwind.config = { theme: { extend: {
-  colors: {
-    ink:'#1c1a17', tekhelet:'#002045', 'tekhelet-2':'#1a365d', indigo:'#3a5ba0',
-    gold:'#8a6510', 'gold-soft':'#b88f2e', cream:'#fdfbf6', 'cream-2':'#f6f1e7', line:'#ece2cf',
-  },
-  fontFamily: { serif:['"Frank Ruhl Libre"','serif'], sans:['Heebo','sans-serif'] },
-}}}
-</script>
+<!-- Local, OFFLINE assets — no CDN (identical look). Fonts self-hosted; Tailwind pre-built from the
+     same config. To rebuild after adding classes:  cd app/frontend/public/ui &&
+     npx tailwindcss@3 -c tailwind.config.cjs -i tw-input.css -o assets/chavruta.tw.css --minify -->
+<link rel="stylesheet" href="assets/fonts.local.css">
+<link rel="stylesheet" href="assets/chavruta.tw.css">
 <style>
   body{ background:
     radial-gradient(120% 80% at 85% -10%, #e7eefc 0%, transparent 45%),
