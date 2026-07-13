@@ -415,6 +415,40 @@ def test_per_hit_dense_floor_prunes_noise_keeps_lexical():
     assert not res.is_empty                                   # top dense cosine 0.70 ≥ threshold
 
 
+# ── Fix (2026-07-13): a WRONG work/commentator scope (e.g. a hallucinated/mis-resolved named_ref
+# pinning the query to the wrong tractate) must NOT collapse retrieval to zero — retrieve falls back
+# to an UNSCOPED semantic search so the topically-relevant sources still surface.
+def test_wrong_scope_falls_back_to_unscoped_semantic():
+    from chavruta.retrieval.hybrid import HybridRetriever
+
+    class _Emb:
+        def embed_query(self, text):
+            return SimpleNamespace(dense=[0.1, 0.2], sparse={1: 0.5})
+
+    class _Store:
+        def search(self, name, q, top_k, filters=None):
+            if filters and "work_id" in filters:            # ANY scoped search (wrong work / floors) → empty
+                return []
+            return [Hit(chunk_id="s1", score=0.05,          # unscoped fallback finds the real source
+                        payload={"chunk_id": "s1", "ref": "Sanhedrin 3.1", "text": "t", "work_id": "talmud_bavli"})]
+
+        def dense_scores(self, name, dense, filters=None, top_k=30):
+            return {"s1": 0.72}
+
+        def fetch_by_refs(self, name, refs, filters=None):
+            return []
+
+        def top_dense_score(self, name, dense, filters=None):
+            return 0.72
+
+    prof = SimpleNamespace(hybrid=True, collection="c", relevance_threshold=0.55, rerank=False)
+    q = Query(text="דיני ממונות בשלושה")
+    q.work_ids = ["bava_metzia"]                             # WRONG scope (hallucinated named_ref)
+    res = HybridRetriever(_Emb(), _Store(), prof).retrieve(q, top_k=8)
+    assert not res.is_empty
+    assert any(h.ref == "Sanhedrin 3.1" for h in res.hits)   # unscoped fallback surfaced the real source
+
+
 # ── Tier0 (2026-07 audit): the agentic ===NEED_SOURCES=== loop is now backend-agnostic ───────────
 # It was a private method on BridgeLLM only; hoisted to chavruta.llm.agentic so cloud/local get it too.
 

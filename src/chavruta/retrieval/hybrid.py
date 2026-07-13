@@ -9,6 +9,7 @@ no-source signal that protects Principle I).
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 
 from chavruta.corpus.refs import with_ref_variants
 from chavruta.corpus.schema import Query, UnitType
@@ -64,10 +65,20 @@ class HybridRetriever:
         use_sparse = self.profile.hybrid and bool(emb.sparse)
         hquery = HybridQuery(dense=emb.dense, sparse=emb.sparse if use_sparse else None)
 
+        filters = self._filters(query)
         try:
             raw = self.store.search(
-                self.profile.collection, hquery, top_k=top_k * 3, filters=self._filters(query)
+                self.profile.collection, hquery, top_k=top_k * 3, filters=filters
             )
+            if not raw and filters is not None:
+                # A SCOPED search (work_ids / commentator_ids) came back empty. That scope can be wrong
+                # — e.g. a hallucinated or mis-resolved named_ref pinned the query to the wrong tractate
+                # (Bava Metzia for a Sanhedrin topic). A wrong scope must never collapse retrieval to
+                # zero: fall back to an UNSCOPED semantic search so the topically-relevant sources still
+                # surface. (The floors below also key off query.work_ids, so clear the scope for them.)
+                logger.info("scoped retrieval empty; falling back to unscoped semantic search")
+                raw = self.store.search(self.profile.collection, hquery, top_k=top_k * 3, filters=None)
+                query = replace(query, work_ids=None, commentator_ids=None)
         except Exception as exc:
             # A backend failure (e.g. a Qdrant search timeout under load) must degrade to an honest
             # "no grounded source" rather than 500 the whole request.
