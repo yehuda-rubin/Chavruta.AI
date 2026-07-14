@@ -7,8 +7,9 @@ language and explains it **in the language you asked in** (Hebrew or English). N
 Torah": every claim is anchored in a retrieved source, the way a *chavruta* (study partner) learns
 straight from the text.
 
-> Built for the **Nebius Serverless AI Builders Challenge**. Runs both **fully offline** on a
-> laptop and **serverless on Nebius** — the same code, one config switch.
+> Built for the **Nebius Serverless AI Builders Challenge**. Retrieval + embedding run **locally**;
+> generation is served by the **Nebius API** (`Qwen3-235B`) — or fully self-contained via the
+> **bridge** backend (no external LLM API). One config switch.
 
 ---
 
@@ -41,7 +42,7 @@ question (he / en)
    │                 • base-source floor — reserve slots for base texts (commentary can't crowd out)
    │                 • link expansion: anchor chains → commentaries → supercommentaries
    ▼  ③ Rank         anchored (explicit anchor set), dedup, optional rerank; honest is_empty gate
-   ▼  ④ Generate     grounded prompt = ONLY retrieved sources → DictaLM / Nebius / **bridge** (Claude
+   ▼  ④ Generate     grounded prompt = ONLY retrieved sources → Nebius API / **bridge** (Claude
    │                 in-session, no external API). Agentic: the model may reply ===NEED_SOURCES===
    │                 to pull more sources mid-answer when retrieval was thin.
    ▼  ⑤ Enforce      citation gate: every claim maps to a real chunk; fabricated markers stripped;
@@ -50,20 +51,21 @@ question (he / en)
 
 **Two deployment profiles — same code, chosen by `CHAVRUTA_PROFILE`:**
 
-| component  | 💻 `local` (offline)              | ☁️ `cloud` (product / scale)            |
+| component  | 💻 `local` (personal machine)     | ☁️ `cloud` (product / scale)            |
 |------------|-----------------------------------|-----------------------------------------|
 | embedding  | `bge-m3` on CPU (query only)      | `bge-m3` GPU (bulk index)               |
 | vector DB  | Qdrant **embedded** (small sets)  | Qdrant **server** (hybrid, full index)  |
-| LLM        | **DictaLM** via Ollama (small, offline) | stronger model via Nebius (OpenAI-compatible) |
+| LLM        | Nebius API (`Qwen3-235B`) — or `bridge` (Claude in-session, no API) | Nebius API (`Qwen3-235B`) |
 | reranker   | off (RAM budget)                  | `bge-reranker-v2-m3`                    |
 
-The serving setup ([scripts/serve.ps1](scripts/serve.ps1)) runs **hybrid** retrieval against a
-Qdrant **server** (embedded mode cannot do hybrid at this scale) with generation on Nebius
-(`Qwen/Qwen3-235B-A22B-Instruct-2507`). This is the **default runtime even locally** — local CPU
-embedding + local Qdrant + the Nebius API for generation (`CHAVRUTA_LLM_BACKEND=nebius`, key from
-`.env`); `CHAVRUTA_QUERY_PLANNER=heuristic` (the LLM planner hallucinated wrong refs). The **bridge**
-backend (Claude in-session, no external API — [scripts/serve_bridge.ps1](scripts/serve_bridge.ps1)) and
-local DictaLM remain available. Every knob is a `CHAVRUTA_*` env var (see `src/chavruta/config/profile.py`).
+Retrieval and embedding run **locally**; generation goes to the **Nebius API** (default) or the
+**bridge** backend (Claude answering in-session, no external LLM API). The serving setup
+([scripts/serve.ps1](scripts/serve.ps1)) runs **hybrid** retrieval against a Qdrant **server**
+(embedded mode cannot do hybrid at this scale) with generation on Nebius
+(`Qwen/Qwen3-235B-A22B-Instruct-2507`) — the **default even locally** (`CHAVRUTA_LLM_BACKEND=nebius`,
+key from `.env`; `CHAVRUTA_QUERY_PLANNER=heuristic`). The no-API path is
+[scripts/serve_bridge.ps1](scripts/serve_bridge.ps1). The local DictaLM/Ollama backend was **removed**.
+Every knob is a `CHAVRUTA_*` env var (see `src/chavruta/config/profile.py`).
 
 ---
 
@@ -155,20 +157,20 @@ python -m venv .venv ; .\.venv\Scripts\Activate.ps1     # Windows PowerShell
 pip install -r requirements.txt
 ```
 
-### Ask from the CLI (offline, embedded store)
+### Ask from the CLI (local retrieval + the API)
 
 ```powershell
 # 1. Fetch a corpus from Sefaria (CPU/network) — e.g. Tanakh
 python scripts/fetch_corpus.py
 
-# 2. Embed on a GPU (Colab/Kaggle/Nebius — see notebooks/). bge-m3 over 100k+ chunks
+# 2. Embed on a GPU (Colab/Kaggle/Nebius/Lightning — see notebooks/). bge-m3 over 100k+ chunks
 #    is impractical on CPU; the GPU notebook produces the vectors.
 
 # 3. Load vectors into the configured store (CPU, no re-embedding)
 python scripts/load_to_store.py --profile local
 
-# 4. Pull a local model (one-time) and ask
-ollama pull hf.co/dicta-il/DictaLM-3.0-1.7B-Thinking-GGUF:Q8_0
+# 4. Ask — retrieval is local; generation goes to the Nebius API (put NEBIUS_API_KEY in .env).
+#    For the no-API path set CHAVRUTA_LLM_BACKEND=bridge (Claude answers in-session).
 python scripts/ask.py "What does Rashi say about the creation of light?"
 python scripts/ask.py "מה אומר רד\"ק על ספר יונה?"
 ```
@@ -232,8 +234,7 @@ python scripts\bootstrap_rag.py --repo Yehuda-Rubin/chavruta-index-yerushalmi --
 | backend | how | notes |
 |---------|-----|-------|
 | Nebius API (default) | `scripts\serve.ps1` | Qwen3-235B; needs `NEBIUS_API_KEY` in `.env` |
-| Bridge (no API) | `scripts\serve_bridge.ps1` | Claude answers `data/llm_bridge/pending/` in-session |
-| Local DictaLM | `CHAVRUTA_LLM_BACKEND=ollama` + `ollama pull …DictaLM…` | fully offline |
+| Bridge (no external API) | `scripts\serve_bridge.ps1` | Claude answers `data/llm_bridge/pending/` in-session |
 
 **Stop everything:** Ctrl-C (or kill) the backend + frontend, then `docker compose stop qdrant`.
 
@@ -258,7 +259,8 @@ The full lifecycle maps onto **"run a job, serve a model, pay only for what you 
 3. *(optional)* **Fine-tuning job** — a LoRA "chavruta style" adapter (see `scripts/train_lora.py`
    and [scripts/TRAIN_README.md](scripts/TRAIN_README.md)).
 
-Everything that isn't a one-off GPU embed runs locally — including fully offline.
+Everything except the one-off GPU embed and the generation call runs locally; generation is the
+Nebius API (default) or the in-session bridge (no external LLM API).
 
 ---
 
@@ -271,7 +273,7 @@ src/chavruta/            the deployment-agnostic core (one package, config-drive
   embedding/             EmbeddingBackend → bge-m3 (dense + sparse)
   store/                 VectorStore → Qdrant (embedded / server)
   retrieval/             HybridRetriever (RRF) · LinkExpander · optional Reranker
-  llm/                   LLMBackend → LocalLLM (Ollama/DictaLM) · CloudLLM (Nebius)
+  llm/                   LLMBackend → CloudLLM (Nebius API) · BridgeLLM (Claude in-session)
   generation/            grounded prompts + the citation-enforcement gate
   pipeline/              ChavrutaPipeline — route → retrieve → generate → cite
   intents/               Router — language, intent, commentators, refs

@@ -7,12 +7,12 @@ contracts/, quickstart.md).
 Active feature: **001-chavruta-redesign** — full redesign of Chavruta.AI as a
 deployment-agnostic, dynamically-extensible RAG over the Jewish bookshelf.
 Stack: Python 3.13 · bge-m3 embeddings · Qdrant (embedded local / server cloud) ·
-hybrid retrieval (+optional rerank) · triple LLM backend selected by `CHAVRUTA_LLM_BACKEND`:
-local DictaLM via Ollama · **Nebius `Qwen/Qwen3-235B-A22B-Instruct-2507`** · **bridge** (Claude answers
-grounded jobs in-session, no external API — `src/chavruta/llm/bridge.py`). **Default runtime (incl.
-locally) uses the Nebius API for generation** — `scripts/serve.ps1`: local CPU embedding + local Qdrant
-server + `CHAVRUTA_LLM_BACKEND=nebius` (key read from `.env`). Bridge (`scripts/serve_bridge.ps1`) and
-local DictaLM remain available but are no longer the default (the earlier no-API rule was lifted).
+hybrid retrieval (+optional rerank) · **two** LLM backends selected by `CHAVRUTA_LLM_BACKEND`:
+**`nebius` — the API (`Qwen/Qwen3-235B-A22B-Instruct-2507`), DEFAULT** · **`bridge`** (Claude answers
+grounded jobs in-session, no external API — `src/chavruta/llm/bridge.py`). The local DictaLM/Ollama
+backend was **removed** (product decision 2026-07-13). **Default runtime (incl. locally) uses the
+Nebius API for generation** — `scripts/serve.ps1`: local CPU embedding + local Qdrant server +
+`CHAVRUTA_LLM_BACKEND=nebius` (key from `.env`); bridge (`scripts/serve_bridge.ps1`) for the no-API path.
 FastAPI backend (`app/api.py`) + SQLite chat history (`app/db.py`) + a **static offline UI**
 (`app/frontend/public/ui/chavruta.html`; local Tailwind + self-hosted fonts; the React SPA in
 `app/frontend/src/` is deprecated). Hebrew RTL + English LTR i18n. Governed by

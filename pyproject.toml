@@ -24,5 +24,5 @@ markers = [
     "contract: backend interface conformance tests",
     "integration: end-to-end pipeline tests",
     "requires_corpus: needs the indexed corpus to be loaded",
-    "requires_llm: needs a running LLM backend (Ollama/Nebius)",
+    "requires_llm: needs a running LLM backend (Nebius API / bridge)",
 ]

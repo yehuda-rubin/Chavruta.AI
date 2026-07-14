@@ -52,14 +52,12 @@ class Profile:
     relevance_threshold: float = 0.5          # min DENSE cosine to be "relevant" (bge-m3 in-corpus ≈0.60–0.70,
     #                                           off-corpus ≈0.47–0.58); server may tighten via env (we use 0.55)
 
-    # ── Generation (LLM) — the dual-model strategy lives here ──
-    llm_backend: str = "ollama"               # "ollama" (local) | "nebius" (cloud)
-    # DictaLM-3.0 1.7B (official Dicta GGUF, Q8_0 ≈ 1.83GB) — fits a realistically-loaded
-    # 16GB machine (~4.2GB total with bge-m3). User decision 2026-06-10: the 7B is too
-    # heavy for daily use; thinking traces are stripped by the generation layer.
-    llm_model: str = "hf.co/dicta-il/DictaLM-3.0-1.7B-Thinking-GGUF:Q8_0"
-    llm_base_url: str = "http://localhost:11434"
-    llm_api_key: str = ""                     # for the cloud backend
+    # ── Generation (LLM) — two backends: "nebius" (the API, DEFAULT) | "bridge" (Claude in-session).
+    # The local DictaLM/Ollama backend was removed (product decision 2026-07-13). ──
+    llm_backend: str = "nebius"
+    llm_model: str = "Qwen/Qwen3-235B-A22B-Instruct-2507"
+    llm_base_url: str = "https://api.studio.nebius.ai/v1"
+    llm_api_key: str = ""                     # the API key (CHAVRUTA_LLM_API_KEY or NEBIUS_API_KEY)
     llm_temperature: float = 0.2
     llm_max_tokens: int = 512                 # bounds CPU generation latency; config-tunable
 
@@ -103,13 +101,14 @@ class Profile:
 
 
 def _local_preset() -> Profile:
-    """Offline personal machine: CPU, small Hebrew model via Ollama, embedded Qdrant."""
+    """Personal machine: local CPU embedding + local Qdrant, generation via the Nebius API (default).
+    The local DictaLM/Ollama backend was removed — set CHAVRUTA_LLM_BACKEND=bridge for the no-API
+    (Claude in-session) path instead."""
     return Profile(
         name="local",
         embedding_device="cpu",
-        # Local Qdrant SERVER in Docker (docker compose up -d) — still fully offline,
-        # real HNSW indexes → ms queries. No Docker? CHAVRUTA_QDRANT_MODE=embedded
-        # falls back to the in-process store.
+        # Local Qdrant SERVER in Docker (docker compose up -d) — real HNSW indexes → ms queries.
+        # No Docker? CHAVRUTA_QDRANT_MODE=embedded falls back to the in-process store.
         qdrant_mode="server",
         qdrant_url="http://localhost:6333",
         # Dense-only queries locally (measured trade-off): hybrid adds +0.9pp retrieval
@@ -117,9 +116,10 @@ def _local_preset() -> Profile:
         # collection serves both; CHAVRUTA_HYBRID=true flips it on (eval gate / cloud).
         hybrid=False,
         rerank=False,                         # keep RAM budget on the laptop
-        llm_backend="ollama",
-        llm_model="hf.co/dicta-il/DictaLM-3.0-1.7B-Thinking-GGUF:Q8_0",
-        llm_base_url="http://localhost:11434",
+        llm_backend="nebius",                 # the API is the default, even locally
+        llm_model=_env("CHAVRUTA_LLM_MODEL", "Qwen/Qwen3-235B-A22B-Instruct-2507"),
+        llm_base_url=_env("CHAVRUTA_LLM_BASE_URL", "https://api.studio.nebius.ai/v1"),
+        llm_api_key=_env("CHAVRUTA_LLM_API_KEY", _env("NEBIUS_API_KEY", "")),
     )
 
 

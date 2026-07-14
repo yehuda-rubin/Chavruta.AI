@@ -1,8 +1,8 @@
 """LLMBackend interface (contracts/llm-backend.md).
 
-Generates the answer from an already-built, source-grounded prompt. The dual-model strategy
-lives here: LocalLLM (DictaLM via Ollama) and CloudLLM (Nebius) implement the same interface,
-chosen by config. Grounding is enforced by the pipeline, not trusted to the model alone.
+Generates the answer from an already-built, source-grounded prompt. Two backends implement this
+interface, chosen by config: CloudLLM (the Nebius API — default) and BridgeLLM (Claude answering
+in-session, no external API). Grounding is enforced by the pipeline, not trusted to the model alone.
 """
 
 from __future__ import annotations

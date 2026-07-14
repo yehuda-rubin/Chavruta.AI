@@ -15,10 +15,8 @@ requests==2.32.3
 huggingface_hub>=0.23
 tqdm==4.66.4
 
-# Local LLM generation (Ollama: DictaLM-2.0-Instruct Q4 by default; model id is config-driven)
-ollama>=0.3.0
-
-# Cloud generation (Nebius Token Factory — OpenAI-compatible; used only in the cloud profile)
+# Generation via the Nebius API (OpenAI-compatible Token Factory). The local Ollama/DictaLM backend
+# was removed; the only other backend (bridge) needs no extra dependency.
 openai>=1.30
 
 # UI
