@@ -82,6 +82,17 @@ class InMemoryStore:
         scored.sort(key=lambda h: h.score, reverse=True)
         return scored[:top_k]
 
+    def dense_scores(self, name: str, dense, filters: Filter | None = None, top_k: int = 30) -> dict:
+        coll = self._data.get(name, {})
+        scored = {c.chunk_id: self._cos(dense, c.dense) for c in coll.values()
+                  if self._matches(c.payload, filters)}
+        return dict(sorted(scored.items(), key=lambda kv: kv[1], reverse=True)[:top_k])
+
+    def top_dense_score(self, name: str, dense, filters: Filter | None = None) -> float:
+        vals = [self._cos(dense, c.dense) for c in self._data.get(name, {}).values()
+                if self._matches(c.payload, filters)]
+        return max(vals) if vals else 0.0
+
     def count(self, name: str, filters: Filter | None = None) -> int:
         return sum(1 for c in self._data.get(name, {}).values() if self._matches(c.payload, filters))
 
@@ -118,6 +129,16 @@ class FakeLLM:
     def stream(self, prompt: GroundedPrompt, *, lang: str, max_tokens: int,
                temperature: float) -> Iterator[str]:
         yield self.generate(prompt, lang=lang, max_tokens=max_tokens, temperature=temperature).text
+
+    def request(self, body_md: str, *, lang: str = "he"):
+        """Agentic-path (job markdown) answer — mirrors generate(): cite the first ### [S#] source. No
+        self-fetch. Returns (text, fetched)."""
+        import re
+        m = re.search(r"###\s*\[\s*(S\d+)\s*\]", body_md or "")
+        if not m:
+            return ("No sources." if lang == "en" else "אין מקורות.", [])
+        marker = m.group(1)
+        return ((f"According to [{marker}]." if lang == "en" else f"לפי המקור [{marker}]."), [])
 
 
 @pytest.fixture
