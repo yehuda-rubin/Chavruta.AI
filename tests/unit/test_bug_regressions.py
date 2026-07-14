@@ -390,6 +390,58 @@ def test_base_sources_for_refs_canonicalises_dedups_and_scores(monkeypatch):
     assert (["Genesis 1.1"], {"unit_type": "source"}) in calls  # queried the corpus form + source filter
 
 
+# ── Feature (2026-07-13): on EMPTY retrieval, QA gives the model a chance to pull its own sources via
+# the agentic ===NEED_SOURCES=== loop before honestly giving up (Principle I is preserved — a self-fetch
+# that still yields nothing falls back to the no-source answer).
+def _selffetch_pipeline(llm):
+    from chavruta.config.profile import Profile
+    from chavruta.retrieval.base import RetrievalResult
+
+    class _Empty:
+        def retrieve(self, q, top_k):
+            return RetrievalResult(hits=[], anchor_refs=[], is_empty=True)
+
+    prof = Profile(name="cloud", collection="c", top_k=5, relevance_threshold=0.0)
+    return ChavrutaPipeline.from_backends(prof, embedding=None, store=None, llm=llm,
+                                          retriever=_Empty(), router=SimpleNamespace(route=lambda q: q))
+
+
+def test_qa_empty_retrieval_selffetches_grounded():
+    from chavruta.corpus.schema import Query, Intent
+    from chavruta.llm.base import SourceBlock
+    src = SourceBlock(marker="", ref="Yoma 8.1", commentator_id=None, text="יום הכיפורים אסור באכילה")
+
+    class _LLM:
+        profile = "cloud"; model_id = "fake"
+        source_fetcher = staticmethod(lambda qs: [src])
+
+        def request(self, body_md, *, lang="he"):
+            assert "===NEED_SOURCES===" in body_md            # the job invited a self-fetch
+            return ("איסור אכילה ביום כיפור נלמד מעינוי [S1]", [src])
+
+        def generate(self, *a, **k):
+            raise AssertionError("generate must NOT be called when retrieval is empty — self-fetch first")
+
+    ans = _selffetch_pipeline(_LLM()).ask(Query(text="מקור לאיסור אכילה ביום כיפור", lang="he", intent=Intent.QA))
+    assert ans.grounded is True and ans.no_source is False
+    assert any(c.ref == "Yoma 8.1" for c in ans.citations)    # cited the source it fetched itself
+
+
+def test_qa_empty_retrieval_selffetch_fails_is_honest():
+    from chavruta.corpus.schema import Query, Intent
+
+    class _LLM:
+        profile = "cloud"; model_id = "fake"
+        source_fetcher = staticmethod(lambda qs: [])
+
+        def request(self, body_md, *, lang="he"):
+            # the loop's no-fetch degrade sentinel — nothing relevant could be pulled
+            return ("לא הצלחתי להשיג מקורות מתאימים דרך הראג. נסה לנסח מחדש או לציין מקור מדויק.", [])
+
+    ans = _selffetch_pipeline(_LLM()).ask(Query(text="שאלה על משהו שאינו בקורפוס", lang="he", intent=Intent.QA))
+    assert ans.grounded is False and ans.citations == []      # honest no-source, never invented
+
+
 # ── Tier0 (2026-07 audit): per-hit relevance floor prunes dense semantic noise, keeps lexical hits ──
 # Bug: the honesty gate was all-or-nothing (top hit only), so off-topic-but-similar sources (Kilayim
 # for a Shabbat question) shipped to the model. The floor drops a hit ONLY if dense retrieval itself
