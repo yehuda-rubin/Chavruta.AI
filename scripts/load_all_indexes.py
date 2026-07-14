@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""load_all_indexes.py — load all 14 prebuilt indexes from HF into the LOCAL Qdrant server.
+"""load_all_indexes.py — load all 15 prebuilt indexes from HF into the LOCAL Qdrant server.
 
 Everything local (Qdrant on localhost:6333, bge-m3 on CPU); only the LLM is remote (Nebius).
 Targets the local server with memory tier applied (quantization + on-disk) so the full ~2.9M
@@ -22,8 +22,8 @@ from pathlib import Path
 
 # smallest → largest, so the light ones land first and a failure late costs least
 SLUGS = ["second_temple", "reference", "musar", "tosefta", "liturgy", "kabbalah",
-         "midrash", "chasidut", "jewish_thought", "shut", "mishnah", "tanakh",
-         "halacha", "gemara"]
+         "midrash", "chasidut", "jewish_thought", "shut", "yerushalmi", "mishnah",
+         "tanakh", "halacha", "gemara"]
 NS = "Yehuda-Rubin"
 COLLECTION = "chavruta"
 QDRANT_URL = os.environ.get("CHAVRUTA_QDRANT_URL", "http://localhost:6333")
@@ -86,10 +86,10 @@ def main() -> None:
                 (OUT / f).unlink()
             except FileNotFoundError:
                 pass
-        print(f"   ⏱️  {(time.time()-t0)/60:.1f}m | done={len(ok)}/14 fail={len(fail)}", flush=True)
+        print(f"   ⏱️  {(time.time()-t0)/60:.1f}m | done={len(ok)}/15 fail={len(fail)}", flush=True)
 
     n = client.count(COLLECTION, exact=True).count if client.collection_exists(COLLECTION) else 0
-    print(f"\n{'='*60}\n✅ collection '{COLLECTION}' now has {n:,} points | done={len(ok)}/14")
+    print(f"\n{'='*60}\n✅ collection '{COLLECTION}' now has {n:,} points | done={len(ok)}/15")
     if fail:
         print(f"❌ failed (just re-run to retry): {fail}")
 
