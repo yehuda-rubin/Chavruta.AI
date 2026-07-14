@@ -207,6 +207,68 @@ class ChavrutaPipeline:
             return self.router.route(request)
         return request
 
+    def _agentic_selffetch(self, query: Query, history) -> Answer | None:
+        """When retrieval returned NOTHING, give the model one chance to pull its own sources via the
+        agentic ===NEED_SOURCES=== loop (the same mechanism the lesson/chavruta paths use). Returns a
+        grounded Answer if it fetched sources and cited them; None otherwise (the caller then falls
+        back to the honest no-source answer, so Principle I is never violated)."""
+        llm = self.llm
+        if not getattr(llm, "source_fetcher", None) or not hasattr(llm, "request"):
+            return None                                   # backend has no self-fetch capability
+        from chavruta.llm.agentic import SOURCE_REQUEST_INSTRUCTION, is_degrade_message
+
+        lang = query.lang or "he"
+        job = "\n".join([
+            f"lang: {lang}", "", "## QUESTION", query.text.strip(), "",
+            "## SOURCES", "(nothing was retrieved for this question — fetch what you need)", "",
+            "## INSTRUCTIONS",
+            "Answer ONLY from SOURCES you fetch; cite every claim by its [S#] marker; match the "
+            "question's language. If after fetching you STILL have nothing relevant, say so plainly "
+            "and do not invent.",
+            SOURCE_REQUEST_INSTRUCTION,
+        ])
+        try:
+            raw, fetched = llm.request(job, lang=lang)
+        except Exception:
+            return None
+        if not fetched or is_degrade_message(raw):
+            return None                                   # nothing fetched, or a timeout/no-fetch degrade
+        marker_map = {f"S{i}": s for i, s in enumerate(fetched, 1)}
+        text, citations, is_grounded = grounded.enforce_citations(raw, marker_map)
+        if not is_grounded:
+            return None                                   # model didn't actually cite a fetched source
+        return Answer(text=text, citations=citations, grounded=True, no_source=False,
+                      intent=query.intent)
+
+    def _agentic_generate(self, prompt, lang: str) -> tuple[str, list]:
+        """Run a Q&A / explain / compare turn through the agentic ===NEED_SOURCES=== loop (so the model
+        can pull MORE sources when the retrieved set is THIN, not only when empty), by formatting the
+        grounded prompt as a job. Sources are emitted as `### [S#]` headers — the loop's marker
+        convention — so agentically-fetched sources continue the numbering. Returns (text, fetched)."""
+        from chavruta.llm.agentic import SOURCE_REQUEST_INSTRUCTION
+
+        he = (lang or "he") != "en"
+        lines = [f"lang: {lang}", "", "## ROLE", prompt.system, ""]
+        prior = [t for t in (prompt.history or []) if (getattr(t, "text", "") or "").strip()]
+        if prior:
+            lines += ["## CONVERSATION SO FAR"]
+            lines += [f"- {getattr(t, 'role', 'user')}: {(t.text or '').strip()}" for t in prior[-8:]]
+            lines += [""]
+        lines += ["## SOURCES"]
+        if prompt.sources:
+            for s in prompt.sources:
+                who = f" ({s.commentator_id})" if s.commentator_id else ""
+                lines += [f"### [{s.marker}] {s.ref}{who}", (s.text or "").strip(), ""]
+        else:
+            lines += ["(no sources retrieved)", ""]
+        lines += ["## QUESTION", prompt.question.strip(), "", "## INSTRUCTIONS"]
+        lines += (["ענה אך ורק מהמקורות; צטט כל טענה בסימון [S#]; כתוב בעברית ברורה ומלאה, ללא מילים בשפה "
+                   "זרה; אם אין תשובה במקורות — אמור זאת בפירוש ואל תמציא."] if he else
+                  ["Answer ONLY from the SOURCES; cite every claim by [S#]; write in clear, full English "
+                   "with no foreign-language words; if the sources lack the answer, say so and do not invent."])
+        lines += [SOURCE_REQUEST_INSTRUCTION]
+        return self.llm.request("\n".join(lines), lang=lang or "he")
+
     def ask(self, request: Query, *, history: list[Turn] | None = None) -> Answer:
         query = self._resolve_query(request)
 
@@ -222,8 +284,15 @@ class ChavrutaPipeline:
         result = self.retriever.retrieve(query, top_k=_top_k_for(query.intent, self.profile))
 
         if result.is_empty:
+            # Retrieval found nothing — for ANY intent (Q&A, explain, compare, halacha) give the model
+            # ONE chance to pull its own sources via the agentic ===NEED_SOURCES=== loop before we
+            # honestly give up (Principle I is preserved: a self-fetch that still comes back empty
+            # falls through to the honest answer below).
+            selffetched = self._agentic_selffetch(query, history)
+            if selffetched is not None:
+                return selffetched
             if query.intent in (Intent.EXPLAIN, Intent.COMPARE) and query.commentator_ids:
-                # Empty because the requested commentator(s) have no comment here.
+                # …and the self-fetch still found nothing: the requested commentator has no comment here.
                 return grounded.no_commentator_answer(
                     query.lang, list(query.commentator_ids), query.intent
                 )
@@ -249,17 +318,24 @@ class ChavrutaPipeline:
         prompt, marker_map = grounded.build_prompt(
             query.text, result.hits, intent=query.intent, history=history, lang=query.lang
         )
-        llm_out = self.llm.generate(
-            prompt, lang=query.lang,
-            max_tokens=_max_tokens_for(query.intent, self.profile),
-            temperature=self.profile.llm_temperature,
-        )
-        # Agentic retrieval may have appended sources during generation; extend the marker map
-        # (continuing the S# numbering) so their [S#] citations resolve instead of being dropped as
-        # fabricated. Read them off the per-call result (no shared state). No-op if none were fetched.
-        for i, s in enumerate(getattr(llm_out, "fetched_sources", None) or [], len(marker_map) + 1):
+        # Run through the agentic ===NEED_SOURCES=== loop so the model can pull MORE sources when the
+        # retrieved set is THIN (it answers in a single round if the sources already suffice). On a
+        # degrade (the model over-asked and the fetch failed) fall back to one grounded call from the
+        # sources we already retrieved, so a thin-but-usable set still yields an answer.
+        raw, fetched = self._agentic_generate(prompt, query.lang)
+        from chavruta.llm.agentic import is_degrade_message
+        if is_degrade_message(raw):
+            llm_out = self.llm.generate(
+                prompt, lang=query.lang,
+                max_tokens=_max_tokens_for(query.intent, self.profile),
+                temperature=self.profile.llm_temperature,
+            )
+            raw, fetched = llm_out.text, getattr(llm_out, "fetched_sources", None) or []
+        # Agentically-fetched sources continue the S# numbering — extend the marker map so their [S#]
+        # citations resolve instead of being dropped as fabricated.
+        for i, s in enumerate(fetched or [], len(marker_map) + 1):
             marker_map.setdefault(f"S{i}", s)
-        text, citations, is_grounded = grounded.enforce_citations(llm_out.text, marker_map)
+        text, citations, is_grounded = grounded.enforce_citations(raw, marker_map)
         answer = Answer(
             text=text, citations=citations, grounded=is_grounded,
             no_source=not is_grounded, intent=query.intent,

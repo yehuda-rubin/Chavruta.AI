@@ -175,11 +175,32 @@ python scripts/ask.py "What does Rashi say about the creation of light?"
 python scripts/ask.py "מה אומר רד\"ק על ספר יונה?"
 ```
 
+### Load the RAG from Hugging Face (first time / fresh machine)
+
+The prebuilt indexes live on Hugging Face (one dataset repo per tier — no re-embedding needed). Pull
+them straight into a local Qdrant:
+
+```powershell
+docker compose --profile server up -d qdrant          # local Qdrant first
+
+# ALL 15 tiers (~2.93M points) — resumable, skips already-loaded tiers, smallest→largest:
+python scripts/load_all_indexes.py                     # add --fresh to drop + reload from scratch
+
+# …or just ONE tier (e.g. the Talmud Yerushalmi):
+python scripts/bootstrap_rag.py --repo Yehuda-Rubin/chavruta-index-yerushalmi --out out_yerushalmi --append
+
+python scripts/create_payload_indexes.py               # required once after loading (ref/anchor_ref)
+```
+
+Both scripts download the index files (`corpus_vectors.npy` + `corpus_sparse.jsonl` + `corpus_meta.jsonl`)
+from `Yehuda-Rubin/chavruta-index-<tier>` and upsert them into the collection. See `docs/CORPUS.md §6`
+for the full tier→repo table.
+
 ### Run EVERYTHING (full stack)
 
 **Prerequisites:** the corpus/index is already embedded and loaded into the local Qdrant (15 tiers,
-~2.93M points), and `.env` holds `NEBIUS_API_KEY` (write access not needed for serving). If so, the
-whole system is just **three commands** — Qdrant → backend → frontend — then open the UI:
+~2.93M points — see "Load the RAG" above if not), and `.env` holds `NEBIUS_API_KEY` (write access not
+needed for serving). If so, the whole system is just **three commands** — Qdrant → backend → frontend:
 
 ```powershell
 # 1. Start the Qdrant server holding the hybrid index (data persists on disk between restarts)

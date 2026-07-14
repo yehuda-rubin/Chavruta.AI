@@ -533,10 +533,9 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
     if floor:
         fset = {b.ref for b in floor}
         hits = floor + [h for h in hits if h.ref not in fset]
-    if not hits:
-        msg = "לא נמצאו מקורות לנושא זה." if he else "No sources found for this topic."
-        return QueryResponse(answer=msg, citations=[], grounded=False, intent="lesson", files=[])
-
+    # Even with ZERO retrieved sources we still build the job — STEP 0 instructs the model to reply
+    # ===NEED_SOURCES=== and the agentic loop fetches its own. If it STILL comes back with nothing
+    # (checked after the loop below), we return the honest "no sources" message then.
     job = _lesson_job_md(topic, hits, lang, audience=aud, grade_band=band, length=length,
                          tpl=tpl, history=history)
     raw, fetched = pipeline.llm.request(job, lang=lang)
@@ -550,6 +549,9 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
     # citations resolve. They continue the marker numbering after the original hits, so a plain
     # append keeps hits[i-1] aligned with [S{i}].
     hits = hits + list(fetched or [])
+    if not hits:                              # retrieval empty AND the model fetched nothing → be honest
+        msg = "לא נמצאו מקורות לנושא זה." if he else "No sources found for this topic."
+        return QueryResponse(answer=msg, citations=[], grounded=False, intent="lesson", files=[])
 
     # Clarify gate — the model decided it needs more info: surface the questions, no files yet.
     if "===CLARIFY===" in raw:

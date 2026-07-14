@@ -103,17 +103,28 @@ def test_intent_autodetection_routes_compare(pipeline):
     assert set(routed.commentator_ids or []) >= {"rashi", "ramban"}
 
 
-def test_unloaded_work_is_honest(pipeline):
-    """A question explicitly about a NOT-loaded work (Zohar / Shulchan Aruch) → honest
-    answer, even though semantically-similar Tanakh chunks exist (out-of-corpus edge case).
+def test_unloaded_work_is_honest(store, fake_embedding, fake_llm):
+    """A question explicitly about a NOT-loaded work → honest answer, even though semantically-similar
+    Tanakh chunks exist (out-of-corpus edge case, Principle I).
 
-    Note: Mishnah and Talmud are now in the default registry, so honesty is tested against
-    works that are still genuinely unloaded.
+    The default registry keeps growing (Zohar, Shulchan Aruch etc. are now known works), so we scope
+    this pipeline to a MINIMAL registry holding only what the store actually has (tanakh) — then the
+    requested works are genuinely unloaded and the honesty gate fires.
     """
+    from chavruta.corpus.registry import CorpusRegistry
+    from chavruta.corpus.schema import Work
+    _seed_corpus(store, fake_embedding)
+    reg = CorpusRegistry()
+    reg.register(Work(work_id="tanakh", title_he="תנ״ך", title_en="Tanakh", kind="tanakh"))
+    profile = Profile(name="test", collection="c", top_k=5, relevance_threshold=0.0)
+    p = ChavrutaPipeline.from_backends(
+        profile, embedding=fake_embedding, store=store, llm=fake_llm,
+        retriever=HybridRetriever(fake_embedding, store, profile), registry=reg,
+    )
     for q in ("מה אומר הזוהר על בריאת העולם?",
-              "What does the Zohar say about the creation of the world?",
-              "מה כתוב בשולחן ערוך על שמירת שבת?"):
-        answer = pipeline.ask(Query(text=q, lang=""))
+              "מה כתוב בשולחן ערוך על שמירת שבת?",
+              "מה אומרת המשנה ברורה על נר שבת?"):
+        answer = p.ask(Query(text=q, lang=""))
         assert answer.no_source and not answer.citations, q
 
 
