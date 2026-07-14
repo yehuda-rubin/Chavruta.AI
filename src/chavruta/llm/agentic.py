@@ -137,7 +137,7 @@ _REQUEST_SYSTEM = ("You are a grounded Torah study assistant. Follow the job bel
 
 def agentic_request(llm, body_md: str, *, lang: str = "he",
                     max_tokens: int = 8000) -> tuple[str, list[SourceBlock]]:
-    """Run the agentic loop for a completion backend (CloudLLM/LocalLLM): each round sends the whole
+    """Run the agentic loop for a completion backend (CloudLLM): each round sends the whole
     job markdown as one grounded prompt and returns the model's completion. Returns
     (answer, fetched_sources) so the caller aligns citations without any shared per-call state."""
     def _send(job_md: str) -> str | None:

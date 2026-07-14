@@ -82,6 +82,8 @@ def build_backends(profile: Profile):
     store = QdrantStore(mode=profile.qdrant_mode, path=profile.qdrant_path,
                         url=profile.qdrant_url, api_key=profile.qdrant_api_key)
 
+    # Two backends only: 'nebius' (the API — DEFAULT) and 'bridge' (Claude answers in-session, no
+    # external API). The local DictaLM/Ollama backend was removed by product decision.
     if profile.llm_backend == "nebius":
         from chavruta.llm.cloud import CloudLLM
 
@@ -91,9 +93,11 @@ def build_backends(profile: Profile):
 
         llm = BridgeLLM()
     else:
-        from chavruta.llm.local import LocalLLM
-
-        llm = LocalLLM(profile.llm_model, profile.llm_base_url)
+        raise ValueError(
+            f"unknown CHAVRUTA_LLM_BACKEND={profile.llm_backend!r}. Supported: 'nebius' (the API — "
+            f"default) or 'bridge' (Claude in-session, no external API). The local DictaLM/Ollama "
+            f"backend has been removed."
+        )
 
     reranker = None
     if profile.rerank:

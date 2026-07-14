@@ -1,7 +1,7 @@
 """CloudLLM — scalable generation via an OpenAI-compatible API (research D2).
 
 Points at Nebius Token Factory by default; a stronger serverless model than the local one.
-Same prompt + grounding rules as LocalLLM — interchangeable behind LLMBackend (Principle II).
+Same prompt + grounding rules across backends — interchangeable behind LLMBackend (Principle II).
 `openai` is imported lazily.
 """
 
