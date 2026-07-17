@@ -1,5 +1,16 @@
 # Chavruta.AI — full local stack in Docker.
 #
+# ⚠️ PREREQUISITE — the corpus is NOT included and NOT downloaded automatically.
+#    A fresh `docker compose up` gives you an EMPTY Qdrant. The API will start, but every question
+#    returns nothing. Load the corpus first (this takes a long time and a lot of disk — see
+#    docs/CORPUS.md), against the running qdrant service:
+#
+#       docker compose up -d qdrant
+#       python scripts/load_all_indexes.py          # downloads the 15 index tiers from HuggingFace
+#       python scripts/create_payload_indexes.py    # REQUIRED — without it, ref anchoring times out
+#
+#    `/ready` tells you the truth: it returns 503 with a reason until the collection has points.
+#
 #   docker compose up --build         # start the whole app (api + web)
 #   open http://localhost:5173        # the UI
 #   docker compose down               # stop (conversation DB + caches persist)
@@ -7,16 +18,14 @@
 # Architecture (the LLM runs on Nebius; everything else is local containers):
 #   web (nginx)  ──/api──▶  api (FastAPI + bge-m3, CPU)  ──▶  Nebius (Qwen, generation)
 #                                       │
-#                                       └─▶ embedded Qdrant index (mounted ./data/qdrant)
+#                                       └─▶ qdrant (server, named volume `qdrant_storage`)
 #
-# Generation uses the Nebius API — put NEBIUS_API_KEY in a .env file beside this
-# one (copy from .env.example). The retrieval index is the existing embedded
-# Qdrant store under ./data/qdrant (1.6GB, collection "chavruta"); it is mounted,
-# not baked into the image, and not re-ingested.
+# Generation uses the Nebius API — put NEBIUS_API_KEY in a .env file beside this one (copy from
+# .env.example). Without it the API now fails fast at boot with an explicit message rather than
+# 500-ing on the first question.
 #
-# Want a standalone Qdrant SERVER instead of the embedded store? Start the
-# profiled services and flip the api env (see the `qdrant` / `ingest` services
-# and comments at the bottom).
+# Retrieval runs against the `qdrant` SERVER below (CHAVRUTA_QDRANT_MODE=server), storing into the
+# named volume `qdrant_storage`. The old embedded-store layout under ./data/qdrant is gone.
 
 services:
   # ── Backend: FastAPI RAG query service ───────────────────────────────────────
@@ -40,10 +49,12 @@ services:
       CHAVRUTA_RERANK: "false"
       CHAVRUTA_RELEVANCE_THRESHOLD: "0.0"
 
-      # Generation — Nebius Token Factory (OpenAI-compatible). Llama-3.3-70B by default;
-      # the Qwen3 "thinking" model returns empty content under a tight token budget.
+      # Generation — Nebius Token Factory (OpenAI-compatible). Qwen3-235B-Instruct is the model the
+      # prompts are tuned and verified against; it is NON-thinking, so it does not hit the empty-content
+      # problem the older Qwen3 "thinking" models had under a tight token budget. Keep this in sync with
+      # .env.example and scripts/serve.ps1 — a different model here silently changes answer quality.
       CHAVRUTA_LLM_BACKEND: nebius
-      CHAVRUTA_LLM_MODEL: ${CHAVRUTA_LLM_MODEL:-meta-llama/Llama-3.3-70B-Instruct}
+      CHAVRUTA_LLM_MODEL: ${CHAVRUTA_LLM_MODEL:-Qwen/Qwen3-235B-A22B-Instruct-2507}
       CHAVRUTA_LLM_BASE_URL: ${CHAVRUTA_LLM_BASE_URL:-https://api.studio.nebius.ai/v1}
       CHAVRUTA_LLM_API_KEY: ${NEBIUS_API_KEY:-}
 
@@ -59,7 +70,9 @@ services:
     ports:
       - "8080:8080"                       # exposed for direct debugging (optional)
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/health').status==200 else 1)"]
+      # /ready, not /health: readiness asserts the corpus is actually loaded, so `web` will not start
+      # in front of an API that answers every question with nothing.
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/ready').status==200 else 1)"]
       interval: 30s
       timeout: 10s
       start_period: 120s                  # bge-m3 load + first warm-up

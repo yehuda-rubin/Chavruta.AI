@@ -47,10 +47,11 @@ import torch  # noqa: F401,E402 — MUST precede qdrant_client import (Windows p
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from chavruta import __version__
 from chavruta.config.profile import Profile
 from chavruta.corpus.schema import Intent, Query, Turn
 from chavruta.llm.agentic import is_degrade_message
@@ -78,14 +79,34 @@ def _get_pipeline():
     return _pipeline
 
 
+def _assert_config_usable() -> None:
+    """Fail at boot on a config that cannot possibly serve, instead of 500-ing on the first question.
+
+    The cloud backend accepts an empty api_key without complaint, so a user who never created .env
+    gets a green, healthy-looking stack that dies on first use with an opaque error. Say it now.
+    """
+    prof = Profile.from_env()
+    if prof.llm_backend == "nebius" and not (prof.llm_api_key or "").strip():
+        raise RuntimeError(
+            "CHAVRUTA_LLM_BACKEND=nebius but no API key is set. "
+            "Set NEBIUS_API_KEY (or CHAVRUTA_LLM_API_KEY) in your .env — see .env.example. "
+            "To run without an external API instead, set CHAVRUTA_LLM_BACKEND=bridge."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _assert_config_usable()
     db.get_conn()          # initialise DB + run migrations
     p = _get_pipeline()    # warm up bge-m3 + Qdrant connection at startup
     try:
         p.embedding.embed_query("warmup")   # load the embedder BEFORE any qdrant_client use
     except Exception:
-        pass
+        # Warmup is best-effort — the app can still serve by loading lazily. But swallowing this
+        # silently hid a real failure mode: without the warmup the unguarded lazy singletons inside
+        # the pipeline can be raced by concurrent first requests, each loading its own ~4.6GB
+        # embedder. Log it so the OOM that follows is explainable.
+        _log.exception("startup warmup failed — embedder will load lazily on first request")
     yield
 
 
@@ -96,7 +117,7 @@ app = FastAPI(
         "over the Jewish bookshelf (Tanakh + commentators). "
         "Every answer is cited to a retrieved source — nothing is invented."
     ),
-    version="0.3.0",
+    version=__version__,     # single source of truth: src/chavruta/__init__.py
     lifespan=lifespan,
 )
 
@@ -787,8 +808,15 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
 
 # ── Health ────────────────────────────────────────────────────────────────────
 
+# Liveness vs readiness are deliberately split. /health must never touch Qdrant or the LLM: it is
+# `async def` so it answers off the event loop and can NOT queue behind the slow generation calls that
+# occupy the sync threadpool — a health probe that stalls because generation is stuck reports the
+# process as dead when it is merely busy. /ready is the one that asserts the system can actually
+# answer, and it is what orchestrators should gate traffic on.
+
 @app.get("/health")
-def health():
+async def health():
+    """Liveness only — the process is up. No I/O, never blocks."""
     p = Profile.from_env()
     return {
         "status": "ok",
@@ -797,6 +825,35 @@ def health():
         "llm_model": p.llm_model,
         "qdrant_mode": p.qdrant_mode,
     }
+
+
+@app.get("/ready")
+def ready(response: Response):
+    """Readiness — the corpus is actually loaded and queryable.
+
+    A fresh `docker compose up` creates an EMPTY Qdrant collection. Without this check the stack
+    reports healthy while every query silently returns nothing, which reads as "the RAG is bad"
+    rather than "the corpus was never loaded". Fail loudly instead.
+    """
+    p = Profile.from_env()
+    try:
+        points = _get_pipeline().store.count(p.collection)
+    except Exception as exc:
+        _log.exception("readiness: qdrant unreachable")
+        response.status_code = 503
+        return {"status": "unavailable", "collection": p.collection,
+                "reason": f"qdrant unreachable: {type(exc).__name__}"}
+
+    if points <= 0:
+        response.status_code = 503
+        return {
+            "status": "empty",
+            "collection": p.collection,
+            "points": 0,
+            "reason": ("the collection holds no points — load the corpus first: "
+                       "python scripts/load_all_indexes.py && python scripts/create_payload_indexes.py"),
+        }
+    return {"status": "ready", "collection": p.collection, "points": points}
 
 
 # ── Stateless query (backward-compatible) ────────────────────────────────────

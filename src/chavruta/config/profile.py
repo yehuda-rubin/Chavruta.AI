@@ -132,7 +132,9 @@ def _cloud_preset() -> Profile:
         qdrant_url=_env("CHAVRUTA_QDRANT_URL", "http://localhost:6333"),
         rerank=True,                          # compute available — sharpen ranking
         llm_backend="nebius",
-        llm_model=_env("CHAVRUTA_LLM_MODEL", "Qwen/Qwen3-32B"),
+        # The prompts are tuned and verified against 235B-Instruct — the cloud path must not silently
+        # fall back to a smaller model when CHAVRUTA_LLM_MODEL is unset.
+        llm_model=_env("CHAVRUTA_LLM_MODEL", "Qwen/Qwen3-235B-A22B-Instruct-2507"),
         llm_base_url=_env("CHAVRUTA_LLM_BASE_URL", "https://api.studio.nebius.ai/v1"),
         llm_api_key=_env("CHAVRUTA_LLM_API_KEY", _env("NEBIUS_API_KEY", "")),
     )

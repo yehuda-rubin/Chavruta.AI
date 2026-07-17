@@ -1,8 +1,15 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "chavruta"
-version = "0.2.0"
+dynamic = ["version"]          # single source of truth: src/chavruta/__init__.py::__version__
 description = "A trustworthy Jewish-text study partner (RAG over the Jewish bookshelf)"
 requires-python = ">=3.11"
+
+[tool.setuptools.dynamic]
+version = {attr = "chavruta.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -20,6 +27,10 @@ ignore = ["E501"]  # line length handled by formatter; long Hebrew strings are f
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-q"
+# src/ layout: without this, `pytest` on a fresh checkout dies with ModuleNotFoundError('chavruta')
+# unless the package happens to be pip-installed. Nothing in the docs or CI installs it, so make the
+# documented command work as written.
+pythonpath = ["src"]
 markers = [
     "contract: backend interface conformance tests",
     "integration: end-to-end pipeline tests",
