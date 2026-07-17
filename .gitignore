@@ -136,3 +136,6 @@ sample_lessons/
 # ---- Claude Code local settings (permission allowlist may capture secrets) ----
 .claude/settings.json
 .claude/settings.local.json
+
+# ---- Vendored third-party tooling (cc10x plugin: local dev aid, not part of the product) ----
+.claude/cc10x/

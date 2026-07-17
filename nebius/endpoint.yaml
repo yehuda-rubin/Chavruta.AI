@@ -4,7 +4,19 @@
 # Connects to the Qdrant Cloud collection populated by the ingest Job.
 #
 # Prerequisites:
-#   1. Run nebius/job.yaml first to populate Qdrant Cloud
+#   1. Populate the Qdrant Cloud collection FIRST. The endpoint ingests nothing — against an empty
+#      collection it starts, reports healthy on /health, and answers every question with no sources.
+#      Use /ready to confirm the corpus is actually there (503 until it is). Two ways to populate:
+#
+#      a. Load the ALREADY-PUBLISHED index (the normal path — no GPU, no rebuild):
+#           CHAVRUTA_QDRANT_URL=https://YOUR-CLUSTER.cloud.qdrant.io:6333 \
+#           CHAVRUTA_QDRANT_API_KEY=... \
+#           python scripts/load_all_indexes.py && python scripts/create_payload_indexes.py
+#         Mind the size/time before you start — see docs/CORPUS.md.
+#
+#      b. REBUILD the index from the corpus on a GPU, then load it: nebius/job.yaml (the "factory").
+#         Only needed when the corpus itself changes. ~45–90 min on H100, ~$1–2.
+#
 #   2. docker build -f docker/Dockerfile.endpoint -t YOUR_REGISTRY/chavruta-endpoint:latest .
 #   3. docker push YOUR_REGISTRY/chavruta-endpoint:latest
 #   4. Fill in image, NEBIUS_API_KEY, CHAVRUTA_QDRANT_URL, CHAVRUTA_QDRANT_API_KEY below
@@ -30,7 +42,7 @@ resources:
 port: 8080
 
 health_check:
-  path: /health
+  path: /ready                 # /ready, not /health — asserts the collection actually has points
   initial_delay_seconds: 90    # bge-m3 warm-up takes ~60s on CPU
   period_seconds: 30
   timeout_seconds: 10
@@ -38,7 +50,7 @@ health_check:
 environment:
   CHAVRUTA_PROFILE: cloud
   CHAVRUTA_LLM_BACKEND: nebius
-  CHAVRUTA_LLM_MODEL: "Qwen/Qwen3-32B"
+  CHAVRUTA_LLM_MODEL: "Qwen/Qwen3-235B-A22B-Instruct-2507"   # keep in sync with .env.example + docker-compose.yml
   CHAVRUTA_LLM_BASE_URL: "https://api.studio.nebius.ai/v1"
   NEBIUS_API_KEY: "your-nebius-api-key"
   CHAVRUTA_LLM_API_KEY: "your-nebius-api-key"   # same key, picked up by CloudLLM
