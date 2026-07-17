@@ -290,6 +290,7 @@ const T = {
     askPlaceholder:'שאל את החברותא…', footer:'נבנה ביראת שמיים · אינו פסיקת הלכה למעשה',
     welcomeTitle:'חברותא AI', welcomeBody:'ברוך הבא ללימוד. שאל שאלה על הסוגיא והחברותא תשיב ממקורות מצוטטים.',
     relatedSources:'מקורות קשורים', sourcesHint:'המקורות יופיעו כאן', noText:'אין טקסט זמין למקור זה.',
+    srcEdition:'מהדורה', srcLicense:'רישיון', viewOnSefaria:'צפה ב-Sefaria',
     openSources:'פתח מקורות', addSource:'+ הוסף מקור', remove:'הסר',
     kindText:'טקסט', kindImage:'תמונה', kindPdf:'PDF', kindWord:'Word',
     addSrcTitle:'הוסף מקור למודל', addSrcDesc:'הדבק טקסט מקור, או העלה קובץ — תמונה, PDF או Word. המקורות שתוסיף יישלחו למודל יחד עם השאלה הבאה.',
@@ -330,6 +331,7 @@ const T = {
     askPlaceholder:'Ask the Chavruta…', footer:'Built with reverence · Not a halachic ruling',
     welcomeTitle:'Chavruta AI', welcomeBody:'Welcome to the study. Ask about the sugya and the Chavruta will answer with cited sources.',
     relatedSources:'Related sources', sourcesHint:'Sources will appear here', noText:'No text available for this source.',
+    srcEdition:'Edition', srcLicense:'License', viewOnSefaria:'View on Sefaria',
     openSources:'Open sources', addSource:'+ Add source', remove:'Remove',
     kindText:'Text', kindImage:'Image', kindPdf:'PDF', kindWord:'Word',
     addSrcTitle:'Add a source for the model', addSrcDesc:'Paste source text, or upload a file — image, PDF or Word. The sources you add are sent to the model with your next question.',
@@ -573,6 +575,23 @@ function renderMessages() {
   box.scrollTop = box.scrollHeight;
 }
 
+// Attribution footer for an expanded source card. The backend now sends the edition + licence a
+// source's text actually came from (CitationOut.license / .version_title). CC-BY / CC-BY-SA require
+// crediting the source edition + licence, so we surface it here — the same TASL the lesson source
+// sheet carries. Renders nothing until those fields are populated (they arrive with the licence
+// backfill), so it never shows an empty strip.
+function attributionFooter(c) {
+  const lic = (c.license || '').trim(), ver = (c.version_title || '').trim(), link = (c.deep_link || '').trim();
+  if (!lic && !ver && !link) return '';
+  let bits = '';
+  if (ver) bits += '<span>' + esc(tr('srcEdition')) + ': ' + esc(ver) + '</span>';
+  if (lic) bits += '<span>' + esc(tr('srcLicense')) + ': ' + esc(lic) + '</span>';
+  const src = link ? ('<a href="' + esc(link) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" ' +
+      'class="text-tekhelet/70 hover:text-tekhelet inline-flex items-center gap-0.5">' + esc(tr('viewOnSefaria')) +
+      '<span class="material-symbols-outlined text-[13px]">open_in_new</span></a>') : '';
+  return '<div class="mt-2 pt-2 border-t border-line/40 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink/45">' + bits + src + '</div>';
+}
+
 function renderSources() {
   const box = $('#sources'); box.innerHTML = '';
   // Accumulate the sources of the WHOLE conversation (not just the last turn), deduped by ref and
@@ -614,6 +633,7 @@ function renderSources() {
       '</div>' +
       (expanded ? ('<div class="mt-3 pt-3 border-t border-line/60">' +
           '<p class="text-[15px] text-ink/85 font-serif leading-relaxed break-words" style="white-space:pre-wrap;overflow-wrap:anywhere" dir="' + (isHe(full||'')?'rtl':'ltr') + '">' + esc(full || tr('noText')) + '</p>' +
+          attributionFooter(c) +
         '</div>') : '') +
     '</div>');
     card.addEventListener('click', () => {
