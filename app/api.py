@@ -53,6 +53,7 @@ from pydantic import BaseModel, Field
 
 from chavruta import __version__
 from chavruta.config.profile import Profile
+from chavruta.corpus import rights
 from chavruta.corpus.schema import Intent, Query, Turn
 from chavruta.llm.agentic import is_degrade_message
 from chavruta.pipeline.pipeline import _max_tokens_for
@@ -158,6 +159,12 @@ class CitationOut(BaseModel):
     text_en: str = ""
     commentator: str = ""
     deep_link: str = ""
+    # Rights of the specific edition this text came from. CC-BY / CC-BY-SA / CC-BY-NC all REQUIRE
+    # credit, and Creative Commons asks for TASL — Title, Author, Source, Licence. Crediting
+    # "Sefaria" generically does not satisfy that for a work by a named translator or publisher.
+    # Empty = unknown, which corpus/rights.py treats as all-rights-reserved.
+    license: str = ""
+    version_title: str = ""
 
 
 class LessonSectionOut(BaseModel):
@@ -395,6 +402,24 @@ def _resolve_topic(question: str, history) -> str:
 
 
 # Tolerate the model bolding/indenting the delimiter (**===FULL_LESSON===**, leading spaces, RTL marks).
+def _source_sheet_entry(n: int, c: CitationOut) -> str:
+    """One source on the sheet: the verbatim text, plus credit where the licence requires it.
+
+    A source sheet REPRODUCES the text — it is not a citation. CC-BY, CC-BY-SA and CC-BY-NC all
+    require attribution, and Creative Commons asks for TASL (Title, Author, Source, Licence).
+    Naming only the ref, as this did, is not TASL for a work by a named translator or publisher:
+    it omits which edition the text is and under what terms. Public-domain and CC0 sources need no
+    credit line, so they don't get noise.
+    """
+    entry = f"**{n}. {c.ref}**\n{c.text_he}"
+    if rights.requires_attribution(c.license):
+        entry += "\n\n> " + rights.attribution_line(
+            ref=c.ref, version_title=c.version_title,
+            license_str=c.license, deep_link=c.deep_link,
+        )
+    return entry
+
+
 _LESSON_SPLIT_RE = re.compile(r"^[ \t>*‏‎]*===\s*(SOURCE_SHEET|LESSON_FLOW|FULL_LESSON|ORDER)\s*===[ \t*]*$", re.M)
 
 
@@ -617,7 +642,9 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
             h = hits[i - 1]
             used.append(CitationOut(ref=h.ref, text_he=(getattr(h, "text", "") or ""), text_en="",
                                     commentator=(getattr(h, "commentator_id", "") or ""),
-                                    deep_link=(getattr(h, "deep_link", "") or "")))
+                                    deep_link=(getattr(h, "deep_link", "") or ""),
+                                    license=(getattr(h, "license", "") or ""),
+                                    version_title=(getattr(h, "version_title", "") or "")))
     ss, lf, fl = _strip_markers(ss), _strip_markers(lf), _strip_markers(fl)
 
     # Source sheet = the FULL retrieved source texts, in teaching order — ALWAYS built mechanically from
@@ -625,7 +652,7 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
     # Models truncate the source texts ("…") when asked to reproduce them; the RAG already has the full
     # text, so we assemble it directly and guarantee complete, verbatim sources.
     if used:
-        ss = "\n\n".join(f"**{n}. {c.ref}**\n{c.text_he}" for n, c in enumerate(used, 1))
+        ss = "\n\n".join(_source_sheet_entry(n, c) for n, c in enumerate(used, 1))
 
     # audience/grade tag woven into the file titles so downloads are self-describing
     tag = ""
@@ -751,7 +778,9 @@ def _run_chavruta(question: str, lang: str, history=None) -> QueryResponse:
             h = hits[i - 1]
             used.append(CitationOut(ref=h.ref, text_he=(getattr(h, "text", "") or ""), text_en="",
                                     commentator=(getattr(h, "commentator_id", "") or ""),
-                                    deep_link=(getattr(h, "deep_link", "") or "")))
+                                    deep_link=(getattr(h, "deep_link", "") or ""),
+                                    license=(getattr(h, "license", "") or ""),
+                                    version_title=(getattr(h, "version_title", "") or "")))
     return QueryResponse(answer=_strip_markers(raw), citations=used, grounded=bool(used),
                          intent="chavruta", files=[])
 

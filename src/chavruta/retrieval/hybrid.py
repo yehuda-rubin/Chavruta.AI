@@ -34,6 +34,13 @@ def _timed(acc: dict, key: str):
 
 def _to_hit(h) -> RankedHit:
     p = h.payload or {}
+    # Rights are per LANGUAGE, not per work: Peninei Halakhah is CC-BY-NC in Hebrew and CC0 in
+    # English. A chunk's `text` is in its own `lang`, so read the licence for THAT language.
+    # `license`/`version_title` (unsuffixed) are the shape written by a fresh ingest; the
+    # *_he/*_en pair is what the backfill stamps onto the already-indexed corpus. Accept both so a
+    # partly-backfilled collection still reports honestly instead of silently reading blank.
+    lang = (p.get("lang") or "he").lower()
+    suffix = "en" if lang.startswith("en") else "he"
     return RankedHit(
         chunk_id=h.chunk_id,
         ref=p.get("ref", ""),
@@ -44,6 +51,8 @@ def _to_hit(h) -> RankedHit:
         work_id=p.get("work_id", ""),
         anchor_ref=p.get("anchor_ref"),
         period=p.get("period"),
+        license=p.get("license") or p.get(f"license_{suffix}") or "",
+        version_title=p.get("version_title") or p.get(f"version_{suffix}") or "",
     )
 
 

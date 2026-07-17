@@ -63,7 +63,7 @@ TANAKH = Work(
     languages=("he", "en"),
     reference_scheme="book/chapter/verse",
     source_adapter="sefaria",
-    license="CC0 / Sefaria",
+    license="",                       # per-CHUNK, not per-work — see corpus/rights.py
     attribution="Sefaria (sefaria.org)",
 )
 
@@ -75,7 +75,7 @@ MISHNAH = Work(
     languages=("he", "en"),
     reference_scheme="tractate/chapter/mishnah",
     source_adapter="sefaria",
-    license="CC0 / Sefaria",
+    license="",                       # per-CHUNK, not per-work — see corpus/rights.py
     attribution="Sefaria (sefaria.org)",
 )
 
@@ -87,7 +87,7 @@ TALMUD_BAVLI = Work(
     languages=("he", "en"),
     reference_scheme="tractate/daf/amud",
     source_adapter="sefaria",
-    license="CC0 / Sefaria",
+    license="",                       # per-CHUNK, not per-work — see corpus/rights.py
     attribution="Sefaria (sefaria.org)",
 )
 
@@ -102,7 +102,7 @@ RESPONSA = Work(
     languages=("he", "en"),
     reference_scheme="work/section/segment",
     source_adapter="sefaria",
-    license="CC0 / Sefaria",
+    license="",                       # per-CHUNK, not per-work — see corpus/rights.py
     attribution="Sefaria (sefaria.org)",
 )
 
@@ -140,7 +140,7 @@ def default_registry() -> CorpusRegistry:
     for wid, (he, en, kind) in _LOADED_CATEGORIES.items():
         reg.register(Work(work_id=wid, title_he=he, title_en=en, kind=kind, languages=("he", "en"),
                           reference_scheme="work/section/segment", source_adapter="sefaria",
-                          license="CC0 / Sefaria", attribution="Sefaria (sefaria.org)"))
+                          license="", attribution="Sefaria (sefaria.org)"))
     for alias, cat in _ALIAS_CATEGORY.items():
         if reg.has(cat) and not reg.has(alias):
             c = reg.get(cat)

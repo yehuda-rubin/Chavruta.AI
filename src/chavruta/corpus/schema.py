@@ -40,6 +40,11 @@ class Work:
     languages: tuple[str, ...] = ("he", "en")
     reference_scheme: str = "book/chapter/verse"
     source_adapter: str = "sefaria"
+    # DO NOT put a licence here. Rights are per (title, language, versionTitle) on Sefaria's side and
+    # do not follow work_id: Talmud Bavli's default edition is CC-BY-NC while its Aramaic base is
+    # public domain, and one work can differ by language. This field once hardcoded "CC0 / Sefaria"
+    # for every work, which was simply false. The real value lives per chunk (Chunk.license), read
+    # from the API at fetch time; classify it with corpus/rights.py.
     license: str = ""
     attribution: str = ""
     version: str = ""
@@ -75,6 +80,13 @@ class Chunk:
     anchor_ref: str | None = None       # the ref this comments on (source OR another commentary)
     anchor_kind: AnchorKind | None = None
     commentator_id: str | None = None
+    # ── Rights. Per-CHUNK, not per-work: Sefaria licenses per (title, language, versionTitle), and
+    # those boundaries do not follow work_id at all. The same work can be CC-BY-NC in Hebrew and CC0
+    # in English (Peninei Halakhah), and one author can span CC-BY-NC and full copyright (Steinsaltz).
+    # Empty means UNKNOWN — which must be treated as "all rights reserved", never as permissive.
+    license: str = ""                   # verbatim from Sefaria: "Public Domain" | "CC0" | "CC-BY" |
+                                        # "CC-BY-SA" | "CC-BY-NC" | "Copyright: <holder>" | "unknown"
+    version_title: str = ""             # the exact edition the text came from — the audit trail
 
     def to_payload(self) -> dict:
         """Metadata stored alongside the vector (and returned on search hits)."""
@@ -93,6 +105,10 @@ class Chunk:
             "anchor_ref": self.anchor_ref,
             "anchor_kind": self.anchor_kind.value if self.anchor_kind else None,
             "commentator_id": self.commentator_id,
+            # Indexed so retrieval can filter by rights (e.g. exclude NonCommercial for paid users)
+            # and so the source sheet can attribute the actual edition, not a generic "Sefaria".
+            "license": self.license,
+            "version_title": self.version_title,
         }
 
     def validate(self) -> None:
