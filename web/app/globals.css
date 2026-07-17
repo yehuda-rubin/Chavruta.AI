@@ -1,0 +1,51 @@
+@import "./fonts.local.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Ported verbatim from the static UI's <style> so the look is identical ── */
+body {
+  background:
+    radial-gradient(120% 80% at 85% -10%, #e7eefc 0%, transparent 45%),
+    radial-gradient(100% 70% at 0% 110%, #faf2dd 0%, transparent 50%),
+    #fdfbf6;
+}
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-thumb { background: #e3d8c2; border-radius: 8px; }
+
+.glass {
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow: 0 1px 2px rgba(28, 26, 23, 0.04), 0 16px 40px -24px rgba(26, 54, 93, 0.35);
+}
+.grad { background: linear-gradient(135deg, #002045, #3a5ba0); }
+.material-symbols-outlined {
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 20;
+  vertical-align: middle;
+}
+.he { direction: rtl; }
+.en { direction: ltr; }
+
+/* Dark theme (Settings → Theme). Curated overrides over the light "Modern Glass" palette. */
+body.theme-dark {
+  background:
+    radial-gradient(120% 80% at 85% -10%, #1b2740 0%, transparent 45%),
+    radial-gradient(100% 70% at 0% 110%, #2a2418 0%, transparent 50%),
+    #12151b;
+  color: #e6e4df;
+}
+body.theme-dark .glass {
+  background: rgba(28, 33, 43, 0.62);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 16px 40px -24px rgba(0, 0, 0, 0.7);
+}
+body.theme-dark .text-tekhelet { color: #a9c2f0 !important; }
+body.theme-dark [class*="text-ink"] { color: #e6e4df !important; }
+body.theme-dark [class*="text-gold"] { color: #d9b45a !important; }
+body.theme-dark [class*="bg-white"] { background-color: rgba(44, 50, 63, 0.5) !important; }
+body.theme-dark [class*="border-white"],
+body.theme-dark [class*="border-line"] { border-color: rgba(255, 255, 255, 0.1) !important; }
+body.theme-dark ::-webkit-scrollbar-thumb { background: #3a4150; }
