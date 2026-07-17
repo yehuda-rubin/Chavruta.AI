@@ -87,7 +87,8 @@ def build_backends(profile: Profile):
     if profile.llm_backend == "nebius":
         from chavruta.llm.cloud import CloudLLM
 
-        llm = CloudLLM(profile.llm_model, profile.llm_base_url, profile.llm_api_key)
+        llm = CloudLLM(profile.llm_model, profile.llm_base_url, profile.llm_api_key,
+                       timeout_s=profile.llm_timeout_s, max_retries=profile.llm_max_retries)
     elif profile.llm_backend == "bridge":
         from chavruta.llm.bridge import BridgeLLM
 

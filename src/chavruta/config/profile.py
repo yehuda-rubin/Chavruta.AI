@@ -60,6 +60,12 @@ class Profile:
     llm_api_key: str = ""                     # the API key (CHAVRUTA_LLM_API_KEY or NEBIUS_API_KEY)
     llm_temperature: float = 0.2
     llm_max_tokens: int = 512                 # bounds CPU generation latency; config-tunable
+    # Per-CALL ceiling. Left unset, the openai SDK defaults to 600s x 2 retries = 30 min for ONE
+    # call — and the agentic loop makes up to 4, so a single question could occupy a worker for
+    # ~2h while nginx already 504'd the user at 300s. Sync endpoints can't be cancelled on client
+    # disconnect, so that orphaned work keeps billing. Bound it explicitly.
+    llm_timeout_s: float = 180.0
+    llm_max_retries: int = 1
 
     # ── Query understanding (spec 002) ──
     query_planner: str = "none"               # "none" (heuristic only) | "llm" (LLM fallback)
@@ -96,6 +102,8 @@ class Profile:
         p.llm_api_key = _env("CHAVRUTA_LLM_API_KEY", p.llm_api_key)
         p.llm_temperature = float(_env("CHAVRUTA_LLM_TEMPERATURE", str(p.llm_temperature)))
         p.llm_max_tokens = int(_env("CHAVRUTA_LLM_MAX_TOKENS", str(p.llm_max_tokens)))
+        p.llm_timeout_s = float(_env("CHAVRUTA_LLM_TIMEOUT_S", str(p.llm_timeout_s)))
+        p.llm_max_retries = int(_env("CHAVRUTA_LLM_MAX_RETRIES", str(p.llm_max_retries)))
         p.query_planner = _env("CHAVRUTA_QUERY_PLANNER", p.query_planner)
         return p
 

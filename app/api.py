@@ -10,6 +10,7 @@ The pipeline is loaded once at startup and shared across requests.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import sys
 import threading
@@ -61,6 +62,26 @@ import app.db as db
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 
+def _configure_logging() -> None:
+    """Give the chavruta.* loggers a real handler.
+
+    uvicorn configures its own loggers but NOT the root logger, so without this every
+    `logger.info(...)` in this codebase falls through to logging.lastResort — a WARNING-level,
+    unformatted handler. Net effect: the info lines were silently discarded and the errors that did
+    print carried no timestamp, level, or logger name. That is why the system had, in practice, no
+    observability at all. Level is env-tunable; default INFO so LLM cost/latency lines show up.
+    """
+    level = os.environ.get("CHAVRUTA_LOG_LEVEL", "INFO").upper()
+    root = logging.getLogger()
+    if not root.handlers:                      # don't fight a host that already configured logging
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s %(levelname)-7s %(name)s: %(message)s", datefmt="%H:%M:%S"))
+        root.addHandler(handler)
+    root.setLevel(getattr(logging, level, logging.INFO))
+
+
+_configure_logging()
 _log = logging.getLogger("chavruta.api")
 _pipeline = None
 # FastAPI runs sync endpoints in a threadpool, so the lazy singletons below can be raced by concurrent
@@ -173,8 +194,6 @@ class QueryResponse(BaseModel):
 # The template RAG ('chavruta_templates', built by scripts/index_templates.py) is queried live
 # to pick the right template SET for the topic — filtered by audience (yeshiva vs school) and,
 # for school, by grade band — so the lesson is written at the correct register.
-
-import os
 
 _TPL_COLLECTION = os.environ.get("CHAVRUTA_TEMPLATES_COLLECTION", "chavruta_templates")
 _tpl_client = None
