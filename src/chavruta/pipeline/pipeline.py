@@ -229,7 +229,8 @@ class ChavrutaPipeline:
             SOURCE_REQUEST_INSTRUCTION,
         ])
         try:
-            raw, fetched = llm.request(job, lang=lang)
+            raw, fetched = llm.request(job, lang=lang,
+                                       token_budget=_max_tokens_for(query.intent, self.profile))
         except Exception:
             return None
         if not fetched or is_degrade_message(raw):
@@ -241,7 +242,7 @@ class ChavrutaPipeline:
         return Answer(text=text, citations=citations, grounded=True, no_source=False,
                       intent=query.intent)
 
-    def _agentic_generate(self, prompt, lang: str) -> tuple[str, list]:
+    def _agentic_generate(self, prompt, lang: str, intent=None) -> tuple[str, list]:
         """Run a Q&A / explain / compare turn through the agentic ===NEED_SOURCES=== loop (so the model
         can pull MORE sources when the retrieved set is THIN, not only when empty), by formatting the
         grounded prompt as a job. Sources are emitted as `### [S#]` headers — the loop's marker
@@ -268,7 +269,8 @@ class ChavrutaPipeline:
                   ["Answer ONLY from the SOURCES; cite every claim by [S#]; write in clear, full English "
                    "with no foreign-language words; if the sources lack the answer, say so and do not invent."])
         lines += [SOURCE_REQUEST_INSTRUCTION]
-        return self.llm.request("\n".join(lines), lang=lang or "he")
+        return self.llm.request("\n".join(lines), lang=lang or "he",
+                                token_budget=_max_tokens_for(intent, self.profile))
 
     def ask(self, request: Query, *, history: list[Turn] | None = None) -> Answer:
         query = self._resolve_query(request)
@@ -323,7 +325,7 @@ class ChavrutaPipeline:
         # retrieved set is THIN (it answers in a single round if the sources already suffice). On a
         # degrade (the model over-asked and the fetch failed) fall back to one grounded call from the
         # sources we already retrieved, so a thin-but-usable set still yields an answer.
-        raw, fetched = self._agentic_generate(prompt, query.lang)
+        raw, fetched = self._agentic_generate(prompt, query.lang, query.intent)
         from chavruta.llm.agentic import is_degrade_message
         if is_degrade_message(raw):
             llm_out = self.llm.generate(

@@ -9,6 +9,8 @@ no-source signal that protects Principle I).
 from __future__ import annotations
 
 import logging
+import time
+from contextlib import contextmanager
 from dataclasses import replace
 
 from chavruta.corpus.refs import with_ref_variants
@@ -17,6 +19,17 @@ from chavruta.retrieval.base import RankedHit, RetrievalResult
 from chavruta.store.base import Filter, HybridQuery
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _timed(acc: dict, key: str):
+    """Accumulate wall-clock into `acc[key]`. Retrieval is many store round-trips, and until it was
+    measured the assumption was that generation dominated a slow request — it does not."""
+    t0 = time.monotonic()
+    try:
+        yield
+    finally:
+        acc[key] = acc.get(key, 0.0) + (time.monotonic() - t0)
 
 
 def _to_hit(h) -> RankedHit:
@@ -61,15 +74,19 @@ class HybridRetriever:
         return {"work_id": list(query.work_ids)} if query.work_ids else None
 
     def retrieve(self, query: Query, *, top_k: int) -> RetrievalResult:
-        emb = self.embedding.embed_query(query.search_text or query.text)
+        t_all = time.monotonic()
+        t: dict[str, float] = {}
+        with _timed(t, "embed"):
+            emb = self.embedding.embed_query(query.search_text or query.text)
         use_sparse = self.profile.hybrid and bool(emb.sparse)
         hquery = HybridQuery(dense=emb.dense, sparse=emb.sparse if use_sparse else None)
 
         filters = self._filters(query)
         try:
-            raw = self.store.search(
-                self.profile.collection, hquery, top_k=top_k * 3, filters=filters
-            )
+            with _timed(t, "search"):
+                raw = self.store.search(
+                    self.profile.collection, hquery, top_k=top_k * 3, filters=filters
+                )
             if not raw and filters is not None:
                 # A SCOPED search (work_ids / commentator_ids) came back empty. That scope can be wrong
                 # — e.g. a hallucinated or mis-resolved named_ref pinned the query to the wrong tractate
@@ -77,7 +94,9 @@ class HybridRetriever:
                 # zero: fall back to an UNSCOPED semantic search so the topically-relevant sources still
                 # surface. (The floors below also key off query.work_ids, so clear the scope for them.)
                 logger.info("scoped retrieval empty; falling back to unscoped semantic search")
-                raw = self.store.search(self.profile.collection, hquery, top_k=top_k * 3, filters=None)
+                with _timed(t, "search"):
+                    raw = self.store.search(self.profile.collection, hquery, top_k=top_k * 3,
+                                            filters=None)
                 query = replace(query, work_ids=None, commentator_ids=None)
         except Exception as exc:
             # A backend failure (e.g. a Qdrant search timeout under load) must degrade to an honest
@@ -95,8 +114,9 @@ class HybridRetriever:
         dense_map: dict[str, float] = {}
         if use_sparse:
             try:
-                dense_map = self.store.dense_scores(
-                    self.profile.collection, emb.dense, self._filters(query), top_k=top_k * 3)
+                with _timed(t, "dense_probe"):
+                    dense_map = self.store.dense_scores(
+                        self.profile.collection, emb.dense, self._filters(query), top_k=top_k * 3)
                 thr = self.profile.relevance_threshold
                 pruned = [h for h in hits
                           if not (h.chunk_id in dense_map and dense_map[h.chunk_id] < thr)]
@@ -116,9 +136,10 @@ class HybridRetriever:
             # space ('Genesis 1.1'); pass BOTH forms so the anchor actually resolves (without this the
             # exact match silently returned 0 → the base pasuk/daf never anchored).
             anchor_filter = self._filters(query) if query.commentator_ids else self._work_filter(query)
-            anchored = self.store.fetch_by_refs(
-                self.profile.collection, with_ref_variants(query.named_refs), filters=anchor_filter
-            )
+            with _timed(t, "anchor"):
+                anchored = self.store.fetch_by_refs(
+                    self.profile.collection, with_ref_variants(query.named_refs), filters=anchor_filter
+                )
             for h in anchored:
                 rh = _to_hit(h)
                 rh.score = max(rh.score, 1.0)
@@ -134,9 +155,10 @@ class HybridRetriever:
         if not query.work_ids and not query.commentator_ids:
             try:
                 bfilt = {"work_id": list(_FOUNDATIONAL_WORKS), "unit_type": "source"}
-                base = self.store.search(self.profile.collection, hquery, top_k=3, filters=bfilt)
-                bmap = self.store.dense_scores(self.profile.collection, emb.dense, bfilt, top_k=3) \
-                    if use_sparse else {}
+                with _timed(t, "floors"):
+                    base = self.store.search(self.profile.collection, hquery, top_k=3, filters=bfilt)
+                    bmap = self.store.dense_scores(self.profile.collection, emb.dense, bfilt, top_k=3) \
+                        if use_sparse else {}
                 thr = self.profile.relevance_threshold
                 for h in base:
                     rh = _to_hit(h)
@@ -152,8 +174,9 @@ class HybridRetriever:
         # grounding source available. Skipped when the query is already scoped to a work/commentator.
         if not query.work_ids and not query.commentator_ids:
             try:
-                found = self.store.search(self.profile.collection, hquery, top_k=6,
-                                          filters={"work_id": list(_FOUNDATIONAL_WORKS)})
+                with _timed(t, "floors"):
+                    found = self.store.search(self.profile.collection, hquery, top_k=6,
+                                              filters={"work_id": list(_FOUNDATIONAL_WORKS)})
                 for h in found:
                     rh = _to_hit(h)
                     rh.score = min(rh.score + 0.05, 0.99)   # boost, but never reach the anchor sentinel
@@ -163,7 +186,8 @@ class HybridRetriever:
 
         # Optional reranking (heavy in cloud / optional local)
         if self.reranker is not None and self.profile.rerank and hits:
-            hits = self.reranker.rerank(query.text, hits)
+            with _timed(t, "rerank"):
+                hits = self.reranker.rerank(query.text, hits)
 
         # Optional link-based expansion (chain of transmission / supercommentary). This is an
         # ENRICHMENT step — if it fails (e.g. a Qdrant scroll timeout on the large collection) it
@@ -171,7 +195,8 @@ class HybridRetriever:
         anchor_refs = self._anchor_refs(hits)
         if query.expand_links and self.link_expander is not None and anchor_refs:
             try:
-                hits = hits + self.link_expander.expand(anchor_refs, query)
+                with _timed(t, "links"):
+                    hits = hits + self.link_expander.expand(anchor_refs, query)
             except Exception as exc:
                 logger.warning("link expansion failed (%s); serving base hits", exc)
 
@@ -203,6 +228,16 @@ class HybridRetriever:
             top_dense = self.store.top_dense_score(self.profile.collection, emb.dense,
                                                    self._filters(query))
             is_empty = top_dense < self.profile.relevance_threshold
+        total = time.monotonic() - t_all
+        # One line per retrieval. Generation was assumed to be what made a request slow; measuring
+        # showed retrieval is a comparable share of it, and this is the breakdown that says which
+        # store round-trip to attack.
+        logger.info(
+            "retrieval done total=%.1fs [%s] hits=%d empty=%s top_k=%d hybrid=%s",
+            total,
+            " ".join(f"{k}={v:.1f}s" for k, v in sorted(t.items(), key=lambda kv: -kv[1])),
+            len(hits), is_empty, top_k, use_sparse,
+        )
         return RetrievalResult(
             hits=[] if is_empty else hits,
             anchor_refs=self._anchor_refs(hits),

@@ -130,10 +130,12 @@ class FakeLLM:
                temperature: float) -> Iterator[str]:
         yield self.generate(prompt, lang=lang, max_tokens=max_tokens, temperature=temperature).text
 
-    def request(self, body_md: str, *, lang: str = "he"):
+    def request(self, body_md: str, *, lang: str = "he", token_budget: int | None = None):
         """Agentic-path (job markdown) answer — mirrors generate(): cite the first ### [S#] source. No
-        self-fetch. Returns (text, fetched)."""
+        self-fetch. Returns (text, fetched). token_budget is accepted for interface parity (the real
+        backends meter it); this fake bills nothing, so it is recorded and ignored."""
         import re
+        self.last_token_budget = token_budget
         m = re.search(r"###\s*\[\s*(S\d+)\s*\]", body_md or "")
         if not m:
             return ("No sources." if lang == "en" else "אין מקורות.", [])

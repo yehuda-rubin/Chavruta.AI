@@ -64,12 +64,12 @@ class CloudLLM:
         self.max_retries = max_retries
         self._client = None  # lazy
 
-    def request(self, body_md: str, *, lang: str = "he"):
+    def request(self, body_md: str, *, lang: str = "he", token_budget: int | None = None):
         """Answer a pre-formatted job (markdown) — the lesson/chavruta path. Runs the same agentic
         ===NEED_SOURCES=== loop as the bridge, over completion calls. Returns (answer, fetched)."""
         from chavruta.llm.agentic import agentic_request
 
-        return agentic_request(self, body_md, lang=lang)
+        return agentic_request(self, body_md, lang=lang, token_budget=token_budget)
 
     def _client_(self):
         if self._client is None:
@@ -84,7 +84,10 @@ class CloudLLM:
         return self._client
 
     def _complete(self, messages, *, max_tokens: int, temperature: float, what: str):
-        """One bounded, reported completion call. Raises LLMConfigError / LLMTransientError."""
+        """One bounded, reported completion call. Returns (choice, usage).
+
+        Raises LLMConfigError / LLMTransientError.
+        """
         t0 = time.monotonic()
         try:
             resp = self._client_().chat.completions.create(
@@ -114,15 +117,20 @@ class CloudLLM:
             getattr(usage, "total_tokens", "?"),
             choice.finish_reason,
         )
-        return choice
+        return choice, usage
 
     def generate(self, prompt: GroundedPrompt, *, lang: str, max_tokens: int,
                  temperature: float) -> LLMResult:
-        choice = self._complete(
+        choice, usage = self._complete(
             render_messages(prompt, lang),
             max_tokens=max_tokens, temperature=temperature, what="generate",
         )
-        return LLMResult(text=choice.message.content or "", finish_reason=choice.finish_reason or "stop")
+        return LLMResult(
+            text=choice.message.content or "",
+            finish_reason=choice.finish_reason or "stop",
+            prompt_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
+            completion_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
+        )
 
     def stream(self, prompt: GroundedPrompt, *, lang: str, max_tokens: int,
                temperature: float) -> Iterator[str]:

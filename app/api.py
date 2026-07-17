@@ -56,6 +56,7 @@ from chavruta import __version__
 from chavruta.config.profile import Profile
 from chavruta.corpus.schema import Intent, Query, Turn
 from chavruta.llm.agentic import is_degrade_message
+from chavruta.pipeline.pipeline import _max_tokens_for
 
 import app.db as db
 
@@ -578,7 +579,10 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
     # (checked after the loop below), we return the honest "no sources" message then.
     job = _lesson_job_md(topic, hits, lang, audience=aud, grade_band=band, length=length,
                          tpl=tpl, history=history)
-    raw, fetched = pipeline.llm.request(job, lang=lang)
+    # Lessons are the most expensive path (biggest source pool, longest output, most agentic rounds),
+    # so cap the WHOLE request's output — not just each round, which multiplies by the round count.
+    raw, fetched = pipeline.llm.request(job, lang=lang,
+                                        token_budget=_max_tokens_for(Intent.LESSON, pipeline.profile))
     # A loop degrade/timeout ('please try again' / 'couldn't retrieve') or empty answer must NOT be
     # packaged as a downloadable lesson marked grounded — surface it as a plain honest message.
     if is_degrade_message(raw):
@@ -737,7 +741,9 @@ def _run_chavruta(question: str, lang: str, history=None) -> QueryResponse:
     # EVERY hybrid turn and nudged the chavruta to stall instead of teach.
     weak = result.is_empty
     job = _chavruta_job_md(question, hits, lang, history, weak_retrieval=weak)
-    raw, fetched = pipeline.llm.request(job, lang=lang)
+    # A chavruta turn is a conversational exchange, not a treatise — budget it like EXPLAIN.
+    raw, fetched = pipeline.llm.request(job, lang=lang,
+                                        token_budget=_max_tokens_for(Intent.EXPLAIN, pipeline.profile))
     hits = hits + list(fetched or [])   # include agentically-fetched so their [S#] resolve
     nums, used, seen = [int(n) for n in re.findall(r"\[\s*S(\d+)\s*\]", raw)], [], set()
     for i in nums:

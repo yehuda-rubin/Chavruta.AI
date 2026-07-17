@@ -201,11 +201,13 @@ def _fake_pipeline(result, captured):
     class _LLM:
         source_fetcher = None
 
-        def request(self, body_md, *, lang="he"):
+        def request(self, body_md, *, lang="he", token_budget=None):
             captured["job"] = body_md
             return ("תשובה מעוגנת [S1]" if result.hits else "רגע, תכוון אותי"), []
 
-    return SimpleNamespace(retriever=_Retriever(), llm=_LLM(), _resolve_query=lambda q: q)
+    # `profile` mirrors the real pipeline: _run_chavruta reads it to budget the request's tokens.
+    return SimpleNamespace(retriever=_Retriever(), llm=_LLM(), _resolve_query=lambda q: q,
+                           profile=SimpleNamespace(llm_max_tokens=512))
 
 
 def test_chavruta_not_weak_on_good_hybrid_retrieval(monkeypatch):
@@ -415,7 +417,7 @@ def test_qa_empty_retrieval_selffetches_grounded():
         profile = "cloud"; model_id = "fake"
         source_fetcher = staticmethod(lambda qs: [src])
 
-        def request(self, body_md, *, lang="he"):
+        def request(self, body_md, *, lang="he", token_budget=None):
             assert "===NEED_SOURCES===" in body_md            # the job invited a self-fetch
             return ("איסור אכילה ביום כיפור נלמד מעינוי [S1]", [src])
 
@@ -434,7 +436,7 @@ def test_qa_empty_retrieval_selffetch_fails_is_honest():
         profile = "cloud"; model_id = "fake"
         source_fetcher = staticmethod(lambda qs: [])
 
-        def request(self, body_md, *, lang="he"):
+        def request(self, body_md, *, lang="he", token_budget=None):
             # the loop's no-fetch degrade sentinel — nothing relevant could be pulled
             return ("לא הצלחתי להשיג מקורות מתאימים דרך הראג. נסה לנסח מחדש או לציין מקור מדויק.", [])
 
@@ -682,3 +684,51 @@ def test_session_query_legacy_session_falls_back_to_request_intent(monkeypatch):
     monkeypatch.setattr(api, "_run_query", _fake_run_query)
     api.session_query("sid-legacy", QueryRequest(question="q", lang="he", intent="qa"))
     assert captured["intent"] == "qa"
+
+# ── Tier0 (2026-07 audit): the agentic loop must enforce a CUMULATIVE output-token budget ──
+# Bug: _INTENT_MAX_TOKENS defined careful per-intent budgets (LESSON: 30000) but the lesson path went
+# through agentic_request, which HARDCODED max_tokens=8000 and never consulted the profile or the
+# intent map. So the one number an operator would reach for to control spend had no effect on the
+# most expensive path — and per-round caps multiply by the round count instead of bounding a request.
+
+def test_agentic_loop_enforces_cumulative_token_budget():
+    from chavruta.llm.agentic import agentic_request, is_degrade_message
+    from chavruta.llm.base import LLMResult
+
+    calls = []
+
+    class _LLM:
+        source_fetcher = staticmethod(lambda qs: [])          # never satisfies the ask → loop continues
+        profile = "cloud"; model_id = "fake"
+
+        def generate(self, prompt, *, lang, max_tokens, temperature):
+            calls.append(max_tokens)
+            # Always ask for more sources, so the loop would run every round if unbounded.
+            return LLMResult(text="===NEED_SOURCES===\nמשהו", completion_tokens=400, prompt_tokens=100)
+
+    answer, _ = agentic_request(_LLM(), "## JOB", lang="he", max_tokens=8000, token_budget=1000)
+
+    # Rounds must be clamped to what remains of the budget, never the full per-round cap.
+    assert calls[0] == 1000, f"first round should be clamped to the budget, got {calls[0]}"
+    assert sum(c for c in calls) <= 8000, "per-round caps must not multiply past the budget"
+    # 400 out/round vs a 1000 budget ⇒ round 3 has 200 left, round 4 would have 0 ⇒ loop stops.
+    assert all(c > 0 for c in calls), "a zero-room round must not be sent"
+    assert len(calls) <= 3, f"loop must stop once the budget is spent, made {len(calls)} calls"
+    assert is_degrade_message(answer), "a budget stop with no answer must be an honest degrade"
+
+
+def test_agentic_loop_uncapped_when_no_budget():
+    """token_budget=None keeps the old behaviour — the bridge (which bills nothing) relies on it."""
+    from chavruta.llm.agentic import agentic_request
+    from chavruta.llm.base import LLMResult
+
+    calls = []
+
+    class _LLM:
+        source_fetcher = None
+        def generate(self, prompt, *, lang, max_tokens, temperature):
+            calls.append(max_tokens)
+            return LLMResult(text="תשובה [S1]", completion_tokens=999999)
+
+    agentic_request(_LLM(), "## JOB", lang="he", max_tokens=8000, token_budget=None)
+    assert calls == [8000], "with no budget the per-round cap is used as-is"

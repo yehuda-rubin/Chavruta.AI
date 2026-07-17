@@ -43,6 +43,10 @@ class LLMResult:
     # Sources the model pulled itself during agentic retrieval (===NEED_SOURCES===), in [S#] order.
     # Returned per-call (never stashed on the shared backend) so callers align citations race-free.
     fetched_sources: list = field(default_factory=list)
+    # Actual tokens billed for this call, when the backend reports them (the bridge does not).
+    # Lets the agentic loop enforce a CUMULATIVE budget on real numbers rather than an estimate.
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
 
 def render_messages(prompt: GroundedPrompt, lang: str) -> list[dict]:
@@ -102,7 +106,12 @@ class LLMBackend(Protocol):
         self, prompt: GroundedPrompt, *, lang: str, max_tokens: int, temperature: float
     ) -> Iterator[str]: ...
 
-    def request(self, body_md: str, *, lang: str = "he") -> tuple[str, list[SourceBlock]]:
+    def request(self, body_md: str, *, lang: str = "he",
+                token_budget: int | None = None) -> tuple[str, list[SourceBlock]]:
         """Answer a pre-formatted job (markdown) — the lesson/chavruta path — running the agentic
-        loop. Returns (answer, fetched_sources) so callers align citations without shared state."""
+        loop. Returns (answer, fetched_sources) so callers align citations without shared state.
+
+        token_budget caps TOTAL output tokens across all agentic rounds (None = uncapped). Backends
+        that don't bill tokens (bridge) may ignore it.
+        """
         ...

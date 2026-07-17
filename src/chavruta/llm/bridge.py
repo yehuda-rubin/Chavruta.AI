@@ -108,7 +108,11 @@ class BridgeLLM:
                temperature: float) -> Iterator[str]:
         yield self.generate(prompt, lang=lang, max_tokens=max_tokens, temperature=temperature).text
 
-    def request(self, body_md: str, *, lang: str = "he"):
+    def request(self, body_md: str, *, lang: str = "he", token_budget: int | None = None):
         """Low-level bridge: write an arbitrary already-formatted job (markdown) and return Claude's
-        (answer, fetched_sources). Used by the lesson / chavruta paths. Runs the agentic loop."""
+        (answer, fetched_sources). Used by the lesson / chavruta paths. Runs the agentic loop.
+
+        token_budget is accepted for interface parity and ignored: this backend answers in-session
+        and bills no tokens, so there is nothing to meter.
+        """
         return self._dispatch("# lesson job", body_md, lang)
