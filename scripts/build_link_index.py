@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """build_link_index.py — the on-disk connection table + link-coverage report (NO LLM API).
 
 Scrolls the 'chavruta' corpus once and writes an on-disk SQLite index mapping every chunk's

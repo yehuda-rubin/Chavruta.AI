@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """build_links_bulk.py — build the WHOLE link graph from Sefaria's bulk links export (NO API load).
 
 Far better than per-ref API calls: Sefaria publishes its entire links table as CSV in a public GCS

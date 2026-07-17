@@ -1,30 +1,37 @@
 # ===========================
 # Chavruta.AI — Dependencies
 # ===========================
+#
+# Pins are the versions the test suite and a live grounded query were actually verified against
+# (2026-07-17) — read off the working environment, not chosen by hand. The previous pins had drifted
+# from reality (e.g. this file claimed pytest 8.2.2 while 9.0.3 was what actually ran), which makes a
+# "pinned" file a false promise: nobody was reproducing the tested environment.
+#
+# Keep in sync with docker/requirements.endpoint.txt.
 
 # Embeddings (bge-m3, multilingual HE+EN — dense + learned sparse for hybrid retrieval)
-FlagEmbedding>=1.2.10
-sentence-transformers>=3.0.0
-numpy>=1.26
+FlagEmbedding==1.4.0
+sentence-transformers==5.5.1
+numpy==2.4.6
 
 # Vector store — Qdrant (embedded local / server)
-qdrant-client>=1.9
+qdrant-client==1.18.0
 
 # Corpus + dataset hosting (Sefaria API, Hugging Face Hub)
-requests==2.32.3
-huggingface_hub>=0.23
-tqdm==4.66.4
+requests==2.34.2
+huggingface_hub==1.16.1
+tqdm==4.67.3
 
-# Generation via the Nebius API (OpenAI-compatible Token Factory). The local Ollama/DictaLM backend
+# Generation via the cloud API (OpenAI-compatible Token Factory). The local Ollama/DictaLM backend
 # was removed; the only other backend (bridge) needs no extra dependency.
-openai>=1.30
+openai==2.41.1
 
 # API — the served product (app/api.py). Without these `uvicorn app.api:app` fails to import.
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
-pydantic==2.10.4
+fastapi==0.137.1
+uvicorn[standard]==0.48.0
+pydantic==2.13.4
 
 # Dev / config
-python-dotenv==1.0.1
-pytest==8.2.2
-ruff>=0.5.0
+python-dotenv==1.2.2
+pytest==9.0.3
+ruff==0.15.22

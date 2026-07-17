@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Run the 3 example שו"ת questions live (intent=halacha) and save the teshuvot.
 
     python scripts/make_sample_shut.py        # backend must be up on :8080

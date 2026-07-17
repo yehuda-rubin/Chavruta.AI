@@ -29,7 +29,7 @@ class EvaluationItem:
     note: str = ""
 
     @classmethod
-    def from_dict(cls, d: dict) -> "EvaluationItem":
+    def from_dict(cls, d: dict) -> EvaluationItem:
         return cls(
             qid=d["qid"], question=d["question"], lang=d.get("lang", "he"),
             expected_refs=d.get("expected_refs", []), intent=d.get("intent", "qa"),

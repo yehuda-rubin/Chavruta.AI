@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 
 from chavruta.corpus.refs import with_ref_variants
-from chavruta.corpus.schema import Query, UnitType
+from chavruta.corpus.schema import Query
 from chavruta.retrieval.base import RankedHit, RetrievalResult
 from chavruta.store.base import Filter, HybridQuery
 

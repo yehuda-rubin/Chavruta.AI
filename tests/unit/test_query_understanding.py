@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import pytest
 
+from chavruta.corpus.links import LinkGraph
 from chavruta.corpus.schema import Intent, Query
+from chavruta.generation.grounded import enforce_citations
 from chavruta.intents.hebrew_refs import detect_hebrew_refs, gematria
 from chavruta.intents.landmarks import resolve_landmarks
 from chavruta.intents.router import Router, retrieval_text
-from chavruta.corpus.links import LinkGraph
-from chavruta.generation.grounded import enforce_citations
 from chavruta.retrieval.base import RankedHit
 from chavruta.retrieval.hybrid import HybridRetriever
 

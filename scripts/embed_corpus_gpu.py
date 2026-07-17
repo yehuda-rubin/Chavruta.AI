@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """embed_corpus_gpu.py — GPU corpus embedding, dense + sparse (full hybrid, research D5).
 
 Why GPU: bge-m3 over 126k chunks ≈ 14h on CPU vs minutes-to-an-hour on a GPU

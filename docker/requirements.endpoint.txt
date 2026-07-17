@@ -1,10 +1,13 @@
-# Nebius Endpoint: RAG query service
-fastapi>=0.111
-uvicorn[standard]>=0.29
-pydantic>=2.7
-FlagEmbedding>=1.2
-torch>=2.2
-qdrant-client>=1.9
-openai>=1.30
-numpy>=1.26
-sentence-transformers>=3.0
+# Endpoint image: the RAG query service.
+# torch is NOT listed here on purpose — the Dockerfile installs it first from the CPU wheel index,
+# because the default PyPI wheel bundles the CUDA runtime (~2.5GB) this CPU-only image cannot use.
+# Pins are the versions the suite and a live grounded query were actually verified against
+# (2026-07-17), not guesses. Keep in sync with requirements.txt so dev and the image agree.
+fastapi==0.137.1
+uvicorn[standard]==0.48.0
+pydantic==2.13.4
+FlagEmbedding==1.4.0
+qdrant-client==1.18.0
+openai==2.41.1
+numpy==2.4.6
+sentence-transformers==5.5.1

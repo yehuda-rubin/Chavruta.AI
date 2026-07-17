@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """test_rag.py — end-to-end smoke test for the LOCAL RAG (retrieval local, LLM on Nebius).
 
 Runs REAL queries against the live local Qdrant and prints REAL results — it never asserts

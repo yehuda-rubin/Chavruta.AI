@@ -191,7 +191,7 @@ def enforce_citations(
 
     # Rebuild each bracket keeping only valid markers; drop wholly-fabricated brackets
     # (the model referenced a source that was never provided — must not stand).
-    def _clean_bracket(bm: "re.Match") -> str:
+    def _clean_bracket(bm: re.Match) -> str:
         nums = _SNUM_RE.findall(bm.group(1))
         if not nums:
             return bm.group(0)                       # not a citation bracket — leave as-is

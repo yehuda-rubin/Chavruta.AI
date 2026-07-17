@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Build the links graph (Phase 4, spec 002-query-understanding) → data/links.jsonl.
 
 Scrolls the Qdrant collection and registers a `commentary_ref ↔ anchor_ref` edge for

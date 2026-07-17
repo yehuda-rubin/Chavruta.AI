@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Diagnose the lesson opening-source retrieval (unit_type=source) for a topic."""
 import sys
 from pathlib import Path

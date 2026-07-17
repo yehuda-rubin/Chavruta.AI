@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """nebius_embed_halacha_standalone.py — self-contained GPU embedding job.
 
 The SIMPLE Nebius path: NO custom Docker image. A Serverless Job runs a public PyTorch

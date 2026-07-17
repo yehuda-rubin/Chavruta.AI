@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 train_lora.py — QLoRA fine-tune of Qwen3.5-4B on the mixed Hebrew+English Torah dataset.
 ─────────────────────────────────────────────────────────────────────────────
@@ -19,7 +18,6 @@ train_lora.py — QLoRA fine-tune of Qwen3.5-4B on the mixed Hebrew+English Tora
 """
 
 import argparse
-import json
 import os
 
 # ─────────────────────────────────────────────

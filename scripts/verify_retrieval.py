@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """verify_retrieval.py — direct RAG retrieval check (NO LLM API at all).
 
 Confirms the local Qdrant actually RETURNS relevant sources for real HE/EN questions,

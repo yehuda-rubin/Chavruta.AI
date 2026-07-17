@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """retrieve_sources.py — pull real sources from the local RAG for lesson building (NO LLM API).
 
 Given one or more queries (and optional work_id filter), runs bge-m3 hybrid search against the

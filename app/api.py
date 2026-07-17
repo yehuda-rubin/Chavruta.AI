@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Chavruta.AI — Nebius Serverless Endpoint (FastAPI).
 
 REST wrapper over ChavrutaPipeline for deployment as a Nebius Serverless Endpoint.
@@ -784,8 +783,8 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
     if intent_str:
         try:
             intent = Intent(intent_str)
-        except ValueError:
-            raise HTTPException(status_code=422, detail=f"unknown intent: {intent_str!r}")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"unknown intent: {intent_str!r}") from exc
 
     if intent == Intent.LESSON:            # lesson mode → Claude writes the 3 files, audience-adapted
         return _run_lesson(question, lang, history=history, audience=audience,

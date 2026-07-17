@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """fetch_full_dynamic.py — re-fetch Tanakh / Gemara / Mishnah from Sefaria with **every**
 commentary, discovered dynamically (not a hardcoded list), and replace the files on HF.
 

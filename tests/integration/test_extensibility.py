@@ -7,8 +7,6 @@ operation with no change to retrieval/ranking/generation code.
 
 from __future__ import annotations
 
-import pytest
-
 from chavruta.config.profile import Profile
 from chavruta.corpus.ingest import ingest_work
 from chavruta.corpus.registry import default_registry

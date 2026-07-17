@@ -1,6 +1,6 @@
-# -*- coding: utf-8 -*-
 """Is Mishnah Bava Metzia.1.1 even retrievable for its own opening words?"""
-import sys, unicodedata
+import sys
+import unicodedata
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 

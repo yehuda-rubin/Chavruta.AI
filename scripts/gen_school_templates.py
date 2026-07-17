@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """gen_school_templates.py — give EVERY lesson genre an age-differentiated (school) template ladder.
 
 For each of the existing lesson genres (general, gemara-iyun, halacha, parasha, moadim, tefila,

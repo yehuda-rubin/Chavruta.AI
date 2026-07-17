@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Backfill a nikud/ktiv-normalised `search_he` payload field + full-text index.
 
 No re-embedding: we only add a searchable text field (corpus.normalize.normalize_he

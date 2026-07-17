@@ -70,7 +70,7 @@ def make_pair(question: str, answer: str) -> dict:
 
 def convert(json_path: str, output_path: str):
     print(f"📖 קורא: {json_path}")
-    with open(json_path, "r", encoding="utf-8") as f:
+    with open(json_path, encoding="utf-8") as f:
         data = json.load(f)
 
     # קיבוץ chunks לפי verse_id
@@ -162,12 +162,12 @@ def convert(json_path: str, output_path: str):
     # סטטיסטיקה מלאה
     print(f"\n{'='*50}")
     print(f"✅ סה\"כ pairs: {len(pairs):,}")
-    print(f"\n📊 לפי סוג pair:")
+    print("\n📊 לפי סוג pair:")
     print(f"   📜 פסוקים:   {stats['pasuk']:,}")
     print(f"   📕 רש\"י:    {stats['rashi']:,}")
     print(f"   📗 רמב\"ן:   {stats['ramban']:,}")
     print(f"   ⚖️  השוואות: {stats['compare']:,}")
-    print(f"\n📊 כיסוי פסוקים:")
+    print("\n📊 כיסוי פסוקים:")
     total_v = sum(coverage.values())
     print(f"   פסוק בלי פירוש:    {coverage['pasuk_only']:,}  ({coverage['pasuk_only']/total_v*100:.1f}%)")
     print(f"   פסוק + רש\"י בלבד: {coverage['rashi_only']:,}  ({coverage['rashi_only']/total_v*100:.1f}%)")
@@ -184,6 +184,6 @@ def convert(json_path: str, output_path: str):
 if __name__ == "__main__":
     if not Path(INPUT_JSON).exists():
         print(f"❌ קובץ לא נמצא: {INPUT_JSON}")
-        print(f"   הרץ מתוך תיקיית הפרויקט CHAVRUTA.AI")
+        print("   הרץ מתוך תיקיית הפרויקט CHAVRUTA.AI")
     else:
         convert(INPUT_JSON, OUTPUT_JSONL)

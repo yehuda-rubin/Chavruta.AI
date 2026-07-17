@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """bootstrap_rag.py — download the prebuilt RAG and load it into a local Qdrant.
 
 This is the END-USER side of the distribution model (see specs/001-chavruta-redesign/plan.md

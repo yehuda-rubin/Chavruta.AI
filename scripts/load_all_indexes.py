@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """load_all_indexes.py — load all 15 prebuilt indexes from HF into the LOCAL Qdrant server.
 
 Everything local (Qdrant on localhost:6333, bge-m3 on CPU); only the LLM is remote (Nebius).

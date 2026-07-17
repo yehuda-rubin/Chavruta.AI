@@ -16,7 +16,7 @@ from pathlib import Path
 class RefIndex:
     def __init__(self, db_path: str | Path) -> None:
         self._db = sqlite3.connect(f"file:{Path(db_path)}?mode=ro", uri=True, check_same_thread=False)
-        self._has_cache: "OrderedDict[str, bool]" = OrderedDict()
+        self._has_cache: OrderedDict[str, bool] = OrderedDict()
         self._cap = 300_000
 
     def has(self, canon: str) -> bool:

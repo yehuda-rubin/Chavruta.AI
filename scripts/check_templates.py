@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """check_templates.py — validate EVERY lesson/shut template end to end (NO LLM API).
 
 For each template folder under lessons/templates/:

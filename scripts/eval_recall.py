@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Query-understanding recall gate (Phase 6, spec 002).
 
 Runs the router over a labelled set of indirect/analytical questions and checks that

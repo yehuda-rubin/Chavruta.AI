@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Diagnostic: what does the retriever actually return for the routed query (server mode)."""
 import sys
 from pathlib import Path

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Create keyword payload indexes on `ref` and `anchor_ref` for the Qdrant collection.
 
 Without these, link-based retrieval's `fetch_by_refs` scroll filter is a full scan of the whole

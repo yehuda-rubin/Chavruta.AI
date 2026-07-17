@@ -19,7 +19,6 @@ from chavruta.intents.router import (
     detect_requested_works,
 )
 
-
 # ── Tier 0-C: whole-word alias matching (COMMENTATOR / WORK) ──────────────────────
 # Bug: a bare substring test fired 'רשי' inside 'מפרשים' / 'שרשי', and 'משנה' inside
 # 'משנה תורה' / 'משנה ברורה'. Fixed with word-boundary matching + a one-hop prefix class
@@ -409,7 +408,7 @@ def _selffetch_pipeline(llm):
 
 
 def test_qa_empty_retrieval_selffetches_grounded():
-    from chavruta.corpus.schema import Query, Intent
+    from chavruta.corpus.schema import Intent, Query
     from chavruta.llm.base import SourceBlock
     src = SourceBlock(marker="", ref="Yoma 8.1", commentator_id=None, text="יום הכיפורים אסור באכילה")
 
@@ -430,7 +429,7 @@ def test_qa_empty_retrieval_selffetches_grounded():
 
 
 def test_qa_empty_retrieval_selffetch_fails_is_honest():
-    from chavruta.corpus.schema import Query, Intent
+    from chavruta.corpus.schema import Intent, Query
 
     class _LLM:
         profile = "cloud"; model_id = "fake"
@@ -518,7 +517,7 @@ def test_wrong_scope_falls_back_to_unscoped_semantic():
 # ── Tier0 (2026-07 audit): the agentic ===NEED_SOURCES=== loop is now backend-agnostic ───────────
 # It was a private method on BridgeLLM only; hoisted to chavruta.llm.agentic so cloud/local get it too.
 
-from chavruta.llm.agentic import run_agentic_loop, parse_need_sources  # noqa: E402
+from chavruta.llm.agentic import parse_need_sources, run_agentic_loop  # noqa: E402
 from chavruta.llm.base import SourceBlock  # noqa: E402
 
 
@@ -568,7 +567,7 @@ def test_agentic_loop_forces_answer_on_final_round():
 
 
 def test_is_degrade_message_detects_sentinels_and_empty():
-    from chavruta.llm.agentic import is_degrade_message, DEGRADE_MESSAGES
+    from chavruta.llm.agentic import DEGRADE_MESSAGES, is_degrade_message
     assert is_degrade_message("")                                   # empty ⇒ not a real answer
     assert is_degrade_message("   ")
     for m in DEGRADE_MESSAGES:

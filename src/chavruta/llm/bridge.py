@@ -28,7 +28,7 @@ from chavruta.llm.agentic import (  # noqa: F401 — re-exported for back-compat
     SOURCE_REQUEST_INSTRUCTION,
     run_agentic_loop,
 )
-from chavruta.llm.base import GroundedPrompt, LLMResult
+from chavruta.llm.base import GroundedPrompt, LLMResult, SourceBlock
 
 BRIDGE_DIR = Path(os.environ.get("CHAVRUTA_BRIDGE_DIR", "data/llm_bridge"))
 PENDING = BRIDGE_DIR / "pending"

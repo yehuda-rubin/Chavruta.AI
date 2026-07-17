@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """build_lesson.py — end-to-end lesson/teshuva assembler (NO LLM API).
 
 Ties the two retrieval layers of Chavruta.AI into one step:

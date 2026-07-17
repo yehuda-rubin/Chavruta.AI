@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """ingest_job.py — Nebius Serverless Job entrypoint (the RAG "factory").
 
 Builds the full prebuilt RAG index on a Nebius GPU Job and publishes it so anyone

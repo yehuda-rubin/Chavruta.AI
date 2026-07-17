@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Diagnose links-graph connectivity + link-expansion for the lesson sources."""
 import sys
 from pathlib import Path
@@ -37,5 +36,5 @@ if le is not None:
             print(f"\nexpand([{src!r}]) -> {len(hits)} hits")
             for h in hits[:5]:
                 print(f"   {h.score:.3f} {h.ref}")
-        except Exception as ex:
+        except Exception:
             import traceback; traceback.print_exc()

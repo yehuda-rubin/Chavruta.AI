@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pytest
-
 from chavruta.lessons.builder import build_lesson_from_template
 from chavruta.lessons.templates import SHUT_PATH, TemplateIndex, load_templates
 from chavruta.retrieval.base import RankedHit

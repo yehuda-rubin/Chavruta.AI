@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """retrieve_template.py — pick the lesson template that best fits a topic (NO LLM API).
 
 The "which template?" retrieval layer of Chavruta.AI. Given a lesson request (a topic or short

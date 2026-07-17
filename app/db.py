@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Chavruta.AI — SQLite persistence for chat sessions and messages."""
 
 from __future__ import annotations
@@ -9,7 +8,7 @@ import sqlite3
 import threading
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -159,7 +158,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
 def _seed_demo(conn: sqlite3.Connection) -> None:
     """Insert demo conversations into a brand-new database (called once, ever)."""
-    now_dt = datetime.now(timezone.utc)
+    now_dt = datetime.now(UTC)
 
     def _seed_session(sid: str, first_q: str, ts: datetime) -> None:
         conn.execute(
@@ -402,4 +401,4 @@ def delete_lesson(lesson_id: str) -> bool:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()

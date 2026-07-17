@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
 
 
 class UnitType(str, Enum):
@@ -73,9 +72,9 @@ class Chunk:
     # structural coordinates for ordering/anchoring (e.g. {"book": "Genesis", "chapter": 1, "verse": 3})
     position: dict = field(default_factory=dict)
     # commentary-only fields
-    anchor_ref: Optional[str] = None       # the ref this comments on (source OR another commentary)
-    anchor_kind: Optional[AnchorKind] = None
-    commentator_id: Optional[str] = None
+    anchor_ref: str | None = None       # the ref this comments on (source OR another commentary)
+    anchor_kind: AnchorKind | None = None
+    commentator_id: str | None = None
 
     def to_payload(self) -> dict:
         """Metadata stored alongside the vector (and returned on search hits)."""
@@ -126,7 +125,7 @@ class Citation:
     ref: str
     deep_link: str
     quote: str = ""
-    commentator_id: Optional[str] = None
+    commentator_id: str | None = None
 
 
 @dataclass
@@ -140,10 +139,10 @@ class Query:
     text: str
     lang: str = "he"
     intent: Intent = Intent.QA
-    work_ids: Optional[list[str]] = None         # corpus scoping; None = all loaded
-    commentator_ids: Optional[list[str]] = None  # named-commentator bias/filter
-    named_refs: Optional[list[str]] = None       # explicit verse refs detected in the question
-    requested_works: Optional[list[str]] = None  # works the question explicitly asks about
+    work_ids: list[str] | None = None         # corpus scoping; None = all loaded
+    commentator_ids: list[str] | None = None  # named-commentator bias/filter
+    named_refs: list[str] | None = None       # explicit verse refs detected in the question
+    requested_works: list[str] | None = None  # works the question explicitly asks about
     expand_links: bool = False                   # follow Link edges + anchor chains
     expand_depth: int = 1
     search_text: str = ""                        # text used for retrieval (trigger phrases like
@@ -176,4 +175,4 @@ class Answer:
     no_source: bool = False
     caveats: list[str] = field(default_factory=list)
     intent: Intent = Intent.QA
-    lesson_plan: Optional[LessonPlan] = None
+    lesson_plan: LessonPlan | None = None

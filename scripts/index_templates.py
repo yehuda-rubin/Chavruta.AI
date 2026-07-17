@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """index_templates.py — build the TEMPLATE RAG (NO LLM API).
 
 Embeds each lesson-template's manifest (title + description + when_to_use + keywords) with

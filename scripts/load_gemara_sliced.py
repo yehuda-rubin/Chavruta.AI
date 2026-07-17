@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """load_gemara_sliced.py — load the big gemara index into local Qdrant in small slices.
 
 gemara (711k×1024) loaded in one shot thrashes a 16GB box (Qdrant already holds ~2.2M points).

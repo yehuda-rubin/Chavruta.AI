@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """upload_links_hf.py — publish the link graph to the SAME HF account as the RAG index.
 
 The RAG ships as ``Yehuda-Rubin/chavruta-index-<category>`` datasets. The link graph is one global,

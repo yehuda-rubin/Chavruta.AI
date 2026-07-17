@@ -18,10 +18,28 @@ where = ["src"]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests", "scripts"]
+# Notebooks are exploratory build/embedding jobs, not the served product: they are run top-to-bottom
+# on Kaggle/Lightning, deliberately re-import per cell, and their import order is tuned to those
+# hosts. Linting them produces noise with no bearing on what ships.
+extend-exclude = ["notebooks", ".claude"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
-ignore = ["E501"]  # line length handled by formatter; long Hebrew strings are fine
+# E501: line length handled by the formatter; long Hebrew strings are fine.
+# The rest are pre-existing style in working, tested code (compact `a = 1; b = 2` lines in scripts,
+# `l`/`I` locals, zip() without strict=). Ruff had never been run despite being configured, so
+# turning it on found 288 of these at once. They are not defects, and rewriting them would bury a
+# security/cost diff in unrelated churn. Enforce the rules that catch REAL bugs (F821 undefined
+# names, F811 redefinitions, unused imports) and leave cosmetics to a dedicated pass.
+ignore = ["E501", "E702", "E701", "E741", "B905", "UP042", "E731", "B007"]
+
+[tool.ruff.lint.per-file-ignores]
+# LOAD-BEARING IMPORT ORDER — do not let isort "tidy" these.
+# On Windows, torch/FlagEmbedding must be imported before qdrant_client or pyarrow's DLL load order
+# segfaults the process. isort sorts alphabetically and would place `app.db` (and others) ahead of
+# `torch`, silently reintroducing a crash that looks like a random hang, not a lint change.
+"app/api.py" = ["I001", "E402"]
+"scripts/*.py" = ["I001", "E402"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

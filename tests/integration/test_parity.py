@@ -7,8 +7,6 @@ shared store with two pipelines whose profiles (and LLM backends) differ.
 
 from __future__ import annotations
 
-import pytest
-
 from chavruta.config.profile import Profile
 from chavruta.corpus.schema import AnchorKind, Chunk, Query, UnitType
 from chavruta.pipeline.pipeline import ChavrutaPipeline

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """run_eval.py — the trust gate (task T029, Principle V).
 
 Runs the evaluation harness over a versioned dataset and prints a reproducible report.

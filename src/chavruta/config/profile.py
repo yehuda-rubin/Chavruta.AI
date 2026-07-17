@@ -73,7 +73,7 @@ class Profile:
     extra: dict = field(default_factory=dict)
 
     @classmethod
-    def from_env(cls) -> "Profile":
+    def from_env(cls) -> Profile:
         """Resolve the active profile from environment variables.
 
         CHAVRUTA_PROFILE selects the preset (local/cloud); individual CHAVRUTA_* vars
