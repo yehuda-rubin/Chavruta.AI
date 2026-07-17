@@ -35,6 +35,19 @@ jobs:
         env:
           CHAVRUTA_LLM_BACKEND: bridge
 
+  secrets:
+    # A live HF write token was found sitting in .claude/settings.json during the 2026-07 audit. It
+    # had never reached git (that file is ignored), but nothing was checking — the audit found it by
+    # hand. This makes the check automatic and permanent.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # gitleaks scans history, not just the tip
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   package:
     # `pip install .` was never exercised, so an unbuildable package (no [build-system], no
     # dependencies, a version that couldn't resolve) would have shipped unnoticed.

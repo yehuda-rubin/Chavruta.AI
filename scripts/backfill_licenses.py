@@ -46,6 +46,13 @@ QDRANT = "http://localhost:6333"
 COLLECTION = "chavruta"
 STATE = ROOT / "data" / "license_backfill.json"     # {title: {"license_he":..., ...}} — the journal
 
+# The journal is keyed by the OUTPUT of index_title_of(). When that function changes, every cached
+# key is stale — and silently so: the run reuses wrong titles and reports them "unresolved" forever.
+# That happened once already (the first heuristic left our Hebrew display prefix on, so the journal
+# held entries like 'רש"י on Rashi on Shabbat' which Sefaria has never heard of). Bump this whenever
+# index_title_of changes; a mismatched journal is discarded rather than trusted.
+HEURISTIC_VERSION = 2
+
 
 # ── plumbing ─────────────────────────────────────────────────────────────────
 
@@ -106,12 +113,25 @@ def index_title_of(ref: str) -> str:
     return ref.replace("_", " ").strip(" .,")     # the dotted form URL-encodes spaces
 
 
-def distinct_titles() -> Counter:
-    """Walk every point's ref (payload only — no vectors) and count chunks per index title."""
+def scan_corpus() -> tuple[Counter, dict[str, list[str]]]:
+    """One pass over every point's ref → (chunks per title, point-ids per title).
+
+    Returns the ids, not just the counts, because the update has to address points BY ID.
+    The obvious alternative — set_payload with a `ref` filter per title — is a trap: `ref` carries a
+    KEYWORD index, so a `match: {text: ...}` filter is unindexed and full-scans all 2.93M points.
+    Measured at 60s PER TITLE against the live collection; 17,561 titles would take ~12 days.
+    Addressing points by id needs no filter and no scan.
+    """
+    # Page by Qdrant's own next_page_offset (a point id, resumed each page — NOT a numeric skip).
+    # This completes a full 2.93M scan when Qdrant is healthy. It degrades badly when the node is
+    # memory-starved (a 16gb-tier collection in a 7.6GB container): pages that normally take ~1s
+    # stretch to 40-90s and eventually 500. That is an OPS limit, not a paging bug — see the note in
+    # main(). Keep the page modest so a struggling node still makes progress.
     titles: Counter = Counter()
+    ids: dict[str, list[str]] = {}
     nxt, seen = None, 0
     while True:
-        body = {"limit": 5000, "with_payload": ["ref"], "with_vector": False}
+        body = {"limit": 4000, "with_payload": ["ref"], "with_vector": False}
         if nxt:
             body["offset"] = nxt
         res = _qdrant(f"/collections/{COLLECTION}/points/scroll", body)["result"]
@@ -119,13 +139,14 @@ def distinct_titles() -> Counter:
             t = index_title_of((p.get("payload") or {}).get("ref") or "")
             if t:
                 titles[t] += 1
+                ids.setdefault(t, []).append(p["id"])
             seen += 1
         nxt = res.get("next_page_offset")
         print(f"\r  scanned {seen:,} chunks → {len(titles):,} distinct titles", end="", flush=True)
         if not nxt:
             break
     print()
-    return titles
+    return titles, ids
 
 
 def rights_for(title: str) -> dict:
@@ -150,12 +171,30 @@ def rights_for(title: str) -> dict:
     return out
 
 
-def apply_to_qdrant(title: str, rights: dict) -> None:
-    """Stamp the rights onto every chunk of this title. Vectors untouched — payload only."""
-    _qdrant(f"/collections/{COLLECTION}/points/payload?wait=true", {
-        "payload": rights,
-        "filter": {"must": [{"key": "ref", "match": {"text": title}}]},
-    })
+def _save_journal(state: dict) -> None:
+    """Persist resolved titles, stamped with the heuristic that produced the keys."""
+    STATE.parent.mkdir(parents=True, exist_ok=True)
+    STATE.write_text(
+        json.dumps({"_heuristic_version": HEURISTIC_VERSION, "titles": state}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+_APPLY_BATCH = 2000
+
+
+def apply_to_qdrant(point_ids: list[str], rights: dict) -> None:
+    """Stamp the rights onto these exact points. Vectors untouched — payload only.
+
+    `wait=false`: the write is queued rather than fsynced per call. There is no read-after-write
+    dependency here (nothing reads a licence back mid-run), and waiting synchronously on every batch
+    was the difference between minutes and hours.
+    """
+    for i in range(0, len(point_ids), _APPLY_BATCH):
+        _qdrant(f"/collections/{COLLECTION}/points/payload?wait=false", {
+            "payload": rights,
+            "points": point_ids[i:i + _APPLY_BATCH],
+        })
 
 
 # ── main ─────────────────────────────────────────────────────────────────────
@@ -168,14 +207,24 @@ def main() -> int:
     ap.add_argument("--sleep", type=float, default=0.2, help="pause between Sefaria calls")
     args = ap.parse_args()
 
-    print("① counting distinct titles in the live collection…", flush=True)
-    titles = distinct_titles()
+    print("① scanning the live collection (one pass: titles + their point ids)…", flush=True)
+    titles, ids_by_title = scan_corpus()
     ordered = titles.most_common(args.titles or None)
     total_chunks = sum(titles.values())
     print(f"   {len(titles):,} titles over {total_chunks:,} chunks")
     print(f"   ~{len(ordered):,} Sefaria calls ≈ {len(ordered) * args.sleep / 60:.0f} min\n")
 
-    state = json.loads(STATE.read_text(encoding="utf-8")) if STATE.exists() else {}
+    # Load the journal only if it was written by THIS heuristic. A journal keyed by an older
+    # index_title_of() holds titles Sefaria has never heard of, and reusing it as a cache turns a
+    # fixed bug back into a permanent 'unresolved'.
+    state, journal = {}, {}
+    if STATE.exists():
+        journal = json.loads(STATE.read_text(encoding="utf-8"))
+        if journal.get("_heuristic_version") == HEURISTIC_VERSION:
+            state = journal.get("titles", {})
+        else:
+            print(f"   journal was written by heuristic v{journal.get('_heuristic_version')} "
+                  f"(now v{HEURISTIC_VERSION}) — discarding it and re-resolving\n")
     lic_counts: Counter = Counter()
     chunks_by_verdict: Counter = Counter()
     unresolved = 0
@@ -189,8 +238,7 @@ def main() -> int:
             state[title] = r
             time.sleep(args.sleep)
             if i % 50 == 0:
-                STATE.parent.mkdir(parents=True, exist_ok=True)
-                STATE.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+                _save_journal(state)
 
         lic = r.get("license_he") or r.get("license_en")
         if not any(r.values()):
@@ -201,12 +249,11 @@ def main() -> int:
         chunks_by_verdict[verdict] += n_chunks
 
         if not args.dry_run and any(r.values()):
-            apply_to_qdrant(title, r)
+            apply_to_qdrant(ids_by_title.get(title, []), r)
         print(f"\r  {i:,}/{len(ordered):,}  {title[:44]:44} {str(lic)[:22]:22}", end="", flush=True)
 
     print()
-    STATE.parent.mkdir(parents=True, exist_ok=True)
-    STATE.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+    _save_journal(state)
 
     print("\n③ what the corpus actually is\n")
     print(f"   {'licence':32} titles")

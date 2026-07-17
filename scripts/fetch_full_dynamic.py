@@ -119,7 +119,7 @@ def _get(url, params=None, retries=4):
     return None
 
 
-def fetch_text(ref):
+def fetch_text(ref, he_version: str | None = None, en_version: str | None = None):
     """GET /api/v3/texts/<ref> → (he_nested, en_nested, rights) or None.
 
     `rights` is {"he": {"license": ..., "version_title": ...}, "en": {...}} — read from the SAME
@@ -128,9 +128,17 @@ def fetch_text(ref):
     `version=hebrew` means "Sefaria's DEFAULT Hebrew edition", and for Talmud/Mishnah that default
     is the William Davidson Edition — CC-BY-NC, not CC0. Rights vary per (title, language, edition),
     so they must be captured per chunk. See src/chavruta/corpus/rights.py.
+
+    `he_version` / `en_version` name an EXACT edition (e.g. "Wikisource Talmud Bavli",
+    "Tanach with Nikkud") instead of accepting Sefaria's default. That is how a commercially
+    reproducible corpus is fetched — see docs/COMMERCIAL_CORPUS.md for which edition per tier.
+    A named edition that doesn't exist for a ref comes back empty rather than falling back to a
+    restricted one: silently substituting the default is exactly the bug this guards against.
     """
+    versions = [f"hebrew|{he_version}" if he_version else "hebrew",
+                f"english|{en_version}" if en_version else "english"]
     r = _get(f"{BASE}/api/v3/texts/{ref}",
-             params={"version": ["hebrew", "english"], "return_format": "text_only"})
+             params={"version": versions, "return_format": "text_only"})
     if not r:
         return None
     he = en = None
