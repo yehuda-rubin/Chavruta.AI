@@ -7,6 +7,27 @@ name = "chavruta"
 dynamic = ["version"]          # single source of truth: src/chavruta/__init__.py::__version__
 description = "A trustworthy Jewish-text study partner (RAG over the Jewish bookshelf)"
 requires-python = ">=3.11"
+# Declared, so `pip install .` yields something that imports. This table was empty, and both
+# Dockerfiles papered over it with `pip install -e . --no-deps` plus a parallel requirements file.
+# Ranges (not the pins in requirements.txt) because a library shouldn't dictate a consumer's
+# resolution — requirements.txt stays the pinned, reproducible set for running THIS app.
+dependencies = [
+    "FlagEmbedding>=1.3",
+    "sentence-transformers>=3.0",
+    "numpy>=1.26",
+    "qdrant-client>=1.12",
+    "requests>=2.32",
+    "huggingface_hub>=0.23",
+    "tqdm>=4.66",
+    "openai>=1.30",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "pydantic>=2.10",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.5"]
 
 [tool.setuptools.dynamic]
 version = {attr = "chavruta.__version__"}

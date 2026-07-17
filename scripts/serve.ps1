@@ -1,15 +1,17 @@
 # Chavruta.AI — launch the full local backend (hybrid retrieval).
+# Linux/macOS: use scripts/serve.sh, which mirrors this file.
 #
-#   1. Start the Qdrant server (holds the 449k-point hybrid index):
-#        docker compose --profile server up -d qdrant
+#   1. Start the Qdrant server (holds the 2.93M-point hybrid index):
+#        docker compose up -d qdrant
 #   2. Run this script:
 #        powershell -ExecutionPolicy Bypass -File scripts\serve.ps1
 #   3. Frontend (separate terminal):  cd app\frontend ; npm run dev
 #        → open http://localhost:5173
 #
-# Retrieval runs HYBRID (dense + sparse) against the Qdrant SERVER — embedded mode
-# cannot do hybrid at this scale. Generation uses Nebius (Llama-3.3-70B; the default
-# Qwen3 is a "thinking" model that returns empty content under a tight token budget).
+# Retrieval runs HYBRID (dense + sparse) against the Qdrant SERVER — embedded mode cannot do
+# hybrid at this scale. Generation uses the cloud API with Qwen3-235B-A22B-Instruct: a
+# NON-thinking instruct model, which is why it doesn't hit the empty-content problem the older
+# Qwen3 "thinking" models had under a tight token budget.
 
 $ErrorActionPreference = "Stop"
 Set-Location (Join-Path $PSScriptRoot "..")
@@ -37,5 +39,5 @@ $m = Select-String -Path .env -Pattern '^\s*NEBIUS_API_KEY=(.+)\s*$'
 if (-not $m) { throw "NEBIUS_API_KEY not found in .env" }
 $env:CHAVRUTA_LLM_API_KEY = $m.Matches[0].Groups[1].Value.Trim().Trim('"')
 
-Write-Host "Starting Chavruta backend on http://localhost:8080 (qdrant=server, hybrid, Llama-3.3-70B)..."
+Write-Host "Starting Chavruta backend on http://localhost:8080 (qdrant=server, hybrid, $env:CHAVRUTA_LLM_MODEL)..."
 & .\.venv\Scripts\python.exe -m uvicorn app.api:app --host 127.0.0.1 --port 8080

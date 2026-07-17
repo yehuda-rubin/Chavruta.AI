@@ -143,9 +143,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Origins are env-driven: the defaults are Vite's dev ports, which is right for local work and
+# useless for a real deployment — a hostname that isn't listed gets blocked in the browser. Behind
+# the compose nginx this doesn't fire at all (same-origin); it matters when the API is exposed
+# directly. Note CORS is a BROWSER policy, not access control: curl ignores it entirely, so this is
+# not a substitute for authentication.
+_CORS_ORIGINS = [o.strip() for o in os.environ.get(
+    "CHAVRUTA_CORS_ORIGINS", "http://localhost:5173,http://localhost:4173").split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:4173"],
+    allow_origins=_CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )

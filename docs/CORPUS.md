@@ -76,15 +76,38 @@
 
 ---
 
-## 4. היקף (Scale)
+## 4. היקף (Scale) — מספרים אמיתיים, נמדדו 2026-07-17
+
+**האינדקס החי:** 2,930,332 נקודות · 15 שכבות · **23.11GB על הדיסק**.
 
 | | תנ"ך (מאומת) | כלל הבית מדרש |
 |---|---|---|
 | פסוקים/קטעי-בסיס | 23,206 | מאות אלפים (לפי קטגוריה) |
-| chunks | **126,738** | ההלכה לבדה ~594K; אינדקס חי ~449K נקודות |
+| chunks | 126,738 | **2,930,332 באינדקס החי** (ההלכה לבדה ~594K) |
+| כותרות Sefaria ייחודיות | — | **17,561** |
 
-הטמעת קורפוס בסדר גודל כזה = **Nebius embedding job** (חד-פעמי, pay-per-use) לכל קטגוריה.
-מקומית ניתן להטמיע בהדרגה (קטגוריה-קטגוריה) על ה-CPU.
+### ⚠️ מה נדרש כדי לטעון את זה — קרא לפני שאתה מתחיל
+
+הקורפוס **לא כלול בריפו ולא יורד אוטומטית**. `docker compose up` נותן Qdrant **ריק**;
+`/ready` יחזיר 503 עם הסיבה עד שתטען.
+
+| משאב | כמה | הערה |
+|------|-----|------|
+| **דיסק — האינדקס הסופי** | **~23GB** | נמדד על ה-volume החי (`qdrant_storage`) |
+| **דיסק — בזמן הטעינה** | **+~20GB זמני** | `load_all_indexes.py` מוחק כל שכבה אחרי טעינתה כדי לפנות מקום לבאה — אל תסמוך על כך שיש לך רק 23GB פנויים |
+| **הורדה** | **~20GB+** | מ-HuggingFace, פרוס על 15 מאגרים |
+| **RAM** | **~16GB** (ברירת מחדל) | נשלט ב-`CHAVRUTA_MEM_TIER` — ראה `store/qdrant_store.py`: `16gb` / `32gb` / `max` |
+| **זמן** | **שעות** | תלוי ברוחב פס; הטעינה **ניתנת להמשך** אחרי הפסקה |
+
+**מבנה הווקטורים:** `dense` (1024 ממדים, Cosine, `on_disk=true`) + `sparse` — 6,113,687 וקטורים
+מאונדקסים. אין קוונטיזציה כרגע; הפעלתה תקטין RAM על חשבון דיוק.
+
+הטמעת קורפוס בסדר גודל כזה = **embedding job על GPU** (חד-פעמי, pay-per-use) לכל קטגוריה —
+ראה `nebius/job.yaml` (~45-90 דק' על H100, ~$1-2). מקומית ניתן להטמיע בהדרגה על ה-CPU,
+אבל זה איטי מאוד בקנה המידה הזה.
+
+**אחרי הטעינה — שלב חובה:** `python scripts/create_payload_indexes.py`.
+בלעדיו העיגון לפי ref נסרק במלואו ונתקע ב-timeout. ראה סעיף 7.
 
 ---
 
@@ -180,3 +203,51 @@ to its corpus opening ref so explicit dapim, first-daf landmarks, and the perek 
 ref, in the corpus format above). `intents/landmarks.py` then resolves `פרק <ordinal|gematria|digit>
 ב<מסכת>` → that ref. **Rebuild the JSON (`python scripts/build_talmud_perek_index.py`) if the corpus
 ingest convention or Sefaria's perek structure changes.**
+
+---
+
+## 8. ⚠️ רישוי — הקורפוס אינו CC0
+
+**אומת חי מול ה-API של Sefaria, 2026-07-17.** עד לתאריך זה `registry.py` הצהיר
+`license="CC0 / Sefaria"` על **כל** הקורפוס. **זה היה שגוי.**
+
+### המבנה שחייבים להפנים
+Sefaria **לא** מרשה את הקורפוס ברישיון אחד. `Sefaria-Export/LICENSE.md` אומר זאת במפורש:
+*"Each text is licensed separately... You can find the license for each text in their JSON versions
+under the `license` field."*
+
+**רישיון הוא פונקציה של `(title, language, versionTitle)`** — לא של היצירה, לא של המחבר,
+ו**לא של ה-`work_id` שלנו**. אין שום חפיפה בין השכבות שלנו לגבולות הרישוי:
+
+| טקסט | רישיון אמיתי |
+|------|---------------|
+| **Berakhot** (תלמוד, ברירת המחדל = William Davidson) | **CC-BY-NC** — בעברית **וגם** באנגלית |
+| Berakhot — מהדורת A. Cohen, Cambridge | Public Domain ← **חלופה קיימת** |
+| **Steinsaltz on Mishneh Torah** | **`Copyright: Steinsaltz Center`** — אין היתר CC כלל |
+| **Peninei Halakhah, Berakhot** | **CC-BY-NC** (עברית) / **CC0** (אנגלית) ← אותה יצירה, שני רישיונות |
+| רש"י, ביאור הגר"א, בית יוסף, כף החיים | Public Domain |
+
+### מה זה אומר
+- **שימוש חינמי / אישי / הוראה** — מותר. CC-BY-NC מתיר בדיוק את זה.
+- **מוצר בתשלום שמשכפל טקסט NC** — **הפרה.** הניסוח של Creative Commons עצמם:
+  *"charging for access may not be permitted with NC-licensed material."*
+  NC חל על **השימוש**, לא על זהות המשתמש.
+- **"unknown" או שדה חסר = כל הזכויות שמורות.** Sefaria עצמם לא אימתו את מעמדם.
+
+### איך זה נאכף בקוד
+- `src/chavruta/corpus/rights.py` — **המקום היחיד** שמסווג רישיון. **נכשל סגור:** כל מה שלא
+  ניתן במפורש (PD / CC0 / CC-BY / CC-BY-SA) הוא "אסור מסחרית".
+- `Chunk` / `RankedHit` / `CitationOut` נושאים `license` + `version_title`, **per שפה**.
+- `fetch_full_dynamic.py` תופס אותם מהתשובה של Sefaria (הם תמיד היו שם — פשוט נזרקו).
+- `scripts/backfill_licenses.py` מטביע אותם על הקורפוס החי דרך `set_payload` — **בלי embedding מחדש**
+  (רישיון הוא metadata, לא משמעות; אף ווקטור לא משתנה).
+- גיליון המקורות נותן ייחוס **TASL** (כותרת · מהדורה · מקור · רישיון) היכן שהרישיון דורש.
+  ייחוס גנרי ל-"Sefaria" **אינו** מספיק ליצירת CC-BY של מתרגם או מו״ל ספציפי.
+
+### לא נעשה — במודע
+**החלפת טקסט NC במהדורות ה-PD שקיימות לצדו.** דורש שליפה מחדש עם `version=` מפורש
++ embedding מחדש של אותן שכבות (עבודת GPU). נדחה בהחלטה.
+
+> **לפני גביית כסף — ייעוץ משפטי.** לא נמצא שום תקדים של מוצר בתשלום על קורפוס Sefaria;
+> כל האפליקציות ב-"Powered by Sefaria" שנבדקו הן חינמיות. `sefaria.org/terms` הוא SPA ולא ניתן
+> לקריאה אוטומטית — **צריך שאדם יקרא אותו בדפדפן.**
