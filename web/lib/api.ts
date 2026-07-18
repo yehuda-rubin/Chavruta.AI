@@ -109,4 +109,15 @@ export const api = {
   deleteLesson: (id: string) => req<void>(`/lessons/${id}`, { method: "DELETE" }),
 
   ready: () => req<{ status: string; points?: number; reason?: string }>("/ready"),
+  me: () => req<Me>("/me"),
 };
+
+// Account + today's free-tier quota (GET /me). daily_quota / remaining are null when unlimited
+// (the local user, or quota disabled) — the UI then shows no counter.
+export interface Me {
+  owner: string;
+  authenticated: boolean;
+  daily_quota: number | null;
+  used_today: number;
+  remaining: number | null;
+}

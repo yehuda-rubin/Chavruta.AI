@@ -6,11 +6,13 @@ import { Icon } from "./Icon";
 export function Header({
   lang,
   theme,
+  remaining,
   onToggleLang,
   onToggleTheme,
 }: {
   lang: Lang;
   theme: "light" | "dark";
+  remaining?: number | null;   // free-tier questions left today; null/undefined = unlimited (no pill)
   onToggleLang: () => void;
   onToggleTheme: () => void;
 }) {
@@ -23,6 +25,17 @@ export function Header({
         <h1 className="font-serif text-2xl font-bold text-tekhelet">{tr(lang, "brand")}</h1>
       </div>
       <div className="flex items-center gap-2">
+        {typeof remaining === "number" && (
+          <span
+            className={
+              "px-3 py-1.5 rounded-full glass text-xs font-semibold " +
+              (remaining === 0 ? "text-red-500" : "text-ink/60")
+            }
+            title={tr(lang, "remainingToday")}
+          >
+            {remaining} {tr(lang, "remainingToday")}
+          </span>
+        )}
         <button
           onClick={onToggleLang}
           className="px-4 py-2 rounded-full glass text-ink/70 text-sm"

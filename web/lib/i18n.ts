@@ -115,6 +115,7 @@ export const STRINGS = {
     authCheckEmail: "שלחנו לך אימייל לאישור החשבון. בדוק את תיבת הדואר.",
     authGenericError: "אירעה שגיאה. נסה שוב.",
     account: "החשבון שלי",
+    remainingToday: "נותרו היום",
   },
   en: {
     brand: "Chavruta",
@@ -220,6 +221,7 @@ export const STRINGS = {
     authCheckEmail: "We sent you a confirmation email. Please check your inbox.",
     authGenericError: "Something went wrong. Please try again.",
     account: "My account",
+    remainingToday: "left today",
   },
 } as const;
 

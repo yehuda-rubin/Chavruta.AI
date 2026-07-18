@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import type { Attachment, FileOut, Lang, Message, SavedLesson, Session } from "@/lib/types";
-import { api, LessonExtras } from "@/lib/api";
+import { api, LessonExtras, Me } from "@/lib/api";
 import { IntentId } from "@/lib/i18n";
 import { tr } from "@/lib/i18n";
 import { LessonFields } from "@/components/LessonOptions";
@@ -30,6 +30,7 @@ export default function Home() {
   const [userSources, setUserSources] = useState<Attachment[]>([]);
   const [subtitle, setSubtitle] = useState("");
   const [previewFile, setPreviewFile] = useState<FileOut | null>(null);
+  const [me, setMe] = useState<Me | null>(null);
 
   // Preferences (persisted)
   const [theme, setTheme] = useState<Theme>("light");
@@ -88,6 +89,18 @@ export default function Home() {
       /* backend down in dev — shell still renders */
     }
   }, []);
+
+  // Account + remaining daily quota (for the header pill). Refreshed on sign-in and after each turn.
+  const refreshMe = useCallback(async () => {
+    try {
+      setMe(await api.me());
+    } catch {
+      /* ignore — no quota pill shown */
+    }
+  }, []);
+  useEffect(() => {
+    refreshMe();
+  }, [refreshMe, auth.user?.id]);
   // Re-fetch when the signed-in user changes too: after sign-in the bearer token is now set, so the
   // list (which 401'd while signed out in Supabase mode) can load. auth.user?.id is null in local mode
   // so this runs exactly once there — unchanged.
@@ -178,9 +191,10 @@ export default function Home() {
         ]);
       } finally {
         setLoading(false);
+        refreshMe(); // update the remaining-quota pill (incl. after a 429)
       }
     },
-    [activeId, intent, lang, lessonFields, userSources, refreshSessions],
+    [activeId, intent, lang, lessonFields, userSources, refreshSessions, refreshMe],
   );
 
   // Auth gate (Supabase mode only). While the initial session check runs, show a minimal splash;
@@ -197,6 +211,7 @@ export default function Home() {
       <Header
         lang={lang}
         theme={effectiveDark ? "dark" : "light"}
+        remaining={me?.remaining ?? null}
         onToggleLang={() => setLang((l) => (l === "he" ? "en" : "he"))}
         onToggleTheme={() => setTheme(effectiveDark ? "light" : "dark")}
       />
