@@ -12,7 +12,8 @@ import { SourcesPanel } from "@/components/SourcesPanel";
 import { Rail } from "@/components/Rail";
 import { AddSourceModal } from "@/components/AddSourceModal";
 import { LessonsModal } from "@/components/LessonsModal";
-import { SettingsModal } from "@/components/SettingsModal";
+import { SettingsModal, Theme } from "@/components/SettingsModal";
+import { SupportModal } from "@/components/SupportModal";
 
 export default function Home() {
   const [lang, setLang] = useState<Lang>("he");
@@ -25,7 +26,7 @@ export default function Home() {
   const [userSources, setUserSources] = useState<Attachment[]>([]);
 
   // Preferences (persisted)
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [theme, setTheme] = useState<Theme>("light");
   const [defaultIntent, setDefaultIntent] = useState<IntentId>("lesson");
   const [srcDefaultOpen, setSrcDefaultOpen] = useState(false);
 
@@ -35,28 +36,38 @@ export default function Home() {
   const [showAddSource, setShowAddSource] = useState(false);
   const [showLessons, setShowLessons] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showSupport, setShowSupport] = useState(false);
+  const [systemDark, setSystemDark] = useState(false);
+  const effectiveDark = theme === "dark" || (theme === "auto" && systemDark);
 
   const locked = !!activeId && messages.length > 0;
 
-  // Load persisted prefs once.
+  // Load persisted prefs once + watch the system theme (for "auto").
   useEffect(() => {
     const g = (k: string) => localStorage.getItem(k);
-    const t = (g("chavruta-theme") as "light" | "dark") || "light";
-    setTheme(t);
+    setTheme((g("chavruta-theme") as Theme) || "light");
     const di = (g("chavruta-default-intent") as IntentId) || "lesson";
     setDefaultIntent(di);
     setIntent(di);
     setSrcDefaultOpen(g("chavruta-src-open") === "1");
+    const saveLang = g("chavruta-lang") as Lang | null;
+    if (saveLang) setLang(saveLang);
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    setSystemDark(mq.matches);
+    const onMq = (e: MediaQueryListEvent) => setSystemDark(e.matches);
+    mq.addEventListener("change", onMq);
+    return () => mq.removeEventListener("change", onMq);
   }, []);
 
   useEffect(() => {
     document.documentElement.lang = lang;
     document.documentElement.dir = lang === "he" ? "rtl" : "ltr";
+    localStorage.setItem("chavruta-lang", lang);
   }, [lang]);
   useEffect(() => {
-    document.body.classList.toggle("theme-dark", theme === "dark");
+    document.body.classList.toggle("theme-dark", effectiveDark);
     localStorage.setItem("chavruta-theme", theme);
-  }, [theme]);
+  }, [theme, effectiveDark]);
   useEffect(() => {
     localStorage.setItem("chavruta-default-intent", defaultIntent);
   }, [defaultIntent]);
@@ -103,6 +114,14 @@ export default function Home() {
     },
     [activeId, newDiscussion, refreshSessions],
   );
+
+  const clearHistory = useCallback(async () => {
+    const ids = sessions.map((s) => s.id);
+    await Promise.allSettled(ids.map((id) => api.deleteSession(id)));
+    setShowSettings(false);
+    newDiscussion();
+    refreshSessions();
+  }, [sessions, newDiscussion, refreshSessions]);
 
   const openLesson = useCallback((l: SavedLesson) => {
     setShowLessons(false);
@@ -151,9 +170,9 @@ export default function Home() {
     <div className="flex flex-col h-screen">
       <Header
         lang={lang}
-        theme={theme}
+        theme={effectiveDark ? "dark" : "light"}
         onToggleLang={() => setLang((l) => (l === "he" ? "en" : "he"))}
-        onToggleTheme={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
+        onToggleTheme={() => setTheme(effectiveDark ? "light" : "dark")}
       />
       <div className="flex flex-1 overflow-hidden px-4 pb-4 gap-4">
         {sessionsCollapsed ? (
@@ -186,6 +205,7 @@ export default function Home() {
             onCollapse={() => setSessionsCollapsed(true)}
             onOpenLessons={() => setShowLessons(true)}
             onOpenSettings={() => setShowSettings(true)}
+            onOpenSupport={() => setShowSupport(true)}
           />
         )}
 
@@ -231,10 +251,13 @@ export default function Home() {
         defaultIntent={defaultIntent}
         srcDefaultOpen={srcDefaultOpen}
         onClose={() => setShowSettings(false)}
+        onLang={setLang}
         onTheme={setTheme}
         onDefaultIntent={setDefaultIntent}
         onSrcDefaultOpen={setSrcDefaultOpen}
+        onClearHistory={clearHistory}
       />
+      <SupportModal open={showSupport} lang={lang} onClose={() => setShowSupport(false)} />
     </div>
   );
 }

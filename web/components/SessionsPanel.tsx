@@ -13,6 +13,7 @@ export function SessionsPanel({
   onCollapse,
   onOpenLessons,
   onOpenSettings,
+  onOpenSupport,
 }: {
   lang: Lang;
   sessions: Session[];
@@ -23,6 +24,7 @@ export function SessionsPanel({
   onCollapse: () => void;
   onOpenLessons: () => void;
   onOpenSettings: () => void;
+  onOpenSupport: () => void;
 }) {
   return (
     <aside className="w-72 shrink-0 glass rounded-[28px] p-4 flex flex-col">
@@ -87,6 +89,13 @@ export function SessionsPanel({
         >
           <Icon name="settings" className="text-[19px]" />
           <span>{tr(lang, "settingsTitle")}</span>
+        </button>
+        <button
+          onClick={onOpenSupport}
+          className="w-full px-4 py-2.5 rounded-2xl glass text-ink/70 font-semibold text-sm hover:bg-white/60 hover:text-tekhelet transition flex items-center gap-2 cursor-pointer"
+        >
+          <Icon name="help" className="text-[19px]" />
+          <span>{tr(lang, "supportTitle")}</span>
         </button>
       </div>
     </aside>

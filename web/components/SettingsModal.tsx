@@ -1,17 +1,55 @@
 "use client";
 import type { Lang } from "@/lib/types";
-import { INTENTS, IntentId, tr, StringKey } from "@/lib/i18n";
+import { IntentId, tr, StringKey } from "@/lib/i18n";
 import { Modal } from "./Modal";
 
-const MODE_KEY: Record<IntentId, StringKey> = {
-  lesson: "lesson",
-  explain: "explain",
-  qa: "qa",
-  shut: "shutMode",
-  chavruta: "chavrutaMode",
-};
+export type Theme = "light" | "dark" | "auto";
 
-// Settings — theme, default mode, and whether source cards open by default. Matches the static UI.
+// Default-mode options match the static UI (lesson / explain / qa / shut).
+const MODES: { id: IntentId; key: StringKey }[] = [
+  { id: "lesson", key: "lesson" },
+  { id: "explain", key: "explain" },
+  { id: "qa", key: "qa" },
+  { id: "shut", key: "shutMode" },
+];
+
+function Seg<T extends string>({
+  value,
+  options,
+  onPick,
+  wrap,
+}: {
+  value: T;
+  options: { v: T; label: string }[];
+  onPick: (v: T) => void;
+  wrap?: boolean;
+}) {
+  return (
+    <div className={`flex bg-white/50 rounded-2xl p-1 text-sm font-semibold gap-1 ${wrap ? "flex-wrap" : ""}`}>
+      {options.map((o) => (
+        <button
+          key={o.v}
+          onClick={() => onPick(o.v)}
+          className={"flex-1 px-3 py-1.5 rounded-full transition " + (value === o.v ? "grad text-white" : "text-ink/60 hover:text-tekhelet")}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label className="text-xs font-bold text-ink/55">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+// Settings — full parity with the static UI: interface language, default mode, theme (light/dark/
+// auto), sources default (collapsed/expanded), clear history, and an about/version footer.
 export function SettingsModal({
   open,
   lang,
@@ -19,59 +57,82 @@ export function SettingsModal({
   defaultIntent,
   srcDefaultOpen,
   onClose,
+  onLang,
   onTheme,
   onDefaultIntent,
   onSrcDefaultOpen,
+  onClearHistory,
 }: {
   open: boolean;
   lang: Lang;
-  theme: "light" | "dark";
+  theme: Theme;
   defaultIntent: IntentId;
   srcDefaultOpen: boolean;
   onClose: () => void;
-  onTheme: (t: "light" | "dark") => void;
+  onLang: (l: Lang) => void;
+  onTheme: (t: Theme) => void;
   onDefaultIntent: (i: IntentId) => void;
   onSrcDefaultOpen: (v: boolean) => void;
+  onClearHistory: () => void;
 }) {
-  const seg = (active: boolean) =>
-    "px-3 py-1.5 rounded-full text-sm font-semibold transition " + (active ? "grad text-white" : "text-ink/60 hover:text-tekhelet");
-
   return (
     <Modal open={open} title={tr(lang, "settingsHeading")} onClose={onClose}>
-      <div className="flex flex-col gap-5">
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-sm font-semibold text-ink/70">{tr(lang, "theme")}</span>
-          <div className="flex bg-white/50 rounded-full p-1">
-            <button className={seg(theme === "light")} onClick={() => onTheme("light")}>
-              {tr(lang, "themeLight")}
-            </button>
-            <button className={seg(theme === "dark")} onClick={() => onTheme("dark")}>
-              {tr(lang, "themeDark")}
-            </button>
-          </div>
-        </div>
+      <div className="flex flex-col gap-4 overflow-y-auto">
+        <Field label={tr(lang, "setLanguage")}>
+          <Seg<Lang>
+            value={lang}
+            onPick={onLang}
+            options={[
+              { v: "he", label: "עברית" },
+              { v: "en", label: "English" },
+            ]}
+          />
+        </Field>
 
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-sm font-semibold text-ink/70">{tr(lang, "defaultMode")}</span>
-          <div className="flex flex-wrap justify-end gap-1 bg-white/50 rounded-2xl p-1">
-            {INTENTS.map((i) => (
-              <button key={i} className={seg(defaultIntent === i)} onClick={() => onDefaultIntent(i)}>
-                {tr(lang, MODE_KEY[i])}
-              </button>
-            ))}
-          </div>
-        </div>
+        <Field label={tr(lang, "setDefaultMode")}>
+          <Seg<IntentId>
+            value={defaultIntent}
+            onPick={onDefaultIntent}
+            wrap
+            options={MODES.map((m) => ({ v: m.id, label: tr(lang, m.key) }))}
+          />
+        </Field>
 
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-sm font-semibold text-ink/70">{tr(lang, "sourcesDefaultOpen")}</span>
-          <div className="flex bg-white/50 rounded-full p-1">
-            <button className={seg(srcDefaultOpen)} onClick={() => onSrcDefaultOpen(true)}>
-              {tr(lang, "on")}
-            </button>
-            <button className={seg(!srcDefaultOpen)} onClick={() => onSrcDefaultOpen(false)}>
-              {tr(lang, "off")}
-            </button>
-          </div>
+        <Field label={tr(lang, "setTheme")}>
+          <Seg<Theme>
+            value={theme}
+            onPick={onTheme}
+            options={[
+              { v: "light", label: tr(lang, "themeLight") },
+              { v: "dark", label: tr(lang, "themeDark") },
+              { v: "auto", label: tr(lang, "themeAuto") },
+            ]}
+          />
+        </Field>
+
+        <Field label={tr(lang, "setSourcesDefault")}>
+          <Seg<"collapsed" | "expanded">
+            value={srcDefaultOpen ? "expanded" : "collapsed"}
+            onPick={(v) => onSrcDefaultOpen(v === "expanded")}
+            options={[
+              { v: "collapsed", label: tr(lang, "srcCollapsed") },
+              { v: "expanded", label: tr(lang, "srcExpanded") },
+            ]}
+          />
+        </Field>
+
+        <Field label={tr(lang, "setHistory")}>
+          <button
+            onClick={onClearHistory}
+            className="w-full py-2.5 rounded-2xl glass text-red-500 font-semibold text-sm hover:bg-red-500/10 transition"
+          >
+            {tr(lang, "clearAll")}
+          </button>
+        </Field>
+
+        <div className="pt-3 border-t border-white/60">
+          <p className="text-xs text-ink/55 leading-relaxed">{tr(lang, "aboutText")}</p>
+          <p className="text-[11px] text-ink/40 mt-1">{tr(lang, "appVersion")}</p>
         </div>
       </div>
     </Modal>
