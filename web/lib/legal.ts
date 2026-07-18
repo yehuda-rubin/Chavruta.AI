@@ -32,8 +32,10 @@ const HE: Section[] = [
     body: "השירות עשוי לכלול תוכנית חינמית עם מכסה יומית, ותוכניות בתשלום. אנו רשאים לשנות מכסות, מחירים ותכונות מעת לעת, בהודעה סבירה." },
   { heading: "שינויים בתנאים",
     body: "אנו רשאים לעדכן תנאים אלה. המשך השימוש לאחר עדכון מהווה הסכמה לתנאים המעודכנים; הגרסה העדכנית תוצג תמיד בשירות." },
+  { heading: "דין וסמכות שיפוט",
+    body: "על תנאים אלה יחול דין מדינת ישראל, וסמכות השיפוט הבלעדית תהיה של בתי המשפט המוסמכים במדינת ישראל." },
   { heading: "יצירת קשר",
-    body: "לשאלות בנוגע לתנאים אלה: rubinyehuda8@gmail.com" },
+    body: "השירות מופעל על ידי יהודה רובין. לשאלות בנוגע לתנאים אלה: rubinyehuda8@gmail.com" },
 ];
 
 const EN: Section[] = [
@@ -57,8 +59,10 @@ const EN: Section[] = [
     body: "The Service may include a free plan with a daily quota, and paid plans. We may change quotas, prices and features from time to time, with reasonable notice." },
   { heading: "Changes to These Terms",
     body: "We may update these terms. Continued use after an update constitutes acceptance; the current version is always shown in the Service." },
+  { heading: "Governing Law and Jurisdiction",
+    body: "These terms are governed by the law of the State of Israel, and the exclusive jurisdiction shall be the competent courts of the State of Israel." },
   { heading: "Contact",
-    body: "Questions about these terms: rubinyehuda8@gmail.com" },
+    body: "The Service is operated by Yehuda Rubin. Questions about these terms: rubinyehuda8@gmail.com" },
 ];
 
 export function termsSections(lang: Lang): Section[] {

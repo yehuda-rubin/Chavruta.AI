@@ -1,6 +1,6 @@
 <!--
-  Privacy Policy — DRAFT. To be reviewed by legal counsel before going live.
-  Fill the placeholders: [Operator name], [jurisdiction].
+  Privacy Policy — recommended for legal review before going live.
+  Operator: Yehuda Rubin · Jurisdiction: State of Israel.
   The in-app version is rendered from the same content (web/lib/legal.ts) — update both together.
 -->
 
@@ -8,7 +8,7 @@
 
 **Version 1.0 · Effective 18 July 2026**
 
-This policy explains what information Chavruta AI (the "Service", operated by [Operator name])
+This policy explains what information Chavruta AI (the "Service", operated by Yehuda Rubin)
 collects, how it is used, and your rights. Using the Service constitutes acceptance of this policy.
 
 ## 1. What We Collect

@@ -1,6 +1,6 @@
 <!--
-  Terms of Use — DRAFT. To be reviewed by legal counsel before going live.
-  Fill the placeholders: [Operator name], [jurisdiction], contact address.
+  Terms of Use — recommended for legal review before going live.
+  Operator: Yehuda Rubin · Jurisdiction: State of Israel.
   The in-app version is rendered from the same content (web/lib/legal.ts) — update both together.
 -->
 
@@ -8,7 +8,7 @@
 
 **Version 1.0 · Effective 18 July 2026**
 
-Welcome to Chavruta AI (the "Service"). The Service is operated by [Operator name] ("we"). Using the
+Welcome to Chavruta AI (the "Service"). The Service is operated by Yehuda Rubin ("we"). Using the
 Service, including registering for it, constitutes acceptance of these terms. If you do not agree, do
 not use the Service.
 
@@ -63,8 +63,8 @@ We may update these terms. Continued use after an update constitutes acceptance 
 The current version is always shown in the Service.
 
 ## 11. Governing Law and Jurisdiction
-These terms are governed by the law of [jurisdiction], and the exclusive jurisdiction shall be the
-competent courts of [jurisdiction].
+These terms are governed by the law of the State of Israel, and the exclusive jurisdiction shall be the
+competent courts of the State of Israel.
 
 ## 12. Contact
 Questions about these terms: rubinyehuda8@gmail.com
