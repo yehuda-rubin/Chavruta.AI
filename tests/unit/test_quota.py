@@ -55,5 +55,37 @@ def test_usage_today_zero_when_none(fresh_db):
     assert fresh_db.usage_today("never-seen") == 0
 
 
+def test_quota_resets_next_day(fresh_db):
+    for _ in range(3):
+        assert fresh_db.bump_usage("d", 3, day="2026-07-18")[0]
+    assert not fresh_db.bump_usage("d", 3, day="2026-07-18")[0]   # day 1 capped
+    assert fresh_db.bump_usage("d", 3, day="2026-07-19")[0]       # new day → fresh allowance
+    assert fresh_db.usage_today("d", day="2026-07-19") == 1
+
+
+def test_no_overshoot_under_concurrency(fresh_db):
+    """N threads hammer the same owner at once — the atomic read-and-increment must let exactly
+    `limit` through, never more (the property the single-lock transaction exists to guarantee)."""
+    import threading
+
+    limit = 50
+    results: list[bool] = []
+    rlock = threading.Lock()
+
+    def worker():
+        allowed, _ = fresh_db.bump_usage("c", limit)
+        with rlock:
+            results.append(allowed)
+
+    threads = [threading.Thread(target=worker) for _ in range(200)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert sum(results) == limit                 # exactly `limit` allowed, never more
+    assert fresh_db.usage_today("c") == limit
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

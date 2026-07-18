@@ -116,6 +116,11 @@ export const STRINGS = {
     authGenericError: "אירעה שגיאה. נסה שוב.",
     account: "החשבון שלי",
     remainingToday: "נותרו היום",
+    authErrBadCreds: "אימייל או סיסמה שגויים.",
+    authErrRegistered: "כתובת האימייל כבר רשומה. נסה להתחבר.",
+    authErrUnconfirmed: "האימייל טרם אושר — בדוק את תיבת הדואר.",
+    authErrWeakPassword: "הסיסמה חייבת להכיל לפחות 6 תווים.",
+    authErrBadEmail: "כתובת אימייל לא תקינה.",
   },
   en: {
     brand: "Chavruta",
@@ -222,6 +227,11 @@ export const STRINGS = {
     authGenericError: "Something went wrong. Please try again.",
     account: "My account",
     remainingToday: "left today",
+    authErrBadCreds: "Incorrect email or password.",
+    authErrRegistered: "That email is already registered. Try signing in.",
+    authErrUnconfirmed: "Email not confirmed yet — check your inbox.",
+    authErrWeakPassword: "Password must be at least 6 characters.",
+    authErrBadEmail: "Invalid email address.",
   },
 } as const;
 

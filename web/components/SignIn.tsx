@@ -1,9 +1,21 @@
 "use client";
 import { useState } from "react";
 import type { Lang } from "@/lib/types";
-import { tr } from "@/lib/i18n";
+import { tr, type StringKey } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { Icon } from "./Icon";
+
+// Map Supabase's English auth errors onto localized copy — this is a Hebrew-first product, so the
+// message a user actually sees must be Hebrew. Unknown errors fall through to a generic string.
+function authErrorKey(msg: string): StringKey {
+  const m = msg.toLowerCase();
+  if (m.includes("invalid login")) return "authErrBadCreds";
+  if (m.includes("already registered") || m.includes("already been registered")) return "authErrRegistered";
+  if (m.includes("not confirmed") || m.includes("confirm your email")) return "authErrUnconfirmed";
+  if (m.includes("at least") && m.includes("password")) return "authErrWeakPassword";
+  if (m.includes("email") && (m.includes("invalid") || m.includes("valid"))) return "authErrBadEmail";
+  return "authGenericError";
+}
 
 // Full-screen sign-in gate, shown only when Supabase is configured AND no user is signed in. Headless
 // (our own markup) precisely so the form is native Hebrew RTL — the reason we chose Supabase over a
@@ -30,8 +42,9 @@ export function SignIn({ lang }: { lang: Lang }) {
         await signIn(email.trim(), password);
       }
     } catch (err) {
-      // Supabase returns a readable message (e.g. "Invalid login credentials"); fall back to generic.
-      setError(err instanceof Error && err.message ? err.message : tr(lang, "authGenericError"));
+      // Supabase returns an English message (e.g. "Invalid login credentials") — localize it.
+      const raw = err instanceof Error ? err.message : "";
+      setError(tr(lang, authErrorKey(raw)));
     } finally {
       setBusy(false);
     }
