@@ -1029,21 +1029,25 @@ def _augment_question(question: str, attachments: list[Attachment] | None) -> st
     return f"{question}\n\n{header}\n{joined}"
 
 
-# ── Free-tier daily quota ─────────────────────────────────────────────────────
-def _free_daily_quota() -> int:
-    """Generations allowed per authenticated user per UTC day. 0 / unset ⇒ quota OFF (unlimited)."""
+# ── Daily quota, per subscription plan ────────────────────────────────────────
+def _plan_daily_quota(plan: str) -> int:
+    """Generations allowed per authenticated user per UTC day for their plan. 0 / unset ⇒ unlimited.
+    Provider-agnostic: the paid limit applies once a billing webhook sets the account's plan='paid'."""
+    env = "CHAVRUTA_PAID_DAILY_QUOTA" if plan == "paid" else "CHAVRUTA_FREE_DAILY_QUOTA"
     try:
-        return int(os.environ.get("CHAVRUTA_FREE_DAILY_QUOTA", "0"))
+        return int(os.environ.get(env, "0"))
     except ValueError:
         return 0
 
 
 def _enforce_quota(owner: str, lang: str) -> None:
-    """Free-tier cap. Only bites authenticated users (owner != 'local') when a quota is configured —
-    local/offline use is always unlimited. Over the limit ⇒ 429 with a bilingual message. Enforced
-    before ownership checks so an over-quota user probing session ids learns nothing about them."""
-    limit = _free_daily_quota()
-    if owner == "local" or limit <= 0:
+    """Per-plan daily cap. Only bites authenticated users (owner != 'local') when a quota is configured
+    for their plan — local/offline use is always unlimited. Over the limit ⇒ 429 with a bilingual
+    message. Enforced before ownership checks so an over-quota user probing session ids learns nothing."""
+    if owner == "local":
+        return
+    limit = _plan_daily_quota(db.get_plan(owner))
+    if limit <= 0:
         return
     allowed, _ = db.bump_usage(owner, limit)
     if not allowed:
@@ -1081,6 +1085,7 @@ def query(req: QueryRequest, owner: str = Depends(current_owner)):
 class MeOut(BaseModel):
     owner: str
     authenticated: bool
+    plan: str = "free"               # 'free' | 'paid'
     daily_quota: int | None = None   # None ⇒ unlimited (local user, or quota disabled)
     used_today: int = 0
     remaining: int | None = None     # None ⇒ unlimited
@@ -1089,14 +1094,16 @@ class MeOut(BaseModel):
 
 @app.get("/me", response_model=MeOut)
 def me(owner: str = Depends(current_owner)):
-    """Account + today's quota state — lets the UI show who's signed in, how many questions remain,
-    and whether a deletion is pending."""
-    limit = _free_daily_quota()
+    """Account + today's quota state — lets the UI show who's signed in, their plan, how many questions
+    remain, and whether a deletion is pending."""
+    plan = "free" if owner == "local" else db.get_plan(owner)
+    limit = _plan_daily_quota(plan)
     unlimited = owner == "local" or limit <= 0
     used = 0 if owner == "local" else db.usage_today(owner)
     return MeOut(
         owner=owner,
         authenticated=owner != "local",
+        plan=plan,
         daily_quota=None if unlimited else limit,
         used_today=used,
         remaining=None if unlimited else max(0, limit - used),

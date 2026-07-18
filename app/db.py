@@ -60,7 +60,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -137,7 +137,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS accounts (
             owner_id               TEXT PRIMARY KEY,
             deletion_requested_at  TEXT,      -- ISO ts when the user asked to delete (NULL = not asked)
-            deletion_scheduled_for TEXT       -- ISO ts when the purge runs (NULL = nothing scheduled)
+            deletion_scheduled_for TEXT,      -- ISO ts when the purge runs (NULL = nothing scheduled)
+            plan                   TEXT NOT NULL DEFAULT 'free'   -- 'free' | 'paid'; flipped by billing
         );
     """)
 
@@ -176,6 +177,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
             if "owner_id" not in cols:
                 conn.execute(f"ALTER TABLE {tbl} ADD COLUMN owner_id TEXT NOT NULL DEFAULT 'local'")
                 conn.execute(f"UPDATE {tbl} SET owner_id='local' WHERE owner_id IS NULL")
+
+    if version < 9:
+        # Subscription plan on the account (billing groundwork). Pre-existing accounts rows (created
+        # in v8 without the column) get 'free' — the default, so behaviour is unchanged.
+        acols = {r[1] for r in conn.execute("PRAGMA table_info(accounts)")}
+        if "plan" not in acols:
+            conn.execute("ALTER TABLE accounts ADD COLUMN plan TEXT NOT NULL DEFAULT 'free'")
 
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
@@ -519,9 +527,28 @@ def get_account(owner_id: str) -> dict[str, Any] | None:
     conn = get_conn()
     with _LOCK:
         row = conn.execute(
-            "SELECT owner_id, deletion_requested_at, deletion_scheduled_for FROM accounts "
+            "SELECT owner_id, deletion_requested_at, deletion_scheduled_for, plan FROM accounts "
             "WHERE owner_id=?", (owner_id,)).fetchone()
     return dict(row) if row else None
+
+
+def get_plan(owner_id: str) -> str:
+    """The owner's subscription plan ('free' if they have no account row yet)."""
+    conn = get_conn()
+    with _LOCK:
+        row = conn.execute("SELECT plan FROM accounts WHERE owner_id=?", (owner_id,)).fetchone()
+    return row["plan"] if row else "free"
+
+
+def set_plan(owner_id: str, plan: str) -> None:
+    """Set the owner's plan — the single write a billing webhook makes on a subscription change.
+    Provider-agnostic: whichever processor is chosen, its 'subscription active/cancelled' event maps
+    to plan='paid'/'free' here."""
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        conn.execute(
+            "INSERT INTO accounts (owner_id, plan) VALUES (?,?) "
+            "ON CONFLICT(owner_id) DO UPDATE SET plan=excluded.plan", (owner_id, plan))
 
 
 def due_deletions(now_iso: str) -> list[str]:

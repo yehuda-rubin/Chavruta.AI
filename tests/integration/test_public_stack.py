@@ -143,5 +143,18 @@ def test_account_deletion_rejected_in_local_mode(client):
     assert client.post("/account/delete").status_code == 400
 
 
+def test_plan_based_quota_switch(client, monkeypatch):
+    monkeypatch.setenv("CHAVRUTA_API_KEYS", "k")
+    monkeypatch.setenv("CHAVRUTA_FREE_DAILY_QUOTA", "2")
+    monkeypatch.setenv("CHAVRUTA_PAID_DAILY_QUOTA", "0")   # paid = unlimited
+    h = {"Authorization": "Bearer k"}
+    me = client.get("/me", headers=h).json()
+    assert me["plan"] == "free" and me["daily_quota"] == 2
+    # A billing webhook would call db.set_plan; simulate it and re-check the quota tier.
+    db.set_plan(me["owner"], "paid")
+    me2 = client.get("/me", headers=h).json()
+    assert me2["plan"] == "paid" and me2["daily_quota"] is None   # unlimited on the paid plan
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

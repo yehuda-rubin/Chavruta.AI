@@ -25,10 +25,12 @@ To operate the Service and generate answers; to associate your conversations and
 account; to enforce quotas; and to secure the Service and prevent abuse. We do not use your content
 for advertising.
 
-## 3. Processing by the Model Provider
-To generate an answer, your question (and any source you attach) is sent to our AI model provider
-solely to process and produce the answer. Do not enter sensitive or personal information you would not
-want processed this way.
+## 3. Processing and Training by the Model Provider
+To generate an answer, your question (and any source you attach) is sent to our AI model provider.
+**The model provider may use the data sent to it — your questions and attached sources — also to
+improve and train its AI models**, subject to its terms. Therefore **do not enter sensitive,
+confidential or personal information** you would not want processed, or used for model training, this
+way.
 
 ## 4. Sharing
 We do not sell your data. We use sub-processors only to run the Service: the registration provider

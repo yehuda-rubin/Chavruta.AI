@@ -83,5 +83,29 @@ def test_schedule_sets_future_deadline(fresh_db, monkeypatch):
     assert when > "2026-07-18"
 
 
+# ── Subscription plan (billing groundwork) ────────────────────────────────────
+def test_plan_defaults_to_free(fresh_db):
+    assert fresh_db.get_plan("newcomer") == "free"
+
+
+def test_set_plan_upserts_and_survives_deletion_schedule(fresh_db):
+    fresh_db.set_plan("u1", "paid")
+    assert fresh_db.get_plan("u1") == "paid"
+    # Scheduling deletion (a separate upsert on the same row) must not clobber the plan.
+    fresh_db.schedule_deletion("u1", "2026-07-18T00:00:00+00:00", "2026-08-17T00:00:00+00:00")
+    assert fresh_db.get_plan("u1") == "paid"
+    assert fresh_db.get_account("u1")["deletion_scheduled_for"] is not None
+    # …and setting the plan doesn't wipe a pending deletion.
+    fresh_db.set_plan("u1", "free")
+    assert fresh_db.get_account("u1")["deletion_scheduled_for"] is not None
+    assert fresh_db.get_plan("u1") == "free"
+
+
+def test_purge_clears_plan(fresh_db):
+    fresh_db.set_plan("u2", "paid")
+    fresh_db.purge_owner("u2")
+    assert fresh_db.get_plan("u2") == "free"     # row gone → back to the default
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
