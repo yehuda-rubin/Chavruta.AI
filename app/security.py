@@ -12,12 +12,16 @@ replica you'd move the window to Redis — noted, not built, because it isn't ne
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import threading
 import time
+import uuid
 
 from fastapi import Header, HTTPException, Request
 from fastapi.responses import JSONResponse
+
+_log = logging.getLogger("chavruta.request")
 
 
 # ── API-key auth (optional) ───────────────────────────────────────────────────
@@ -148,3 +152,26 @@ async def body_size_middleware(request: Request, call_next):
     if cl and cl.isdigit() and int(cl) > _MAX_BODY:
         return JSONResponse(status_code=413, content={"detail": "request body too large"})
     return await call_next(request)
+
+
+# ── Request logging + correlation IDs ─────────────────────────────────────────
+async def request_context_middleware(request: Request, call_next):
+    """One structured log line per request (method, path, status, ms) with a correlation id that's
+    echoed back as X-Request-ID. Until this, the only per-request record was uvicorn's access log —
+    no way to tie a user's error report to a server-side line. Health/readiness are skipped so probes
+    don't spam the log."""
+    rid = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
+    path = request.url.path
+    if path in ("/health", "/ready"):
+        return await call_next(request)
+    t0 = time.monotonic()
+    try:
+        response = await call_next(request)
+    except Exception:
+        _log.exception("request FAILED rid=%s %s %s (%.0fms)",
+                       rid, request.method, path, (time.monotonic() - t0) * 1000)
+        raise
+    dt = (time.monotonic() - t0) * 1000
+    _log.info("rid=%s %s %s -> %s (%.0fms)", rid, request.method, path, response.status_code, dt)
+    response.headers["X-Request-ID"] = rid
+    return response

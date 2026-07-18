@@ -138,6 +138,7 @@ from app.security import (  # noqa: E402
     body_size_middleware,
     current_owner,
     rate_limit_middleware,
+    request_context_middleware,
     require_api_key,
 )
 
@@ -155,10 +156,11 @@ app = FastAPI(
     dependencies=[Depends(require_api_key)],
 )
 
-# Per-IP rate limiting on the generation routes (protects the LLM key from a runaway loop) and a
-# body-size cap. Both are generous by default and tightened by env for public hosting.
-app.middleware("http")(rate_limit_middleware)
+# Middleware runs outermost-first in reverse registration order: request-context wraps everything
+# (so every request gets a logged id), then rate limit, then body-size.
 app.middleware("http")(body_size_middleware)
+app.middleware("http")(rate_limit_middleware)
+app.middleware("http")(request_context_middleware)
 
 # Origins are env-driven: the defaults are Vite's dev ports, which is right for local work and
 # useless for a real deployment — a hostname that isn't listed gets blocked in the browser. Behind
