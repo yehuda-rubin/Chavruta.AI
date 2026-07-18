@@ -10,6 +10,8 @@
 
 This policy explains what information Chavruta AI (the "Service", operated by Yehuda Rubin)
 collects, how it is used, and your rights. Using the Service constitutes acceptance of this policy.
+**Providing your data is not a legal obligation — it is a condition for using the Service** (e.g. an
+email address for sign-in); sources you attach are provided voluntarily, at your choice.
 
 ## 1. What We Collect
 - **Account details:** your email address, managed through the registration provider (Supabase). We do
@@ -48,23 +50,37 @@ for security.
   grace period (about 30 days), during which you can cancel it. At the end of the period, all data
   associated with the account is permanently erased (as is the login, where configured).
 - **Correction:** you can update details in account settings.
+- **Response times:** we will answer an access request within 30 days (extendable by a further 15 days
+  as permitted by law). Following a deletion or correction, we will also notify parties to whom the
+  data was disclosed in the preceding 3 years, where required by law.
 
-## 7. Minors
+## 7. Minors and Schools
 The Service is also intended for study in schools. Use by minors should be under the responsibility and
-supervision of a parent, teacher or educational institution. We do not knowingly collect personal
-information from minors beyond an email address used for sign-in.
+supervision of a parent, teacher or educational institution.
+- **Institutional accounts:** when access is via an educational institution, the institution is the
+  consenting party and controller of the student data, and we act as its processor.
+- **No training or marketing:** we do not use minors' data for model training or marketing without
+  separate, explicit consent.
+- **Parental consent:** consent given by a parent on a minor's behalf can be withdrawn at any time.
+- We do not knowingly collect personal information from minors beyond an email address used for sign-in.
 
 ## 8. Cookies and Local Storage
 We use browser local storage to keep your preferences and to maintain your active session (session
 token). We do not use third-party advertising or tracking cookies.
 
-## 9. International Transfer
-Some sub-processors (e.g. Supabase, the model provider) may process data outside your country. Using
-the Service constitutes consent to such transfer, subject to reasonable safeguards.
+## 9. Transfer of Data Outside Israel
+Some sub-processors (e.g. Supabase and the model provider) process data outside Israel. The transfer is
+made on the basis of **your consent** and subject to a **contractual undertaking** by the providers to
+maintain a level of protection equivalent to that required under Israeli law and not to transfer the
+data onward without authorization, in accordance with the Protection of Privacy Regulations (Transfer
+of Data to Databases Abroad), 2001.
 
 ## 10. Security
 We take reasonable measures — authentication, rate limiting, and encryption in transit — to protect
-your information. However, no method is 100% secure and we cannot guarantee absolute security.
+your information, in accordance with the Protection of Privacy (Data Security) Regulations, 2017. In
+the event of a serious security incident we will act to notify the Privacy Protection Authority and
+affected users as required by law. However, no method is 100% secure and we cannot guarantee absolute
+security.
 
 ## 11. Changes and Contact
 We may update this policy; the current version is always shown in the Service. For privacy questions:

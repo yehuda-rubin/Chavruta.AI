@@ -54,9 +54,13 @@ We store your email address (via the registration provider), your conversation a
 usage counters. We do not sell your data to third parties. Data is used only to run the Service and to
 associate your content with you.
 
-## 9. Quotas and Paid Plans
+## 9. Quotas, Paid Plans and Cancellation
 The Service may include a free plan with a daily quota, and paid plans. We may change quotas, prices
 and features from time to time, with reasonable notice.
+**Cancellation:** you may cancel a paid subscription at any time. Billing will stop within **3 business
+days** of your cancellation notice, and any refund will be pro-rated for the unused period, in
+accordance with the Consumer Protection Law. **Cancelling a subscription (stopping billing) is not the
+same as deleting your account** (a separate mechanism — see the Privacy Policy).
 
 ## 10. Changes to These Terms
 We may update these terms. Continued use after an update constitutes acceptance of the updated terms.
