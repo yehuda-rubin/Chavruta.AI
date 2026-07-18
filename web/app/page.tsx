@@ -19,6 +19,17 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [intent, setIntent] = useState<IntentId>(DEFAULT_INTENT);
   const [lessonFields, setLessonFields] = useState<LessonFields>({ audience: "", gradeBand: "", length: "" });
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+
+  // Theme: persisted, applied as body.theme-dark (the dark palette is in globals.css).
+  useEffect(() => {
+    const saved = (localStorage.getItem("chavruta-theme") as "light" | "dark") || "light";
+    setTheme(saved);
+  }, []);
+  useEffect(() => {
+    document.body.classList.toggle("theme-dark", theme === "dark");
+    localStorage.setItem("chavruta-theme", theme);
+  }, [theme]);
 
   // Sticky mode: once a conversation has messages the intent is locked (server enforces it too).
   const locked = !!activeId && messages.length > 0;
@@ -105,7 +116,12 @@ export default function Home() {
 
   return (
     <div className="flex flex-col h-screen">
-      <Header lang={lang} onToggleLang={() => setLang((l) => (l === "he" ? "en" : "he"))} />
+      <Header
+        lang={lang}
+        theme={theme}
+        onToggleLang={() => setLang((l) => (l === "he" ? "en" : "he"))}
+        onToggleTheme={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
+      />
       <div className="flex flex-1 overflow-hidden px-4 pb-4 gap-4">
         <SessionsPanel
           lang={lang}
