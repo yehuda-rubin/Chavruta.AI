@@ -415,6 +415,11 @@ def main():
         if not args.force and already_on_hf(slug, token):
             print(f"[{slug}] already on HF — skipping (use --force to rebuild)", flush=True)
             continue
+        # Release the per-tier Sefaria caches before each tier. They only help WITHIN a tier; left
+        # to accumulate across all 15 they grow unbounded (every title's version metadata retained),
+        # which on a 16GB machine competes with everything else. Clearing bounds the footprint.
+        _VCACHE.clear()
+        _WCACHE.clear()
         t0 = time.time()
         out_jsonl, n, manifest = build_tier(slug)
         if n == 0:
