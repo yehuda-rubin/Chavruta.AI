@@ -919,6 +919,88 @@ def ready(response: Response):
 
 # ── Stateless query (backward-compatible) ────────────────────────────────────
 
+class Attachment(BaseModel):
+    """A source the user brought — pasted text, or an uploaded file (data: URL). Its extracted text
+    is folded into what the model sees (NOT into what's saved as the user's message)."""
+    kind: str = Field(default="text", max_length=16)   # "text" | "file"
+    name: str = Field(default="", max_length=300)
+    content: str = ""        # pasted text, or a data: URL for a file
+    mime: str = Field(default="", max_length=120)
+
+
+# Total extracted attachment text folded into one question — bounded so an upload can't blow the
+# prompt token budget. Generous enough for a full daf / a few pages.
+_ATTACH_MAX_CHARS = 12000
+
+
+def _attachment_text(att: Attachment) -> str:
+    """Extract usable text from one attachment. Text is used directly; PDF/Word are parsed; images
+    are not read yet (Hebrew OCR is a separate, opt-in step) — they contribute a labelled note so the
+    model knows a source was attached but its text is unavailable, rather than hallucinating it."""
+    import base64
+
+    if att.kind == "text" or (not att.content.startswith("data:")):
+        return (att.content or "").strip()
+
+    # data:<mime>;base64,<payload>
+    try:
+        header, b64 = att.content.split(",", 1)
+        raw = base64.b64decode(b64)
+    except Exception:
+        return ""
+    mime = (att.mime or header).lower()
+    name = (att.name or "").lower()
+
+    if "pdf" in mime or name.endswith(".pdf"):
+        try:
+            import io
+
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(raw))
+            return "\n".join((p.extract_text() or "") for p in reader.pages).strip()
+        except Exception as exc:
+            _log.warning("attachment pdf extract failed (%s): %s", att.name, exc)
+            return ""
+    if "word" in mime or "officedocument" in mime or name.endswith((".docx", ".doc")):
+        try:
+            import io
+
+            import docx
+            d = docx.Document(io.BytesIO(raw))
+            return "\n".join(p.text for p in d.paragraphs).strip()
+        except Exception as exc:
+            _log.warning("attachment docx extract failed (%s): %s", att.name, exc)
+            return ""
+    if mime.startswith("image/") or name.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif", ".heic")):
+        return f"[image attached: {att.name} — OCR not enabled; text unavailable]"
+    if "text" in mime or name.endswith(".txt"):
+        try:
+            return raw.decode("utf-8", "ignore").strip()
+        except Exception:
+            return ""
+    return ""
+
+
+def _augment_question(question: str, attachments: list[Attachment] | None) -> str:
+    """Append the user's attached sources to the question the MODEL sees. The saved user message
+    stays the plain typed question; only generation/retrieval sees the appended sources."""
+    if not attachments:
+        return question
+    blocks = []
+    for att in attachments:
+        text = _attachment_text(att)
+        if text:
+            label = att.name or ("מקור" if any("א" <= c <= "ת" for c in question) else "source")
+            blocks.append(f"### {label}\n{text}")
+    if not blocks:
+        return question
+    joined = "\n\n".join(blocks)[:_ATTACH_MAX_CHARS]
+    he = any("א" <= c <= "ת" for c in question)
+    header = "## מקורות שצירף המשתמש (לא מהמאגר — התייחס אליהם כמקור נוסף)" if he \
+        else "## Sources the user attached (not from the corpus — treat as additional source material)"
+    return f"{question}\n\n{header}\n{joined}"
+
+
 class QueryRequest(BaseModel):
     # Bounded so a giant body can't blow up the bridge job files / prompt tokens (a 422 is returned
     # for over-length input). 8k chars is far beyond any real question incl. a pasted source.
@@ -928,13 +1010,14 @@ class QueryRequest(BaseModel):
     audience: str = ""       # lesson mode: "" (auto) | "yeshiva" | "school"
     grade_band: str = ""     # school lessons: a-c | d-f | g-i | j-l
     length: str = ""         # "" (medium) | "short" | "medium" | "long"
+    attachments: list[Attachment] = []   # user-brought sources (text / pdf / word); images pending OCR
 
 
 @app.post("/query", response_model=QueryResponse)
 def query(req: QueryRequest):
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
-    return _run_query(req.question, req.lang, req.intent, [],
+    return _run_query(_augment_question(req.question, req.attachments), req.lang, req.intent, [],
                       audience=req.audience, grade_band=req.grade_band, length=req.length)
 
 
@@ -969,7 +1052,7 @@ def create_session(req: QueryRequest):
     sid = db.create_session(req.question.strip(), mode=req.intent or None)
     db.save_message(sid, "user", req.question)
 
-    result = _run_query(req.question, req.lang, req.intent, [],
+    result = _run_query(_augment_question(req.question, req.attachments), req.lang, req.intent, [],
                         audience=req.audience, grade_band=req.grade_band, length=req.length)
 
     db.save_message(
@@ -1015,7 +1098,7 @@ def session_query(session_id: str, req: QueryRequest):
     locked_mode = db.get_session_mode(session_id)
     intent = locked_mode or req.intent
 
-    result = _run_query(req.question, req.lang, intent, history,
+    result = _run_query(_augment_question(req.question, req.attachments), req.lang, intent, history,
                         audience=req.audience, grade_band=req.grade_band, length=req.length)
 
     db.save_message(
