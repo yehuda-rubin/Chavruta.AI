@@ -1,8 +1,9 @@
 "use client";
 import { useState } from "react";
-import type { Citation, Lang, Message } from "@/lib/types";
+import type { Attachment, Citation, Lang, Message } from "@/lib/types";
 import { tr } from "@/lib/i18n";
 import { commentatorTag, isHe } from "@/lib/format";
+import { fileKind } from "@/lib/files";
 import { Icon } from "./Icon";
 
 // Attribution — the edition + licence a source's text came from. CC-BY / CC-BY-SA require it.
@@ -40,8 +41,25 @@ function Attribution({ c, lang }: { c: Citation; lang: Lang }) {
   );
 }
 
-export function SourcesPanel({ lang, messages }: { lang: Lang; messages: Message[] }) {
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+export function SourcesPanel({
+  lang,
+  messages,
+  userSources,
+  srcDefaultOpen,
+  onRemoveSource,
+  onAddSource,
+  onCollapse,
+}: {
+  lang: Lang;
+  messages: Message[];
+  userSources: Attachment[];
+  srcDefaultOpen: boolean;
+  onRemoveSource: (i: number) => void;
+  onAddSource: () => void;
+  onCollapse: () => void;
+}) {
+  // When "sources open by default", membership in `toggled` means "collapsed" (inverted).
+  const [toggled, setToggled] = useState<Set<string>>(new Set());
 
   // Dedupe across the whole conversation by ref, earliest-first (matches the static UI).
   const order: string[] = [];
@@ -59,15 +77,23 @@ export function SourcesPanel({ lang, messages }: { lang: Lang; messages: Message
   }
 
   const toggle = (ref: string) =>
-    setExpanded((prev) => {
+    setToggled((prev) => {
       const next = new Set(prev);
       next.has(ref) ? next.delete(ref) : next.add(ref);
       return next;
     });
+  const isOpen = (ref: string) => (srcDefaultOpen ? !toggled.has(ref) : toggled.has(ref));
 
   return (
     <aside className="w-80 shrink-0 glass rounded-[28px] flex flex-col overflow-hidden">
       <div className="flex items-center gap-2 p-4 pb-3">
+        <button
+          onClick={onCollapse}
+          className="h-9 w-9 rounded-xl glass grid place-items-center text-ink/50 hover:text-tekhelet shrink-0 transition"
+          title={tr(lang, "collapse")}
+        >
+          <Icon name="chevron_left" />
+        </button>
         <h3 className="font-serif text-xl font-bold text-tekhelet">{tr(lang, "relatedSources")}</h3>
       </div>
       <div className="flex-1 overflow-y-auto p-4 pt-0 flex flex-col gap-3">
@@ -79,7 +105,7 @@ export function SourcesPanel({ lang, messages }: { lang: Lang; messages: Message
             .map((ref, idx) => ({ c: byRef.get(ref)!, n: idx + 1 }))
             .reverse()
             .map(({ c, n }) => {
-              const open = expanded.has(c.ref);
+              const open = isOpen(c.ref);
               const full = lang === "en" ? c.text_en || c.text_he : c.text_he || c.text_en;
               return (
                 <div
@@ -120,6 +146,32 @@ export function SourcesPanel({ lang, messages }: { lang: Lang; messages: Message
               );
             })
         )}
+      </div>
+
+      {/* User-added sources + the add button (sent with the next question). */}
+      <div className="p-4 pt-2 border-t border-white/40 flex flex-col gap-2">
+        {userSources.map((s, i) => {
+          const k = s.kind === "text" ? { icon: "notes", label: tr(lang, "kindText") } : fileKind(s.name, lang);
+          return (
+            <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/70 ring-1 ring-line/70 text-sm">
+              <Icon name={k.icon} className="text-[18px] text-indigo shrink-0" />
+              <span className="flex-1 truncate text-ink/75" title={s.name}>
+                {s.name}
+              </span>
+              <span className="text-[10px] font-bold text-gold uppercase shrink-0">{k.label}</span>
+              <button onClick={() => onRemoveSource(i)} className="text-ink/40 hover:text-red-500 shrink-0" title={tr(lang, "remove")}>
+                <Icon name="close" className="text-[16px]" />
+              </button>
+            </div>
+          );
+        })}
+        <button
+          onClick={onAddSource}
+          className="w-full py-2.5 rounded-full grad text-white font-bold text-sm hover:opacity-95 transition shadow-lg shadow-tekhelet/20"
+        >
+          {tr(lang, "addSource")}
+          {userSources.length ? ` (${userSources.length})` : ""}
+        </button>
       </div>
     </aside>
   );

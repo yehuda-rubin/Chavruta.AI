@@ -10,6 +10,9 @@ export function SessionsPanel({
   onNew,
   onSelect,
   onDelete,
+  onCollapse,
+  onOpenLessons,
+  onOpenSettings,
 }: {
   lang: Lang;
   sessions: Session[];
@@ -17,6 +20,9 @@ export function SessionsPanel({
   onNew: () => void;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
+  onCollapse: () => void;
+  onOpenLessons: () => void;
+  onOpenSettings: () => void;
 }) {
   return (
     <aside className="w-72 shrink-0 glass rounded-[28px] p-4 flex flex-col">
@@ -26,6 +32,13 @@ export function SessionsPanel({
           className="flex-1 grad text-white py-3 rounded-2xl font-serif text-lg font-bold hover:opacity-95 transition shadow-lg shadow-tekhelet/20"
         >
           {tr(lang, "newChat")}
+        </button>
+        <button
+          onClick={onCollapse}
+          className="h-10 w-10 rounded-2xl glass grid place-items-center text-ink/50 hover:text-tekhelet shrink-0 transition"
+          title={tr(lang, "collapse")}
+        >
+          <Icon name="chevron_right" />
         </button>
       </div>
       <p className="text-[11px] tracking-widest text-ink/40 font-bold uppercase mt-3 mb-2 px-2">
@@ -61,17 +74,19 @@ export function SessionsPanel({
         })}
       </nav>
       <div className="mt-auto pt-3 flex flex-col gap-2">
-        <button className="w-full px-4 py-2.5 rounded-2xl glass text-ink/70 font-semibold text-sm hover:bg-white/60 hover:text-tekhelet transition flex items-center gap-2 cursor-pointer">
+        <button
+          onClick={onOpenLessons}
+          className="w-full px-4 py-2.5 rounded-2xl glass text-ink/70 font-semibold text-sm hover:bg-white/60 hover:text-tekhelet transition flex items-center gap-2 cursor-pointer"
+        >
           <Icon name="auto_stories" className="text-[19px]" />
           <span>{tr(lang, "myShiurim")}</span>
         </button>
-        <button className="w-full px-4 py-2.5 rounded-2xl glass text-ink/70 font-semibold text-sm hover:bg-white/60 hover:text-tekhelet transition flex items-center gap-2 cursor-pointer">
+        <button
+          onClick={onOpenSettings}
+          className="w-full px-4 py-2.5 rounded-2xl glass text-ink/70 font-semibold text-sm hover:bg-white/60 hover:text-tekhelet transition flex items-center gap-2 cursor-pointer"
+        >
           <Icon name="settings" className="text-[19px]" />
           <span>{tr(lang, "settingsTitle")}</span>
-        </button>
-        <button className="w-full px-4 py-2.5 rounded-2xl glass text-ink/70 font-semibold text-sm hover:bg-white/60 hover:text-tekhelet transition flex items-center gap-2 cursor-pointer">
-          <Icon name="help" className="text-[19px]" />
-          <span>{tr(lang, "supportTitle")}</span>
         </button>
       </div>
     </aside>

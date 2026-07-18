@@ -52,3 +52,25 @@ export interface QueryResponse {
 }
 
 export type Lang = "he" | "en";
+
+// A source the user adds (pasted text or an uploaded file), sent with the next query. Matches the
+// static UI. NOTE: the backend QueryRequest does not currently consume attachments, so these are
+// UI-parity for now — the same behaviour the static UI has today.
+export interface Attachment {
+  kind: "text" | "file";
+  name: string;
+  content: string; // pasted text, or a data: URL for a file
+  mime?: string;
+}
+
+export interface SavedLesson {
+  id: string;
+  topic: string;
+  audience?: string;
+  grade_band?: string;
+  length?: string;
+  lang?: string;
+  created_at: string;
+  files?: FileOut[];
+  citations?: Citation[];
+}
