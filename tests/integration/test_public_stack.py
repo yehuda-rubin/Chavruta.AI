@@ -124,5 +124,24 @@ def test_local_user_never_quota_limited(client, monkeypatch):
     assert me["authenticated"] is False and me["daily_quota"] is None
 
 
+def test_account_deletion_schedule_reflect_cancel(client, monkeypatch):
+    monkeypatch.setenv("CHAVRUTA_API_KEYS", "k")
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    h = {"Authorization": "Bearer k"}
+    # Not scheduled initially.
+    assert client.get("/me", headers=h).json()["deletion_scheduled_for"] is None
+    # Schedule → a future deadline is returned and surfaced on /me.
+    when = client.post("/account/delete", headers=h).json()["deletion_scheduled_for"]
+    assert when and client.get("/me", headers=h).json()["deletion_scheduled_for"] == when
+    # Cancel → cleared.
+    client.post("/account/delete/cancel", headers=h)
+    assert client.get("/me", headers=h).json()["deletion_scheduled_for"] is None
+
+
+def test_account_deletion_rejected_in_local_mode(client):
+    # No auth ⇒ owner 'local' ⇒ no account to delete.
+    assert client.post("/account/delete").status_code == 400
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

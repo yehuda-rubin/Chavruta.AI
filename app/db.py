@@ -60,7 +60,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -129,6 +129,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
             day       TEXT NOT NULL,          -- UTC date, YYYY-MM-DD
             count     INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (owner_id, day)
+        );
+
+        -- Account lifecycle — currently just scheduled deletion. A user can request deletion; it's
+        -- carried out after a grace period (during which they can cancel), so an accidental or
+        -- coerced click is recoverable. NULL scheduled_for = no pending deletion.
+        CREATE TABLE IF NOT EXISTS accounts (
+            owner_id               TEXT PRIMARY KEY,
+            deletion_requested_at  TEXT,      -- ISO ts when the user asked to delete (NULL = not asked)
+            deletion_scheduled_for TEXT       -- ISO ts when the purge runs (NULL = nothing scheduled)
         );
     """)
 
@@ -481,3 +490,59 @@ def usage_today(owner_id: str, day: str | None = None) -> int:
         row = conn.execute(
             "SELECT count FROM usage_counters WHERE owner_id=? AND day=?", (owner_id, day)).fetchone()
     return row["count"] if row else 0
+
+
+# ── Account deletion (scheduled, with a grace period) ─────────────────────────
+def schedule_deletion(owner_id: str, requested_at: str, scheduled_for: str) -> None:
+    """Mark an account for deletion at `scheduled_for` (idempotent upsert)."""
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        conn.execute(
+            "INSERT INTO accounts (owner_id, deletion_requested_at, deletion_scheduled_for) "
+            "VALUES (?,?,?) ON CONFLICT(owner_id) DO UPDATE SET "
+            "deletion_requested_at=excluded.deletion_requested_at, "
+            "deletion_scheduled_for=excluded.deletion_scheduled_for",
+            (owner_id, requested_at, scheduled_for))
+
+
+def cancel_deletion(owner_id: str) -> None:
+    """Undo a pending deletion — the account stays active."""
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        conn.execute(
+            "UPDATE accounts SET deletion_requested_at=NULL, deletion_scheduled_for=NULL "
+            "WHERE owner_id=?", (owner_id,))
+
+
+def get_account(owner_id: str) -> dict[str, Any] | None:
+    """The account's lifecycle row, or None if the owner has no account row yet."""
+    conn = get_conn()
+    with _LOCK:
+        row = conn.execute(
+            "SELECT owner_id, deletion_requested_at, deletion_scheduled_for FROM accounts "
+            "WHERE owner_id=?", (owner_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def due_deletions(now_iso: str) -> list[str]:
+    """Owner ids whose scheduled deletion time has arrived (scheduled_for <= now)."""
+    conn = get_conn()
+    with _LOCK:
+        rows = conn.execute(
+            "SELECT owner_id FROM accounts WHERE deletion_scheduled_for IS NOT NULL "
+            "AND deletion_scheduled_for <= ?", (now_iso,)).fetchall()
+    return [r["owner_id"] for r in rows]
+
+
+def purge_owner(owner_id: str) -> None:
+    """Irreversibly delete ALL of an owner's data: sessions (messages cascade), saved lessons, usage
+    counters, and the account row itself. Used by the deletion sweeper once the grace period lapses.
+    Guarded against the shared single-user 'local' id so a misconfigured call can't wipe local dev."""
+    if owner_id == "local":
+        return
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        conn.execute("DELETE FROM sessions WHERE owner_id=?", (owner_id,))         # messages cascade
+        conn.execute("DELETE FROM saved_lessons WHERE owner_id=?", (owner_id,))
+        conn.execute("DELETE FROM usage_counters WHERE owner_id=?", (owner_id,))
+        conn.execute("DELETE FROM accounts WHERE owner_id=?", (owner_id,))

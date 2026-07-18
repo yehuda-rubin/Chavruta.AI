@@ -59,6 +59,7 @@ from chavruta.corpus.schema import Intent, Query, Turn
 from chavruta.llm.agentic import is_degrade_message
 from chavruta.pipeline.pipeline import _max_tokens_for
 
+import app.accounts as accounts
 import app.db as db
 from app.jobs import registry as jobs
 
@@ -122,6 +123,7 @@ def _assert_config_usable() -> None:
 async def lifespan(app: FastAPI):
     _assert_config_usable()
     db.get_conn()          # initialise DB + run migrations
+    accounts.start_sweeper()   # background purge of accounts past their deletion grace period
     p = _get_pipeline()    # warm up bge-m3 + Qdrant connection at startup
     try:
         p.embedding.embed_query("warmup")   # load the embedder BEFORE any qdrant_client use
@@ -1082,11 +1084,13 @@ class MeOut(BaseModel):
     daily_quota: int | None = None   # None ⇒ unlimited (local user, or quota disabled)
     used_today: int = 0
     remaining: int | None = None     # None ⇒ unlimited
+    deletion_scheduled_for: str | None = None   # ISO ts if the account is pending deletion
 
 
 @app.get("/me", response_model=MeOut)
 def me(owner: str = Depends(current_owner)):
-    """Account + today's quota state — lets the UI show who's signed in and how many questions remain."""
+    """Account + today's quota state — lets the UI show who's signed in, how many questions remain,
+    and whether a deletion is pending."""
     limit = _free_daily_quota()
     unlimited = owner == "local" or limit <= 0
     used = 0 if owner == "local" else db.usage_today(owner)
@@ -1096,7 +1100,31 @@ def me(owner: str = Depends(current_owner)):
         daily_quota=None if unlimited else limit,
         used_today=used,
         remaining=None if unlimited else max(0, limit - used),
+        deletion_scheduled_for=None if owner == "local" else accounts.scheduled_for(owner),
     )
+
+
+# ── Account deletion (scheduled, with a grace period + cancel) ────────────────
+class DeletionOut(BaseModel):
+    deletion_scheduled_for: str | None = None
+
+
+@app.post("/account/delete", response_model=DeletionOut)
+def request_account_deletion(owner: str = Depends(current_owner)):
+    """Schedule this account for deletion after a grace period. The user can cancel until then; at the
+    deadline the background sweeper purges all their data (and the Supabase login, if configured)."""
+    if owner == "local":
+        # No account to delete in local/offline mode (the single-user store isn't an account).
+        raise HTTPException(status_code=400, detail="no account in local mode")
+    return DeletionOut(deletion_scheduled_for=accounts.schedule(owner))
+
+
+@app.post("/account/delete/cancel", response_model=DeletionOut)
+def cancel_account_deletion(owner: str = Depends(current_owner)):
+    """Cancel a pending deletion — the account stays active."""
+    if owner != "local":
+        accounts.cancel(owner)
+    return DeletionOut(deletion_scheduled_for=None)
 
 
 # ── Sessions ──────────────────────────────────────────────────────────────────

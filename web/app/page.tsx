@@ -155,6 +155,24 @@ export default function Home() {
     refreshSessions();
   }, [sessions, newDiscussion, refreshSessions]);
 
+  const deleteAccount = useCallback(async () => {
+    try {
+      await api.deleteAccount();
+    } catch {
+      /* ignore */
+    }
+    refreshMe();
+  }, [refreshMe]);
+
+  const cancelAccountDeletion = useCallback(async () => {
+    try {
+      await api.cancelAccountDeletion();
+    } catch {
+      /* ignore */
+    }
+    refreshMe();
+  }, [refreshMe]);
+
   const openLesson = useCallback((l: SavedLesson) => {
     setShowLessons(false);
     setActiveId(null);
@@ -306,6 +324,9 @@ export default function Home() {
         onDefaultIntent={setDefaultIntent}
         onSrcDefaultOpen={setSrcDefaultOpen}
         onClearHistory={clearHistory}
+        deletionScheduledFor={me?.deletion_scheduled_for ?? null}
+        onDeleteAccount={deleteAccount}
+        onCancelDeletion={cancelAccountDeletion}
       />
       <SupportModal open={showSupport} lang={lang} onClose={() => setShowSupport(false)} />
       <FilePreviewModal file={previewFile} lang={lang} onClose={() => setPreviewFile(null)} />

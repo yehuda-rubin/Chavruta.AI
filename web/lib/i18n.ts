@@ -131,6 +131,11 @@ export const STRINGS = {
     privacyTitle: "מדיניות פרטיות",
     privacyLink: "מדיניות הפרטיות",
     termsAnd: "ואת",
+    deleteAccount: "מחק חשבון",
+    deleteAccountConfirm: "למחוק את החשבון? הנתונים יימחקו לצמיתות בתום תקופת חסד — ניתן לבטל עד אז.",
+    deletionScheduledPrefix: "החשבון מתוזמן למחיקה בתאריך",
+    deletionCanCancel: "אפשר לבטל את המחיקה עד אז.",
+    cancelDeletion: "בטל מחיקה",
   },
   en: {
     brand: "Chavruta",
@@ -252,6 +257,11 @@ export const STRINGS = {
     privacyTitle: "Privacy Policy",
     privacyLink: "Privacy Policy",
     termsAnd: "and the",
+    deleteAccount: "Delete account",
+    deleteAccountConfirm: "Delete your account? Your data will be permanently erased after a grace period — you can cancel until then.",
+    deletionScheduledPrefix: "Account scheduled for deletion on",
+    deletionCanCancel: "You can cancel the deletion until then.",
+    cancelDeletion: "Cancel deletion",
   },
 } as const;
 

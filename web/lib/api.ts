@@ -110,6 +110,10 @@ export const api = {
 
   ready: () => req<{ status: string; points?: number; reason?: string }>("/ready"),
   me: () => req<Me>("/me"),
+
+  // Account deletion (scheduled, with a grace period). deleteAccount schedules it; cancel undoes it.
+  deleteAccount: () => req<Deletion>("/account/delete", { method: "POST" }),
+  cancelAccountDeletion: () => req<Deletion>("/account/delete/cancel", { method: "POST" }),
 };
 
 // Account + today's free-tier quota (GET /me). daily_quota / remaining are null when unlimited
@@ -120,4 +124,9 @@ export interface Me {
   daily_quota: number | null;
   used_today: number;
   remaining: number | null;
+  deletion_scheduled_for: string | null;   // ISO ts if the account is pending deletion
+}
+
+export interface Deletion {
+  deletion_scheduled_for: string | null;
 }

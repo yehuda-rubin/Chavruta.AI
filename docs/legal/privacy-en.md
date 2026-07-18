@@ -42,8 +42,9 @@ for security.
 
 ## 6. Your Rights
 - **Access and deletion:** you can view and delete your conversations and lessons at any time in the app.
-- **Account deletion:** to delete your account and its associated data, contact us at the address in
-  section 11.
+- **Account deletion:** you can request account deletion from Settings. Deletion is carried out after a
+  grace period (about 30 days), during which you can cancel it. At the end of the period, all data
+  associated with the account is permanently erased (as is the login, where configured).
 - **Correction:** you can update details in account settings.
 
 ## 7. Minors

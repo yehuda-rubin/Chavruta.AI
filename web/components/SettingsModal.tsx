@@ -63,6 +63,9 @@ export function SettingsModal({
   onDefaultIntent,
   onSrcDefaultOpen,
   onClearHistory,
+  deletionScheduledFor,
+  onDeleteAccount,
+  onCancelDeletion,
 }: {
   open: boolean;
   lang: Lang;
@@ -75,8 +78,14 @@ export function SettingsModal({
   onDefaultIntent: (i: IntentId) => void;
   onSrcDefaultOpen: (v: boolean) => void;
   onClearHistory: () => void;
+  deletionScheduledFor?: string | null;   // ISO ts if the account is pending deletion
+  onDeleteAccount?: () => void;
+  onCancelDeletion?: () => void;
 }) {
   const auth = useAuth();
+  const fmtDate = (iso: string) =>
+    new Date(iso).toLocaleDateString(lang === "he" ? "he-IL" : "en-US",
+      { year: "numeric", month: "long", day: "numeric" });
   return (
     <Modal open={open} title={tr(lang, "settingsHeading")} onClose={onClose}>
       <div className="flex flex-col gap-4 overflow-y-auto">
@@ -144,6 +153,30 @@ export function SettingsModal({
                 {tr(lang, "signOut")}
               </button>
             </div>
+
+            {/* Account deletion — scheduled with a grace period, cancellable until the deadline. */}
+            {deletionScheduledFor ? (
+              <div className="mt-2 p-3 rounded-2xl bg-red-500/5 ring-1 ring-red-500/15 flex flex-col gap-2">
+                <p className="text-xs text-red-600/90 leading-relaxed">
+                  {tr(lang, "deletionScheduledPrefix")} {fmtDate(deletionScheduledFor)}. {tr(lang, "deletionCanCancel")}
+                </p>
+                <button
+                  onClick={() => onCancelDeletion?.()}
+                  className="py-2 rounded-2xl grad text-white font-semibold text-sm hover:opacity-95 transition"
+                >
+                  {tr(lang, "cancelDeletion")}
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => {
+                  if (window.confirm(tr(lang, "deleteAccountConfirm"))) onDeleteAccount?.();
+                }}
+                className="mt-2 w-full py-2 rounded-2xl glass text-red-500 font-semibold text-sm hover:bg-red-500/10 transition"
+              >
+                {tr(lang, "deleteAccount")}
+              </button>
+            )}
           </Field>
         )}
 
