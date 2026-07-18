@@ -69,3 +69,40 @@ def test_rate_limit_window_slides():
     assert w.allow("a", 0.0) is True
     assert w.allow("a", 5.0) is False   # within window
     assert w.allow("a", 11.0) is True   # old hit expired
+
+
+# ── Per-owner data isolation (app/db.py) — the IDOR the audit flagged (GET /sessions leaked all) ──
+def _fresh_db(tmp_path, monkeypatch):
+    import app.db as db
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    monkeypatch.setattr(db, "_conn", None)
+    db.get_conn()   # init schema (v6, with owner_id) on the temp file
+    return db
+
+
+def test_sessions_are_isolated_by_owner(tmp_path, monkeypatch):
+    db = _fresh_db(tmp_path, monkeypatch)
+    a = db.create_session("alice q", mode="qa", owner_id="alice")
+    b = db.create_session("bob q", mode="qa", owner_id="bob")
+    db.save_message(a, "user", "hi")
+    db.save_message(b, "user", "hi")
+
+    assert [s["id"] for s in db.list_sessions("alice")] == [a]     # alice sees only hers
+    assert [s["id"] for s in db.list_sessions("bob")] == [b]
+    assert db.get_messages(b, "alice") == []                       # can't read bob's chat
+    assert len(db.get_messages(b, "bob")) == 1
+    assert db.delete_session(b, "alice") is False                  # can't delete bob's
+    assert db.list_sessions("bob"), "bob's session survived alice's delete attempt"
+    assert db.get_session_mode(b, "alice") is None                 # can't read bob's locked mode
+
+
+def test_lessons_are_isolated_by_owner(tmp_path, monkeypatch):
+    db = _fresh_db(tmp_path, monkeypatch)
+    db.save_lesson("L1", "alice topic", "", "", "", "he", [{"name": "a"}], owner_id="alice")
+    db.save_lesson("L2", "bob topic", "", "", "", "he", [{"name": "b"}], owner_id="bob")
+
+    assert [x["id"] for x in db.list_lessons("alice")] == ["L1"]
+    assert db.get_lesson("L2", "alice") is None                    # can't read bob's lesson
+    assert db.get_lesson("L2", "bob") is not None
+    assert db.delete_lesson("L2", "alice") is False                # can't delete bob's
+    assert db.get_lesson("L2", "bob") is not None

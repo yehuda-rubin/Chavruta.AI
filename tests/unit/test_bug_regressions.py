@@ -655,9 +655,9 @@ def test_session_query_locks_mode_to_first_turn(monkeypatch):
     from app.api import QueryRequest
     captured = {}
 
-    monkeypatch.setattr(api.db, "get_messages", lambda sid: [{"role": "user", "text": "q1"}])
+    monkeypatch.setattr(api.db, "get_messages", lambda sid, owner="local": [{"role": "user", "text": "q1"}])
     monkeypatch.setattr(api.db, "save_message", lambda *a, **k: 1)
-    monkeypatch.setattr(api.db, "get_session_mode", lambda sid: "chavruta")   # locked on turn 1
+    monkeypatch.setattr(api.db, "get_session_mode", lambda sid, owner="local": "chavruta")  # locked turn 1
 
     def _fake_run_query(question, lang, intent, history, **kw):
         captured["intent"] = intent
@@ -665,23 +665,23 @@ def test_session_query_locks_mode_to_first_turn(monkeypatch):
 
     monkeypatch.setattr(api, "_run_query", _fake_run_query)
     # client tries to switch to 'lesson' mid-chat — must be ignored in favour of the locked 'chavruta'
-    api.session_query("sid-1", QueryRequest(question="follow-up", lang="he", intent="lesson"))
+    api.session_query("sid-1", QueryRequest(question="follow-up", lang="he", intent="lesson"), owner="local")
     assert captured["intent"] == "chavruta"
 
 
 def test_session_query_legacy_session_falls_back_to_request_intent(monkeypatch):
     from app.api import QueryRequest
     captured = {}
-    monkeypatch.setattr(api.db, "get_messages", lambda sid: [{"role": "user", "text": "q1"}])
+    monkeypatch.setattr(api.db, "get_messages", lambda sid, owner="local": [{"role": "user", "text": "q1"}])
     monkeypatch.setattr(api.db, "save_message", lambda *a, **k: 1)
-    monkeypatch.setattr(api.db, "get_session_mode", lambda sid: None)         # legacy: no locked mode
+    monkeypatch.setattr(api.db, "get_session_mode", lambda sid, owner="local": None)  # legacy: no locked mode
 
     def _fake_run_query(question, lang, intent, history, **kw):
         captured["intent"] = intent
         return api.QueryResponse(answer="ok", citations=[], grounded=True, intent=intent, files=[])
 
     monkeypatch.setattr(api, "_run_query", _fake_run_query)
-    api.session_query("sid-legacy", QueryRequest(question="q", lang="he", intent="qa"))
+    api.session_query("sid-legacy", QueryRequest(question="q", lang="he", intent="qa"), owner="local")
     assert captured["intent"] == "qa"
 
 # ── Tier0 (2026-07 audit): the agentic loop must enforce a CUMULATIVE output-token budget ──

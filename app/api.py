@@ -134,7 +134,12 @@ async def lifespan(app: FastAPI):
 
 from fastapi import Depends  # noqa: E402
 
-from app.security import body_size_middleware, rate_limit_middleware, require_api_key  # noqa: E402
+from app.security import (  # noqa: E402
+    body_size_middleware,
+    current_owner,
+    rate_limit_middleware,
+    require_api_key,
+)
 
 app = FastAPI(
     title="Chavruta.AI",
@@ -567,7 +572,7 @@ def _split_lesson(text: str) -> tuple[str, str, str, str]:
 
 
 def _run_lesson(question: str, lang: str, history=None, audience: str = "",
-                grade_band: str = "", length: str = "") -> QueryResponse:
+                grade_band: str = "", length: str = "", owner_id: str = "local") -> QueryResponse:
     """Dedicated LESSON path: resolve audience/grade → pick a template from the template RAG →
     real source retrieval → Claude writes the 3 files at the right register (or asks clarifying
     questions first) via the bridge → 3 Word files + only-cited sources (in discussion order)."""
@@ -703,7 +708,8 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
         try:
             import uuid
             db.save_lesson(uuid.uuid4().hex[:12], topic, aud or "", band or "", length, lang,
-                           [f.model_dump() for f in files], [c.model_dump() for c in used])
+                           [f.model_dump() for f in files], [c.model_dump() for c in used],
+                           owner_id=owner_id)
         except Exception:
             pass
     return QueryResponse(answer="", citations=used, grounded=bool(used),
@@ -806,11 +812,13 @@ def _run_chavruta(question: str, lang: str, history=None) -> QueryResponse:
 
 
 def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
-               audience: str = "", grade_band: str = "", length: str = "") -> QueryResponse:
+               audience: str = "", grade_band: str = "", length: str = "",
+               owner_id: str = "local") -> QueryResponse:
     """Safety wrapper: a retrieval/LLM/backend failure degrades to an honest error response instead
     of a 500 for the whole request (real HTTPExceptions — e.g. 422 bad intent — still propagate)."""
     try:
-        return _run_query_impl(question, lang, intent_str, history, audience, grade_band, length)
+        return _run_query_impl(question, lang, intent_str, history, audience, grade_band, length,
+                               owner_id)
     except HTTPException:
         raise
     except Exception:
@@ -823,7 +831,8 @@ def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
 
 
 def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Turn],
-                    audience: str = "", grade_band: str = "", length: str = "") -> QueryResponse:
+                    audience: str = "", grade_band: str = "", length: str = "",
+                    owner_id: str = "local") -> QueryResponse:
     if intent_str == "shut":          # UI's responsa mode → HALACHA intent
         intent_str = "halacha"
     if intent_str == "chavruta":      # Socratic study-partner mode (its own path)
@@ -837,7 +846,7 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
 
     if intent == Intent.LESSON:            # lesson mode → Claude writes the 3 files, audience-adapted
         return _run_lesson(question, lang, history=history, audience=audience,
-                           grade_band=grade_band, length=length)
+                           grade_band=grade_band, length=length, owner_id=owner_id)
 
     q = Query(text=question, lang=lang or None, intent=intent)
     answer = _get_pipeline().ask(q, history=history)
@@ -1026,11 +1035,12 @@ class QueryRequest(BaseModel):
 
 
 @app.post("/query", response_model=QueryResponse)
-def query(req: QueryRequest):
+def query(req: QueryRequest, owner: str = Depends(current_owner)):
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
     return _run_query(_augment_question(req.question, req.attachments), req.lang, req.intent, [],
-                      audience=req.audience, grade_band=req.grade_band, length=req.length)
+                      audience=req.audience, grade_band=req.grade_band, length=req.length,
+                      owner_id=owner)
 
 
 # ── Sessions ──────────────────────────────────────────────────────────────────
@@ -1050,22 +1060,23 @@ class SessionCreateOut(SessionOut):
 
 
 @app.get("/sessions", response_model=list[SessionOut])
-def list_sessions():
-    return db.list_sessions()
+def list_sessions(owner: str = Depends(current_owner)):
+    return db.list_sessions(owner)
 
 
 @app.post("/sessions", response_model=SessionCreateOut, status_code=201)
-def create_session(req: QueryRequest):
+def create_session(req: QueryRequest, owner: str = Depends(current_owner)):
     """Create a new session and run the first query."""
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
 
     # Lock the chat's mode to the intent chosen on this first turn; every follow-up stays in it.
-    sid = db.create_session(req.question.strip(), mode=req.intent or None)
+    sid = db.create_session(req.question.strip(), mode=req.intent or None, owner_id=owner)
     db.save_message(sid, "user", req.question)
 
     result = _run_query(_augment_question(req.question, req.attachments), req.lang, req.intent, [],
-                        audience=req.audience, grade_band=req.grade_band, length=req.length)
+                        audience=req.audience, grade_band=req.grade_band, length=req.length,
+                        owner_id=owner)
 
     db.save_message(
         sid,
@@ -1078,7 +1089,7 @@ def create_session(req: QueryRequest):
         files=[f.model_dump() for f in result.files],
     )
 
-    session = db.list_sessions()
+    session = db.list_sessions(owner)
     session_row = next(s for s in session if s["id"] == sid)
     return {"id": sid, "first_q": session_row["first_q"], "created_at": session_row["created_at"],
             "result": result}
@@ -1089,12 +1100,14 @@ class SessionQueryResponse(QueryResponse):   # inherits lesson_plan etc.
 
 
 @app.post("/sessions/{session_id}/query", response_model=SessionQueryResponse)
-def session_query(session_id: str, req: QueryRequest):
+def session_query(session_id: str, req: QueryRequest, owner: str = Depends(current_owner)):
     """Continue an existing session."""
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
 
-    history_rows = db.get_messages(session_id)
+    # Ownership gate: a session the caller doesn't own reads as not-found (no history leak, and no
+    # writing a message into someone else's chat).
+    history_rows = db.get_messages(session_id, owner)
     if not history_rows:
         raise HTTPException(status_code=404, detail="session not found")
 
@@ -1107,11 +1120,12 @@ def session_query(session_id: str, req: QueryRequest):
 
     # Sticky mode: a chat stays in the mode chosen on its first turn — ignore any intent the client
     # sends on later turns. Legacy sessions (mode=NULL) fall back to the per-request intent.
-    locked_mode = db.get_session_mode(session_id)
+    locked_mode = db.get_session_mode(session_id, owner)
     intent = locked_mode or req.intent
 
     result = _run_query(_augment_question(req.question, req.attachments), req.lang, intent, history,
-                        audience=req.audience, grade_band=req.grade_band, length=req.length)
+                        audience=req.audience, grade_band=req.grade_band, length=req.length,
+                        owner_id=owner)
 
     db.save_message(
         session_id,
@@ -1140,16 +1154,16 @@ class MessageOut(BaseModel):
 
 
 @app.get("/sessions/{session_id}/messages", response_model=list[MessageOut])
-def get_messages(session_id: str):
-    msgs = db.get_messages(session_id)
+def get_messages(session_id: str, owner: str = Depends(current_owner)):
+    msgs = db.get_messages(session_id, owner)
     if not msgs:
         raise HTTPException(status_code=404, detail="session not found")
     return msgs
 
 
 @app.delete("/sessions/{session_id}", status_code=204)
-def delete_session(session_id: str):
-    if not db.delete_session(session_id):
+def delete_session(session_id: str, owner: str = Depends(current_owner)):
+    if not db.delete_session(session_id, owner):
         raise HTTPException(status_code=404, detail="session not found")
 
 
@@ -1166,19 +1180,19 @@ class SavedLessonOut(BaseModel):
 
 
 @app.get("/lessons", response_model=list[SavedLessonOut])
-def list_lessons():
-    return db.list_lessons()
+def list_lessons(owner: str = Depends(current_owner)):
+    return db.list_lessons(owner)
 
 
 @app.get("/lessons/{lesson_id}")
-def get_lesson(lesson_id: str):
-    lesson = db.get_lesson(lesson_id)
+def get_lesson(lesson_id: str, owner: str = Depends(current_owner)):
+    lesson = db.get_lesson(lesson_id, owner)
     if not lesson:
         raise HTTPException(status_code=404, detail="lesson not found")
     return lesson
 
 
 @app.delete("/lessons/{lesson_id}", status_code=204)
-def delete_lesson(lesson_id: str):
-    if not db.delete_lesson(lesson_id):
+def delete_lesson(lesson_id: str, owner: str = Depends(current_owner)):
+    if not db.delete_lesson(lesson_id, owner):
         raise HTTPException(status_code=404, detail="lesson not found")

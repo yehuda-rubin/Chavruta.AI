@@ -11,6 +11,7 @@ replica you'd move the window to Redis — noted, not built, because it isn't ne
 
 from __future__ import annotations
 
+import hashlib
 import os
 import threading
 import time
@@ -47,6 +48,24 @@ def require_api_key(
         presented = authorization[7:].strip()
     if presented not in keys:
         raise HTTPException(status_code=401, detail="missing or invalid API key")
+
+
+def current_owner(
+    authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None),
+) -> str:
+    """The identity data is scoped to. With auth OFF (no keys) everyone is the single 'local' user —
+    unchanged local/offline behaviour. With auth ON, the owner is a stable hash of the presented key
+    (the key itself is never stored as an id), so each key sees only its own sessions and lessons.
+    The auth dependency has already rejected unknown keys before this runs."""
+    if not _api_keys():
+        return "local"
+    presented = x_api_key or ""
+    if not presented and authorization and authorization.lower().startswith("bearer "):
+        presented = authorization[7:].strip()
+    if not presented:
+        return "local"
+    return "u_" + hashlib.sha256(presented.encode()).hexdigest()[:16]
 
 
 # ── Rate limiting (per-IP, in-memory sliding window) ──────────────────────────

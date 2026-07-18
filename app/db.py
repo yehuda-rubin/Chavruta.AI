@@ -60,7 +60,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -85,7 +85,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
             first_q      TEXT NOT NULL,
             created_at   TEXT NOT NULL,
             updated_at   TEXT,
-            mode         TEXT          -- the chat's locked mode (intent chosen on the first turn)
+            mode         TEXT,         -- the chat's locked mode (intent chosen on the first turn)
+            owner_id     TEXT NOT NULL DEFAULT 'local'  -- who this belongs to; 'local' = single-user
         );
 
         CREATE TABLE IF NOT EXISTS messages (
@@ -115,7 +116,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
             lang        TEXT,
             files       TEXT NOT NULL,   -- JSON [{name,title,content}]
             citations   TEXT,            -- JSON
-            created_at  TEXT NOT NULL
+            created_at  TEXT NOT NULL,
+            owner_id    TEXT NOT NULL DEFAULT 'local'  -- who this belongs to; 'local' = single-user
         );
         CREATE INDEX IF NOT EXISTS idx_saved_lessons_time ON saved_lessons(created_at DESC);
     """)
@@ -145,6 +147,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
         scols = {r[1] for r in conn.execute("PRAGMA table_info(sessions)")}
         if "mode" not in scols:
             conn.execute("ALTER TABLE sessions ADD COLUMN mode TEXT")
+
+    if version < 6:
+        # Per-owner scoping (public hosting): sessions/lessons belong to an owner so one user can't
+        # read another's. Existing rows predate multi-user and become 'local' — the single-user
+        # default, so local/offline behaviour is unchanged.
+        for tbl in ("sessions", "saved_lessons"):
+            cols = {r[1] for r in conn.execute(f"PRAGMA table_info({tbl})")}
+            if "owner_id" not in cols:
+                conn.execute(f"ALTER TABLE {tbl} ADD COLUMN owner_id TEXT NOT NULL DEFAULT 'local'")
+                conn.execute(f"UPDATE {tbl} SET owner_id='local' WHERE owner_id IS NULL")
 
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
@@ -268,40 +280,52 @@ def _seed_demo(conn: sqlite3.Connection) -> None:
 
 # ── Sessions ──────────────────────────────────────────────────────────────────
 
-def create_session(first_q: str, mode: str | None = None) -> str:
+def create_session(first_q: str, mode: str | None = None, owner_id: str = "local") -> str:
     sid = str(uuid.uuid4())
     now = _now()
     with _tx(get_conn()) as conn:
         conn.execute(
-            "INSERT INTO sessions (id, first_q, created_at, updated_at, mode) VALUES (?,?,?,?,?)",
-            (sid, first_q, now, now, mode or None),
+            "INSERT INTO sessions (id, first_q, created_at, updated_at, mode, owner_id) "
+            "VALUES (?,?,?,?,?,?)",
+            (sid, first_q, now, now, mode or None, owner_id),
         )
     return sid
 
 
-def get_session_mode(sid: str) -> str | None:
-    """The chat's locked mode (the intent chosen on its first turn), or None for legacy sessions."""
+def owns_session(sid: str, owner_id: str = "local") -> bool:
+    """True if this owner may touch the session — the ownership gate every session route checks."""
     with _LOCK:
-        r = get_conn().execute("SELECT mode FROM sessions WHERE id=?", (sid,)).fetchone()
+        r = get_conn().execute(
+            "SELECT 1 FROM sessions WHERE id=? AND owner_id=?", (sid, owner_id)).fetchone()
+    return r is not None
+
+
+def get_session_mode(sid: str, owner_id: str = "local") -> str | None:
+    """The chat's locked mode (the intent chosen on its first turn), or None for legacy/foreign."""
+    with _LOCK:
+        r = get_conn().execute(
+            "SELECT mode FROM sessions WHERE id=? AND owner_id=?", (sid, owner_id)).fetchone()
     return (r["mode"] if r else None) or None
 
 
-def list_sessions() -> list[dict[str, Any]]:
+def list_sessions(owner_id: str = "local") -> list[dict[str, Any]]:
     with _LOCK:
-        # Order by last activity so a conversation you return to bubbles to the
-        # top; fall back to created_at for rows that predate updated_at.
+        # Only this owner's sessions. Order by last activity so a conversation you return to bubbles
+        # to the top; fall back to created_at for rows that predate updated_at.
         rows = get_conn().execute(
             """SELECT id, first_q, created_at, updated_at, mode
                FROM sessions
+               WHERE owner_id=?
                ORDER BY COALESCE(updated_at, created_at) DESC
-               LIMIT 100"""
+               LIMIT 100""",
+            (owner_id,),
         ).fetchall()
     return [dict(r) for r in rows]
 
 
-def delete_session(sid: str) -> bool:
+def delete_session(sid: str, owner_id: str = "local") -> bool:
     with _tx(get_conn()) as conn:
-        cur = conn.execute("DELETE FROM sessions WHERE id=?", (sid,))
+        cur = conn.execute("DELETE FROM sessions WHERE id=? AND owner_id=?", (sid, owner_id))
     return cur.rowcount > 0
 
 
@@ -340,11 +364,14 @@ def save_message(
     return cur.lastrowid
 
 
-def get_messages(session_id: str) -> list[dict[str, Any]]:
+def get_messages(session_id: str, owner_id: str = "local") -> list[dict[str, Any]]:
     with _LOCK:
+        # Scoped to the owner via a subquery, so a guessed session id from another owner reads
+        # nothing (the route then 404s) rather than leaking the conversation.
         rows = get_conn().execute(
-            "SELECT * FROM messages WHERE session_id=? ORDER BY id",
-            (session_id,),
+            "SELECT * FROM messages WHERE session_id=? "
+            "AND session_id IN (SELECT id FROM sessions WHERE id=? AND owner_id=?) ORDER BY id",
+            (session_id, session_id, owner_id),
         ).fetchall()
     out = []
     for r in rows:
@@ -360,31 +387,34 @@ def get_messages(session_id: str) -> list[dict[str, Any]]:
 # ── 'My Shiurim' saved-lesson library ────────────────────────────────────────
 
 def save_lesson(lesson_id: str, topic: str, audience: str, grade_band: str, length: str,
-                lang: str, files: list[dict], citations: list[dict] | None = None) -> None:
+                lang: str, files: list[dict], citations: list[dict] | None = None,
+                owner_id: str = "local") -> None:
     conn = get_conn()
     with _LOCK, _tx(conn):
         conn.execute(
             "INSERT OR REPLACE INTO saved_lessons "
-            "(id, topic, audience, grade_band, length, lang, files, citations, created_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
+            "(id, topic, audience, grade_band, length, lang, files, citations, created_at, owner_id) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
             (lesson_id, topic, audience or "", grade_band or "", length or "", lang or "he",
              json.dumps(files, ensure_ascii=False),
-             json.dumps(citations or [], ensure_ascii=False), _now()),
+             json.dumps(citations or [], ensure_ascii=False), _now(), owner_id),
         )
 
 
-def list_lessons() -> list[dict[str, Any]]:
+def list_lessons(owner_id: str = "local") -> list[dict[str, Any]]:
     with _LOCK:
         rows = get_conn().execute(
             "SELECT id, topic, audience, grade_band, length, lang, created_at "
-            "FROM saved_lessons ORDER BY created_at DESC"
+            "FROM saved_lessons WHERE owner_id=? ORDER BY created_at DESC",
+            (owner_id,),
         ).fetchall()
     return [dict(r) for r in rows]
 
 
-def get_lesson(lesson_id: str) -> dict[str, Any] | None:
+def get_lesson(lesson_id: str, owner_id: str = "local") -> dict[str, Any] | None:
     with _LOCK:
-        r = get_conn().execute("SELECT * FROM saved_lessons WHERE id=?", (lesson_id,)).fetchone()
+        r = get_conn().execute(
+            "SELECT * FROM saved_lessons WHERE id=? AND owner_id=?", (lesson_id, owner_id)).fetchone()
     if not r:
         return None
     d = dict(r)
@@ -393,10 +423,11 @@ def get_lesson(lesson_id: str) -> dict[str, Any] | None:
     return d
 
 
-def delete_lesson(lesson_id: str) -> bool:
+def delete_lesson(lesson_id: str, owner_id: str = "local") -> bool:
     conn = get_conn()
     with _LOCK, _tx(conn):
-        cur = conn.execute("DELETE FROM saved_lessons WHERE id=?", (lesson_id,))
+        cur = conn.execute(
+            "DELETE FROM saved_lessons WHERE id=? AND owner_id=?", (lesson_id, owner_id))
     return cur.rowcount > 0
 
 
