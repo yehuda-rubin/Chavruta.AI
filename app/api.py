@@ -1027,6 +1027,33 @@ def _augment_question(question: str, attachments: list[Attachment] | None) -> st
     return f"{question}\n\n{header}\n{joined}"
 
 
+# ── Free-tier daily quota ─────────────────────────────────────────────────────
+def _free_daily_quota() -> int:
+    """Generations allowed per authenticated user per UTC day. 0 / unset ⇒ quota OFF (unlimited)."""
+    try:
+        return int(os.environ.get("CHAVRUTA_FREE_DAILY_QUOTA", "0"))
+    except ValueError:
+        return 0
+
+
+def _enforce_quota(owner: str, lang: str) -> None:
+    """Free-tier cap. Only bites authenticated users (owner != 'local') when a quota is configured —
+    local/offline use is always unlimited. Over the limit ⇒ 429 with a bilingual message. Enforced
+    before ownership checks so an over-quota user probing session ids learns nothing about them."""
+    limit = _free_daily_quota()
+    if owner == "local" or limit <= 0:
+        return
+    allowed, _ = db.bump_usage(owner, limit)
+    if not allowed:
+        he = (lang or "he").startswith("he")
+        raise HTTPException(
+            status_code=429,
+            detail=(f"הגעת למכסת השאלות היומית ({limit}). המכסה מתאפסת מחר, או שדרג לתוכנית בתשלום."
+                    if he else
+                    f"Daily limit reached ({limit}). It resets tomorrow, or upgrade to a paid plan."),
+        )
+
+
 class QueryRequest(BaseModel):
     # Bounded so a giant body can't blow up the bridge job files / prompt tokens (a 422 is returned
     # for over-length input). 8k chars is far beyond any real question incl. a pasted source.
@@ -1043,9 +1070,33 @@ class QueryRequest(BaseModel):
 def query(req: QueryRequest, owner: str = Depends(current_owner)):
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
+    _enforce_quota(owner, req.lang)
     return _run_query(_augment_question(req.question, req.attachments), req.lang, req.intent, [],
                       audience=req.audience, grade_band=req.grade_band, length=req.length,
                       owner_id=owner)
+
+
+class MeOut(BaseModel):
+    owner: str
+    authenticated: bool
+    daily_quota: int | None = None   # None ⇒ unlimited (local user, or quota disabled)
+    used_today: int = 0
+    remaining: int | None = None     # None ⇒ unlimited
+
+
+@app.get("/me", response_model=MeOut)
+def me(owner: str = Depends(current_owner)):
+    """Account + today's quota state — lets the UI show who's signed in and how many questions remain."""
+    limit = _free_daily_quota()
+    unlimited = owner == "local" or limit <= 0
+    used = 0 if owner == "local" else db.usage_today(owner)
+    return MeOut(
+        owner=owner,
+        authenticated=owner != "local",
+        daily_quota=None if unlimited else limit,
+        used_today=used,
+        remaining=None if unlimited else max(0, limit - used),
+    )
 
 
 # ── Sessions ──────────────────────────────────────────────────────────────────
@@ -1138,6 +1189,7 @@ def create_session(req: QueryRequest, owner: str = Depends(current_owner)):
     /sessions/async for a long lesson that would outlast a proxy timeout)."""
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
+    _enforce_quota(owner, req.lang)
 
     # Lock the chat's mode to the intent chosen on this first turn; every follow-up stays in it.
     sid = db.create_session(req.question.strip(), mode=req.intent or None, owner_id=owner)
@@ -1150,6 +1202,7 @@ def session_query(session_id: str, req: QueryRequest, owner: str = Depends(curre
     """Continue an existing session (synchronous)."""
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
+    _enforce_quota(owner, req.lang)
     history, intent = _prepare_continue(session_id, req, owner)
     return _continue_query_work(session_id, req, history, intent, owner)
 
@@ -1162,6 +1215,7 @@ def session_query(session_id: str, req: QueryRequest, owner: str = Depends(curre
 def query_async(req: QueryRequest, owner: str = Depends(current_owner)):
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
+    _enforce_quota(owner, req.lang)
     q = _augment_question(req.question, req.attachments)
     jid = jobs.submit(owner, lambda: jsonable_encoder(
         _run_query(q, req.lang, req.intent, [], audience=req.audience,
@@ -1175,6 +1229,7 @@ def create_session_async(req: QueryRequest, owner: str = Depends(current_owner))
     query in the background."""
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
+    _enforce_quota(owner, req.lang)
     sid = db.create_session(req.question.strip(), mode=req.intent or None, owner_id=owner)
     db.save_message(sid, "user", req.question)
     jid = jobs.submit(owner, lambda: jsonable_encoder(_first_query_work(sid, req, owner)))
@@ -1185,6 +1240,7 @@ def create_session_async(req: QueryRequest, owner: str = Depends(current_owner))
 def session_query_async(session_id: str, req: QueryRequest, owner: str = Depends(current_owner)):
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
+    _enforce_quota(owner, req.lang)
     # The ownership gate + user-turn save happen NOW (before returning) so an unauthorized caller
     # gets a synchronous 404 and the user message is durable even if generation later fails.
     history, intent = _prepare_continue(session_id, req, owner)

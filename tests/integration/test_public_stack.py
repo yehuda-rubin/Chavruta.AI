@@ -103,5 +103,26 @@ def test_auth_required_when_keys_set(client, monkeypatch):
     assert client.get("/health").status_code == 200
 
 
+def test_free_quota_blocks_over_limit_and_me_reflects_it(client, monkeypatch):
+    monkeypatch.setenv("CHAVRUTA_API_KEYS", "k")
+    monkeypatch.setenv("CHAVRUTA_FREE_DAILY_QUOTA", "2")
+    h = {"Authorization": "Bearer k"}
+    assert client.post("/query/async", headers=h, json={"question": "a"}).status_code == 202
+    assert client.post("/query/async", headers=h, json={"question": "b"}).status_code == 202
+    third = client.post("/query/async", headers=h, json={"question": "c"})
+    assert third.status_code == 429
+    me = client.get("/me", headers=h).json()
+    assert me["authenticated"] and me["daily_quota"] == 2 and me["remaining"] == 0
+
+
+def test_local_user_never_quota_limited(client, monkeypatch):
+    # Quota set, but auth off ⇒ everyone is 'local' ⇒ unlimited (local/offline unchanged).
+    monkeypatch.setenv("CHAVRUTA_FREE_DAILY_QUOTA", "1")
+    for _ in range(3):
+        assert client.post("/query/async", json={"question": "x"}).status_code == 202
+    me = client.get("/me").json()
+    assert me["authenticated"] is False and me["daily_quota"] is None
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

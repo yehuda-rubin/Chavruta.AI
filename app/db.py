@@ -60,7 +60,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -120,6 +120,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
             owner_id    TEXT NOT NULL DEFAULT 'local'  -- who this belongs to; 'local' = single-user
         );
         CREATE INDEX IF NOT EXISTS idx_saved_lessons_time ON saved_lessons(created_at DESC);
+
+        -- Per-owner daily usage counter — the free-tier quota (public hosting). One row per
+        -- (owner, UTC day); the generation endpoints bump it and reject over the configured limit.
+        -- Persisted (not in-memory) so a restart can't reset a user's daily allowance.
+        CREATE TABLE IF NOT EXISTS usage_counters (
+            owner_id  TEXT NOT NULL,
+            day       TEXT NOT NULL,          -- UTC date, YYYY-MM-DD
+            count     INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (owner_id, day)
+        );
     """)
 
     # Forward migrations for databases created by an older schema version.
@@ -433,3 +443,41 @@ def delete_lesson(lesson_id: str, owner_id: str = "local") -> bool:
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def today_utc() -> str:
+    """The current UTC date as YYYY-MM-DD — the bucket a daily quota counts against."""
+    return datetime.now(UTC).strftime("%Y-%m-%d")
+
+
+def bump_usage(owner_id: str, limit: int, day: str | None = None) -> tuple[bool, int]:
+    """Atomically account one generation for `owner_id` today and enforce the free-tier quota.
+
+    Returns (allowed, count). With limit <= 0 the quota is OFF: always allowed, still counted (so
+    usage is observable). With limit > 0, if the day's count already reached the limit we do NOT
+    increment and return (False, count) — the caller turns that into a 429. The read-and-increment
+    runs under the shared lock in one transaction, so two concurrent requests can't both slip past
+    the limit."""
+    day = day or today_utc()
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        row = conn.execute(
+            "SELECT count FROM usage_counters WHERE owner_id=? AND day=?", (owner_id, day)).fetchone()
+        current = row["count"] if row else 0
+        if limit > 0 and current >= limit:
+            return False, current
+        conn.execute(
+            "INSERT INTO usage_counters (owner_id, day, count) VALUES (?,?,1) "
+            "ON CONFLICT(owner_id, day) DO UPDATE SET count = count + 1",
+            (owner_id, day))
+        return True, current + 1
+
+
+def usage_today(owner_id: str, day: str | None = None) -> int:
+    """Today's generation count for `owner_id` (0 if none) — for the /me quota readout."""
+    day = day or today_utc()
+    conn = get_conn()
+    with _LOCK:
+        row = conn.execute(
+            "SELECT count FROM usage_counters WHERE owner_id=? AND day=?", (owner_id, day)).fetchone()
+    return row["count"] if row else 0
