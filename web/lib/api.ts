@@ -121,10 +121,14 @@ export const api = {
 export interface Me {
   owner: string;
   authenticated: boolean;
+  plan: string;
   daily_quota: number | null;
   used_today: number;
   remaining: number | null;
   deletion_scheduled_for: string | null;   // ISO ts if the account is pending deletion
+  blocked: boolean;
+  blocked_until: string | null;             // ISO ts the block lifts (null + blocked ⇒ permanent)
+  blocked_reason: string;
 }
 
 export interface Deletion {

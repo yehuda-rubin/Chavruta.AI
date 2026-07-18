@@ -60,7 +60,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -139,6 +139,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
             deletion_requested_at  TEXT,      -- ISO ts when the user asked to delete (NULL = not asked)
             deletion_scheduled_for TEXT,      -- ISO ts when the purge runs (NULL = nothing scheduled)
             plan                   TEXT NOT NULL DEFAULT 'free'   -- 'free' | 'paid'; flipped by billing
+        );
+
+        -- Blocklist — an account can be blocked for a bounded window (hours / days / months) or for
+        -- good (banned_until IS NULL = permanent). Enforced at the auth gate: a blocked owner is 403'd
+        -- on every route except viewing/managing their own account. Admin-managed (scripts/manage_bans.py).
+        CREATE TABLE IF NOT EXISTS account_bans (
+            owner_id     TEXT PRIMARY KEY,
+            banned_at    TEXT NOT NULL,        -- ISO ts the block was applied
+            banned_until TEXT,                 -- ISO ts the block lifts; NULL = permanent
+            reason       TEXT
         );
     """)
 
@@ -549,6 +559,46 @@ def set_plan(owner_id: str, plan: str) -> None:
         conn.execute(
             "INSERT INTO accounts (owner_id, plan) VALUES (?,?) "
             "ON CONFLICT(owner_id) DO UPDATE SET plan=excluded.plan", (owner_id, plan))
+
+
+# ── Blocklist ─────────────────────────────────────────────────────────────────
+def ban_account(owner_id: str, banned_at: str, banned_until: str | None, reason: str = "") -> None:
+    """Block an account. banned_until=None ⇒ permanent; otherwise the ISO ts the block lifts."""
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        conn.execute(
+            "INSERT INTO account_bans (owner_id, banned_at, banned_until, reason) VALUES (?,?,?,?) "
+            "ON CONFLICT(owner_id) DO UPDATE SET banned_at=excluded.banned_at, "
+            "banned_until=excluded.banned_until, reason=excluded.reason",
+            (owner_id, banned_at, banned_until, reason))
+
+
+def unban_account(owner_id: str) -> bool:
+    """Lift a block. Returns True if a block existed."""
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        cur = conn.execute("DELETE FROM account_bans WHERE owner_id=?", (owner_id,))
+    return cur.rowcount > 0
+
+
+def get_ban(owner_id: str) -> dict[str, Any] | None:
+    """The raw block row for an owner (regardless of expiry), or None."""
+    conn = get_conn()
+    with _LOCK:
+        row = conn.execute(
+            "SELECT owner_id, banned_at, banned_until, reason FROM account_bans WHERE owner_id=?",
+            (owner_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def list_bans() -> list[dict[str, Any]]:
+    """All block rows (for the admin CLI)."""
+    conn = get_conn()
+    with _LOCK:
+        rows = conn.execute(
+            "SELECT owner_id, banned_at, banned_until, reason FROM account_bans "
+            "ORDER BY banned_at DESC").fetchall()
+    return [dict(r) for r in rows]
 
 
 def due_deletions(now_iso: str) -> list[str]:

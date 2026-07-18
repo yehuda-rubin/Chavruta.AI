@@ -1090,16 +1090,20 @@ class MeOut(BaseModel):
     used_today: int = 0
     remaining: int | None = None     # None ⇒ unlimited
     deletion_scheduled_for: str | None = None   # ISO ts if the account is pending deletion
+    blocked: bool = False            # account on the blocklist
+    blocked_until: str | None = None  # ISO ts the block lifts (None + blocked ⇒ permanent)
+    blocked_reason: str = ""
 
 
 @app.get("/me", response_model=MeOut)
 def me(owner: str = Depends(current_owner)):
     """Account + today's quota state — lets the UI show who's signed in, their plan, how many questions
-    remain, and whether a deletion is pending."""
+    remain, whether a deletion is pending, and whether the account is blocked."""
     plan = "free" if owner == "local" else db.get_plan(owner)
     limit = _plan_daily_quota(plan)
     unlimited = owner == "local" or limit <= 0
     used = 0 if owner == "local" else db.usage_today(owner)
+    ban = None if owner == "local" else accounts.active_ban(owner)
     return MeOut(
         owner=owner,
         authenticated=owner != "local",
@@ -1108,6 +1112,9 @@ def me(owner: str = Depends(current_owner)):
         used_today=used,
         remaining=None if unlimited else max(0, limit - used),
         deletion_scheduled_for=None if owner == "local" else accounts.scheduled_for(owner),
+        blocked=ban is not None,
+        blocked_until=ban["until"] if ban else None,
+        blocked_reason=ban["reason"] if ban else "",
     )
 
 

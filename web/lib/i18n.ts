@@ -136,6 +136,11 @@ export const STRINGS = {
     deletionScheduledPrefix: "החשבון מתוזמן למחיקה בתאריך",
     deletionCanCancel: "אפשר לבטל את המחיקה עד אז.",
     cancelDeletion: "בטל מחיקה",
+    blockedTitle: "החשבון חסום",
+    blockedPermanent: "החשבון שלך נחסם לצמיתות.",
+    blockedUntilPrefix: "החשבון שלך חסום עד",
+    blockedReasonPrefix: "סיבה:",
+    blockedContact: "לערעור פנה אלינו:",
   },
   en: {
     brand: "Chavruta",
@@ -262,6 +267,11 @@ export const STRINGS = {
     deletionScheduledPrefix: "Account scheduled for deletion on",
     deletionCanCancel: "You can cancel the deletion until then.",
     cancelDeletion: "Cancel deletion",
+    blockedTitle: "Account blocked",
+    blockedPermanent: "Your account has been permanently blocked.",
+    blockedUntilPrefix: "Your account is blocked until",
+    blockedReasonPrefix: "Reason:",
+    blockedContact: "To appeal, contact us:",
   },
 } as const;
 

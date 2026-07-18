@@ -16,6 +16,7 @@ import { SettingsModal, Theme } from "@/components/SettingsModal";
 import { SupportModal } from "@/components/SupportModal";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
 import { SignIn } from "@/components/SignIn";
+import { Blocked } from "@/components/Blocked";
 import { useAuth } from "@/lib/auth";
 
 export default function Home() {
@@ -230,6 +231,10 @@ export default function Home() {
   }
   if (auth.enabled && !auth.user) {
     return <SignIn lang={lang} />;
+  }
+  // Blocklisted account — show the block notice instead of the app (the server 403s everything else).
+  if (auth.enabled && auth.user && me?.blocked) {
+    return <Blocked lang={lang} until={me.blocked_until} reason={me.blocked_reason} />;
   }
 
   return (

@@ -51,6 +51,23 @@ def scheduled_for(owner_id: str) -> str | None:
     return acct.get("deletion_scheduled_for") if acct else None
 
 
+# ── Blocklist ─────────────────────────────────────────────────────────────────
+def active_ban(owner_id: str, now_iso: str | None = None) -> dict | None:
+    """The block currently in force for this owner, or None. Permanent blocks (banned_until IS NULL)
+    are always active; timed blocks are active only until their deadline. Returns
+    {permanent, until, reason} so the caller can tell the user how long the block lasts."""
+    row = db.get_ban(owner_id)
+    if not row:
+        return None
+    until = row.get("banned_until")
+    if until is None:
+        return {"permanent": True, "until": None, "reason": row.get("reason") or ""}
+    now_iso = now_iso or datetime.now(UTC).isoformat()
+    if until > now_iso:
+        return {"permanent": False, "until": until, "reason": row.get("reason") or ""}
+    return None      # the timed block has expired — no longer in force
+
+
 # ── Purge execution ───────────────────────────────────────────────────────────
 def _delete_supabase_user(owner_id: str) -> None:
     """Best-effort: remove the auth user from Supabase so the email can no longer sign in. Requires a

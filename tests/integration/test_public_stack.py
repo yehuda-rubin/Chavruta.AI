@@ -143,6 +143,21 @@ def test_account_deletion_rejected_in_local_mode(client):
     assert client.post("/account/delete").status_code == 400
 
 
+def test_blocked_account_403d_but_can_see_status(client, monkeypatch):
+    monkeypatch.setenv("CHAVRUTA_API_KEYS", "k")
+    h = {"Authorization": "Bearer k"}
+    owner = client.get("/me", headers=h).json()["owner"]
+    # Block permanently, then generation is 403'd while /me still works and reports the block.
+    db.ban_account(owner, "2026-07-18T00:00:00+00:00", None, "abuse")
+    assert client.post("/query/async", headers=h, json={"question": "x"}).status_code == 403
+    assert client.post("/sessions/async", headers=h, json={"question": "x"}).status_code == 403
+    me = client.get("/me", headers=h).json()
+    assert me["blocked"] is True and me["blocked_until"] is None and me["blocked_reason"] == "abuse"
+    # Lifting the block restores access.
+    db.unban_account(owner)
+    assert client.post("/query/async", headers=h, json={"question": "x"}).status_code == 202
+
+
 def test_plan_based_quota_switch(client, monkeypatch):
     monkeypatch.setenv("CHAVRUTA_API_KEYS", "k")
     monkeypatch.setenv("CHAVRUTA_FREE_DAILY_QUOTA", "2")

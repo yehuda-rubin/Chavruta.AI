@@ -21,9 +21,14 @@ import uuid
 from fastapi import Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from app import accounts as accts
 from app import auth_supabase as sb
 
 _log = logging.getLogger("chavruta.request")
+
+# A blocked account is still allowed to reach these path prefixes — so it can see WHY it's blocked
+# (/me reports the block) and manage its own account (/account/*). Everything else is 403'd.
+_BAN_EXEMPT_PREFIXES = ("/me", "/account")
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -64,22 +69,46 @@ def require_api_key(
         raise HTTPException(status_code=401, detail="missing or invalid API key")
 
 
+def _owner_from_key(authorization: str | None, x_api_key: str | None) -> str:
+    """The owner id for API-key / open-local mode: 'local' when no keys are set or none presented,
+    otherwise a stable hash of the presented key (the key is never stored as an id)."""
+    if not _api_keys():
+        return "local"
+    presented = x_api_key or _bearer(authorization)
+    if not presented:
+        return "local"
+    return "u_" + hashlib.sha256(presented.encode()).hexdigest()[:16]
+
+
 def require_auth(
     request: Request,
     authorization: str | None = Header(default=None),
     x_api_key: str | None = Header(default=None),
 ) -> None:
-    """App-wide gate. In Supabase mode, require a valid access-token JWT and stash the verified user
-    id on request.state for current_owner; otherwise fall back to the API-key gate (or open-local)."""
-    if request.url.path in _AUTH_EXEMPT:
+    """App-wide gate. Resolves the caller's identity (Supabase JWT `sub`, or a hashed API key, or
+    'local'), stashes it on request.state for current_owner, and enforces the blocklist: a blocked
+    account is 403'd on every route except viewing/managing its own account."""
+    path = request.url.path
+    if path in _AUTH_EXEMPT:
         return
     if sb.enabled():
-        sub = sb.verify_sub(_bearer(authorization))
-        if not sub:
+        owner = sb.verify_sub(_bearer(authorization))
+        if not owner:
             raise HTTPException(status_code=401, detail="missing or invalid bearer token")
-        request.state.owner = sub
-        return
-    require_api_key(request, authorization, x_api_key)
+    else:
+        require_api_key(request, authorization, x_api_key)     # 401 on a bad/absent key
+        owner = _owner_from_key(authorization, x_api_key)
+    request.state.owner = owner
+
+    if owner != "local" and not path.startswith(_BAN_EXEMPT_PREFIXES):
+        ban = accts.active_ban(owner)
+        if ban:
+            raise HTTPException(status_code=403, detail={
+                "error": "account_blocked",
+                "permanent": ban["permanent"],
+                "until": ban["until"],
+                "reason": ban["reason"],
+            })
 
 
 def current_owner(
@@ -87,18 +116,14 @@ def current_owner(
     authorization: str | None = Header(default=None),
     x_api_key: str | None = Header(default=None),
 ) -> str:
-    """The identity data is scoped to. Supabase mode ⇒ the verified JWT `sub` (already validated and
-    stashed by require_auth). API-key mode ⇒ a stable hash of the presented key (the key itself is
-    never stored as an id). Neither configured ⇒ the single 'local' user (unchanged offline behaviour)."""
+    """The identity data is scoped to. Prefers the value require_auth already resolved and stashed;
+    falls back to recomputing for direct calls (and exempt paths that skip require_auth)."""
+    stashed = getattr(getattr(request, "state", None), "owner", None)
+    if stashed:
+        return stashed
     if sb.enabled():
-        # require_auth verified + stashed the sub on non-exempt paths; exempt paths carry no identity.
-        return getattr(request.state, "owner", None) or "local"
-    if not _api_keys():
         return "local"
-    presented = x_api_key or _bearer(authorization)
-    if not presented:
-        return "local"
-    return "u_" + hashlib.sha256(presented.encode()).hexdigest()[:16]
+    return _owner_from_key(authorization, x_api_key)
 
 
 # ── Rate limiting (per-IP, in-memory sliding window) ──────────────────────────
