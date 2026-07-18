@@ -13,12 +13,55 @@ ground truth for what a request costs — it used to be read off the response an
 from __future__ import annotations
 
 import logging
+import os
+import threading
 import time
 from collections.abc import Iterator
 
 from chavruta.llm.base import GroundedPrompt, LLMResult, render_messages
 
 _log = logging.getLogger("chavruta.llm.cloud")
+
+
+class _CircuitBreaker:
+    """Fail fast when the LLM API is down. Without it, every request waits out the full timeout and
+    pins a worker thread — so a provider outage backs the whole API up (the audit's C4). After N
+    consecutive transient failures the circuit OPENS: calls raise immediately for a cooldown, then
+    one trial (half-open) decides whether to close again. Config errors don't trip it — they're a
+    misconfiguration, not an outage, and are handled separately.
+    """
+
+    def __init__(self, fails: int, cooldown_s: float):
+        self.fails = fails
+        self.cooldown = cooldown_s
+        self._consecutive = 0
+        self._open_until = 0.0
+        self._lock = threading.Lock()
+
+    def before(self, now: float) -> None:
+        with self._lock:
+            if self._open_until and now < self._open_until:
+                raise LLMTransientError(
+                    f"LLM circuit open — provider failing; retry in {self._open_until - now:.0f}s")
+
+    def on_success(self) -> None:
+        with self._lock:
+            self._consecutive = 0
+            self._open_until = 0.0
+
+    def on_failure(self, now: float) -> None:
+        with self._lock:
+            self._consecutive += 1
+            if self._consecutive >= self.fails:
+                self._open_until = now + self.cooldown
+                _log.error("LLM circuit OPEN after %d consecutive failures — pausing calls for %.0fs",
+                           self._consecutive, self.cooldown)
+
+
+_BREAKER = _CircuitBreaker(
+    fails=int(os.environ.get("CHAVRUTA_LLM_BREAKER_FAILS", "5")),
+    cooldown_s=float(os.environ.get("CHAVRUTA_LLM_BREAKER_COOLDOWN_S", "30")),
+)
 
 
 class LLMConfigError(RuntimeError):
@@ -89,6 +132,7 @@ class CloudLLM:
         Raises LLMConfigError / LLMTransientError.
         """
         t0 = time.monotonic()
+        _BREAKER.before(t0)     # fail fast if the provider is currently flagged down
         try:
             resp = self._client_().chat.completions.create(
                 model=self.model_id,
@@ -98,6 +142,10 @@ class CloudLLM:
             )
         except Exception as exc:
             mapped = _classify(exc)
+            # Only transient failures (timeout/429/5xx/connection) count toward the breaker — a
+            # config error is a misconfiguration, not an outage.
+            if isinstance(mapped, LLMTransientError):
+                _BREAKER.on_failure(time.monotonic())
             _log.error(
                 "llm call FAILED what=%s model=%s elapsed=%.1fs kind=%s: %s",
                 what, self.model_id, time.monotonic() - t0,
@@ -105,6 +153,7 @@ class CloudLLM:
             )
             raise mapped from exc
 
+        _BREAKER.on_success()
         elapsed = time.monotonic() - t0
         usage = getattr(resp, "usage", None)
         choice = resp.choices[0]

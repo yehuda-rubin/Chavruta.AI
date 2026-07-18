@@ -731,3 +731,36 @@ def test_agentic_loop_uncapped_when_no_budget():
 
     agentic_request(_LLM(), "## JOB", lang="he", max_tokens=8000, token_budget=None)
     assert calls == [8000], "with no budget the per-round cap is used as-is"
+
+
+# ── Tier3 (public hosting): the LLM circuit breaker fails fast when the provider is down ──
+# Bug (audit C4): with no breaker, every request during an outage waits out the full timeout and
+# pins a worker thread, so one provider outage backs up the whole API. The breaker opens after N
+# consecutive transient failures and fails fast for a cooldown.
+
+def test_llm_circuit_breaker_opens_and_recovers():
+    from chavruta.llm.cloud import LLMTransientError, _CircuitBreaker
+
+    b = _CircuitBreaker(fails=3, cooldown_s=10.0)
+    now = 100.0
+    b.before(now)                                   # closed: allowed
+    for _ in range(3):
+        b.on_failure(now)                           # 3 consecutive transient failures → open
+    import pytest as _pytest
+    with _pytest.raises(LLMTransientError):
+        b.before(now + 1)                           # open → fails fast, no network call
+    with _pytest.raises(LLMTransientError):
+        b.before(now + 9)                           # still within cooldown
+    b.before(now + 11)                              # cooldown elapsed → half-open trial allowed
+    b.on_success()
+    b.before(now + 12)                              # success closed it again
+
+
+def test_llm_circuit_breaker_success_resets_count():
+    from chavruta.llm.cloud import _CircuitBreaker
+
+    b = _CircuitBreaker(fails=2, cooldown_s=10.0)
+    b.on_failure(0.0)
+    b.on_success()          # a success in between must reset the consecutive counter
+    b.on_failure(1.0)
+    b.before(2.0)           # only 1 failure since the reset → still closed
