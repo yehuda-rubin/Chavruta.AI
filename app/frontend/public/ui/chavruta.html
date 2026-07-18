@@ -156,7 +156,7 @@
     <label class="w-full py-3 rounded-2xl glass text-ink/70 font-semibold text-sm text-center cursor-pointer hover:bg-white/60 transition flex items-center justify-center gap-2">
       <span class="material-symbols-outlined">upload_file</span>
       <span data-i18n="uploadFile">העלה קובץ · תמונה, PDF או Word</span>
-      <input id="addSrcFile" type="file" accept="image/*,.pdf,.doc,.docx,.txt" class="hidden" multiple>
+      <input id="addSrcFile" type="file" accept=".pdf,.doc,.docx,.txt" class="hidden" multiple>
     </label>
     <div class="flex gap-2">
       <button id="addSrcSave" class="flex-1 py-3 rounded-full grad text-white font-bold text-sm hover:opacity-95 transition" data-i18n="add">הוסף</button>
@@ -293,8 +293,8 @@ const T = {
     srcEdition:'מהדורה', srcLicense:'רישיון', viewOnSefaria:'צפה ב-Sefaria',
     openSources:'פתח מקורות', addSource:'+ הוסף מקור', remove:'הסר',
     kindText:'טקסט', kindImage:'תמונה', kindPdf:'PDF', kindWord:'Word',
-    addSrcTitle:'הוסף מקור למודל', addSrcDesc:'הדבק טקסט מקור, או העלה קובץ — תמונה, PDF או Word. המקורות שתוסיף יישלחו למודל יחד עם השאלה הבאה.',
-    addSrcPlaceholder:'הדבק כאן טקסט של מקור…', uploadFile:'העלה קובץ · תמונה, PDF או Word', add:'הוסף', cancel:'ביטול',
+    addSrcTitle:'הוסף מקור למודל', addSrcDesc:'הדבק טקסט מקור, או העלה קובץ — PDF או Word. המקורות שתוסיף יישלחו למודל יחד עם השאלה הבאה.',
+    addSrcPlaceholder:'הדבק כאן טקסט של מקור…', uploadFile:'העלה קובץ · PDF או Word', add:'הוסף', cancel:'ביטול',
     clickView:'Word · לחץ לתצוגה', view:'תצוגה', download:'הורד Word', lessonThreeFiles:'שיעור · שלושה קבצים',
     downloadWord:'הורד Word', noContent:'אין תוכן זמין.', lessonReady:'הנה השיעור שלך — שלושה קבצי Word מוכנים להורדה:',
     demoOffline:'‹ מצב הדגמה — השרת אינו מחובר. הפעל את ה-API (uvicorn / docker) כדי לקבל תשובות אמיתיות. ›',
@@ -334,8 +334,8 @@ const T = {
     srcEdition:'Edition', srcLicense:'License', viewOnSefaria:'View on Sefaria',
     openSources:'Open sources', addSource:'+ Add source', remove:'Remove',
     kindText:'Text', kindImage:'Image', kindPdf:'PDF', kindWord:'Word',
-    addSrcTitle:'Add a source for the model', addSrcDesc:'Paste source text, or upload a file — image, PDF or Word. The sources you add are sent to the model with your next question.',
-    addSrcPlaceholder:'Paste source text here…', uploadFile:'Upload a file · Image, PDF or Word', add:'Add', cancel:'Cancel',
+    addSrcTitle:'Add a source for the model', addSrcDesc:'Paste source text, or upload a file — PDF or Word. The sources you add are sent to the model with your next question.',
+    addSrcPlaceholder:'Paste source text here…', uploadFile:'Upload a file · PDF or Word', add:'Add', cancel:'Cancel',
     clickView:'Word · click to view', view:'View', download:'Download Word', lessonThreeFiles:'Lesson · three files',
     downloadWord:'Download Word', noContent:'No content available.', lessonReady:'Here is your lesson — three Word files ready to download:',
     demoOffline:'‹ Demo mode — the server is not connected. Start the API (uvicorn / docker) for real answers. ›',

@@ -52,7 +52,9 @@ export function AddSourceModal({
         <Icon name="upload_file" className="text-[19px]" />
         {tr(lang, "uploadFile")}
       </button>
-      <input ref={fileRef} type="file" accept="image/*,.pdf,.doc,.docx,.txt" className="hidden" multiple />
+      {/* Images are intentionally excluded for now — OCR (image → Hebrew text) is a separate,
+          owner-approved step. Re-add "image/*" here and drop the backend note to enable it. */}
+      <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,.txt" className="hidden" multiple />
       <div className="flex gap-2">
         <button onClick={save} className="flex-1 py-3 rounded-full grad text-white font-bold text-sm hover:opacity-95 transition">
           {tr(lang, "add")}
