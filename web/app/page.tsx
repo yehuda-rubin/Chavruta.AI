@@ -15,8 +15,11 @@ import { LessonsModal } from "@/components/LessonsModal";
 import { SettingsModal, Theme } from "@/components/SettingsModal";
 import { SupportModal } from "@/components/SupportModal";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
+import { SignIn } from "@/components/SignIn";
+import { useAuth } from "@/lib/auth";
 
 export default function Home() {
+  const auth = useAuth();
   const [lang, setLang] = useState<Lang>("he");
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -85,9 +88,12 @@ export default function Home() {
       /* backend down in dev — shell still renders */
     }
   }, []);
+  // Re-fetch when the signed-in user changes too: after sign-in the bearer token is now set, so the
+  // list (which 401'd while signed out in Supabase mode) can load. auth.user?.id is null in local mode
+  // so this runs exactly once there — unchanged.
   useEffect(() => {
     refreshSessions();
-  }, [refreshSessions]);
+  }, [refreshSessions, auth.user?.id]);
 
   const selectSession = useCallback(async (s: Session) => {
     setActiveId(s.id);
@@ -176,6 +182,15 @@ export default function Home() {
     },
     [activeId, intent, lang, lessonFields, userSources, refreshSessions],
   );
+
+  // Auth gate (Supabase mode only). While the initial session check runs, show a minimal splash;
+  // if no user, show the sign-in screen. In local mode auth.enabled is false and neither fires.
+  if (auth.enabled && auth.loading) {
+    return <div className="min-h-screen grid place-items-center text-ink/50">{tr(lang, "authWorking")}</div>;
+  }
+  if (auth.enabled && !auth.user) {
+    return <SignIn lang={lang} />;
+  }
 
   return (
     <div className="flex flex-col h-screen">

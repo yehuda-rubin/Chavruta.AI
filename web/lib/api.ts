@@ -3,10 +3,20 @@
 
 import type { Attachment, Message, QueryResponse, SavedLesson, Session } from "./types";
 
+// The current Supabase access token, kept in sync by the auth provider (setAuthToken). When set, it's
+// attached as `Authorization: Bearer <token>` so the backend can verify the user and scope their data;
+// when null (Supabase not configured / signed out) requests go out unauthenticated, unchanged.
+let _authToken: string | null = null;
+export function setAuthToken(token: string | null) {
+  _authToken = token;
+}
+
 async function req<T>(path: string, opts?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (_authToken) headers.Authorization = `Bearer ${_authToken}`;
   const res = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
     ...opts,
+    headers: { ...headers, ...(opts?.headers as Record<string, string> | undefined) },
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");

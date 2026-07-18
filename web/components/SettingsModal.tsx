@@ -2,6 +2,7 @@
 import type { Lang } from "@/lib/types";
 import { IntentId, tr, StringKey } from "@/lib/i18n";
 import { Modal } from "./Modal";
+import { useAuth } from "@/lib/auth";
 
 export type Theme = "light" | "dark" | "auto";
 
@@ -75,6 +76,7 @@ export function SettingsModal({
   onSrcDefaultOpen: (v: boolean) => void;
   onClearHistory: () => void;
 }) {
+  const auth = useAuth();
   return (
     <Modal open={open} title={tr(lang, "settingsHeading")} onClose={onClose}>
       <div className="flex flex-col gap-4 overflow-y-auto">
@@ -129,6 +131,21 @@ export function SettingsModal({
             {tr(lang, "clearAll")}
           </button>
         </Field>
+
+        {/* Account — only in Supabase mode (auth.enabled). Shows who's signed in + a sign-out. */}
+        {auth.enabled && auth.user && (
+          <Field label={tr(lang, "account")}>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs text-ink/60 truncate">{auth.user.email}</span>
+              <button
+                onClick={() => auth.signOut()}
+                className="px-4 py-2 rounded-2xl glass text-red-500 font-semibold text-sm hover:bg-red-500/10 transition shrink-0"
+              >
+                {tr(lang, "signOut")}
+              </button>
+            </div>
+          </Field>
+        )}
 
         <div className="pt-3 border-t border-white/60">
           <p className="text-xs text-ink/55 leading-relaxed">{tr(lang, "aboutText")}</p>

@@ -141,7 +141,7 @@ from app.security import (  # noqa: E402
     current_owner,
     rate_limit_middleware,
     request_context_middleware,
-    require_api_key,
+    require_auth,
 )
 
 app = FastAPI(
@@ -153,9 +153,10 @@ app = FastAPI(
     ),
     version=__version__,     # single source of truth: src/chavruta/__init__.py
     lifespan=lifespan,
-    # App-wide auth gate. OFF until CHAVRUTA_API_KEYS is set (local dev unchanged); required on a
-    # public deployment. Health/readiness/docs are exempt inside the dependency.
-    dependencies=[Depends(require_api_key)],
+    # App-wide auth gate. OFF for local dev; in Supabase mode (SUPABASE_URL set) every request needs
+    # a valid access-token JWT, in API-key mode a valid key. Health/readiness/docs are exempt inside
+    # the dependency.
+    dependencies=[Depends(require_auth)],
 )
 
 # Middleware runs outermost-first in reverse registration order: request-context wraps everything

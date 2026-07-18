@@ -21,17 +21,29 @@ import uuid
 from fastapi import Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from app import auth_supabase as sb
+
 _log = logging.getLogger("chavruta.request")
 
 
-# ── API-key auth (optional) ───────────────────────────────────────────────────
+# ── Auth ──────────────────────────────────────────────────────────────────────
+# Two interchangeable modes, both env-gated (Principle II):
+#   • Supabase (SUPABASE_URL set)  — a real signed-in user; owner = the verified JWT `sub`.
+#   • API key  (CHAVRUTA_API_KEYS) — a shared/service key; owner = a stable hash of the key.
+# Neither configured ⇒ open local dev, everyone is the single 'local' user (unchanged).
 def _api_keys() -> set[str]:
-    """Keys allowed to call the API. Empty ⇒ auth DISABLED (local dev, and the current public
-    behaviour until keys are set)."""
+    """Keys allowed to call the API. Empty ⇒ API-key auth DISABLED."""
     return {k.strip() for k in os.environ.get("CHAVRUTA_API_KEYS", "").split(",") if k.strip()}
 
 
 _AUTH_EXEMPT = ("/health", "/ready", "/docs", "/openapi.json", "/redoc")
+
+
+def _bearer(authorization: str | None) -> str:
+    """The token from an `Authorization: Bearer <token>` header, or ''."""
+    if authorization and authorization.lower().startswith("bearer "):
+        return authorization[7:].strip()
+    return ""
 
 
 def require_api_key(
@@ -39,34 +51,51 @@ def require_api_key(
     authorization: str | None = Header(default=None),
     x_api_key: str | None = Header(default=None),
 ) -> None:
-    """App-wide FastAPI dependency. If CHAVRUTA_API_KEYS is set, require a matching key via
-    `Authorization: Bearer <key>` or `X-API-Key: <key>`; otherwise a no-op (auth off). Liveness /
-    readiness / docs are always exempt so probes and orchestrators aren't blocked."""
+    """API-key gate. If CHAVRUTA_API_KEYS is set, require a matching key via `Authorization: Bearer
+    <key>` or `X-API-Key: <key>`; otherwise a no-op. Liveness / readiness / docs are always exempt so
+    probes and orchestrators aren't blocked."""
     if request.url.path in _AUTH_EXEMPT:
         return
     keys = _api_keys()
     if not keys:
         return
-    presented = x_api_key or ""
-    if not presented and authorization and authorization.lower().startswith("bearer "):
-        presented = authorization[7:].strip()
+    presented = x_api_key or _bearer(authorization)
     if presented not in keys:
         raise HTTPException(status_code=401, detail="missing or invalid API key")
 
 
+def require_auth(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None),
+) -> None:
+    """App-wide gate. In Supabase mode, require a valid access-token JWT and stash the verified user
+    id on request.state for current_owner; otherwise fall back to the API-key gate (or open-local)."""
+    if request.url.path in _AUTH_EXEMPT:
+        return
+    if sb.enabled():
+        sub = sb.verify_sub(_bearer(authorization))
+        if not sub:
+            raise HTTPException(status_code=401, detail="missing or invalid bearer token")
+        request.state.owner = sub
+        return
+    require_api_key(request, authorization, x_api_key)
+
+
 def current_owner(
+    request: Request,
     authorization: str | None = Header(default=None),
     x_api_key: str | None = Header(default=None),
 ) -> str:
-    """The identity data is scoped to. With auth OFF (no keys) everyone is the single 'local' user —
-    unchanged local/offline behaviour. With auth ON, the owner is a stable hash of the presented key
-    (the key itself is never stored as an id), so each key sees only its own sessions and lessons.
-    The auth dependency has already rejected unknown keys before this runs."""
+    """The identity data is scoped to. Supabase mode ⇒ the verified JWT `sub` (already validated and
+    stashed by require_auth). API-key mode ⇒ a stable hash of the presented key (the key itself is
+    never stored as an id). Neither configured ⇒ the single 'local' user (unchanged offline behaviour)."""
+    if sb.enabled():
+        # require_auth verified + stashed the sub on non-exempt paths; exempt paths carry no identity.
+        return getattr(request.state, "owner", None) or "local"
     if not _api_keys():
         return "local"
-    presented = x_api_key or ""
-    if not presented and authorization and authorization.lower().startswith("bearer "):
-        presented = authorization[7:].strip()
+    presented = x_api_key or _bearer(authorization)
     if not presented:
         return "local"
     return "u_" + hashlib.sha256(presented.encode()).hexdigest()[:16]
