@@ -37,18 +37,61 @@ function body(question: string, intent: string, lang: string, extras?: LessonExt
   return JSON.stringify(b);
 }
 
+// Async generation (job queue). A full lesson can take minutes — longer than a proxy's 504 window —
+// so the backend returns a job id immediately and we poll GET /jobs/{id} until it flips to done/error.
+// This is what keeps long lessons from failing on a hosted deployment behind nginx/Cloudflare.
+interface JobAccepted {
+  job_id: string;
+  session_id?: string;
+}
+interface JobStatus<T> {
+  status: "pending" | "running" | "done" | "error";
+  result?: T;
+  error?: string;
+}
+
+async function pollJob<T>(jobId: string, intervalMs = 1400, timeoutMs = 10 * 60 * 1000): Promise<T> {
+  const start = Date.now();
+  for (;;) {
+    const s = await req<JobStatus<T>>(`/jobs/${jobId}`);
+    if (s.status === "done") return s.result as T;
+    if (s.status === "error") throw new Error(s.error || "generation failed");
+    if (Date.now() - start > timeoutMs) throw new Error("timed out waiting for generation");
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+}
+
 export const api = {
   listSessions: () => req<Session[]>("/sessions"),
   sessionMessages: (id: string) => req<Message[]>(`/sessions/${id}/messages`),
   deleteSession: (id: string) => req<{ ok: boolean }>(`/sessions/${id}`, { method: "DELETE" }),
 
-  // POST /sessions creates a session and runs the first query atomically.
+  // POST /sessions creates a session and runs the first query atomically (synchronous).
   createSession: (q: string, intent: string, lang: string, extras?: LessonExtras, att?: Attachment[]) =>
     req<CreatedSession>("/sessions", { method: "POST", body: body(q, intent, lang, extras, att) }),
 
   // POST /sessions/{id}/query continues an existing conversation (sticky mode enforced server-side).
   sessionQuery: (id: string, q: string, intent: string, lang: string, extras?: LessonExtras, att?: Attachment[]) =>
     req<QueryResponse>(`/sessions/${id}/query`, { method: "POST", body: body(q, intent, lang, extras, att) }),
+
+  // Async variants — the ones the UI actually uses. The session is created server-side immediately
+  // (onSession fires with its id so the chat can appear in the list while it generates); the result
+  // is polled off the job queue so a long lesson never trips a gateway timeout.
+  createSessionAsync: async (
+    q: string, intent: string, lang: string, extras?: LessonExtras, att?: Attachment[],
+    onSession?: (id: string) => void,
+  ) => {
+    const acc = await req<JobAccepted>("/sessions/async", { method: "POST", body: body(q, intent, lang, extras, att) });
+    if (acc.session_id && onSession) onSession(acc.session_id);
+    return pollJob<CreatedSession>(acc.job_id);
+  },
+
+  sessionQueryAsync: async (
+    id: string, q: string, intent: string, lang: string, extras?: LessonExtras, att?: Attachment[],
+  ) => {
+    const acc = await req<JobAccepted>(`/sessions/${id}/query/async`, { method: "POST", body: body(q, intent, lang, extras, att) });
+    return pollJob<QueryResponse>(acc.job_id);
+  },
 
   // My Shiurim — saved lessons.
   listLessons: () => req<SavedLesson[]>("/lessons"),

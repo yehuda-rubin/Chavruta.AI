@@ -764,3 +764,71 @@ def test_llm_circuit_breaker_success_resets_count():
     b.on_success()          # a success in between must reset the consecutive counter
     b.on_failure(1.0)
     b.before(2.0)           # only 1 failure since the reset → still closed
+
+
+# ── Feature (2026-07-18): async job queue — long lessons must not trip a proxy 504. The async
+# endpoints return a job id immediately and run generation on a background pool; the client polls
+# GET /jobs/{id}. These pin the wiring: the work actually runs, the result is the same shape as the
+# sync endpoint, ownership is enforced synchronously, and polling is owner-scoped.
+
+def _await_job(owner, jid, timeout=5.0):
+    import time as _t
+    deadline = _t.time() + timeout
+    while _t.time() < deadline:
+        job = api.jobs.get(jid, owner)
+        assert job is not None
+        if job.status in ("done", "error"):
+            return job
+        _t.sleep(0.01)
+    raise AssertionError("async job did not finish in time")
+
+
+def test_create_session_async_runs_in_background(monkeypatch):
+    from app.api import QueryRequest
+    monkeypatch.setattr(api.db, "create_session", lambda q, mode=None, owner_id="local": "sid-async")
+    monkeypatch.setattr(api.db, "save_message", lambda *a, **k: 1)
+    monkeypatch.setattr(api.db, "list_sessions",
+                        lambda owner="local": [{"id": "sid-async", "first_q": "q", "created_at": "t"}])
+    monkeypatch.setattr(api, "_run_query",
+                        lambda *a, **k: api.QueryResponse(answer="lesson body", citations=[],
+                                                          grounded=True, intent="lesson", files=[]))
+
+    accepted = api.create_session_async(QueryRequest(question="בנה שיעור", lang="he", intent="lesson"),
+                                        owner="local")
+    assert accepted.session_id == "sid-async"
+    job = _await_job("local", accepted.job_id)
+    assert job.status == "done"
+    assert job.result["result"]["answer"] == "lesson body"
+    assert job.result["id"] == "sid-async"
+
+
+def test_session_query_async_rejects_unowned_synchronously(monkeypatch):
+    from fastapi import HTTPException
+
+    from app.api import QueryRequest
+    # Not owned → get_messages returns empty → a 404 must be raised NOW (before any job is submitted),
+    # so an unauthorized caller never enqueues work against someone else's chat.
+    monkeypatch.setattr(api.db, "get_messages", lambda sid, owner="local": [])
+    with pytest.raises(HTTPException) as e:
+        api.session_query_async("sid-x", QueryRequest(question="q", lang="he"), owner="local")
+    assert e.value.status_code == 404
+
+
+def test_get_job_is_owner_scoped(monkeypatch):
+    from fastapi import HTTPException
+
+    from app.api import QueryRequest
+    monkeypatch.setattr(api.db, "create_session", lambda q, mode=None, owner_id="local": "sid-o")
+    monkeypatch.setattr(api.db, "save_message", lambda *a, **k: 1)
+    monkeypatch.setattr(api.db, "list_sessions",
+                        lambda owner="local": [{"id": "sid-o", "first_q": "q", "created_at": "t"}])
+    monkeypatch.setattr(api, "_run_query",
+                        lambda *a, **k: api.QueryResponse(answer="a", citations=[], grounded=True,
+                                                          intent="qa", files=[]))
+    accepted = api.create_session_async(QueryRequest(question="q", lang="he"), owner="alice")
+    _await_job("alice", accepted.job_id)
+    # Bob polling Alice's job id must get a 404, not her lesson.
+    with pytest.raises(HTTPException) as e:
+        api.get_job(accepted.job_id, owner="bob")
+    assert e.value.status_code == 404
+    assert api.get_job(accepted.job_id, owner="alice").status == "done"

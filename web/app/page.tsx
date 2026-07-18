@@ -152,11 +152,15 @@ export default function Home() {
         ]);
       try {
         if (activeId) {
-          push(await api.sessionQuery(activeId, text, intent, lang, extras, att));
+          push(await api.sessionQueryAsync(activeId, text, intent, lang, extras, att));
         } else {
-          const s = await api.createSession(text, intent, lang, extras, att);
-          setActiveId(s.id);
-          setSubtitle(text);
+          // Async create: the session id comes back immediately (onSession) so the new chat attaches
+          // to the UI while the (possibly minutes-long) first lesson generates on the job queue.
+          const s = await api.createSessionAsync(text, intent, lang, extras, att, (id) => {
+            setActiveId(id);
+            setSubtitle(text);
+            refreshSessions();
+          });
           push(s.result);
           refreshSessions();
         }

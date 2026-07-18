@@ -48,6 +48,7 @@ import torch  # noqa: F401,E402 — MUST precede qdrant_client import (Windows p
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Response
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -59,6 +60,7 @@ from chavruta.llm.agentic import is_degrade_message
 from chavruta.pipeline.pipeline import _max_tokens_for
 
 import app.db as db
+from app.jobs import registry as jobs
 
 
 # ── Startup ───────────────────────────────────────────────────────────────────
@@ -1066,69 +1068,20 @@ def list_sessions(owner: str = Depends(current_owner)):
     return db.list_sessions(owner)
 
 
-@app.post("/sessions", response_model=SessionCreateOut, status_code=201)
-def create_session(req: QueryRequest, owner: str = Depends(current_owner)):
-    """Create a new session and run the first query."""
-    if not req.question.strip():
-        raise HTTPException(status_code=422, detail="question must not be empty")
-
-    # Lock the chat's mode to the intent chosen on this first turn; every follow-up stays in it.
-    sid = db.create_session(req.question.strip(), mode=req.intent or None, owner_id=owner)
-    db.save_message(sid, "user", req.question)
-
-    result = _run_query(_augment_question(req.question, req.attachments), req.lang, req.intent, [],
-                        audience=req.audience, grade_band=req.grade_band, length=req.length,
-                        owner_id=owner)
-
-    db.save_message(
-        sid,
-        "assistant",
-        result.answer,
-        intent=result.intent,
-        citations=[c.model_dump() for c in result.citations],
-        caveats=result.caveats,
-        grounded=result.grounded,
-        files=[f.model_dump() for f in result.files],
-    )
-
-    session = db.list_sessions(owner)
-    session_row = next(s for s in session if s["id"] == sid)
-    return {"id": sid, "first_q": session_row["first_q"], "created_at": session_row["created_at"],
-            "result": result}
-
-
 class SessionQueryResponse(QueryResponse):   # inherits lesson_plan etc.
     session_id: str
 
 
-@app.post("/sessions/{session_id}/query", response_model=SessionQueryResponse)
-def session_query(session_id: str, req: QueryRequest, owner: str = Depends(current_owner)):
-    """Continue an existing session."""
-    if not req.question.strip():
-        raise HTTPException(status_code=422, detail="question must not be empty")
+class JobAccepted(BaseModel):
+    """202 body for the async endpoints: a job id to poll, plus the session id when one was just
+    created so the client can attach the chat to the UI before generation finishes."""
+    job_id: str
+    session_id: str | None = None
 
-    # Ownership gate: a session the caller doesn't own reads as not-found (no history leak, and no
-    # writing a message into someone else's chat).
-    history_rows = db.get_messages(session_id, owner)
-    if not history_rows:
-        raise HTTPException(status_code=404, detail="session not found")
 
-    history = [
-        Turn(role=m["role"], text=m["text"])
-        for m in history_rows[-8:]
-    ]
-
-    db.save_message(session_id, "user", req.question)
-
-    # Sticky mode: a chat stays in the mode chosen on its first turn — ignore any intent the client
-    # sends on later turns. Legacy sessions (mode=NULL) fall back to the per-request intent.
-    locked_mode = db.get_session_mode(session_id, owner)
-    intent = locked_mode or req.intent
-
-    result = _run_query(_augment_question(req.question, req.attachments), req.lang, intent, history,
-                        audience=req.audience, grade_band=req.grade_band, length=req.length,
-                        owner_id=owner)
-
+def _save_assistant(session_id: str, result: QueryResponse) -> None:
+    """Persist a generated answer as the assistant turn — the one place that maps a QueryResponse
+    onto the message columns, shared by every (sync/async, create/continue) path."""
     db.save_message(
         session_id,
         "assistant",
@@ -1140,7 +1093,122 @@ def session_query(session_id: str, req: QueryRequest, owner: str = Depends(curre
         files=[f.model_dump() for f in result.files],
     )
 
+
+def _first_query_work(sid: str, req: QueryRequest, owner: str) -> dict:
+    """Run the first query for an already-created session, save the assistant turn, and return the
+    SessionCreateOut-shaped payload. Runs identically inline (sync route) or inside a job (async)."""
+    result = _run_query(_augment_question(req.question, req.attachments), req.lang, req.intent, [],
+                        audience=req.audience, grade_band=req.grade_band, length=req.length,
+                        owner_id=owner)
+    _save_assistant(sid, result)
+    row = next(s for s in db.list_sessions(owner) if s["id"] == sid)
+    return {"id": sid, "first_q": row["first_q"], "created_at": row["created_at"], "result": result}
+
+
+def _prepare_continue(session_id: str, req: QueryRequest, owner: str) -> tuple[list[Turn], str]:
+    """Shared setup for continuing a session: ownership gate (404 if not owned), build the trailing
+    history, save the user turn, and resolve the sticky/locked intent. Returns (history, intent)."""
+    history_rows = db.get_messages(session_id, owner)
+    if not history_rows:
+        # A session the caller doesn't own reads as not-found — no history leak, no writing into
+        # someone else's chat.
+        raise HTTPException(status_code=404, detail="session not found")
+    history = [Turn(role=m["role"], text=m["text"]) for m in history_rows[-8:]]
+    db.save_message(session_id, "user", req.question)
+    # Sticky mode: a chat stays in the mode chosen on its first turn — ignore any intent the client
+    # sends on later turns. Legacy sessions (mode=NULL) fall back to the per-request intent.
+    locked_mode = db.get_session_mode(session_id, owner)
+    return history, (locked_mode or req.intent)
+
+
+def _continue_query_work(session_id: str, req: QueryRequest, history: list[Turn], intent: str,
+                         owner: str) -> SessionQueryResponse:
+    """Run a follow-up turn, save the assistant answer, and return the SessionQueryResponse."""
+    result = _run_query(_augment_question(req.question, req.attachments), req.lang, intent, history,
+                        audience=req.audience, grade_band=req.grade_band, length=req.length,
+                        owner_id=owner)
+    _save_assistant(session_id, result)
     return SessionQueryResponse(**result.model_dump(), session_id=session_id)
+
+
+@app.post("/sessions", response_model=SessionCreateOut, status_code=201)
+def create_session(req: QueryRequest, owner: str = Depends(current_owner)):
+    """Create a new session and run the first query (synchronous — fine for quick Q&A; use
+    /sessions/async for a long lesson that would outlast a proxy timeout)."""
+    if not req.question.strip():
+        raise HTTPException(status_code=422, detail="question must not be empty")
+
+    # Lock the chat's mode to the intent chosen on this first turn; every follow-up stays in it.
+    sid = db.create_session(req.question.strip(), mode=req.intent or None, owner_id=owner)
+    db.save_message(sid, "user", req.question)
+    return _first_query_work(sid, req, owner)
+
+
+@app.post("/sessions/{session_id}/query", response_model=SessionQueryResponse)
+def session_query(session_id: str, req: QueryRequest, owner: str = Depends(current_owner)):
+    """Continue an existing session (synchronous)."""
+    if not req.question.strip():
+        raise HTTPException(status_code=422, detail="question must not be empty")
+    history, intent = _prepare_continue(session_id, req, owner)
+    return _continue_query_work(session_id, req, history, intent, owner)
+
+
+# ── Async generation (job queue) ──────────────────────────────────────────────
+# A full lesson can take minutes — longer than a proxy's 504 window. These mirror the sync endpoints
+# but return a job id immediately (202); the client polls GET /jobs/{id}. See app/jobs.py.
+
+@app.post("/query/async", response_model=JobAccepted, status_code=202)
+def query_async(req: QueryRequest, owner: str = Depends(current_owner)):
+    if not req.question.strip():
+        raise HTTPException(status_code=422, detail="question must not be empty")
+    q = _augment_question(req.question, req.attachments)
+    jid = jobs.submit(owner, lambda: jsonable_encoder(
+        _run_query(q, req.lang, req.intent, [], audience=req.audience,
+                   grade_band=req.grade_band, length=req.length, owner_id=owner)))
+    return JobAccepted(job_id=jid)
+
+
+@app.post("/sessions/async", response_model=JobAccepted, status_code=202)
+def create_session_async(req: QueryRequest, owner: str = Depends(current_owner)):
+    """Create the session synchronously (so the client gets session_id at once) and run the first
+    query in the background."""
+    if not req.question.strip():
+        raise HTTPException(status_code=422, detail="question must not be empty")
+    sid = db.create_session(req.question.strip(), mode=req.intent or None, owner_id=owner)
+    db.save_message(sid, "user", req.question)
+    jid = jobs.submit(owner, lambda: jsonable_encoder(_first_query_work(sid, req, owner)))
+    return JobAccepted(job_id=jid, session_id=sid)
+
+
+@app.post("/sessions/{session_id}/query/async", response_model=JobAccepted, status_code=202)
+def session_query_async(session_id: str, req: QueryRequest, owner: str = Depends(current_owner)):
+    if not req.question.strip():
+        raise HTTPException(status_code=422, detail="question must not be empty")
+    # The ownership gate + user-turn save happen NOW (before returning) so an unauthorized caller
+    # gets a synchronous 404 and the user message is durable even if generation later fails.
+    history, intent = _prepare_continue(session_id, req, owner)
+    jid = jobs.submit(owner, lambda: jsonable_encoder(
+        _continue_query_work(session_id, req, history, intent, owner)))
+    return JobAccepted(job_id=jid, session_id=session_id)
+
+
+class JobStatusOut(BaseModel):
+    status: str                 # pending | running | done | error
+    result: dict | None = None  # present when status == done (the endpoint's normal response body)
+    error: str | None = None    # present when status == error
+
+
+@app.get("/jobs/{job_id}", response_model=JobStatusOut)
+def get_job(job_id: str, owner: str = Depends(current_owner)):
+    """Poll an async generation job. Owner-scoped: another identity's job reads as not-found."""
+    job = jobs.get(job_id, owner)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    if job.status == "done":
+        return JobStatusOut(status="done", result=job.result)
+    if job.status == "error":
+        return JobStatusOut(status="error", error=job.error)
+    return JobStatusOut(status=job.status)
 
 
 class MessageOut(BaseModel):
