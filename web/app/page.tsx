@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import type { Attachment, Lang, Message, SavedLesson, Session } from "@/lib/types";
+import type { Attachment, FileOut, Lang, Message, SavedLesson, Session } from "@/lib/types";
 import { api, LessonExtras } from "@/lib/api";
 import { IntentId } from "@/lib/i18n";
 import { tr } from "@/lib/i18n";
@@ -14,6 +14,7 @@ import { AddSourceModal } from "@/components/AddSourceModal";
 import { LessonsModal } from "@/components/LessonsModal";
 import { SettingsModal, Theme } from "@/components/SettingsModal";
 import { SupportModal } from "@/components/SupportModal";
+import { FilePreviewModal } from "@/components/FilePreviewModal";
 
 export default function Home() {
   const [lang, setLang] = useState<Lang>("he");
@@ -24,6 +25,8 @@ export default function Home() {
   const [intent, setIntent] = useState<IntentId>("lesson");
   const [lessonFields, setLessonFields] = useState<LessonFields>({ audience: "", gradeBand: "", length: "" });
   const [userSources, setUserSources] = useState<Attachment[]>([]);
+  const [subtitle, setSubtitle] = useState("");
+  const [previewFile, setPreviewFile] = useState<FileOut | null>(null);
 
   // Preferences (persisted)
   const [theme, setTheme] = useState<Theme>("light");
@@ -88,6 +91,7 @@ export default function Home() {
 
   const selectSession = useCallback(async (s: Session) => {
     setActiveId(s.id);
+    setSubtitle(s.first_q || "");
     if (s.mode) setIntent(s.mode as IntentId);
     try {
       setMessages(await api.sessionMessages(s.id));
@@ -99,6 +103,7 @@ export default function Home() {
   const newDiscussion = useCallback(() => {
     setActiveId(null);
     setMessages([]);
+    setSubtitle("");
     setIntent(defaultIntent);
   }, [defaultIntent]);
 
@@ -127,6 +132,7 @@ export default function Home() {
     setShowLessons(false);
     setActiveId(null);
     setIntent("lesson");
+    setSubtitle(l.topic);
     setMessages([{ role: "assistant", text: "📚 " + l.topic, files: l.files || [], citations: l.citations || [], caveats: [] }]);
   }, []);
 
@@ -150,6 +156,7 @@ export default function Home() {
         } else {
           const s = await api.createSession(text, intent, lang, extras, att);
           setActiveId(s.id);
+          setSubtitle(text);
           push(s.result);
           refreshSessions();
         }
@@ -216,10 +223,11 @@ export default function Home() {
           intent={intent}
           locked={locked}
           lessonFields={lessonFields}
-          subtitle=""
+          subtitle={subtitle}
           onPickIntent={setIntent}
           onLessonChange={setLessonFields}
           onSend={send}
+          onPreviewFile={setPreviewFile}
         />
 
         {sourcesCollapsed ? (
@@ -258,6 +266,7 @@ export default function Home() {
         onClearHistory={clearHistory}
       />
       <SupportModal open={showSupport} lang={lang} onClose={() => setShowSupport(false)} />
+      <FilePreviewModal file={previewFile} lang={lang} onClose={() => setPreviewFile(null)} />
     </div>
   );
 }

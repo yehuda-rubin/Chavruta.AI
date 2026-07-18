@@ -55,6 +55,8 @@ export const STRINGS = {
     clickView: "לחץ לצפייה",
     view: "צפה",
     download: "הורד",
+    downloadWord: "הורד Word",
+    noContent: "אין תוכן להצגה.",
     // add-source
     addSrcTitle: "הוסף מקור למודל",
     addSrcDesc: "הדבק טקסט מקור, או העלה קובץ — PDF או Word. המקורות שתוסיף יישלחו למודל יחד עם השאלה הבאה.",
@@ -150,6 +152,8 @@ export const STRINGS = {
     clickView: "Click to view",
     view: "View",
     download: "Download",
+    downloadWord: "Download Word",
+    noContent: "No content to display.",
     addSrcTitle: "Add a source for the model",
     addSrcDesc: "Paste source text, or upload a file — PDF or Word. The sources you add are sent to the model with your next question.",
     addSrcPlaceholder: "Paste source text here…",

@@ -8,7 +8,7 @@ import { Icon } from "./Icon";
 import { IntentBar } from "./IntentBar";
 import { LessonOptions, LessonFields } from "./LessonOptions";
 
-function LessonFiles({ lang, files }: { lang: Lang; files: FileOut[] }) {
+function LessonFiles({ lang, files, onPreview }: { lang: Lang; files: FileOut[]; onPreview: (f: FileOut) => void }) {
   return (
     <>
       <p className="text-[11px] tracking-widest text-gold font-bold uppercase mb-2">{tr(lang, "lessonThreeFiles")}</p>
@@ -16,7 +16,8 @@ function LessonFiles({ lang, files }: { lang: Lang; files: FileOut[] }) {
         {files.map((f, idx) => (
           <div
             key={idx}
-            className="fileCard flex items-center gap-3 w-full bg-white/70 hover:bg-white/95 ring-1 ring-line/70 rounded-2xl p-3.5 transition"
+            onClick={() => onPreview(f)}
+            className="fileCard flex items-center gap-3 w-full bg-white/70 hover:bg-white/95 ring-1 ring-line/70 rounded-2xl p-3.5 transition cursor-pointer"
           >
             <span className="h-10 w-10 rounded-xl grad grid place-items-center text-white shrink-0">
               <Icon name="description" />
@@ -26,7 +27,20 @@ function LessonFiles({ lang, files }: { lang: Lang; files: FileOut[] }) {
               <span className="block text-[11px] text-ink/50">{tr(lang, "clickView")}</span>
             </span>
             <button
-              onClick={() => downloadDoc(f.name, f.title || f.name.replace(/\.docx?$/, ""), f.content || "")}
+              onClick={(e) => {
+                e.stopPropagation();
+                onPreview(f);
+              }}
+              className="h-8 w-8 rounded-lg hover:bg-white grid place-items-center text-tekhelet shrink-0"
+              title={tr(lang, "view")}
+            >
+              <Icon name="visibility" className="text-[20px]" />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                downloadDoc(f.name, f.title || f.name.replace(/\.docx?$/, ""), f.content || "");
+              }}
               className="h-8 w-8 rounded-lg hover:bg-white grid place-items-center text-gold shrink-0"
               title={tr(lang, "download")}
             >
@@ -39,7 +53,7 @@ function LessonFiles({ lang, files }: { lang: Lang; files: FileOut[] }) {
   );
 }
 
-function Bubble({ lang, m }: { lang: Lang; m: Message }) {
+function Bubble({ lang, m, onPreview }: { lang: Lang; m: Message; onPreview: (f: FileOut) => void }) {
   const dir = isHe(m.text) ? "he" : "en";
   if (m.role === "user") {
     return (
@@ -66,7 +80,7 @@ function Bubble({ lang, m }: { lang: Lang; m: Message }) {
             {renderText(m.text)}
           </p>
         )}
-        {hasFiles && <LessonFiles lang={lang} files={m.files!} />}
+        {hasFiles && <LessonFiles lang={lang} files={m.files!} onPreview={onPreview} />}
         {m.caveats?.map((c, i) => (
           <p key={i} className="mt-3 text-[13px] text-gold/90 bg-gold/5 rounded-xl px-3 py-2 leading-relaxed">
             {c}
@@ -97,6 +111,7 @@ export function ChatPane({
   onPickIntent,
   onLessonChange,
   onSend,
+  onPreviewFile,
 }: {
   lang: Lang;
   messages: Message[];
@@ -108,13 +123,23 @@ export function ChatPane({
   onPickIntent: (i: IntentId) => void;
   onLessonChange: (v: LessonFields) => void;
   onSend: (text: string) => void;
+  onPreviewFile: (f: FileOut) => void;
 }) {
   const [input, setInput] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+
+  // Auto-grow the composer up to 128px, like the static UI's autogrow().
+  useEffect(() => {
+    const t = taRef.current;
+    if (!t) return;
+    t.style.height = "auto";
+    t.style.height = Math.min(t.scrollHeight, 128) + "px";
+  }, [input]);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -146,7 +171,7 @@ export function ChatPane({
             <p className="text-ink/55 max-w-md mx-auto leading-relaxed">{tr(lang, "welcomeBody")}</p>
           </div>
         ) : (
-          messages.map((m, i) => <Bubble key={m.id ?? i} lang={lang} m={m} />)
+          messages.map((m, i) => <Bubble key={m.id ?? i} lang={lang} m={m} onPreview={onPreviewFile} />)
         )}
         {loading && (
           <div className="flex gap-3.5">
@@ -170,6 +195,7 @@ export function ChatPane({
             {INTENT_LABEL[lang][intent]}
           </span>
           <textarea
+            ref={taRef}
             rows={1}
             value={input}
             onChange={(e) => setInput(e.target.value)}
