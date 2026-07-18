@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Attachment, FileOut, Lang, Message, SavedLesson, Session } from "@/lib/types";
 import { api, LessonExtras, Me } from "@/lib/api";
 import { IntentId } from "@/lib/i18n";
@@ -48,6 +48,14 @@ export default function Home() {
   const effectiveDark = theme === "dark" || (theme === "auto" && systemDark);
 
   const locked = !!activeId && messages.length > 0;
+
+  // Always-current active session id, readable inside async callbacks. An async generation can take
+  // minutes; if the user switches chats before it resolves, we must NOT append its answer onto the
+  // now-open conversation. The ref lets the resolve handler check "am I still the active chat?".
+  const activeIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeIdRef.current = activeId;
+  }, [activeId]);
 
   // Load persisted prefs once + watch the system theme (for "auto").
   useEffect(() => {
@@ -162,13 +170,15 @@ export default function Home() {
           ? { audience: lessonFields.audience, grade_band: lessonFields.gradeBand, length: lessonFields.length }
           : undefined;
       const att = userSources.length ? userSources : undefined;
+      // The conversation this turn belongs to. For a follow-up it's the current chat; for a brand-new
+      // chat it becomes known when onSession fires. Answers are only shown if this is still on screen.
+      let target = activeId;
       setLoading(true);
       setMessages((prev) => [...prev, { role: "user", text, citations: [], caveats: [] }]);
+      const appendIfCurrent = (msg: Message) =>
+        setMessages((prev) => (activeIdRef.current === target ? [...prev, msg] : prev));
       const push = (r: { answer: string; citations?: Message["citations"]; caveats?: string[]; grounded?: boolean; files?: Message["files"] }) =>
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", text: r.answer, citations: r.citations || [], caveats: r.caveats || [], grounded: r.grounded, files: r.files },
-        ]);
+        appendIfCurrent({ role: "assistant", text: r.answer, citations: r.citations || [], caveats: r.caveats || [], grounded: r.grounded, files: r.files });
       try {
         if (activeId) {
           push(await api.sessionQueryAsync(activeId, text, intent, lang, extras, att));
@@ -176,6 +186,7 @@ export default function Home() {
           // Async create: the session id comes back immediately (onSession) so the new chat attaches
           // to the UI while the (possibly minutes-long) first lesson generates on the job queue.
           const s = await api.createSessionAsync(text, intent, lang, extras, att, (id) => {
+            target = id;
             setActiveId(id);
             setSubtitle(text);
             refreshSessions();
@@ -185,10 +196,7 @@ export default function Home() {
         }
         setUserSources([]); // consumed by this turn
       } catch (e) {
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", text: String(e instanceof Error ? e.message : e), citations: [], caveats: [] },
-        ]);
+        appendIfCurrent({ role: "assistant", text: String(e instanceof Error ? e.message : e), citations: [], caveats: [] });
       } finally {
         setLoading(false);
         refreshMe(); // update the remaining-quota pill (incl. after a 429)

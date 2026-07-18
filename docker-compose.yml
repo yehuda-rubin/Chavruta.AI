@@ -58,6 +58,11 @@ services:
       CHAVRUTA_LLM_BASE_URL: ${CHAVRUTA_LLM_BASE_URL:-https://api.studio.nebius.ai/v1}
       CHAVRUTA_LLM_API_KEY: ${NEBIUS_API_KEY:-}
 
+      # Exactly one trusted proxy sits in front of the API in this topology: the `web` nginx. So the
+      # real client is the last X-Forwarded-For hop nginx appends — the per-IP rate limiter reads that
+      # instead of the (spoofable) leftmost value. Raise this only if you add more proxies in front.
+      CHAVRUTA_TRUSTED_PROXY_HOPS: "1"
+
       # Chat history — persisted to the named volume below.
       CHAVRUTA_DB_PATH: /app-data/chavruta.db
     volumes:

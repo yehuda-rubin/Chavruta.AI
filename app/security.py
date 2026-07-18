@@ -142,13 +142,35 @@ _EXEMPT = ("/health", "/ready")
 _last_sweep = [0.0]
 
 
+def _trusted_proxy_hops() -> int:
+    """How many trusted reverse proxies sit in front of the app. 0 (default) ⇒ trust ONLY the real
+    TCP peer and ignore X-Forwarded-For entirely. The shipped docker topology (one nginx) sets 1."""
+    try:
+        return max(0, int(os.environ.get("CHAVRUTA_TRUSTED_PROXY_HOPS", "0")))
+    except ValueError:
+        return 0
+
+
 def _client_ip(request: Request) -> str:
-    # Behind nginx with --proxy-headers, request.client.host is the real client; X-Forwarded-For is
-    # the fallback when proxy headers aren't parsed.
+    """The rate-limit key: the real client IP, chosen so it can't be spoofed.
+
+    X-Forwarded-For is a client-writable header. The LEFTMOST entries are whatever the client typed;
+    only the RIGHTMOST entries are appended by trusted proxies (nginx's `$proxy_add_x_forwarded_for`
+    appends the real peer as the last element). So with N trusted proxies, the real client is the
+    Nth-from-the-right — never the leftmost. With no trusted proxy (default), XFF is ignored and we
+    use the TCP peer, which the client cannot forge. Reading the leftmost value (the old behaviour)
+    let an attacker rotate the header to land every request in a fresh bucket and skip the limiter."""
+    peer = request.client.host if request.client else "unknown"
+    hops = _trusted_proxy_hops()
+    if hops <= 0:
+        return peer
     fwd = request.headers.get("x-forwarded-for")
-    if fwd:
-        return fwd.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    if not fwd:
+        return peer
+    parts = [p.strip() for p in fwd.split(",") if p.strip()]
+    if len(parts) >= hops:
+        return parts[-hops]        # the address the outermost trusted proxy saw as its client
+    return peer
 
 
 async def rate_limit_middleware(request: Request, call_next):

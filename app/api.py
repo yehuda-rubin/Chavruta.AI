@@ -1148,10 +1148,18 @@ def _save_assistant(session_id: str, result: QueryResponse) -> None:
 
 def _first_query_work(sid: str, req: QueryRequest, owner: str) -> dict:
     """Run the first query for an already-created session, save the assistant turn, and return the
-    SessionCreateOut-shaped payload. Runs identically inline (sync route) or inside a job (async)."""
-    result = _run_query(_augment_question(req.question, req.attachments), req.lang, req.intent, [],
-                        audience=req.audience, grade_band=req.grade_band, length=req.length,
-                        owner_id=owner)
+    SessionCreateOut-shaped payload. Runs identically inline (sync route) or inside a job (async).
+
+    _run_query degrades ordinary retrieval/LLM failures to an error answer (so a turn is still saved),
+    but it re-raises real 4xx (e.g. an unrecognised intent). If that happens the session would be left
+    with a user turn and no answer — a blank chat stuck in the list — so we delete it on failure."""
+    try:
+        result = _run_query(_augment_question(req.question, req.attachments), req.lang, req.intent, [],
+                            audience=req.audience, grade_band=req.grade_band, length=req.length,
+                            owner_id=owner)
+    except Exception:
+        db.delete_session(sid, owner)   # don't leave a half-created, answer-less session behind
+        raise
     _save_assistant(sid, result)
     row = next(s for s in db.list_sessions(owner) if s["id"] == sid)
     return {"id": sid, "first_q": row["first_q"], "created_at": row["created_at"], "result": result}

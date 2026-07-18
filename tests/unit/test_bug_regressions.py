@@ -832,3 +832,25 @@ def test_get_job_is_owner_scoped(monkeypatch):
         api.get_job(accepted.job_id, owner="bob")
     assert e.value.status_code == 404
     assert api.get_job(accepted.job_id, owner="alice").status == "done"
+
+
+# ── Fix (2026-07-18 adversarial review): a first-query job that FAILS must not leave a blank,
+# answer-less session stuck in the list. _first_query_work deletes the orphan on failure.
+def test_create_session_async_deletes_orphan_on_failure(monkeypatch):
+    from fastapi import HTTPException
+
+    from app.api import QueryRequest
+    deleted = {}
+    monkeypatch.setattr(api.db, "create_session", lambda q, mode=None, owner_id="local": "sid-fail")
+    monkeypatch.setattr(api.db, "save_message", lambda *a, **k: 1)
+    monkeypatch.setattr(api.db, "delete_session",
+                        lambda sid, owner="local": (deleted.__setitem__(sid, owner), True)[1])
+
+    def boom(*a, **k):
+        raise HTTPException(status_code=422, detail="unknown intent")
+
+    monkeypatch.setattr(api, "_run_query", boom)
+    accepted = api.create_session_async(QueryRequest(question="q", lang="he", intent="bad"), owner="local")
+    job = _await_job("local", accepted.job_id)
+    assert job.status == "error"
+    assert deleted.get("sid-fail") == "local"      # orphan session cleaned up, not left behind

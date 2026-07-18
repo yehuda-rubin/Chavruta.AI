@@ -70,6 +70,46 @@ def test_rate_limit_window_slides():
     assert w.allow("a", 11.0) is True   # old hit expired
 
 
+# ── Spoof-proof client IP for the rate-limit key (adversarial review P1) ──
+def _req_ip(peer="1.2.3.4", xff=None):
+    r = types.SimpleNamespace()
+    r.client = types.SimpleNamespace(host=peer)
+    r.headers = {"x-forwarded-for": xff} if xff is not None else {}
+    return r
+
+
+def test_client_ip_ignores_xff_by_default(monkeypatch):
+    from app.security import _client_ip
+    monkeypatch.delenv("CHAVRUTA_TRUSTED_PROXY_HOPS", raising=False)
+    # Attacker rotates XFF hoping for a fresh rate-limit bucket — with no trusted proxy it's ignored
+    # and the (unforgeable) TCP peer is used, so every request maps to the same bucket.
+    assert _client_ip(_req_ip(peer="9.9.9.9", xff="evil-1")) == "9.9.9.9"
+    assert _client_ip(_req_ip(peer="9.9.9.9", xff="evil-2")) == "9.9.9.9"
+
+
+def test_client_ip_takes_last_hop_behind_one_proxy(monkeypatch):
+    from app.security import _client_ip
+    monkeypatch.setenv("CHAVRUTA_TRUSTED_PROXY_HOPS", "1")
+    # nginx appends the real client as the LAST XFF entry; the leftmost is attacker-typed and ignored.
+    assert _client_ip(_req_ip(peer="10.0.0.2", xff="spoofed, 203.0.113.7")) == "203.0.113.7"
+    # Spoofing more entries can't help: still the last hop.
+    assert _client_ip(_req_ip(peer="10.0.0.2", xff="a, b, 203.0.113.7")) == "203.0.113.7"
+
+
+def test_client_ip_two_trusted_hops(monkeypatch):
+    from app.security import _client_ip
+    monkeypatch.setenv("CHAVRUTA_TRUSTED_PROXY_HOPS", "2")
+    # client -> CF (adds real client) -> nginx (adds CF ip): real client is 2nd from the right.
+    assert _client_ip(_req_ip(peer="10.0.0.2", xff="spoof, 203.0.113.7, 172.16.0.9")) == "203.0.113.7"
+
+
+def test_client_ip_falls_back_to_peer_when_xff_too_short(monkeypatch):
+    from app.security import _client_ip
+    monkeypatch.setenv("CHAVRUTA_TRUSTED_PROXY_HOPS", "2")
+    # Only one hop present but two claimed — don't trust it, use the peer.
+    assert _client_ip(_req_ip(peer="10.0.0.2", xff="203.0.113.7")) == "10.0.0.2"
+
+
 # ── Per-owner data isolation (app/db.py) — the IDOR the audit flagged (GET /sessions leaked all) ──
 def _fresh_db(tmp_path, monkeypatch):
     import app.db as db
