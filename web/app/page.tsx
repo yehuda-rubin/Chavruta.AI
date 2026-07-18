@@ -1,11 +1,15 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import type { Lang, Message, Session } from "@/lib/types";
-import { api } from "@/lib/api";
+import { api, LessonExtras } from "@/lib/api";
+import { IntentId } from "@/lib/i18n";
+import { LessonFields } from "@/components/LessonOptions";
 import { Header } from "@/components/Header";
 import { SessionsPanel } from "@/components/SessionsPanel";
 import { ChatPane } from "@/components/ChatPane";
 import { SourcesPanel } from "@/components/SourcesPanel";
+
+const DEFAULT_INTENT: IntentId = "lesson";
 
 export default function Home() {
   const [lang, setLang] = useState<Lang>("he");
@@ -13,8 +17,12 @@ export default function Home() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
+  const [intent, setIntent] = useState<IntentId>(DEFAULT_INTENT);
+  const [lessonFields, setLessonFields] = useState<LessonFields>({ audience: "", gradeBand: "", length: "" });
 
-  // Reflect language on <html> so RTL/LTR + fonts flip exactly like the static UI.
+  // Sticky mode: once a conversation has messages the intent is locked (server enforces it too).
+  const locked = !!activeId && messages.length > 0;
+
   useEffect(() => {
     document.documentElement.lang = lang;
     document.documentElement.dir = lang === "he" ? "rtl" : "ltr";
@@ -32,10 +40,11 @@ export default function Home() {
     refreshSessions();
   }, [refreshSessions]);
 
-  const selectSession = useCallback(async (id: string) => {
-    setActiveId(id);
+  const selectSession = useCallback(async (s: Session) => {
+    setActiveId(s.id);
+    if (s.mode) setIntent(s.mode as IntentId); // reflect the session's locked mode
     try {
-      setMessages(await api.sessionMessages(id));
+      setMessages(await api.sessionMessages(s.id));
     } catch {
       setMessages([]);
     }
@@ -44,6 +53,7 @@ export default function Home() {
   const newDiscussion = useCallback(() => {
     setActiveId(null);
     setMessages([]);
+    setIntent(DEFAULT_INTENT);
   }, []);
 
   const deleteSession = useCallback(
@@ -61,24 +71,24 @@ export default function Home() {
 
   const send = useCallback(
     async (text: string) => {
-      const intent = "qa"; // sticky mode is enforced server-side; intent selection is a later port
+      const extras: LessonExtras | undefined =
+        intent === "lesson"
+          ? { audience: lessonFields.audience, grade_band: lessonFields.gradeBand, length: lessonFields.length }
+          : undefined;
       setLoading(true);
       setMessages((prev) => [...prev, { role: "user", text, citations: [], caveats: [] }]);
+      const push = (r: { answer: string; citations?: Message["citations"]; caveats?: string[]; grounded?: boolean; files?: Message["files"] }) =>
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", text: r.answer, citations: r.citations || [], caveats: r.caveats || [], grounded: r.grounded, files: r.files },
+        ]);
       try {
         if (activeId) {
-          const r = await api.sessionQuery(activeId, text, intent, lang);
-          setMessages((prev) => [
-            ...prev,
-            { role: "assistant", text: r.answer, citations: r.citations || [], caveats: r.caveats || [], grounded: r.grounded, files: r.files },
-          ]);
+          push(await api.sessionQuery(activeId, text, intent, lang, extras));
         } else {
-          const s = await api.createSession(text, intent, lang);
+          const s = await api.createSession(text, intent, lang, extras);
           setActiveId(s.id);
-          const r = s.result;
-          setMessages((prev) => [
-            ...prev,
-            { role: "assistant", text: r.answer, citations: r.citations || [], caveats: r.caveats || [], grounded: r.grounded, files: r.files },
-          ]);
+          push(s.result);
           refreshSessions();
         }
       } catch (e) {
@@ -90,7 +100,7 @@ export default function Home() {
         setLoading(false);
       }
     },
-    [activeId, lang, refreshSessions],
+    [activeId, intent, lang, lessonFields, refreshSessions],
   );
 
   return (
@@ -102,10 +112,24 @@ export default function Home() {
           sessions={sessions}
           activeId={activeId}
           onNew={newDiscussion}
-          onSelect={selectSession}
+          onSelect={(id) => {
+            const s = sessions.find((x) => x.id === id);
+            if (s) selectSession(s);
+          }}
           onDelete={deleteSession}
         />
-        <ChatPane lang={lang} messages={messages} loading={loading} onSend={send} />
+        <ChatPane
+          lang={lang}
+          messages={messages}
+          loading={loading}
+          intent={intent}
+          locked={locked}
+          lessonFields={lessonFields}
+          subtitle=""
+          onPickIntent={setIntent}
+          onLessonChange={setLessonFields}
+          onSend={send}
+        />
         <SourcesPanel lang={lang} messages={messages} />
       </div>
     </div>

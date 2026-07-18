@@ -1,11 +1,45 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import type { Lang, Message } from "@/lib/types";
-import { tr } from "@/lib/i18n";
+import type { FileOut, Lang, Message } from "@/lib/types";
+import { INTENT_LABEL, IntentId, tr } from "@/lib/i18n";
 import { commentatorTag, isHe, renderText } from "@/lib/format";
+import { downloadDoc } from "@/lib/doc";
 import { Icon } from "./Icon";
+import { IntentBar } from "./IntentBar";
+import { LessonOptions, LessonFields } from "./LessonOptions";
 
-function Bubble({ m }: { m: Message }) {
+function LessonFiles({ lang, files }: { lang: Lang; files: FileOut[] }) {
+  return (
+    <>
+      <p className="text-[11px] tracking-widest text-gold font-bold uppercase mb-2">{tr(lang, "lessonThreeFiles")}</p>
+      <div className="flex flex-col gap-2">
+        {files.map((f, idx) => (
+          <div
+            key={idx}
+            className="fileCard flex items-center gap-3 w-full bg-white/70 hover:bg-white/95 ring-1 ring-line/70 rounded-2xl p-3.5 transition"
+          >
+            <span className="h-10 w-10 rounded-xl grad grid place-items-center text-white shrink-0">
+              <Icon name="description" />
+            </span>
+            <span className="flex-1 min-w-0">
+              <span className="block font-serif font-bold text-tekhelet truncate">{f.name}</span>
+              <span className="block text-[11px] text-ink/50">{tr(lang, "clickView")}</span>
+            </span>
+            <button
+              onClick={() => downloadDoc(f.name, f.title || f.name.replace(/\.docx?$/, ""), f.content || "")}
+              className="h-8 w-8 rounded-lg hover:bg-white grid place-items-center text-gold shrink-0"
+              title={tr(lang, "download")}
+            >
+              <Icon name="download" className="text-[20px]" />
+            </button>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function Bubble({ lang, m }: { lang: Lang; m: Message }) {
   const dir = isHe(m.text) ? "he" : "en";
   if (m.role === "user") {
     return (
@@ -20,21 +54,25 @@ function Bubble({ m }: { m: Message }) {
     );
   }
   const tags = [...new Set((m.citations || []).map(commentatorTag))].filter(Boolean).slice(0, 4);
+  const hasFiles = m.files && m.files.length > 0;
   return (
     <div className="flex gap-3.5">
       <div className="h-9 w-9 rounded-2xl bg-white/80 grid place-items-center text-tekhelet font-serif font-black shrink-0 shadow-sm">
         ח
       </div>
-      <div className="bg-white/70 rounded-3xl rounded-tr-md p-5 shadow-sm ring-1 ring-white/60">
-        <p className={`font-serif text-[18px] leading-loose ${dir}`} style={{ whiteSpace: "pre-wrap" }}>
-          {renderText(m.text)}
-        </p>
+      <div className={"bg-white/70 rounded-3xl rounded-tr-md p-5 shadow-sm ring-1 ring-white/60 " + (hasFiles ? "max-w-[85%] w-full" : "")}>
+        {m.text && (
+          <p className={`font-serif text-[18px] leading-loose ${dir} ${hasFiles ? "mb-3" : ""}`} style={{ whiteSpace: "pre-wrap" }}>
+            {renderText(m.text)}
+          </p>
+        )}
+        {hasFiles && <LessonFiles lang={lang} files={m.files!} />}
         {m.caveats?.map((c, i) => (
           <p key={i} className="mt-3 text-[13px] text-gold/90 bg-gold/5 rounded-xl px-3 py-2 leading-relaxed">
             {c}
           </p>
         ))}
-        {tags.length > 0 && (
+        {!hasFiles && tags.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-2">
             {tags.map((t) => (
               <span key={t} className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-tekhelet/8 text-tekhelet">
@@ -52,11 +90,23 @@ export function ChatPane({
   lang,
   messages,
   loading,
+  intent,
+  locked,
+  lessonFields,
+  subtitle,
+  onPickIntent,
+  onLessonChange,
   onSend,
 }: {
   lang: Lang;
   messages: Message[];
   loading: boolean;
+  intent: IntentId;
+  locked: boolean;
+  lessonFields: LessonFields;
+  subtitle: string;
+  onPickIntent: (i: IntentId) => void;
+  onLessonChange: (v: LessonFields) => void;
   onSend: (text: string) => void;
 }) {
   const [input, setInput] = useState("");
@@ -76,6 +126,16 @@ export function ChatPane({
 
   return (
     <main className="flex-1 glass rounded-[28px] flex flex-col overflow-hidden">
+      <div className="px-7 py-4 flex items-center justify-between gap-3 border-b border-white/40">
+        <div className="min-w-0">
+          <h2 className="font-serif text-lg font-bold text-tekhelet">{tr(lang, "discussionTitle")}</h2>
+          {subtitle && <p className="text-[10px] tracking-widest text-gold font-bold uppercase truncate">{subtitle}</p>}
+        </div>
+        <IntentBar lang={lang} intent={intent} locked={locked} onPick={onPickIntent} />
+      </div>
+
+      {intent === "lesson" && <LessonOptions lang={lang} value={lessonFields} onChange={onLessonChange} />}
+
       <div className="flex-1 overflow-y-auto px-8 py-8 flex flex-col gap-6 max-w-2xl mx-auto w-full">
         {messages.length === 0 ? (
           <div className="m-auto text-center px-6">
@@ -86,7 +146,7 @@ export function ChatPane({
             <p className="text-ink/55 max-w-md mx-auto leading-relaxed">{tr(lang, "welcomeBody")}</p>
           </div>
         ) : (
-          messages.map((m, i) => <Bubble key={m.id ?? i} m={m} />)
+          messages.map((m, i) => <Bubble key={m.id ?? i} lang={lang} m={m} />)
         )}
         {loading && (
           <div className="flex gap-3.5">
@@ -106,6 +166,9 @@ export function ChatPane({
           onSubmit={submit}
           className="max-w-2xl mx-auto flex items-center gap-2 glass rounded-full px-3 py-2 focus-within:ring-2 focus-within:ring-indigo/30"
         >
+          <span className="text-gold font-bold text-sm px-3 py-1.5 rounded-full select-none whitespace-nowrap">
+            {INTENT_LABEL[lang][intent]}
+          </span>
           <textarea
             rows={1}
             value={input}

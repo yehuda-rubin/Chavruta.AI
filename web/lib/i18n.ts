@@ -29,6 +29,32 @@ export const STRINGS = {
     send: "שלח",
     thinking: "החברותא חושבת…",
     deleteChat: "מחק שיחה",
+    discussionTitle: "דיון עם החברותא",
+    // intents
+    lesson: "שיעור",
+    explain: "הסבר",
+    qa: "שאלה",
+    shutMode: 'שו"ת',
+    chavrutaMode: "חברותא",
+    // lesson options
+    forWhom: "עבור:",
+    audAuto: "אוטומטי (מהפרומט)",
+    audYeshiva: "בית מדרש / ישיבה",
+    audSchool: "בית ספר",
+    bandAuto: "שכבה — אוטומטי",
+    band1: "כיתות א–ג",
+    band2: "כיתות ד–ו",
+    band3: "כיתות ז–ט",
+    band4: "כיתות י–יב",
+    lenLabel: "אורך:",
+    lenAuto: "אוטומטי (מהפרומט)",
+    lenShort: "קצר",
+    lenMed: "בינוני",
+    lenLong: "ארוך",
+    lessonThreeFiles: "שלושה קבצים מוכנים להורדה",
+    clickView: "לחץ לצפייה",
+    view: "צפה",
+    download: "הורד",
   },
   en: {
     brand: "Chavruta",
@@ -56,10 +82,43 @@ export const STRINGS = {
     send: "Send",
     thinking: "The Chavruta is thinking…",
     deleteChat: "Delete chat",
+    discussionTitle: "Discussion with the Chavruta",
+    lesson: "Lesson",
+    explain: "Explain",
+    qa: "Q&A",
+    shutMode: "Responsa",
+    chavrutaMode: "Chavruta",
+    forWhom: "For:",
+    audAuto: "Auto (from prompt)",
+    audYeshiva: "Beit Midrash / Yeshiva",
+    audSchool: "School",
+    bandAuto: "Grade — auto",
+    band1: "Grades 1–3",
+    band2: "Grades 4–6",
+    band3: "Grades 7–9",
+    band4: "Grades 10–12",
+    lenLabel: "Length:",
+    lenAuto: "Auto (from prompt)",
+    lenShort: "Short",
+    lenMed: "Medium",
+    lenLong: "Long",
+    lessonThreeFiles: "Three files ready to download",
+    clickView: "Click to view",
+    view: "View",
+    download: "Download",
   },
 } as const;
 
 export type StringKey = keyof (typeof STRINGS)["he"];
+
+// Intent goal labels for the composer (with emoji), matching the static UI.
+export const INTENT_LABEL: Record<Lang, Record<string, string>> = {
+  he: { lesson: "🎯 שיעור", explain: "🎯 הסבר", qa: "🎯 שאלה", shut: '🎯 שו"ת', chavruta: "🤝 חברותא" },
+  en: { lesson: "🎯 Lesson", explain: "🎯 Explain", qa: "🎯 Q&A", shut: "🎯 Responsa", chavruta: "🤝 Chavruta" },
+};
+
+export const INTENTS = ["lesson", "explain", "qa", "shut", "chavruta"] as const;
+export type IntentId = (typeof INTENTS)[number];
 
 export function tr(lang: Lang, key: StringKey): string {
   return STRINGS[lang][key] ?? STRINGS.he[key] ?? key;
