@@ -8,7 +8,6 @@ from __future__ import annotations
 import types
 
 import pytest
-
 from app.security import _SlidingWindow, require_api_key
 
 
