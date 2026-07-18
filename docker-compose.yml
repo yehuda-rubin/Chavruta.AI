@@ -103,6 +103,13 @@ services:
     #                                     can silently alter retrieval behaviour
     container_name: chavruta-qdrant
     restart: unless-stopped
+    environment:
+      # Serve from SSD, not RAM. memmap_threshold makes Qdrant store any segment larger than this
+      # (in KB of vectors) memory-mapped from disk — so on a small machine the corpus is paged from
+      # SSD instead of pinned in RAM. Belt-and-suspenders alongside the per-collection "ssd" mem tier
+      # (see store/qdrant_store.py); it also covers future segment optimizations of an existing
+      # collection. Lower = more aggressively on disk (slower queries, far less RAM).
+      QDRANT__STORAGE__OPTIMIZERS__MEMMAP_THRESHOLD_KB: "20000"
     # Bound to LOCALHOST, not 0.0.0.0. Qdrant here runs with no API key, so publishing it to the
     # network hands anyone read/write on the whole corpus — including the templates collection,
     # whose payloads are turned into repo file reads by the lesson path. `api` reaches it over the

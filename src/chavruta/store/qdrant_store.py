@@ -16,15 +16,20 @@ _NAMESPACE = uuid.UUID("c4a5f0de-0000-4000-8000-000000000001")  # stable, for ch
 
 # Memory tiers — how much of the index lives in RAM vs on SSD. Chosen by machine RAM
 # (Principle II: config, not code). Approx RAM for the full ~2.9M×1024 corpus:
-#   16gb : int8-quantized vectors in RAM, originals + payload on SSD  → ~4 GB   (default)
+#   ssd  : everything on SSD — quantized vectors, HNSW graph, originals, payload all memmapped →
+#          ~1–2 GB. Slower per query (SSD reads) but survives a small machine under load.
+#   16gb : int8-quantized vectors in RAM, HNSW in RAM, originals + payload on SSD → ~4 GB (default)
 #   32gb : int8-quantized + full vectors in RAM (faster rescore), payload on SSD → ~15 GB
 #   max  : full-precision vectors + payload in RAM, no quantization   → ~22 GB  (fastest)
 # Quality is preserved under quantization by rescoring the top candidates against the
 # original vectors (kept on SSD or in RAM) — see `search`'s oversampling.
+# quant_ram: keep the quantized vectors in RAM (fast) vs memmap them (ssd). hnsw_on_disk: put the
+# HNSW graph on SSD — usually the single biggest RAM item, so this is what makes the ssd tier small.
 MEM_TIERS = {
-    "16gb": {"quant": "int8", "on_disk_vectors": True,  "on_disk_payload": True},
-    "32gb": {"quant": "int8", "on_disk_vectors": False, "on_disk_payload": True},
-    "max":  {"quant": None,   "on_disk_vectors": False, "on_disk_payload": False},
+    "ssd":  {"quant": "int8", "on_disk_vectors": True,  "on_disk_payload": True,  "quant_ram": False, "hnsw_on_disk": True},
+    "16gb": {"quant": "int8", "on_disk_vectors": True,  "on_disk_payload": True,  "quant_ram": True,  "hnsw_on_disk": False},
+    "32gb": {"quant": "int8", "on_disk_vectors": False, "on_disk_payload": True,  "quant_ram": True,  "hnsw_on_disk": False},
+    "max":  {"quant": None,   "on_disk_vectors": False, "on_disk_payload": False, "quant_ram": True,  "hnsw_on_disk": False},
 }
 
 
@@ -65,7 +70,8 @@ class QdrantStore:
         if cfg["quant"] == "int8":
             quant = models.ScalarQuantization(
                 scalar=models.ScalarQuantizationConfig(
-                    type=models.ScalarType.INT8, always_ram=True))   # quantized vectors in RAM
+                    type=models.ScalarType.INT8,
+                    always_ram=cfg.get("quant_ram", True)))   # in RAM (fast) or memmapped (ssd tier)
         client.create_collection(
             collection_name=name,
             vectors_config={"dense": models.VectorParams(
@@ -75,6 +81,9 @@ class QdrantStore:
             )},
             sparse_vectors_config={"sparse": models.SparseVectorParams(
                 index=models.SparseIndexParams(on_disk=cfg["on_disk_vectors"]))},
+            # The HNSW graph on SSD (mmap) is what lets the ssd tier fit ~1–2GB; on other tiers it
+            # stays in RAM for speed.
+            hnsw_config=models.HnswConfigDiff(on_disk=cfg.get("hnsw_on_disk", False)),
             on_disk_payload=cfg["on_disk_payload"],  # text payload on SSD
         )
 

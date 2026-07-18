@@ -37,7 +37,10 @@ ENV.update({
     "CHAVRUTA_QDRANT_MODE": "server",
     "CHAVRUTA_QDRANT_URL": QDRANT_URL,
     "CHAVRUTA_QDRANT_API_KEY": "",
-    "CHAVRUTA_MEM_TIER": os.environ.get("CHAVRUTA_MEM_TIER", "16gb"),
+    # Default to the SSD-served tier: everything memmapped from disk, ~1–2GB RAM for the full
+    # corpus, so a 16GB machine doesn't OOM. Override with CHAVRUTA_MEM_TIER=16gb/32gb/max for speed
+    # on a bigger box. Applies when the collection is CREATED (first load).
+    "CHAVRUTA_MEM_TIER": os.environ.get("CHAVRUTA_MEM_TIER", "ssd"),
     "CHAVRUTA_COLLECTION": COLLECTION,
     "HF_HUB_DOWNLOAD_TIMEOUT": "30",   # a dead socket errors out instead of hanging the run
 })

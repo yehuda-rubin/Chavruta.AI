@@ -41,8 +41,10 @@ class Profile:
     qdrant_url: str = ""                      # server URL (cloud)
     qdrant_api_key: str = ""                  # Qdrant Cloud API key
     collection: str = "chavruta"
-    qdrant_mem_tier: str = "16gb"             # "16gb" | "32gb" | "max" — RAM budget for the index
-                                              # (quantization + on-disk; see store.MEM_TIERS)
+    qdrant_mem_tier: str = "ssd"              # "ssd" | "16gb" | "32gb" | "max" — RAM budget for the
+                                              # index. Default "ssd": HNSW + vectors + payload all
+                                              # memmapped from SSD (~1–2GB), so a small machine won't
+                                              # OOM. Applies at collection creation. See store.MEM_TIERS
 
     # ── Retrieval ──
     top_k: int = 8
