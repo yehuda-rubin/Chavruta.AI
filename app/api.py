@@ -132,6 +132,10 @@ async def lifespan(app: FastAPI):
     yield
 
 
+from fastapi import Depends  # noqa: E402
+
+from app.security import body_size_middleware, rate_limit_middleware, require_api_key  # noqa: E402
+
 app = FastAPI(
     title="Chavruta.AI",
     description=(
@@ -141,7 +145,15 @@ app = FastAPI(
     ),
     version=__version__,     # single source of truth: src/chavruta/__init__.py
     lifespan=lifespan,
+    # App-wide auth gate. OFF until CHAVRUTA_API_KEYS is set (local dev unchanged); required on a
+    # public deployment. Health/readiness/docs are exempt inside the dependency.
+    dependencies=[Depends(require_api_key)],
 )
+
+# Per-IP rate limiting on the generation routes (protects the LLM key from a runaway loop) and a
+# body-size cap. Both are generous by default and tightened by env for public hosting.
+app.middleware("http")(rate_limit_middleware)
+app.middleware("http")(body_size_middleware)
 
 # Origins are env-driven: the defaults are Vite's dev ports, which is right for local work and
 # useless for a real deployment — a hostname that isn't listed gets blocked in the browser. Behind
