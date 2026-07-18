@@ -126,8 +126,11 @@ export const STRINGS = {
     termsVersionLabel: "גרסה",
     termsAgreePrefix: "קראתי ואני מאשר/ת את",
     termsLink: "תנאי השימוש",
-    termsMustAccept: "יש לאשר את תנאי השימוש כדי להירשם.",
+    termsMustAccept: "יש לאשר את התנאים ומדיניות הפרטיות כדי להירשם.",
     termsDisclaimer: "טיוטה — לבדיקה משפטית לפני עלייה לאוויר.",
+    privacyTitle: "מדיניות פרטיות",
+    privacyLink: "מדיניות הפרטיות",
+    termsAnd: "ואת",
   },
   en: {
     brand: "Chavruta",
@@ -244,8 +247,11 @@ export const STRINGS = {
     termsVersionLabel: "Version",
     termsAgreePrefix: "I have read and accept the",
     termsLink: "Terms of Use",
-    termsMustAccept: "You must accept the Terms of Use to register.",
+    termsMustAccept: "You must accept the Terms and Privacy Policy to register.",
     termsDisclaimer: "Draft — pending legal review before launch.",
+    privacyTitle: "Privacy Policy",
+    privacyLink: "Privacy Policy",
+    termsAnd: "and the",
   },
 } as const;
 

@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/auth";
 import { TERMS_VERSION } from "@/lib/legal";
 import { Icon } from "./Icon";
 import { TermsModal } from "./TermsModal";
+import { PrivacyModal } from "./PrivacyModal";
 
 // Map Supabase's English auth errors onto localized copy — this is a Hebrew-first product, so the
 // message a user actually sees must be Hebrew. Unknown errors fall through to a generic string.
@@ -32,6 +33,7 @@ export function SignIn({ lang }: { lang: Lang }) {
   const [notice, setNotice] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
+  const [showPrivacy, setShowPrivacy] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -114,6 +116,14 @@ export function SignIn({ lang }: { lang: Lang }) {
                   className="text-tekhelet font-semibold hover:underline"
                 >
                   {tr(lang, "termsLink")}
+                </button>{" "}
+                {tr(lang, "termsAnd")}{" "}
+                <button
+                  type="button"
+                  onClick={() => setShowPrivacy(true)}
+                  className="text-tekhelet font-semibold hover:underline"
+                >
+                  {tr(lang, "privacyLink")}
                 </button>
               </span>
             </label>
@@ -146,6 +156,7 @@ export function SignIn({ lang }: { lang: Lang }) {
       </div>
 
       <TermsModal open={showTerms} lang={lang} onClose={() => setShowTerms(false)} />
+      <PrivacyModal open={showPrivacy} lang={lang} onClose={() => setShowPrivacy(false)} />
     </div>
   );
 }
