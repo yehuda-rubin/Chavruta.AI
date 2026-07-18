@@ -12,7 +12,7 @@ interface AuthState {
   loading: boolean;
   user: User | null;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string) => Promise<{ needsConfirm: boolean }>;
+  signUp: (email: string, password: string, meta?: Record<string, unknown>) => Promise<{ needsConfirm: boolean }>;
   signOut: () => Promise<void>;
 }
 
@@ -52,10 +52,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (error) throw error;
   }, []);
 
-  const signUp = useCallback(async (email: string, password: string) => {
+  const signUp = useCallback(async (email: string, password: string, meta?: Record<string, unknown>) => {
     const sb = getSupabase();
     if (!sb) return { needsConfirm: false };
-    const { data, error } = await sb.auth.signUp({ email, password });
+    // `meta` is stored as Supabase user_metadata — we use it to record terms-acceptance (version +
+    // timestamp) so consent is durable on the account, not just a client-side gate.
+    const { data, error } = await sb.auth.signUp({ email, password, options: { data: meta } });
     if (error) throw error;
     // If email confirmation is on, there's a user but no session yet.
     return { needsConfirm: !data.session };

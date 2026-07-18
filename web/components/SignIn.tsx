@@ -3,7 +3,9 @@ import { useState } from "react";
 import type { Lang } from "@/lib/types";
 import { tr, type StringKey } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
+import { TERMS_VERSION } from "@/lib/legal";
 import { Icon } from "./Icon";
+import { TermsModal } from "./TermsModal";
 
 // Map Supabase's English auth errors onto localized copy — this is a Hebrew-first product, so the
 // message a user actually sees must be Hebrew. Unknown errors fall through to a generic string.
@@ -28,15 +30,26 @@ export function SignIn({ lang }: { lang: Lang }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [showTerms, setShowTerms] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setNotice("");
+    // Registration requires accepting the terms; enforced here (and the button is disabled without it).
+    if (mode === "up" && !acceptedTerms) {
+      setError(tr(lang, "termsMustAccept"));
+      return;
+    }
     setBusy(true);
     try {
       if (mode === "up") {
-        const { needsConfirm } = await signUp(email.trim(), password);
+        // Record consent durably on the account (which terms version, when).
+        const { needsConfirm } = await signUp(email.trim(), password, {
+          terms_version: TERMS_VERSION,
+          terms_accepted_at: new Date().toISOString(),
+        });
         if (needsConfirm) setNotice(tr(lang, "authCheckEmail"));
       } else {
         await signIn(email.trim(), password);
@@ -84,12 +97,34 @@ export function SignIn({ lang }: { lang: Lang }) {
             placeholder={tr(lang, "signInPassword")}
           />
 
+          {/* Terms acceptance — required to register. */}
+          {mode === "up" && (
+            <label className="flex items-start gap-2 text-xs text-ink/70 leading-relaxed cursor-pointer">
+              <input
+                type="checkbox"
+                checked={acceptedTerms}
+                onChange={(e) => setAcceptedTerms(e.target.checked)}
+                className="mt-0.5 accent-tekhelet"
+              />
+              <span>
+                {tr(lang, "termsAgreePrefix")}{" "}
+                <button
+                  type="button"
+                  onClick={() => setShowTerms(true)}
+                  className="text-tekhelet font-semibold hover:underline"
+                >
+                  {tr(lang, "termsLink")}
+                </button>
+              </span>
+            </label>
+          )}
+
           {error && <p className="text-xs text-red-600 leading-relaxed">{error}</p>}
           {notice && <p className="text-xs text-green-700 leading-relaxed">{notice}</p>}
 
           <button
             type="submit"
-            disabled={busy}
+            disabled={busy || (mode === "up" && !acceptedTerms)}
             className="py-3 rounded-full grad text-white font-bold text-sm hover:opacity-95 transition disabled:opacity-60"
           >
             {busy ? tr(lang, "authWorking") : tr(lang, mode === "up" ? "signUpBtn" : "signInBtn")}
@@ -109,6 +144,8 @@ export function SignIn({ lang }: { lang: Lang }) {
 
         <p className="text-[11px] text-ink/40 text-center">{tr(lang, "footer")}</p>
       </div>
+
+      <TermsModal open={showTerms} lang={lang} onClose={() => setShowTerms(false)} />
     </div>
   );
 }

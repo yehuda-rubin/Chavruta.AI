@@ -121,6 +121,13 @@ export const STRINGS = {
     authErrUnconfirmed: "האימייל טרם אושר — בדוק את תיבת הדואר.",
     authErrWeakPassword: "הסיסמה חייבת להכיל לפחות 6 תווים.",
     authErrBadEmail: "כתובת אימייל לא תקינה.",
+    termsTitle: "תנאי שימוש",
+    termsEffectiveLabel: "בתוקף מ־",
+    termsVersionLabel: "גרסה",
+    termsAgreePrefix: "קראתי ואני מאשר/ת את",
+    termsLink: "תנאי השימוש",
+    termsMustAccept: "יש לאשר את תנאי השימוש כדי להירשם.",
+    termsDisclaimer: "טיוטה — לבדיקה משפטית לפני עלייה לאוויר.",
   },
   en: {
     brand: "Chavruta",
@@ -232,6 +239,13 @@ export const STRINGS = {
     authErrUnconfirmed: "Email not confirmed yet — check your inbox.",
     authErrWeakPassword: "Password must be at least 6 characters.",
     authErrBadEmail: "Invalid email address.",
+    termsTitle: "Terms of Use",
+    termsEffectiveLabel: "Effective",
+    termsVersionLabel: "Version",
+    termsAgreePrefix: "I have read and accept the",
+    termsLink: "Terms of Use",
+    termsMustAccept: "You must accept the Terms of Use to register.",
+    termsDisclaimer: "Draft — pending legal review before launch.",
   },
 } as const;
 
