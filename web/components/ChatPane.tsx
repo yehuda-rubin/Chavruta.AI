@@ -161,7 +161,12 @@ export function ChatPane({
 
       {intent === "lesson" && <LessonOptions lang={lang} value={lessonFields} onChange={onLessonChange} />}
 
-      <div className="flex-1 overflow-y-auto px-8 py-8 flex flex-col gap-6 max-w-2xl mx-auto w-full">
+      <div
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions"
+        className="flex-1 overflow-y-auto px-8 py-8 flex flex-col gap-6 max-w-2xl mx-auto w-full"
+      >
         {messages.length === 0 ? (
           <div className="m-auto text-center px-6">
             <div className="h-16 w-16 rounded-3xl grad grid place-items-center text-white font-serif text-3xl font-black mx-auto mb-5 shadow-lg shadow-tekhelet/20">

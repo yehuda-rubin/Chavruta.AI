@@ -164,6 +164,16 @@ export default function Home() {
     api.billingConfig().then((c) => setBillingEnabled(c.enabled)).catch(() => setBillingEnabled(false));
   }, [auth.user?.id]);
 
+  // Esc closes an open mobile drawer (keyboard accessibility).
+  useEffect(() => {
+    if (!mobileSessions && !mobileSources) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { setMobileSessions(false); setMobileSources(false); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mobileSessions, mobileSources]);
+
   const upgrade = useCallback(async () => {
     try {
       const { url } = await api.checkout(auth.user?.email || "", "");
@@ -369,7 +379,13 @@ export default function Home() {
       {mobileSessions && (
         <div className="lg:hidden fixed inset-0 z-50" onClick={() => setMobileSessions(false)}>
           <div className="absolute inset-0 bg-ink/30 backdrop-blur-sm" />
-          <div className="absolute inset-y-0 start-0 p-3 flex max-w-[90vw]" onClick={(e) => e.stopPropagation()}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={tr(lang, "recentChats")}
+            className="absolute inset-y-0 start-0 p-3 flex max-w-[90vw]"
+            onClick={(e) => e.stopPropagation()}
+          >
             {sessionsPanel(true)}
           </div>
         </div>
@@ -377,7 +393,13 @@ export default function Home() {
       {mobileSources && (
         <div className="lg:hidden fixed inset-0 z-50" onClick={() => setMobileSources(false)}>
           <div className="absolute inset-0 bg-ink/30 backdrop-blur-sm" />
-          <div className="absolute inset-y-0 end-0 p-3 flex max-w-[90vw]" onClick={(e) => e.stopPropagation()}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={tr(lang, "relatedSources")}
+            className="absolute inset-y-0 end-0 p-3 flex max-w-[90vw]"
+            onClick={(e) => e.stopPropagation()}
+          >
             {sourcesPanel(true)}
           </div>
         </div>
