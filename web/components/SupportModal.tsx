@@ -1,17 +1,12 @@
 "use client";
-import { useState } from "react";
 import type { Lang } from "@/lib/types";
 import { tr } from "@/lib/i18n";
 import { Modal } from "./Modal";
-import { TermsModal } from "./TermsModal";
-import { PrivacyModal } from "./PrivacyModal";
 
 const CONTACT_EMAIL = "rubinyehuda8@gmail.com";
 
 // Support — quick guide, halachic disclaimer, limitations, and contact. Ported from the static UI.
 export function SupportModal({ open, lang, onClose }: { open: boolean; lang: Lang; onClose: () => void }) {
-  const [showTerms, setShowTerms] = useState(false);
-  const [showPrivacy, setShowPrivacy] = useState(false);
   return (
     <Modal open={open} title={tr(lang, "supportTitle")} onClose={onClose} maxW="max-w-lg">
       <div className="flex flex-col gap-4 overflow-y-auto">
@@ -46,26 +41,18 @@ export function SupportModal({ open, lang, onClose }: { open: boolean; lang: Lan
           </p>
         </div>
 
+        {/* Legal docs are their own pages (/terms, /privacy) — open in a new tab. */}
         <div className="flex gap-4">
-          <button
-            type="button"
-            onClick={() => setShowTerms(true)}
-            className="text-xs text-tekhelet/80 hover:text-tekhelet font-semibold text-start"
-          >
+          <a href="/terms" target="_blank" rel="noopener noreferrer"
+             className="text-xs text-tekhelet/80 hover:text-tekhelet font-semibold">
             {tr(lang, "termsLink")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowPrivacy(true)}
-            className="text-xs text-tekhelet/80 hover:text-tekhelet font-semibold text-start"
-          >
+          </a>
+          <a href="/privacy" target="_blank" rel="noopener noreferrer"
+             className="text-xs text-tekhelet/80 hover:text-tekhelet font-semibold">
             {tr(lang, "privacyLink")}
-          </button>
+          </a>
         </div>
       </div>
-
-      <TermsModal open={showTerms} lang={lang} onClose={() => setShowTerms(false)} />
-      <PrivacyModal open={showPrivacy} lang={lang} onClose={() => setShowPrivacy(false)} />
     </Modal>
   );
 }

@@ -5,8 +5,6 @@ import { tr, type StringKey } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { TERMS_VERSION } from "@/lib/legal";
 import { Icon } from "./Icon";
-import { TermsModal } from "./TermsModal";
-import { PrivacyModal } from "./PrivacyModal";
 
 // Map Supabase's English auth errors onto localized copy — this is a Hebrew-first product, so the
 // message a user actually sees must be Hebrew. Unknown errors fall through to a generic string.
@@ -32,8 +30,6 @@ export function SignIn({ lang }: { lang: Lang }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState(false);
-  const [showTerms, setShowTerms] = useState(false);
-  const [showPrivacy, setShowPrivacy] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -110,21 +106,15 @@ export function SignIn({ lang }: { lang: Lang }) {
               />
               <span>
                 {tr(lang, "termsAgreePrefix")}{" "}
-                <button
-                  type="button"
-                  onClick={() => setShowTerms(true)}
-                  className="text-tekhelet font-semibold hover:underline"
-                >
+                <a href="/terms" target="_blank" rel="noopener noreferrer"
+                   className="text-tekhelet font-semibold hover:underline">
                   {tr(lang, "termsLink")}
-                </button>{" "}
+                </a>{" "}
                 {tr(lang, "termsAnd")}{" "}
-                <button
-                  type="button"
-                  onClick={() => setShowPrivacy(true)}
-                  className="text-tekhelet font-semibold hover:underline"
-                >
+                <a href="/privacy" target="_blank" rel="noopener noreferrer"
+                   className="text-tekhelet font-semibold hover:underline">
                   {tr(lang, "privacyLink")}
-                </button>
+                </a>
               </span>
             </label>
           )}
@@ -155,8 +145,6 @@ export function SignIn({ lang }: { lang: Lang }) {
         <p className="text-[11px] text-ink/40 text-center">{tr(lang, "footer")}</p>
       </div>
 
-      <TermsModal open={showTerms} lang={lang} onClose={() => setShowTerms(false)} />
-      <PrivacyModal open={showPrivacy} lang={lang} onClose={() => setShowPrivacy(false)} />
     </div>
   );
 }
