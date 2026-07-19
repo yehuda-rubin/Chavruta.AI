@@ -64,8 +64,11 @@ The Service is also intended for study in schools. Use by minors should be under
 supervision of a parent, teacher or educational institution.
 - **Institutional accounts:** when access is via an educational institution, the institution is the
   consenting party and controller of the student data, and we act as its processor.
-- **No training or marketing:** we do not use minors' data for model training or marketing without
-  separate, explicit consent.
+- **Important — processing and training:** as described in section 3, questions and sources entered are
+  sent to the model provider and **may also be used to train its models**. Therefore **do not enter
+  identifying or personal information about minors** (full names, contact details, location, photos,
+  etc.); it is the parent's/institution's responsibility to instruct and supervise accordingly.
+- **Marketing:** we do not use minors' data for marketing.
 - **Parental consent:** consent given by a parent on a minor's behalf can be withdrawn at any time.
 - We do not knowingly collect personal information from minors beyond an email address used for sign-in.
 
