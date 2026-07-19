@@ -21,6 +21,9 @@ email address for sign-in); sources you attach are provided voluntarily, at your
 - **Usage data:** a daily question counter (to enforce quotas), and basic technical records (request
   id, IP address) for security and rate limiting.
 - **Local preferences:** language, theme and display settings are stored in your browser (localStorage).
+- **Subscription & billing data:** if you purchase a subscription — your subscription status and period
+  dates, and a reference (token) to the payment method held by the payment provider. **We do not see or
+  store your full card number** — it is handled by the payment provider.
 
 ## 2. How We Use It
 To operate the Service and generate answers; to associate your conversations and lessons with your
@@ -36,8 +39,10 @@ way.
 
 ## 4. Sharing
 We do not sell your data. We use sub-processors only to run the Service: the registration provider
-(Supabase), the AI model provider, and the hosting provider. Study sources are retrieved from a
-Sefaria-based corpus subject to their licenses. We will disclose information if required by law.
+(Supabase), the AI model provider, and the hosting provider. **For paid subscribers — the payment
+provider (PayPlus) and the invoicing provider (Green Invoice)**, which process payment and billing
+data. Study sources are retrieved from a Sefaria-based corpus subject to their licenses. We will
+disclose information if required by law.
 
 ## 5. Retention
 Content you create is kept until you delete it (delete conversations/lessons in the app) or until the
