@@ -32,6 +32,7 @@ export default function Home() {
   const [subtitle, setSubtitle] = useState("");
   const [previewFile, setPreviewFile] = useState<FileOut | null>(null);
   const [me, setMe] = useState<Me | null>(null);
+  const [billingEnabled, setBillingEnabled] = useState(false);
 
   // Preferences (persisted)
   const [theme, setTheme] = useState<Theme>("light");
@@ -155,6 +156,28 @@ export default function Home() {
     newDiscussion();
     refreshSessions();
   }, [sessions, newDiscussion, refreshSessions]);
+
+  useEffect(() => {
+    api.billingConfig().then((c) => setBillingEnabled(c.enabled)).catch(() => setBillingEnabled(false));
+  }, [auth.user?.id]);
+
+  const upgrade = useCallback(async () => {
+    try {
+      const { url } = await api.checkout(auth.user?.email || "", "");
+      window.location.href = url;   // redirect to the hosted payment page
+    } catch {
+      /* ignore — button stays */
+    }
+  }, [auth.user?.email]);
+
+  const cancelSubscription = useCallback(async () => {
+    try {
+      await api.cancelSubscription();
+    } catch {
+      /* ignore */
+    }
+    refreshMe();
+  }, [refreshMe]);
 
   const deleteAccount = useCallback(async () => {
     try {
@@ -332,6 +355,10 @@ export default function Home() {
         deletionScheduledFor={me?.deletion_scheduled_for ?? null}
         onDeleteAccount={deleteAccount}
         onCancelDeletion={cancelAccountDeletion}
+        plan={me?.plan}
+        billingEnabled={billingEnabled}
+        onUpgrade={upgrade}
+        onCancelSubscription={cancelSubscription}
       />
       <SupportModal open={showSupport} lang={lang} onClose={() => setShowSupport(false)} />
       <FilePreviewModal file={previewFile} lang={lang} onClose={() => setPreviewFile(null)} />

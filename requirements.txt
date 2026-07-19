@@ -39,6 +39,10 @@ python-docx==1.2.0
 # is set; [crypto] pulls in `cryptography` for the ES256/RS256 asymmetric signing keys Supabase uses.
 PyJWT[crypto]==2.13.0
 
+# Billing — HTTP calls to PayPlus (gateway) and Green Invoice (invoicing). Only used when billing env
+# is configured.
+requests==2.34.2
+
 # Dev / config
 python-dotenv==1.2.2
 pytest==9.0.3

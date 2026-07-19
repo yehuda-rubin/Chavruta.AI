@@ -651,6 +651,17 @@ def get_subscription(owner_id: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
+def due_downgrades(now_iso: str) -> list[str]:
+    """Owners whose CANCELLED subscription's paid period has now ended — the billing sweep flips these
+    back to the free plan (they keep paid access until the period they already paid for lapses)."""
+    conn = get_conn()
+    with _LOCK:
+        rows = conn.execute(
+            "SELECT owner_id FROM subscriptions WHERE status='canceled' "
+            "AND current_period_end IS NOT NULL AND current_period_end <= ?", (now_iso,)).fetchall()
+    return [r["owner_id"] for r in rows]
+
+
 def due_deletions(now_iso: str) -> list[str]:
     """Owner ids whose scheduled deletion time has arrived (scheduled_for <= now)."""
     conn = get_conn()

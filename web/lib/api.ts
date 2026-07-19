@@ -114,6 +114,12 @@ export const api = {
   // Account deletion (scheduled, with a grace period). deleteAccount schedules it; cancel undoes it.
   deleteAccount: () => req<Deletion>("/account/delete", { method: "POST" }),
   cancelAccountDeletion: () => req<Deletion>("/account/delete/cancel", { method: "POST" }),
+
+  // Billing: is it available, start a checkout (returns a hosted payment URL), cancel the subscription.
+  billingConfig: () => req<{ enabled: boolean }>("/billing/config"),
+  checkout: (email: string, name: string) =>
+    req<{ url: string }>("/billing/checkout", { method: "POST", body: JSON.stringify({ email, name }) }),
+  cancelSubscription: () => req<{ ok: boolean }>("/billing/cancel", { method: "POST" }),
 };
 
 // Account + today's free-tier quota (GET /me). daily_quota / remaining are null when unlimited

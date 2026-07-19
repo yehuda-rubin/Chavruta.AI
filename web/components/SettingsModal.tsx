@@ -66,6 +66,10 @@ export function SettingsModal({
   deletionScheduledFor,
   onDeleteAccount,
   onCancelDeletion,
+  plan,
+  billingEnabled,
+  onUpgrade,
+  onCancelSubscription,
 }: {
   open: boolean;
   lang: Lang;
@@ -81,6 +85,10 @@ export function SettingsModal({
   deletionScheduledFor?: string | null;   // ISO ts if the account is pending deletion
   onDeleteAccount?: () => void;
   onCancelDeletion?: () => void;
+  plan?: string;                           // 'free' | 'paid'
+  billingEnabled?: boolean;
+  onUpgrade?: () => void;
+  onCancelSubscription?: () => void;
 }) {
   const auth = useAuth();
   const fmtDate = (iso: string) =>
@@ -152,6 +160,32 @@ export function SettingsModal({
               >
                 {tr(lang, "signOut")}
               </button>
+            </div>
+
+            {/* Plan + billing — upgrade (free) or cancel subscription (paid). */}
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <span className="text-xs text-ink/60">
+                {tr(lang, "planLabel")}: {tr(lang, plan === "paid" ? "planPaid" : "planFree")}
+              </span>
+              {plan === "paid" ? (
+                <button
+                  onClick={() => {
+                    if (window.confirm(tr(lang, "cancelSubscriptionConfirm"))) onCancelSubscription?.();
+                  }}
+                  className="px-4 py-2 rounded-2xl glass text-red-500 font-semibold text-sm hover:bg-red-500/10 transition shrink-0"
+                >
+                  {tr(lang, "cancelSubscription")}
+                </button>
+              ) : (
+                billingEnabled && (
+                  <button
+                    onClick={() => onUpgrade?.()}
+                    className="px-4 py-2 rounded-2xl grad text-white font-semibold text-sm hover:opacity-95 transition shrink-0"
+                  >
+                    {tr(lang, "upgrade")}
+                  </button>
+                )
+              )}
             </div>
 
             {/* Account deletion — scheduled with a grace period, cancellable until the deadline. */}

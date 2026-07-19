@@ -47,7 +47,7 @@ import torch  # noqa: F401,E402 — MUST precede qdrant_client import (Windows p
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -60,7 +60,9 @@ from chavruta.llm.agentic import is_degrade_message
 from chavruta.pipeline.pipeline import _max_tokens_for
 
 import app.accounts as accounts
+import app.billing.service as billing
 import app.db as db
+from app.billing import payplus
 from app.jobs import registry as jobs
 
 
@@ -124,6 +126,7 @@ async def lifespan(app: FastAPI):
     _assert_config_usable()
     db.get_conn()          # initialise DB + run migrations
     accounts.start_sweeper()   # background purge of accounts past their deletion grace period
+    billing.start_sweeper()    # background downgrade of expired-cancelled subscriptions (if billing on)
     p = _get_pipeline()    # warm up bge-m3 + Qdrant connection at startup
     try:
         p.embedding.embed_query("warmup")   # load the embedder BEFORE any qdrant_client use
@@ -1139,6 +1142,61 @@ def cancel_account_deletion(owner: str = Depends(current_owner)):
     if owner != "local":
         accounts.cancel(owner)
     return DeletionOut(deletion_scheduled_for=None)
+
+
+# ── Billing (subscription checkout / cancel / webhook) ────────────────────────
+class CheckoutRequest(BaseModel):
+    email: str = ""
+    name: str = ""
+
+
+class CheckoutOut(BaseModel):
+    url: str
+
+
+@app.get("/billing/config")
+def billing_config():
+    """Whether billing is available (so the UI can show/hide the upgrade button)."""
+    return {"enabled": billing.enabled()}
+
+
+@app.post("/billing/checkout", response_model=CheckoutOut)
+def billing_checkout(req: CheckoutRequest, owner: str = Depends(current_owner)):
+    """Create a hosted payment page and return its URL. The client redirects the user there."""
+    if owner == "local":
+        raise HTTPException(status_code=400, detail="sign in to subscribe")
+    if not billing.enabled():
+        raise HTTPException(status_code=503, detail="billing not configured")
+    try:
+        return CheckoutOut(url=billing.start_checkout(owner, req.email, req.name))
+    except Exception as exc:            # noqa: BLE001 — surface a clean 502 rather than a stack trace
+        _log.exception("checkout failed for %s", owner)
+        raise HTTPException(status_code=502, detail="could not start checkout") from exc
+
+
+@app.post("/billing/cancel")
+def billing_cancel(owner: str = Depends(current_owner)):
+    """Cancel the subscription — stops future charges; paid access lasts until the period end."""
+    if owner == "local":
+        raise HTTPException(status_code=400, detail="no subscription in local mode")
+    billing.cancel(owner)
+    return {"ok": True}
+
+
+@app.post("/billing/webhook")
+async def billing_webhook(request: Request):
+    """PayPlus charge callback. Public (no bearer — PayPlus can't send one) but authenticated by the
+    HMAC `hash` header over the raw body; unverified posts are rejected. Exempt from the auth gate."""
+    raw = await request.body()
+    if not payplus.verify_webhook(raw, request.headers.get("user-agent"), request.headers.get("hash")):
+        raise HTTPException(status_code=400, detail="invalid signature")
+    import json
+    try:
+        payload = json.loads(raw or b"{}")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="bad payload") from exc
+    billing.handle_event(payplus.parse_event(payload))
+    return {"ok": True}
 
 
 # ── Sessions ──────────────────────────────────────────────────────────────────

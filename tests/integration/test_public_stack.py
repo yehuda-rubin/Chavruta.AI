@@ -158,6 +158,25 @@ def test_blocked_account_403d_but_can_see_status(client, monkeypatch):
     assert client.post("/query/async", headers=h, json={"question": "x"}).status_code == 202
 
 
+def test_billing_config_disabled_by_default(client):
+    assert client.get("/billing/config").json() == {"enabled": False}
+
+
+def test_billing_checkout_local_and_unconfigured(client, monkeypatch):
+    # Local (no auth) ⇒ 400 (must sign in to subscribe).
+    assert client.post("/billing/checkout", json={"email": "a@b.co"}).status_code == 400
+    # Authed but billing not configured ⇒ 503.
+    monkeypatch.setenv("CHAVRUTA_API_KEYS", "k")
+    assert client.post("/billing/checkout", headers={"Authorization": "Bearer k"},
+                       json={"email": "a@b.co"}).status_code == 503
+
+
+def test_billing_webhook_rejects_unsigned(client):
+    # No valid PayPlus HMAC/user-agent ⇒ 400 (a forged callback can't activate a plan).
+    r = client.post("/billing/webhook", json={"transaction": {"status_code": "000", "more_info": "x"}})
+    assert r.status_code == 400
+
+
 def test_plan_based_quota_switch(client, monkeypatch):
     monkeypatch.setenv("CHAVRUTA_API_KEYS", "k")
     monkeypatch.setenv("CHAVRUTA_FREE_DAILY_QUOTA", "2")

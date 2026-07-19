@@ -141,6 +141,12 @@ export const STRINGS = {
     blockedUntilPrefix: "החשבון שלך חסום עד",
     blockedReasonPrefix: "סיבה:",
     blockedContact: "לערעור פנה אלינו:",
+    planLabel: "תוכנית",
+    planFree: "חינם",
+    planPaid: "בתשלום",
+    upgrade: "שדרג לתוכנית בתשלום",
+    cancelSubscription: "בטל מנוי",
+    cancelSubscriptionConfirm: "לבטל את המנוי? החיוב יופסק, אך הגישה בתשלום תישאר עד סוף התקופה ששולמה.",
   },
   en: {
     brand: "Chavruta",
@@ -272,6 +278,12 @@ export const STRINGS = {
     blockedUntilPrefix: "Your account is blocked until",
     blockedReasonPrefix: "Reason:",
     blockedContact: "To appeal, contact us:",
+    planLabel: "Plan",
+    planFree: "Free",
+    planPaid: "Paid",
+    upgrade: "Upgrade to paid",
+    cancelSubscription: "Cancel subscription",
+    cancelSubscriptionConfirm: "Cancel your subscription? Billing stops, but paid access remains until the end of the period you paid for.",
   },
 } as const;
 
