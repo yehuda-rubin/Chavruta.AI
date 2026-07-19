@@ -92,7 +92,26 @@ def step_embed() -> None:
     if device == "cpu":
         print("[embed] ⚠️  no GPU — this will be very slow", flush=True)
 
-    chunks = [json.loads(l) for l in MERGED.open(encoding="utf-8") if l.strip()]
+    chunks, bad = [], 0
+    for line in MERGED.open(encoding="utf-8"):
+        line = line.strip().lstrip("﻿")          # tolerate a stray BOM / blank line
+        if not line:
+            continue
+        try:
+            c = json.loads(line)
+        except json.JSONDecodeError:
+            bad += 1
+            continue
+        if c.get("document") and c.get("id"):
+            chunks.append(c)
+        else:
+            bad += 1
+    if bad:
+        print(f"[embed] skipped {bad:,} unparseable/incomplete lines of {len(chunks) + bad:,}", flush=True)
+    limit = int(os.environ.get("LIMIT", "0"))
+    if limit > 0:
+        chunks = chunks[:limit]
+        print(f"[embed] LIMIT={limit} — capping to {len(chunks):,} chunks (smoke test)", flush=True)
     docs = [c["document"] for c in chunks]
     print(f"[embed] {len(docs):,} chunks", flush=True)
 
@@ -137,10 +156,12 @@ def step_load() -> int:
     print(f"[load] collection '{COLLECTION}' @ {QDRANT_URL} | mem_tier={MEM_TIER}", flush=True)
     store.ensure_collection(COLLECTION, dim=1024, mem_tier=MEM_TIER)
 
+    # Batches of 250, not 1000: a 1000-point batch (full text + dense + sparse) can exceed Qdrant's
+    # 32 MB request-size limit and 400. 250 keeps each request comfortably under it.
     batch, total = [], 0
     for sc in load_processed_chunks(str(OUT)):
         batch.append(sc)
-        if len(batch) >= 1000:
+        if len(batch) >= 250:
             store.upsert(COLLECTION, batch)
             total += len(batch); batch = []
             if total % 50000 == 0:
@@ -167,12 +188,31 @@ def step_index() -> None:
     print(f"[index] ✅ payload indexes ready ({_el()})", flush=True)
 
 
+# ── publish the raw index files (RIGHT AFTER embed) so the expensive GPU work is never lost even if
+#    the qdrant load/snapshot tail fails. From these 3 files a snapshot can be rebuilt cheaply. ──────
+def publish_index_files() -> None:
+    if not HF_TOKEN:
+        raise SystemExit("[publish] HF_TOKEN not set — required to upload")
+    from huggingface_hub import HfApi, create_repo
+
+    create_repo(INDEX_REPO, repo_type="dataset", exist_ok=True, token=HF_TOKEN)
+    api = HfApi()
+    for fn in INDEX_FILES:
+        p = OUT / fn
+        if p.exists():
+            print(f"  ⬆️  {p.stat().st_size / 1e6:9.1f} MB  {fn}", flush=True)
+            api.upload_file(path_or_fileobj=str(p), path_in_repo=fn,
+                            repo_id=INDEX_REPO, repo_type="dataset", token=HF_TOKEN)
+    print(f"[publish-index] ✅ embeddings safe on HF ({_el()})", flush=True)
+
+
 # ── 5. snapshot + publish ─────────────────────────────────────────────────────
 def step_publish() -> None:
     if not HF_TOKEN:
         raise SystemExit("[publish] HF_TOKEN not set — required to upload")
     import requests
     from huggingface_hub import HfApi, create_repo
+
     from qdrant_client import QdrantClient
 
     client = QdrantClient(url=QDRANT_URL, timeout=600)
@@ -191,14 +231,11 @@ def step_publish() -> None:
 
     create_repo(INDEX_REPO, repo_type="dataset", exist_ok=True, token=HF_TOKEN)
     api = HfApi()
-    # The Qdrant snapshot (restore locally in seconds) + the raw index files (for bootstrap_rag).
-    to_upload = [(snap_path, f"snapshots/{snap_name}")] + \
-                [(OUT / f, f) for f in INDEX_FILES if (OUT / f).exists()]
-    for path, name in to_upload:
-        mb = path.stat().st_size / 1e6
-        print(f"  ⬆️  {mb:9.1f} MB  {name}", flush=True)
-        api.upload_file(path_or_fileobj=str(path), path_in_repo=name,
-                        repo_id=INDEX_REPO, repo_type="dataset", token=HF_TOKEN)
+    # Just the snapshot here — the 3 raw index files were already uploaded (publish_index_files).
+    mb = snap_path.stat().st_size / 1e6
+    print(f"  ⬆️  {mb:9.1f} MB  snapshots/{snap_name}", flush=True)
+    api.upload_file(path_or_fileobj=str(snap_path), path_in_repo=f"snapshots/{snap_name}",
+                    repo_id=INDEX_REPO, repo_type="dataset", token=HF_TOKEN)
     # A tiny manifest so consumers know what collection/vectors this snapshot restores to.
     manifest = {"collection": COLLECTION, "snapshot": f"snapshots/{snap_name}", "mem_tier": MEM_TIER,
                 "dim": 1024, "vectors": "dense+sparse (bge-m3)", "tiers": TIERS}
@@ -215,6 +252,7 @@ if __name__ == "__main__":
     print("=" * 64, flush=True)
     step_merge()
     step_embed()
+    publish_index_files()   # save the 2.5h of embeddings to HF BEFORE the risky qdrant tail
     step_load()
     step_index()
     step_publish()
