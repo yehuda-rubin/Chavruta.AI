@@ -1,0 +1,42 @@
+# Chavruta.AI — commercial-corpus embed + index + publish job (cloud GPU)
+#
+# Embeds ALL 15 commercial-licence tiers with bge-m3 on an H100 (batch 2048), loads them into a
+# co-located Qdrant (named dense+sparse vectors, ssd mem tier), builds the keyword payload indexes,
+# snapshots the collection, and uploads the snapshot + index files to HF — so the index restores
+# locally in seconds instead of the hours it took to embed+index on a laptop.
+#
+# Prereqs:
+#   1. docker build -f docker/Dockerfile.commercial-index -t YOUR_REGISTRY/chavruta-commercial-index:latest .
+#   2. docker push  YOUR_REGISTRY/chavruta-commercial-index:latest
+#   3. Fill image + HF_TOKEN below.
+#
+# Submit:
+#   nebius ai serverless job run --spec nebius/job.commercial.yaml
+#
+# Estimated: ~2M chunks × bge-m3 on H100 ≈ 1–3 h; cost a few $ (check current rates).
+
+name: chavruta-commercial-index-v1
+
+container:
+  image: docker.io/YOUR_DOCKERHUB_USER/chavruta-commercial-index:latest
+
+resources:
+  gpu: 1
+  gpu_type: h100-80gb
+  memory_gb: 64          # ~2M dense vectors + sparse held during embed
+  cpu: 16
+
+timeout_seconds: 21600   # 6 h hard limit
+
+environment:
+  BATCH: "2048"                          # the H100 target (lower to 1024/512 if it OOMs)
+  CHAVRUTA_QDRANT_URL: "http://localhost:6333"   # the co-located Qdrant in the image
+  CHAVRUTA_COLLECTION: "chavruta_commercial"
+  CHAVRUTA_MEM_TIER: "ssd"               # on-disk vectors/payload — memory-safe
+
+  COMMERCIAL_NAMESPACE: "Yehuda-Rubin"   # source tiers: <ns>/chavruta-commercial-<slug>
+  INDEX_REPO: "Yehuda-Rubin/chavruta-commercial-index"   # publishes the snapshot + index files here
+  HF_TOKEN: "your-hf-write-token"        # required to publish
+
+  # Optional: a subset for a smaller test run first, e.g. the two smallest tiers:
+  # TIERS: "reference,musar"

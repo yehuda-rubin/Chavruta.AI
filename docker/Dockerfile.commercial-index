@@ -1,0 +1,49 @@
+# Chavruta.AI — commercial corpus: GPU embed + index + publish (cloud batch job)
+#
+# Bundles everything the job needs in one image: the chavruta package, bge-m3 weights, and a
+# CO-LOCATED Qdrant server pinned to v1.18.2 (SAME version as docker-compose, so the snapshot this
+# job produces restores cleanly into the app's Qdrant). The entrypoint starts Qdrant, waits for it,
+# then runs scripts/index_commercial_job.py.
+#
+# Build:  docker build -f docker/Dockerfile.commercial-index -t YOUR_REGISTRY/chavruta-commercial-index:latest .
+# Push:   docker push YOUR_REGISTRY/chavruta-commercial-index:latest
+# Run:    see nebius/job.commercial.yaml  (H100, BATCH=2048)
+
+FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    QDRANT_VERSION=1.18.2
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 python3.11-dev python3-pip git curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN ln -sf python3.11 /usr/bin/python3 && ln -sf python3.11 /usr/bin/python
+
+# Co-located Qdrant server (static binary, pinned to the app's version for snapshot compatibility).
+RUN curl -L "https://github.com/qdrant/qdrant/releases/download/v${QDRANT_VERSION}/qdrant-x86_64-unknown-linux-gnu.tar.gz" \
+    | tar -xz -C /usr/local/bin && chmod +x /usr/local/bin/qdrant
+
+WORKDIR /app
+
+# Python deps. FlagEmbedding + transformers are PINNED — an unpinned install pulls a transformers
+# that breaks bge-m3 ("Could not import module 'AutoModel'").
+RUN pip install --upgrade pip && pip install \
+    "torch==2.3.1" \
+    "FlagEmbedding==1.3.4" "transformers==4.44.2" \
+    "qdrant-client==1.12.1" \
+    huggingface_hub numpy requests
+
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+COPY pyproject.toml ./
+RUN pip install -e . --no-deps
+
+# Pre-download bge-m3 so the job starts embedding immediately.
+RUN python3 -c "from FlagEmbedding import BGEM3FlagModel; BGEM3FlagModel('BAAI/bge-m3', use_fp16=False)"
+
+COPY docker/entrypoint.commercial-index.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
