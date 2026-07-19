@@ -60,7 +60,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -149,6 +149,20 @@ def _migrate(conn: sqlite3.Connection) -> None:
             banned_at    TEXT NOT NULL,        -- ISO ts the block was applied
             banned_until TEXT,                 -- ISO ts the block lifts; NULL = permanent
             reason       TEXT
+        );
+
+        -- Subscription state (billing). Provider-agnostic: `provider` names the processor (e.g.
+        -- 'payplus') and `provider_ref` holds its handle for this subscriber (a saved card token /
+        -- subscription id). The billing webhook writes status + period end here and flips accounts.plan.
+        -- current_period_end is the "renew or lapse" moment cancellation and deletion align to.
+        CREATE TABLE IF NOT EXISTS subscriptions (
+            owner_id             TEXT PRIMARY KEY,
+            provider             TEXT,
+            provider_ref         TEXT,
+            status               TEXT NOT NULL DEFAULT 'none',   -- none | active | past_due | canceled
+            current_period_end   TEXT,                           -- ISO ts the paid period ends
+            cancel_at_period_end INTEGER NOT NULL DEFAULT 0,     -- 1 = don't renew, lapse at period end
+            updated_at           TEXT
         );
     """)
 
@@ -601,6 +615,42 @@ def list_bans() -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+# ── Subscriptions (billing) ───────────────────────────────────────────────────
+def upsert_subscription(owner_id: str, *, provider: str | None = None, provider_ref: str | None = None,
+                        status: str | None = None, current_period_end: str | None = None,
+                        cancel_at_period_end: bool | None = None, updated_at: str) -> None:
+    """Create or update an owner's subscription row. A passed field is written; None means "leave as-is"
+    (merged over the current row), so a webhook can update just status+period without clobbering the
+    stored provider_ref. Read-merge-write under the lock keeps concurrent webhooks consistent."""
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        row = conn.execute(
+            "SELECT provider, provider_ref, status, current_period_end, cancel_at_period_end "
+            "FROM subscriptions WHERE owner_id=?", (owner_id,)).fetchone()
+        cur = dict(row) if row else {
+            "provider": None, "provider_ref": None, "status": "none",
+            "current_period_end": None, "cancel_at_period_end": 0}
+        conn.execute(
+            "INSERT OR REPLACE INTO subscriptions (owner_id, provider, provider_ref, status, "
+            "current_period_end, cancel_at_period_end, updated_at) VALUES (?,?,?,?,?,?,?)",
+            (owner_id,
+             provider if provider is not None else cur["provider"],
+             provider_ref if provider_ref is not None else cur["provider_ref"],
+             status if status is not None else cur["status"],
+             current_period_end if current_period_end is not None else cur["current_period_end"],
+             cur["cancel_at_period_end"] if cancel_at_period_end is None else int(cancel_at_period_end),
+             updated_at))
+
+
+def get_subscription(owner_id: str) -> dict[str, Any] | None:
+    conn = get_conn()
+    with _LOCK:
+        row = conn.execute(
+            "SELECT owner_id, provider, provider_ref, status, current_period_end, "
+            "cancel_at_period_end, updated_at FROM subscriptions WHERE owner_id=?", (owner_id,)).fetchone()
+    return dict(row) if row else None
+
+
 def due_deletions(now_iso: str) -> list[str]:
     """Owner ids whose scheduled deletion time has arrived (scheduled_for <= now)."""
     conn = get_conn()
@@ -622,4 +672,5 @@ def purge_owner(owner_id: str) -> None:
         conn.execute("DELETE FROM sessions WHERE owner_id=?", (owner_id,))         # messages cascade
         conn.execute("DELETE FROM saved_lessons WHERE owner_id=?", (owner_id,))
         conn.execute("DELETE FROM usage_counters WHERE owner_id=?", (owner_id,))
+        conn.execute("DELETE FROM subscriptions WHERE owner_id=?", (owner_id,))
         conn.execute("DELETE FROM accounts WHERE owner_id=?", (owner_id,))

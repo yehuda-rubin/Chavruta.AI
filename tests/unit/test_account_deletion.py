@@ -107,5 +107,28 @@ def test_purge_clears_plan(fresh_db):
     assert fresh_db.get_plan("u2") == "free"     # row gone → back to the default
 
 
+# ── Subscriptions (billing) ───────────────────────────────────────────────────
+def test_subscription_partial_update_preserves_fields(fresh_db):
+    # First write: provider + token from checkout.
+    fresh_db.upsert_subscription("u1", provider="payplus", provider_ref="tok_123",
+                                 status="active", current_period_end="2026-08-19T00:00:00+00:00",
+                                 updated_at="2026-07-19T00:00:00+00:00")
+    # A later webhook updates only status + period — must NOT wipe the stored token/provider.
+    fresh_db.upsert_subscription("u1", status="past_due",
+                                 current_period_end="2026-09-19T00:00:00+00:00",
+                                 updated_at="2026-08-19T00:00:00+00:00")
+    sub = fresh_db.get_subscription("u1")
+    assert sub["provider"] == "payplus" and sub["provider_ref"] == "tok_123"
+    assert sub["status"] == "past_due"
+    assert sub["current_period_end"] == "2026-09-19T00:00:00+00:00"
+
+
+def test_subscription_purged_with_account(fresh_db):
+    fresh_db.upsert_subscription("u2", provider="payplus", status="active",
+                                 updated_at="2026-07-19T00:00:00+00:00")
+    fresh_db.purge_owner("u2")
+    assert fresh_db.get_subscription("u2") is None
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
