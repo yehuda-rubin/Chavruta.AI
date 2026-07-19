@@ -1,11 +1,24 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
 
 export const metadata: Metadata = {
-  title: "Chavruta.AI · בית מדרש",
+  title: "חברותא AI · בית מדרש",
   description:
-    "Grounded Q&A, commentator explanation, and lesson preparation over the Jewish bookshelf — every answer cited to a retrieved source.",
+    "שותפה ללימוד תורה — שאלה, הסבר ובניית שיעורים מעל המדף היהודי, עם מקורות מצוטטים.",
+  applicationName: "חברותא AI",
+  appleWebApp: { capable: true, title: "חברותא", statusBarStyle: "default" },
+  formatDetection: { telephone: false },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,      // prevent iOS zoom-on-input-focus jank in the chat composer
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#faf7ef" },
+    { media: "(prefers-color-scheme: dark)", color: "#0f1626" },
+  ],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
