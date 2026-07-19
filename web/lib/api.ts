@@ -19,8 +19,19 @@ async function req<T>(path: string, opts?: RequestInit): Promise<T> {
     headers: { ...headers, ...(opts?.headers as Record<string, string> | undefined) },
   });
   if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`API ${res.status}: ${body}`);
+    // Surface the server's human-readable `detail` (often bilingual, e.g. the quota/429 message)
+    // rather than a raw "API 502: {json}" blob. Tag with the status so callers can special-case.
+    const raw = await res.text().catch(() => "");
+    let detail = raw;
+    try {
+      const j = JSON.parse(raw);
+      detail = typeof j.detail === "string" ? j.detail : raw;
+    } catch {
+      /* not JSON — keep raw */
+    }
+    const err = new Error(detail || `HTTP ${res.status}`);
+    (err as Error & { status?: number }).status = res.status;
+    throw err;
   }
   return res.json() as Promise<T>;
 }

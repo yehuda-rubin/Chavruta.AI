@@ -241,7 +241,17 @@ export default function Home() {
         }
         setUserSources([]); // consumed by this turn
       } catch (e) {
-        appendIfCurrent({ role: "assistant", text: String(e instanceof Error ? e.message : e), citations: [], caveats: [] });
+        // Friendly errors: a network failure → connection message; a 4xx with a clean server detail
+        // (e.g. the bilingual quota/429 message) → show it; 5xx / job failure / timeout → generic
+        // (never surface a raw exception or stack to the user).
+        const err = e as Error & { status?: number };
+        const msg =
+          err?.name === "TypeError"
+            ? tr(lang, "errNetwork")
+            : err?.status && err.status < 500 && err.message
+              ? err.message
+              : tr(lang, "errGeneric");
+        appendIfCurrent({ role: "assistant", text: msg, citations: [], caveats: [] });
       } finally {
         setLoading(false);
         refreshMe(); // update the remaining-quota pill (incl. after a 429)
