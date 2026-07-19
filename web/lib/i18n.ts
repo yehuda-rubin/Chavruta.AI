@@ -132,6 +132,7 @@ export const STRINGS = {
     privacyLink: "מדיניות הפרטיות",
     termsAnd: "ואת",
     backToApp: "חזרה לאפליקציה",
+    examplesLabel: "נסה לדוגמה:",
     deleteAccount: "מחק חשבון",
     deleteAccountConfirm: "למחוק את החשבון? הנתונים יימחקו לצמיתות בתום תקופת חסד — ניתן לבטל עד אז.",
     deletionScheduledPrefix: "החשבון מתוזמן למחיקה בתאריך",
@@ -270,6 +271,7 @@ export const STRINGS = {
     privacyLink: "Privacy Policy",
     termsAnd: "and the",
     backToApp: "Back to the app",
+    examplesLabel: "Try, for example:",
     deleteAccount: "Delete account",
     deleteAccountConfirm: "Delete your account? Your data will be permanently erased after a grace period — you can cancel until then.",
     deletionScheduledPrefix: "Account scheduled for deletion on",
@@ -295,6 +297,23 @@ export type StringKey = keyof (typeof STRINGS)["he"];
 export const INTENT_LABEL: Record<Lang, Record<string, string>> = {
   he: { lesson: "🎯 שיעור", explain: "🎯 הסבר", qa: "🎯 שאלה", shut: '🎯 שו"ת', chavruta: "🤝 חברותא" },
   en: { lesson: "🎯 Lesson", explain: "🎯 Explain", qa: "🎯 Q&A", shut: "🎯 Responsa", chavruta: "🤝 Chavruta" },
+};
+
+// Example prompts shown on the empty welcome screen — click to prefill the composer. Well-known,
+// safe sugyot spanning the modes (explain / lesson / halacha / source).
+export const EXAMPLES: Record<Lang, string[]> = {
+  he: [
+    "הסבר את מחלוקת בית שמאי ובית הלל בהדלקת נר חנוכה",
+    "בנה שיעור על סוגיית \"שניים אוחזין בטלית\"",
+    "מה אומר הרמב\"ם על מצוות תלמוד תורה?",
+    "מהו המקור לאיסור לשון הרע?",
+  ],
+  en: [
+    "Explain the dispute between Beit Shammai and Beit Hillel on the Chanukah lights",
+    "Build a lesson on the sugya of \"two holding a garment\"",
+    "What does the Rambam say about the mitzvah of Torah study?",
+    "What is the source for the prohibition of lashon hara?",
+  ],
 };
 
 export const INTENTS = ["lesson", "explain", "qa", "shut", "chavruta"] as const;

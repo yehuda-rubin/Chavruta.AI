@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import type { FileOut, Lang, Message } from "@/lib/types";
-import { INTENT_LABEL, IntentId, tr } from "@/lib/i18n";
+import { EXAMPLES, INTENT_LABEL, IntentId, tr } from "@/lib/i18n";
 import { commentatorTag, isHe, renderText } from "@/lib/format";
 import { downloadDoc } from "@/lib/doc";
 import { Icon } from "./Icon";
@@ -169,6 +169,24 @@ export function ChatPane({
             </div>
             <h2 className="font-serif text-3xl font-bold text-tekhelet mb-2">{tr(lang, "welcomeTitle")}</h2>
             <p className="text-ink/55 max-w-md mx-auto leading-relaxed">{tr(lang, "welcomeBody")}</p>
+
+            {/* Onboarding — clickable example prompts prefill the composer so a new user knows where
+                to start. */}
+            <p className="text-xs text-ink/45 mt-7 mb-2.5">{tr(lang, "examplesLabel")}</p>
+            <div className="flex flex-col gap-2 max-w-md mx-auto">
+              {EXAMPLES[lang].map((ex) => (
+                <button
+                  key={ex}
+                  onClick={() => {
+                    setInput(ex);
+                    taRef.current?.focus();
+                  }}
+                  className="text-start text-sm text-ink/70 glass rounded-2xl px-4 py-2.5 hover:text-tekhelet hover:bg-white/60 transition font-serif"
+                >
+                  {ex}
+                </button>
+              ))}
+            </div>
           </div>
         ) : (
           messages.map((m, i) => <Bubble key={m.id ?? i} lang={lang} m={m} onPreview={onPreviewFile} />)
