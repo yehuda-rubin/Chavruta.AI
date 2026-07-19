@@ -20,7 +20,9 @@ export function LegalPage({ doc }: { doc: "terms" | "privacy" }) {
   const title = tr(lang, isTerms ? "termsTitle" : "privacyTitle");
 
   return (
-    <div dir={lang === "he" ? "rtl" : "ltr"} className="min-h-screen py-10 px-4">
+    <div dir={lang === "he" ? "rtl" : "ltr"} className="h-screen overflow-y-auto py-10 px-4">
+      {/* h-screen + overflow-y-auto: the app's <body> is overflow-hidden (fixed chat layout), so the
+          page must own its own scroll or long legal text is clipped. */}
       <article className="glass rounded-[28px] max-w-2xl mx-auto p-8 flex flex-col gap-5">
         <div className="flex items-center justify-between gap-3">
           <Link href="/" className="text-xs text-tekhelet/80 hover:text-tekhelet font-semibold inline-flex items-center gap-1">
