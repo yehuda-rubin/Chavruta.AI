@@ -55,6 +55,7 @@ function LessonFiles({ lang, files, onPreview }: { lang: Lang; files: FileOut[];
 
 function Bubble({ lang, m, onPreview }: { lang: Lang; m: Message; onPreview: (f: FileOut) => void }) {
   const dir = isHe(m.text) ? "he" : "en";
+  const [copied, setCopied] = useState(false);
   if (m.role === "user") {
     return (
       <div className="flex gap-3.5 flex-row-reverse">
@@ -94,6 +95,21 @@ function Bubble({ lang, m, onPreview }: { lang: Lang; m: Message; onPreview: (f:
               </span>
             ))}
           </div>
+        )}
+        {m.text && (
+          <button
+            onClick={() => {
+              navigator.clipboard?.writeText(m.text).then(() => {
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              }).catch(() => {});
+            }}
+            aria-label={tr(lang, "copy")}
+            className="mt-3 text-xs text-ink/40 hover:text-tekhelet inline-flex items-center gap-1 transition"
+          >
+            <Icon name={copied ? "check" : "content_copy"} className="text-[15px]" />
+            {tr(lang, copied ? "copied" : "copy")}
+          </button>
         )}
       </div>
     </div>
