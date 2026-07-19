@@ -42,6 +42,9 @@ export default function Home() {
   // UI chrome
   const [sessionsCollapsed, setSessionsCollapsed] = useState(false);
   const [sourcesCollapsed, setSourcesCollapsed] = useState(false);
+  // Mobile: the side panels are hidden and open as slide-over drawers (desktop keeps them inline).
+  const [mobileSessions, setMobileSessions] = useState(false);
+  const [mobileSources, setMobileSources] = useState(false);
   const [showAddSource, setShowAddSource] = useState(false);
   const [showLessons, setShowLessons] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -260,6 +263,38 @@ export default function Home() {
     return <Blocked lang={lang} until={me.blocked_until} reason={me.blocked_reason} />;
   }
 
+  // Panels shared by the desktop-inline layout and the mobile drawers. `mobile` closes the drawer on
+  // select/new/collapse so the user lands back on the chat.
+  const sessionsPanel = (mobile: boolean) => (
+    <SessionsPanel
+      lang={lang}
+      sessions={sessions}
+      activeId={activeId}
+      onNew={() => { newDiscussion(); if (mobile) setMobileSessions(false); }}
+      onSelect={(id) => {
+        const s = sessions.find((x) => x.id === id);
+        if (s) selectSession(s);
+        if (mobile) setMobileSessions(false);
+      }}
+      onDelete={deleteSession}
+      onCollapse={() => (mobile ? setMobileSessions(false) : setSessionsCollapsed(true))}
+      onOpenLessons={() => setShowLessons(true)}
+      onOpenSettings={() => setShowSettings(true)}
+      onOpenSupport={() => setShowSupport(true)}
+    />
+  );
+  const sourcesPanel = (mobile: boolean) => (
+    <SourcesPanel
+      lang={lang}
+      messages={messages}
+      userSources={userSources}
+      srcDefaultOpen={srcDefaultOpen}
+      onRemoveSource={(i) => setUserSources((prev) => prev.filter((_, j) => j !== i))}
+      onAddSource={() => setShowAddSource(true)}
+      onCollapse={() => (mobile ? setMobileSources(false) : setSourcesCollapsed(true))}
+    />
+  );
+
   return (
     <div className="flex flex-col h-screen">
       <Header
@@ -268,41 +303,33 @@ export default function Home() {
         remaining={me?.remaining ?? null}
         onToggleLang={() => setLang((l) => (l === "he" ? "en" : "he"))}
         onToggleTheme={() => setTheme(effectiveDark ? "light" : "dark")}
+        onOpenSessions={() => setMobileSessions(true)}
+        onOpenSources={() => setMobileSources(true)}
       />
       <div className="flex flex-1 overflow-hidden px-4 pb-4 gap-4">
-        {sessionsCollapsed ? (
-          <Rail
-            side="start"
-            icon="forum"
-            title={tr(lang, "openChatsTip")}
-            onExpand={() => setSessionsCollapsed(false)}
-            extra={
-              <button
-                onClick={newDiscussion}
-                className="h-10 w-10 rounded-2xl grad text-white grid place-items-center hover:opacity-95 transition"
-                title={tr(lang, "newChatShort")}
-              >
-                <span className="material-symbols-outlined">add</span>
-              </button>
-            }
-          />
-        ) : (
-          <SessionsPanel
-            lang={lang}
-            sessions={sessions}
-            activeId={activeId}
-            onNew={newDiscussion}
-            onSelect={(id) => {
-              const s = sessions.find((x) => x.id === id);
-              if (s) selectSession(s);
-            }}
-            onDelete={deleteSession}
-            onCollapse={() => setSessionsCollapsed(true)}
-            onOpenLessons={() => setShowLessons(true)}
-            onOpenSettings={() => setShowSettings(true)}
-            onOpenSupport={() => setShowSupport(true)}
-          />
-        )}
+        {/* Sessions — desktop inline only (hidden on mobile, opened as a drawer). lg:contents keeps
+            the desktop flex row exactly as before. */}
+        <div className="hidden lg:contents">
+          {sessionsCollapsed ? (
+            <Rail
+              side="start"
+              icon="forum"
+              title={tr(lang, "openChatsTip")}
+              onExpand={() => setSessionsCollapsed(false)}
+              extra={
+                <button
+                  onClick={newDiscussion}
+                  className="h-10 w-10 rounded-2xl grad text-white grid place-items-center hover:opacity-95 transition"
+                  title={tr(lang, "newChatShort")}
+                >
+                  <span className="material-symbols-outlined">add</span>
+                </button>
+              }
+            />
+          ) : (
+            sessionsPanel(false)
+          )}
+        </div>
 
         <ChatPane
           lang={lang}
@@ -318,20 +345,33 @@ export default function Home() {
           onPreviewFile={setPreviewFile}
         />
 
-        {sourcesCollapsed ? (
-          <Rail side="end" icon="menu_book" title={tr(lang, "openSourcesTip")} onExpand={() => setSourcesCollapsed(false)} />
-        ) : (
-          <SourcesPanel
-            lang={lang}
-            messages={messages}
-            userSources={userSources}
-            srcDefaultOpen={srcDefaultOpen}
-            onRemoveSource={(i) => setUserSources((prev) => prev.filter((_, j) => j !== i))}
-            onAddSource={() => setShowAddSource(true)}
-            onCollapse={() => setSourcesCollapsed(true)}
-          />
-        )}
+        <div className="hidden lg:contents">
+          {sourcesCollapsed ? (
+            <Rail side="end" icon="menu_book" title={tr(lang, "openSourcesTip")} onExpand={() => setSourcesCollapsed(false)} />
+          ) : (
+            sourcesPanel(false)
+          )}
+        </div>
       </div>
+
+      {/* Mobile drawers — slide-over panels with a tap-to-close backdrop (start=sessions, end=sources;
+          both respect RTL). Hidden on lg where the panels are inline. */}
+      {mobileSessions && (
+        <div className="lg:hidden fixed inset-0 z-50" onClick={() => setMobileSessions(false)}>
+          <div className="absolute inset-0 bg-ink/30 backdrop-blur-sm" />
+          <div className="absolute inset-y-0 start-0 p-3 flex max-w-[90vw]" onClick={(e) => e.stopPropagation()}>
+            {sessionsPanel(true)}
+          </div>
+        </div>
+      )}
+      {mobileSources && (
+        <div className="lg:hidden fixed inset-0 z-50" onClick={() => setMobileSources(false)}>
+          <div className="absolute inset-0 bg-ink/30 backdrop-blur-sm" />
+          <div className="absolute inset-y-0 end-0 p-3 flex max-w-[90vw]" onClick={(e) => e.stopPropagation()}>
+            {sourcesPanel(true)}
+          </div>
+        </div>
+      )}
 
       <AddSourceModal
         open={showAddSource}
