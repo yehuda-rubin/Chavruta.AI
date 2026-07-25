@@ -19,10 +19,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from qdrant_client import QdrantClient
 
+from chavruta.config import DEFAULT_COLLECTION
 from chavruta.corpus.links import LinkGraph
 
 URL = os.environ.get("CHAVRUTA_QDRANT_URL", "http://localhost:6333")
-COLLECTION = os.environ.get("CHAVRUTA_COLLECTION", "chavruta")
+COLLECTION = os.environ.get("CHAVRUTA_COLLECTION", DEFAULT_COLLECTION)
 OUT = Path(os.environ.get("CHAVRUTA_LINKS_PATH", "data/links.jsonl"))
 PAGE = int(os.environ.get("BUILD_LINKS_PAGE", "10000"))
 

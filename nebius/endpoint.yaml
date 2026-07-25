@@ -57,7 +57,7 @@ environment:
   CHAVRUTA_QDRANT_MODE: server
   CHAVRUTA_QDRANT_URL: "https://YOUR-CLUSTER.cloud.qdrant.io:6333"
   CHAVRUTA_QDRANT_API_KEY: "your-qdrant-api-key"
-  CHAVRUTA_COLLECTION: chavruta
+  CHAVRUTA_COLLECTION: chavruta_commercial
   CHAVRUTA_EMBEDDING_DEVICE: cpu
   CHAVRUTA_HYBRID: "true"
   CHAVRUTA_RERANK: "true"

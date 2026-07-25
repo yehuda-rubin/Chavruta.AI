@@ -10,7 +10,7 @@ runs on EVERY query, so it needs an index for the same reason `ref` does.
 
 Safe + idempotent (an existing index is a no-op).
 
-    python scripts/create_payload_indexes.py            # collection from env / default 'chavruta'
+    python scripts/create_payload_indexes.py    # collection from env / default 'chavruta_commercial'
 """
 import os
 import sys
@@ -19,7 +19,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models
 
 URL = os.environ.get("CHAVRUTA_QDRANT_URL", "http://localhost:6333")
-COLLECTION = os.environ.get("CHAVRUTA_COLLECTION", "chavruta")
+COLLECTION = os.environ.get("CHAVRUTA_COLLECTION", "chavruta_commercial")  # config.DEFAULT_COLLECTION
 FIELDS = ("ref", "anchor_ref", "license_he", "license_en")
 
 

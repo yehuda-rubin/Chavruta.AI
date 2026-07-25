@@ -1,5 +1,13 @@
 """load_all_indexes.py — load all 15 prebuilt indexes from HF into the LOCAL Qdrant server.
 
+⚠️  THIS BUILDS THE LEGACY MIXED-LICENCE CORPUS, NOT THE PRODUCTION ONE. The `chavruta-index-<slug>`
+    repos it pulls contain CC-BY-NC and copyrighted editions (Davidson Talmud, Steinsaltz, …), so the
+    result may NOT be reproduced to users in a paid product. Production serves `chavruta_commercial`
+    (100% PD/CC0/CC-BY/CC-BY-SA), which is restored from a Qdrant snapshot — see
+    `scripts/restore_commercial_tonight.ps1` and `docs/COMMERCIAL_CORPUS.md`.
+    Do NOT point this script at CHAVRUTA_COLLECTION=chavruta_commercial: it would pour
+    non-commercial text into the collection whose entire value is being clean.
+
 Everything local (Qdrant on localhost:6333, bge-m3 on CPU); only the LLM is remote (Nebius).
 Targets the local server with memory tier applied (quantization + on-disk) so the full ~2.9M
 corpus fits a 16GB machine. Idempotent (upserts keyed by chunk_id) AND resumable: finished
@@ -24,7 +32,7 @@ SLUGS = ["second_temple", "reference", "musar", "tosefta", "liturgy", "kabbalah"
          "midrash", "chasidut", "jewish_thought", "shut", "yerushalmi", "mishnah",
          "tanakh", "halacha", "gemara"]
 NS = "Yehuda-Rubin"
-COLLECTION = "chavruta"
+COLLECTION = "chavruta_mixed"   # deliberately NOT config.DEFAULT_COLLECTION — see the warning above
 QDRANT_URL = os.environ.get("CHAVRUTA_QDRANT_URL", "http://localhost:6333")
 OUT = Path("out_load")
 DONE_FILE = Path("data/processed/local_load.done")

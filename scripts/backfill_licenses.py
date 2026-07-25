@@ -39,11 +39,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from chavruta.config import DEFAULT_COLLECTION  # noqa: E402
 from chavruta.corpus.rights import allows_commercial_use, is_unknown  # noqa: E402
 
 SEFARIA = "https://www.sefaria.org"
 QDRANT = "http://localhost:6333"
-COLLECTION = "chavruta"
+COLLECTION = DEFAULT_COLLECTION
 STATE = ROOT / "data" / "license_backfill.json"     # {title: {"license_he":..., ...}} — the journal
 
 # The journal is keyed by the OUTPUT of index_title_of(). When that function changes, every cached

@@ -34,7 +34,7 @@ Index publishing (step 3):
 Qdrant Cloud load (step 4):
   CHAVRUTA_QDRANT_URL       Qdrant Cloud cluster URL (if unset, this step is skipped)
   CHAVRUTA_QDRANT_API_KEY   Qdrant Cloud API key
-  CHAVRUTA_COLLECTION       Qdrant collection name (default: chavruta)
+  CHAVRUTA_COLLECTION       Qdrant collection name (default: chavruta_commercial)
 
 Other:
   INGEST_BATCH              embedding batch size (default: 64)

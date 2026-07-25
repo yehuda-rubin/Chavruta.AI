@@ -22,7 +22,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 os.environ.setdefault("CHAVRUTA_QDRANT_URL", "http://localhost:6333")
-COLLECTION = os.environ.get("CHAVRUTA_COLLECTION", "chavruta")
+from chavruta.config import DEFAULT_COLLECTION  # noqa: E402 — after the sys.path insert above
+
+COLLECTION = os.environ.get("CHAVRUTA_COLLECTION", DEFAULT_COLLECTION)
 
 
 def main() -> None:

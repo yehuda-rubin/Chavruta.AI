@@ -40,11 +40,14 @@ services:
       CHAVRUTA_PROFILE: local
       CHAVRUTA_EMBEDDING_DEVICE: cpu
 
-      # Retrieval — HYBRID against the Qdrant SERVER (449k-point dense+sparse index).
+      # Retrieval — HYBRID against the Qdrant SERVER (2.4M-point dense+sparse index).
       # Embedded mode cannot do hybrid at this scale (brute force → timeouts).
       CHAVRUTA_QDRANT_MODE: server
       CHAVRUTA_QDRANT_URL: http://qdrant:6333
-      CHAVRUTA_COLLECTION: chavruta
+      # The live production collection. The older mixed-licence `chavruta` was DELETED 2026-07-20;
+      # naming it here gives a silently EMPTY RAG (every question returns nothing, no error).
+      CHAVRUTA_COLLECTION: ${CHAVRUTA_COLLECTION:-chavruta_commercial}
+      CHAVRUTA_MEM_TIER: ${CHAVRUTA_MEM_TIER:-ssd}
       CHAVRUTA_HYBRID: "true"
       CHAVRUTA_RERANK: "false"
       CHAVRUTA_RELEVANCE_THRESHOLD: "0.0"
@@ -139,7 +142,7 @@ services:
       CHAVRUTA_EMBEDDING_DEVICE: cpu
       CHAVRUTA_QDRANT_MODE: server
       CHAVRUTA_QDRANT_URL: http://qdrant:6333
-      CHAVRUTA_COLLECTION: chavruta
+      CHAVRUTA_COLLECTION: ${CHAVRUTA_COLLECTION:-chavruta_commercial}
       INGEST_CHUNKS_PATH: /data/processed/all_chunks_full.json
     volumes:
       - ./data:/data                      # prebuilt corpus (read) — see data/processed/

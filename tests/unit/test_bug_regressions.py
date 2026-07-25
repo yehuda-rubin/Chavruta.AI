@@ -251,10 +251,17 @@ def test_with_ref_variants_covers_dot_space_and_chapter_opening():
     from chavruta.corpus.refs import with_ref_variants
     # verse-level: dot + corpus-space forms so anchoring matches whichever the store uses
     assert with_ref_variants(["Genesis.1.1"]) == ["Genesis.1.1", "Genesis 1.1"]
-    # chapter-level: also the opening verse, since base texts are stored per-verse
-    assert with_ref_variants(["Exodus.20"]) == ["Exodus.20", "Exodus 20", "Exodus 20.1"]
-    # already-spaced ref (Mishnah) isn't corrupted or duplicated
-    assert with_ref_variants(["Mishnah Sukkah 3.5"]) == ["Mishnah Sukkah 3.5"]
+    # chapter-level: also the opening verse, since base texts are stored per-verse — in BOTH
+    # spellings, because the commercial corpus stores 'Exodus.20.1' and the old one 'Exodus 20.1'
+    assert with_ref_variants(["Exodus.20"]) == [
+        "Exodus.20", "Exodus 20", "Exodus 20.1", "Exodus.20.1"]
+    # a book whose name contains spaces: the commercial corpus underscores them. Emitting only the
+    # spaced form is what made every base pasuk miss after the corpus swap (recall 50% -> 83%).
+    assert with_ref_variants(["Mishnah Sukkah 3.5"]) == [
+        "Mishnah Sukkah 3.5", "Mishnah_Sukkah.3.5"]
+    # Talmud amud -> amud-linear opening segment, again in both spellings
+    assert with_ref_variants(["Bava Metzia 2a"]) == [
+        "Bava Metzia 2a", "Bava Metzia 3.1", "Bava_Metzia.3.1"]
 
 
 # ── Tier1 (2026-07): Talmud daf amud form → corpus amud-linear ref (N = 2·daf − 1/2·daf) ──────────

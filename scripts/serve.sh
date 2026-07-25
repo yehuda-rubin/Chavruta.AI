@@ -23,7 +23,8 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 export CHAVRUTA_PROFILE="local"
 export CHAVRUTA_QDRANT_MODE="server"
 export CHAVRUTA_QDRANT_URL="http://localhost:6333"
-export CHAVRUTA_COLLECTION="chavruta"
+export CHAVRUTA_COLLECTION="chavruta_commercial"   # the live collection (old 'chavruta' deleted 2026-07-20)
+export CHAVRUTA_MEM_TIER="ssd"
 export CHAVRUTA_EMBEDDING_DEVICE="cpu"
 export CHAVRUTA_HYBRID="true"
 export CHAVRUTA_RERANK="false"          # cross-encoder is GPU-only in practice (too slow on CPU)

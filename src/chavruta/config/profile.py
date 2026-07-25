@@ -13,6 +13,11 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parents[3]
 
+# The live production collection. Single source of truth: every script and compose file names this
+# collection, not a literal of its own — the old mixed-licence `chavruta` collection was DELETED on
+# 2026-07-20 and a stale literal points at nothing (a silently empty RAG, not an error).
+DEFAULT_COLLECTION = "chavruta_commercial"
+
 
 def _env(name: str, default: str) -> str:
     return os.environ.get(name, default)
@@ -40,7 +45,7 @@ class Profile:
     qdrant_path: str = str(BASE_DIR / "data" / "qdrant")   # embedded storage path
     qdrant_url: str = ""                      # server URL (cloud)
     qdrant_api_key: str = ""                  # Qdrant Cloud API key
-    collection: str = "chavruta"
+    collection: str = DEFAULT_COLLECTION
     qdrant_mem_tier: str = "ssd"              # "ssd" | "16gb" | "32gb" | "max" — RAM budget for the
                                               # index. Default "ssd": HNSW + vectors + payload all
                                               # memmapped from SSD (~1–2GB), so a small machine won't

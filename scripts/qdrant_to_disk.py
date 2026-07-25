@@ -20,7 +20,7 @@ import os
 import sys
 
 URL = os.environ.get("CHAVRUTA_QDRANT_URL", "http://localhost:6333")
-COLLECTION = os.environ.get("CHAVRUTA_COLLECTION", "chavruta")
+COLLECTION = os.environ.get("CHAVRUTA_COLLECTION", "chavruta_commercial")  # config.DEFAULT_COLLECTION
 
 
 def main() -> int:

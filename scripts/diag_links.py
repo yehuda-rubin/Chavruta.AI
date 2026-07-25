@@ -8,7 +8,7 @@ from chavruta.corpus.schema import Intent, Query
 from chavruta.pipeline.pipeline import build_backends
 
 p = Profile(name="local", qdrant_mode="server", qdrant_url="http://localhost:6333",
-            collection="chavruta", hybrid=True, embedding_device="cpu", llm_backend="nebius")
+            hybrid=True, embedding_device="cpu", llm_backend="nebius")   # collection: Profile default
 emb, store, llm, retr = build_backends(p)
 le = getattr(retr, "link_expander", None)
 g = getattr(le, "link_graph", None) or getattr(le, "graph", None)

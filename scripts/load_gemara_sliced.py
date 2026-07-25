@@ -20,7 +20,9 @@ import time
 from pathlib import Path
 
 OUT = Path("out_load")
-COLLECTION = "chavruta"
+# The LEGACY mixed-licence collection, same as load_all_indexes.py — NOT the production
+# `chavruta_commercial`. The gemara index repo it loads holds CC-BY-NC editions.
+COLLECTION = "chavruta_mixed"
 URL = os.environ.get("CHAVRUTA_QDRANT_URL", "http://localhost:6333")
 SLICE = 40_000
 BATCH = 256
