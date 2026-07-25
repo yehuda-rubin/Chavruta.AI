@@ -54,12 +54,30 @@ def _amud_to_corpus(ref: str) -> str | None:
     return f"{m.group('t')} {daf_amud_to_corpus_n(int(m.group('daf')), m.group('amud'))}.1"
 
 
+def _to_sefaria_ref(ref: str) -> str:
+    """The Sefaria API spelling the COMMERCIAL corpus stores: spaces inside the book name become
+    underscores and every depth separator becomes a dot — 'Bava Metzia 3.1' → 'Bava_Metzia.3.1',
+    'Exodus 20' → 'Exodus.20', 'Mishnah Sukkah 3.5' → 'Mishnah_Sukkah.3.5'. (The older space-form
+    corpus stores 'Bava Metzia 3.1'; emitting BOTH lets one ref resolve against either.)"""
+    ref = (ref or "").strip()
+    m = re.match(r"^(.*?)[ ._](\d.*)$", ref)       # book (up to the first digit-led segment), tail
+    if not m:
+        return ref.replace(" ", "_")
+    book = m.group(1).replace(" ", "_")
+    tail = re.sub(r"[ :._]+", ".", m.group(2))
+    return f"{book}.{tail}"
+
+
 def with_ref_variants(refs) -> list[str]:
-    """The original + corpus-canonical form of each ref (deduped, order-preserving), so an exact
-    `fetch_by_refs` lookup matches whichever spelling the stored `ref`/`anchor_ref` uses:
+    """Every stored spelling of each ref (deduped, order-preserving), so an EXACT `fetch_by_refs`
+    lookup resolves regardless of which corpus format holds it — Qdrant matches the `ref` string
+    literally, so the caller must supply the stored form. Covers BOTH corpora:
+      • old space-form ('Genesis 1.1', 'Bava Metzia 3.1', 'Mishnah Sukkah 3.5'), and
+      • commercial Sefaria underscore-dot form ('Genesis.1.1', 'Bava_Metzia.3.1', 'Mishnah_Sukkah.3.5');
+    with the transforms:
       • dotted↔space book boundary ('Genesis.1.1' ↔ 'Genesis 1.1'),
-      • chapter-level → opening verse ('Exodus.20' → 'Exodus 20.1'),
-      • Talmud amud form → the corpus amud-linear opening ref ('Sanhedrin.23a' → 'Sanhedrin 45.1')."""
+      • chapter-level → opening verse ('Exodus.20' → 'Exodus 20.1' AND 'Exodus.20.1'),
+      • Talmud amud → the amud-linear opening ref ('Sanhedrin.23a' → 'Sanhedrin 45.1' / 'Sanhedrin.45.1')."""
     out: list[str] = []
 
     def _add(v: str) -> None:
@@ -70,11 +88,17 @@ def with_ref_variants(refs) -> list[str]:
         _add(r)
         canon = canon_corpus_ref(r)
         _add(canon)
-        amud = _amud_to_corpus(canon)              # Talmud daf → corpus amud-linear opening segment
+        amud = _amud_to_corpus(canon)              # Talmud daf → amud-linear opening segment
         if amud:
-            _add(amud)
-        elif re.fullmatch(r".+\s\d+", canon):      # chapter-level (no verse) → opening verse
-            _add(canon + ".1")
+            _add(amud)                             # 'Bava Metzia 3.1'  (old space-form)
+            _add(_to_sefaria_ref(amud))            # 'Bava_Metzia.3.1'  (commercial)
+            continue
+        sef = _to_sefaria_ref(canon)
+        _add(sef)                                  # 'Exodus.20' / 'Mishnah_Sukkah.3.5'
+        if re.fullmatch(r".+\s\d+", canon):        # chapter-level (no verse) → opening verse
+            _add(canon + ".1")                     # 'Exodus 20.1'   (old space-form)
+        if sef.count(".") == 1:                    # Book.Chapter (book carries no dots) → opening verse
+            _add(sef + ".1")                       # 'Exodus.20.1'   (commercial)  ← the base-verse fix
     return out
 
 

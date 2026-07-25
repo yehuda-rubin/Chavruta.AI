@@ -12,6 +12,7 @@ score is detectable before acceptance. The same harness runs under both profiles
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -53,8 +54,11 @@ def _ref_matches(expected: str, got: str) -> bool:
     'Genesis.1' matches 'Genesis.1.3' (chapter-level), but 'Genesis.1.1' does NOT match
     'Genesis.1.10' (no false positives on string prefixes).
     """
-    e = expected.strip().lower().replace(" ", ".").split(".")
-    g = got.strip().lower().replace(" ", ".").split(".")
+    # Separator-agnostic: space / underscore / dot / colon / comma all denote a segment boundary, so a
+    # space-form expected ref ('Bava Metzia') matches the commercial corpus's underscore form
+    # ('Bava_Metzia.3.1') and vice-versa. Without this, cross-format refs silently never match.
+    e = [s for s in re.split(r"[ _.:,]+", expected.strip().lower()) if s]
+    g = [s for s in re.split(r"[ _.:,]+", got.strip().lower()) if s]
     n = min(len(e), len(g))
     return n > 0 and e[:n] == g[:n]
 
