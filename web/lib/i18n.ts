@@ -153,6 +153,13 @@ export const STRINGS = {
     upgrade: "שדרג לתוכנית בתשלום",
     cancelSubscription: "בטל מנוי",
     cancelSubscriptionConfirm: "לבטל את המנוי? החיוב יופסק, אך הגישה בתשלום תישאר עד סוף התקופה ששולמה.",
+    planUntil: "עד",
+    creditsLabel: "קרדיטים",
+    couponLabel: "קוד קופון",
+    couponPlaceholder: "הזן קוד",
+    couponRedeem: "מימוש",
+    couponRedeeming: "מממש…",
+    couponFailed: "מימוש הקוד נכשל.",
   },
   en: {
     brand: "Chavruta",
@@ -296,6 +303,13 @@ export const STRINGS = {
     upgrade: "Upgrade to paid",
     cancelSubscription: "Cancel subscription",
     cancelSubscriptionConfirm: "Cancel your subscription? Billing stops, but paid access remains until the end of the period you paid for.",
+    planUntil: "until",
+    creditsLabel: "credits",
+    couponLabel: "Coupon code",
+    couponPlaceholder: "Enter code",
+    couponRedeem: "Redeem",
+    couponRedeeming: "Redeeming…",
+    couponFailed: "Could not redeem that code.",
   },
 } as const;
 

@@ -1,4 +1,5 @@
 "use client";
+import { useState } from "react";
 import type { Lang } from "@/lib/types";
 import { IntentId, tr, StringKey } from "@/lib/i18n";
 import { Modal } from "./Modal";
@@ -40,6 +41,63 @@ function Seg<T extends string>({
   );
 }
 
+/** Coupon entry. Keeps its own state so a failed attempt doesn't disturb the rest of settings; the
+ *  result line is whatever the server said (already localized there, so the two never disagree). */
+function CouponField({ lang, onRedeem }: { lang: Lang; onRedeem: (c: string) => Promise<string> }) {
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  async function submit() {
+    const c = code.trim();
+    if (!c || busy) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      setResult({ ok: true, msg: await onRedeem(c) });
+      setCode("");
+    } catch (e) {
+      setResult({ ok: false, msg: e instanceof Error ? e.message : tr(lang, "couponFailed") });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 flex flex-col gap-2">
+      <span className="text-xs text-ink/60">{tr(lang, "couponLabel")}</span>
+      <div className="flex gap-2">
+        <input
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+          placeholder={tr(lang, "couponPlaceholder")}
+          aria-label={tr(lang, "couponLabel")}
+          disabled={busy}
+          spellCheck={false}
+          autoComplete="off"
+          className="flex-1 min-w-0 px-3 py-2 rounded-2xl glass text-sm tracking-wider uppercase
+                     outline-none focus:ring-2 focus:ring-brand/40 disabled:opacity-50"
+        />
+        <button
+          onClick={submit}
+          disabled={busy || !code.trim()}
+          className="px-4 py-2 rounded-2xl grad text-white font-semibold text-sm shrink-0
+                     hover:opacity-95 transition disabled:opacity-40"
+        >
+          {busy ? tr(lang, "couponRedeeming") : tr(lang, "couponRedeem")}
+        </button>
+      </div>
+      {result && (
+        <p role="status" aria-live="polite"
+           className={"text-xs leading-relaxed " + (result.ok ? "text-emerald-600" : "text-red-500")}>
+          {result.msg}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5">
@@ -67,9 +125,13 @@ export function SettingsModal({
   onDeleteAccount,
   onCancelDeletion,
   plan,
+  planName,
+  planUntil,
+  credits,
   billingEnabled,
   onUpgrade,
   onCancelSubscription,
+  onRedeemCoupon,
 }: {
   open: boolean;
   lang: Lang;
@@ -85,10 +147,14 @@ export function SettingsModal({
   deletionScheduledFor?: string | null;   // ISO ts if the account is pending deletion
   onDeleteAccount?: () => void;
   onCancelDeletion?: () => void;
-  plan?: string;                           // 'free' | 'paid'
+  plan?: string;                           // tier id — see app/plans.py
+  planName?: string;                       // localized tier name from /me
+  planUntil?: string | null;               // ISO ts a coupon-granted plan lapses
+  credits?: number;                        // prepaid generations left
   billingEnabled?: boolean;
   onUpgrade?: () => void;
   onCancelSubscription?: () => void;
+  onRedeemCoupon?: (code: string) => Promise<string>;   // resolves with a message to show
 }) {
   const auth = useAuth();
   const fmtDate = (iso: string) =>
@@ -165,9 +231,11 @@ export function SettingsModal({
             {/* Plan + billing — upgrade (free) or cancel subscription (paid). */}
             <div className="mt-2 flex items-center justify-between gap-2">
               <span className="text-xs text-ink/60">
-                {tr(lang, "planLabel")}: {tr(lang, plan === "paid" ? "planPaid" : "planFree")}
+                {tr(lang, "planLabel")}: {planName || tr(lang, "planFree")}
+                {planUntil && <> · {tr(lang, "planUntil")} {fmtDate(planUntil)}</>}
+                {!!credits && <> · {credits} {tr(lang, "creditsLabel")}</>}
               </span>
-              {plan === "paid" ? (
+              {plan && plan !== "free" ? (
                 <button
                   onClick={() => {
                     if (window.confirm(tr(lang, "cancelSubscriptionConfirm"))) onCancelSubscription?.();
@@ -187,6 +255,11 @@ export function SettingsModal({
                 )
               )}
             </div>
+
+            {/* Coupon redemption — grants a time-boxed plan or prepaid credits. Always shown to a
+                signed-in user, including when billing is off: coupons are the one way to get paid
+                access on a deployment with no payment provider configured. */}
+            {onRedeemCoupon && <CouponField lang={lang} onRedeem={onRedeemCoupon} />}
 
             {/* Account deletion — scheduled with a grace period, cancellable until the deadline. */}
             {deletionScheduledFor ? (

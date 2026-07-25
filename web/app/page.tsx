@@ -192,6 +192,15 @@ export default function Home() {
     refreshMe();
   }, [refreshMe]);
 
+  // Unlike the other billing handlers this one rethrows: the coupon field shows the server's own
+  // message (localized there, and specific — "already redeemed" vs "expired"), so swallowing the
+  // error would leave the user staring at a field that did nothing.
+  const redeemCoupon = useCallback(async (code: string) => {
+    const res = await api.redeemCoupon(code);
+    refreshMe();
+    return res.message;
+  }, [refreshMe]);
+
   const deleteAccount = useCallback(async () => {
     try {
       await api.deleteAccount();
@@ -428,9 +437,13 @@ export default function Home() {
         onDeleteAccount={deleteAccount}
         onCancelDeletion={cancelAccountDeletion}
         plan={me?.plan}
+        planName={me?.plan_name}
+        planUntil={me?.plan_until}
+        credits={me?.credits}
         billingEnabled={billingEnabled}
         onUpgrade={upgrade}
         onCancelSubscription={cancelSubscription}
+        onRedeemCoupon={me?.authenticated ? redeemCoupon : undefined}
       />
       <SupportModal open={showSupport} lang={lang} onClose={() => setShowSupport(false)} />
       <FilePreviewModal file={previewFile} lang={lang} onClose={() => setPreviewFile(null)} />

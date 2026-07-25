@@ -68,7 +68,9 @@ def cancel(owner_id: str, *, now: datetime | None = None) -> None:
     current period ends (Consumer Protection: billing stops, but the user keeps what they paid for)."""
     now = now or datetime.now(UTC)
     sub = db.get_subscription(owner_id)
-    if sub and sub.get("provider_ref"):
+    # Only a real provider subscription has anything to cancel upstream. A coupon-granted plan stores
+    # the coupon code in provider_ref; sending that to PayPlus would be a guaranteed API error.
+    if sub and sub.get("provider_ref") and sub.get("provider") == "payplus":
         try:
             payplus.cancel_recurring(sub["provider_ref"])
         except Exception:               # noqa: BLE001 — still mark cancelled locally so we stop renewing
@@ -95,11 +97,13 @@ _lock = threading.Lock()
 
 
 def start_sweeper() -> None:
-    """Daemon that periodically downgrades expired-cancelled subscriptions. Idempotent; only starts
-    when billing is configured."""
+    """Daemon that periodically downgrades expired-cancelled subscriptions. Idempotent.
+
+    Runs whether or not a payment provider is configured: a coupon grants a time-boxed plan through
+    the same subscriptions row, so gating this on PayPlus would leave coupon plans never expiring on
+    a deployment that only issues coupons.
+    """
     global _started
-    if not enabled():
-        return
     with _lock:
         if _started:
             return

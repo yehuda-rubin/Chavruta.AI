@@ -62,7 +62,9 @@ from chavruta.pipeline.pipeline import _max_tokens_for
 import app.accounts as accounts
 import app.auth_supabase as sb
 import app.billing.service as billing
+import app.coupons as coupons
 import app.db as db
+from app import plans
 from app.billing import payplus
 from app.jobs import registry as jobs
 
@@ -1085,33 +1087,44 @@ def _augment_question(question: str, attachments: list[Attachment] | None) -> st
 
 # ── Daily quota, per subscription plan ────────────────────────────────────────
 def _plan_daily_quota(plan: str) -> int:
-    """Generations allowed per authenticated user per UTC day for their plan. 0 / unset ⇒ unlimited.
-    Provider-agnostic: the paid limit applies once a billing webhook sets the account's plan='paid'."""
-    env = "CHAVRUTA_PAID_DAILY_QUOTA" if plan == "paid" else "CHAVRUTA_FREE_DAILY_QUOTA"
-    try:
-        return int(os.environ.get(env, "0"))
-    except ValueError:
-        return 0
+    """Generations allowed per authenticated user per UTC day for their plan. 0 ⇒ unlimited.
+    Tier table + env overrides live in app/plans.py; 'paid' still maps to the standard paid tier."""
+    return plans.daily_quota(plan)
 
 
-def _enforce_quota(owner: str, lang: str) -> None:
-    """Per-plan daily cap. Only bites authenticated users (owner != 'local') when a quota is configured
-    for their plan — local/offline use is always unlimited. Over the limit ⇒ 429 with a bilingual
-    message. Enforced before ownership checks so an over-quota user probing session ids learns nothing."""
+def _enforce_quota(owner: str, lang: str, intent: str = "") -> None:
+    """Per-plan daily cap, with prepaid credits as the overflow.
+
+    Only bites authenticated users (owner != 'local') when a quota is configured for their plan —
+    local/offline use is always unlimited. Once the day's allowance is gone we try to spend credits
+    instead of refusing; only when there are none does this 429. Enforced before ownership checks so
+    an over-quota user probing session ids learns nothing.
+    """
     if owner == "local":
         return
     limit = _plan_daily_quota(db.get_plan(owner))
     if limit <= 0:
         return
     allowed, _ = db.bump_usage(owner, limit)
-    if not allowed:
-        he = (lang or "he").startswith("he")
-        raise HTTPException(
-            status_code=429,
-            detail=(f"הגעת למכסת השאלות היומית ({limit}). המכסה מתאפסת מחר, או שדרג לתוכנית בתשלום."
-                    if he else
-                    f"Daily limit reached ({limit}). It resets tomorrow, or upgrade to a paid plan."),
-        )
+    if allowed:
+        return
+
+    cost = plans.credit_cost(intent)
+    spent, balance = db.spend_credits(owner, cost)
+    if spent:
+        _log.info("owner=%s over daily quota (%d); spent %d credit(s), %d left", owner, limit, cost, balance)
+        return
+
+    he = (lang or "he").startswith("he")
+    raise HTTPException(
+        status_code=429,
+        detail=(f"הגעת למכסת השאלות היומית ({limit}). "
+                f"נותרו לך {balance} קרדיטים (הפעולה הזו עולה {cost}). "
+                "המכסה מתאפסת מחר — או שדרג את התוכנית / הזן קוד קופון."
+                if he else
+                f"Daily limit reached ({limit}). You have {balance} credits "
+                f"(this action costs {cost}). It resets tomorrow — or upgrade, or redeem a coupon."),
+    )
 
 
 class QueryRequest(BaseModel):
@@ -1130,7 +1143,7 @@ class QueryRequest(BaseModel):
 def query(req: QueryRequest, owner: str = Depends(current_owner)):
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
-    _enforce_quota(owner, req.lang)
+    _enforce_quota(owner, req.lang, req.intent)
     return _run_query(_augment_question(req.question, req.attachments), req.lang, req.intent, [],
                       audience=req.audience, grade_band=req.grade_band, length=req.length,
                       owner_id=owner)
@@ -1139,10 +1152,13 @@ def query(req: QueryRequest, owner: str = Depends(current_owner)):
 class MeOut(BaseModel):
     owner: str
     authenticated: bool
-    plan: str = "free"               # 'free' | 'paid'
+    plan: str = "free"               # tier id — see app/plans.py
+    plan_name: str = ""              # localized display name for the UI
     daily_quota: int | None = None   # None ⇒ unlimited (local user, or quota disabled)
     used_today: int = 0
     remaining: int | None = None     # None ⇒ unlimited
+    credits: int = 0                 # prepaid generations, spent once the daily quota runs out
+    plan_until: str | None = None    # ISO ts a time-boxed (coupon) plan lapses; None = no end date
     deletion_scheduled_for: str | None = None   # ISO ts if the account is pending deletion
     blocked: bool = False            # account on the blocklist
     blocked_until: str | None = None  # ISO ts the block lifts (None + blocked ⇒ permanent)
@@ -1153,18 +1169,22 @@ class MeOut(BaseModel):
 def me(owner: str = Depends(current_owner)):
     """Account + today's quota state — lets the UI show who's signed in, their plan, how many questions
     remain, whether a deletion is pending, and whether the account is blocked."""
-    plan = "free" if owner == "local" else db.get_plan(owner)
+    plan = "free" if owner == "local" else plans.canonical(db.get_plan(owner))
     limit = _plan_daily_quota(plan)
     unlimited = owner == "local" or limit <= 0
     used = 0 if owner == "local" else db.usage_today(owner)
     ban = None if owner == "local" else accounts.active_ban(owner)
+    sub = None if owner == "local" else db.get_subscription(owner)
     return MeOut(
         owner=owner,
         authenticated=owner != "local",
         plan=plan,
+        plan_name=plans.tier(plan).name_he,
         daily_quota=None if unlimited else limit,
         used_today=used,
         remaining=None if unlimited else max(0, limit - used),
+        credits=0 if owner == "local" else db.get_credits(owner),
+        plan_until=(sub or {}).get("current_period_end") if plan != "free" else None,
         deletion_scheduled_for=None if owner == "local" else accounts.scheduled_for(owner),
         blocked=ban is not None,
         blocked_until=ban["until"] if ban else None,
@@ -1206,9 +1226,70 @@ class CheckoutOut(BaseModel):
 
 
 @app.get("/billing/config")
-def billing_config():
-    """Whether billing is available (so the UI can show/hide the upgrade button)."""
-    return {"enabled": billing.enabled()}
+def billing_config(lang: str = "he"):
+    """Whether billing is available (so the UI can show/hide the upgrade button), plus the tier
+    catalogue so prices are never hardcoded in the frontend."""
+    return {"enabled": billing.enabled(), "tiers": plans.public_catalogue(lang)}
+
+
+# ── Coupons ───────────────────────────────────────────────────────────────────
+class RedeemRequest(BaseModel):
+    code: str = Field(max_length=64)
+
+
+class RedeemOut(BaseModel):
+    ok: bool = True
+    kind: str = ""                   # 'plan' | 'credits'
+    plan: str | None = None
+    plan_name: str = ""
+    until: str | None = None         # ISO ts a plan grant lapses
+    credits_added: int = 0
+    credits_balance: int = 0
+    message: str = ""
+
+
+# Stable reason → user-facing message. "invalid" deliberately covers not-found, revoked and
+# malformed alike: telling a prober which of those it hit turns the endpoint into an oracle for
+# discovering real codes.
+_REDEEM_MESSAGES = {
+    "sign_in_required": ("צריך להתחבר כדי לממש קוד.", "Sign in to redeem a code."),
+    "invalid": ("הקוד אינו תקף.", "That code isn't valid."),
+    "already_redeemed": ("כבר מימשת את הקוד הזה.", "You've already redeemed this code."),
+    "exhausted": ("הקוד מוצה — כל המימושים נוצלו.", "This code has been fully redeemed."),
+    "expired": ("תוקף הקוד פג.", "This code has expired."),
+    "throttled": ("יותר מדי ניסיונות. נסה שוב בעוד שעה.", "Too many attempts. Try again in an hour."),
+    "has_paid_subscription": ("יש לך מנוי פעיל בתשלום — הקוד לא הופעל כדי לא לפגוע בו.",
+                              "You have an active paid subscription — the code was not applied."),
+    "downgrade": ("הקוד נותן רמה נמוכה מזו שיש לך כבר.",
+                  "That code grants a lower tier than you already have."),
+}
+_REDEEM_STATUS = {"throttled": 429, "sign_in_required": 401}
+
+
+@app.post("/coupons/redeem", response_model=RedeemOut)
+def redeem_coupon(req: RedeemRequest, lang: str = "he", owner: str = Depends(current_owner)):
+    """Redeem a coupon code for a time-boxed plan or a pile of credits."""
+    he = (lang or "he").startswith("he")
+    try:
+        res = coupons.redeem(owner, req.code)
+    except coupons.RedeemError as exc:
+        msg = _REDEEM_MESSAGES.get(exc.reason, _REDEEM_MESSAGES["invalid"])
+        raise HTTPException(status_code=_REDEEM_STATUS.get(exc.reason, 400),
+                            detail=msg[0] if he else msg[1]) from exc
+
+    if res["kind"] == "credits":
+        message = (f"נוספו {res['credits_added']} קרדיטים. יתרה: {res['credits_balance']}."
+                   if he else
+                   f"{res['credits_added']} credits added. Balance: {res['credits_balance']}.")
+    else:
+        name = plans.tier(res["plan"]).name_he if he else plans.tier(res["plan"]).name_en
+        until = (res["until"] or "")[:10]
+        message = (f"התוכנית שודרגה ל'{name}' עד {until}." if he else
+                   f"Upgraded to {name} until {until}.")
+    return RedeemOut(kind=res["kind"], plan=res["plan"],
+                     plan_name=plans.tier(res["plan"]).name_he if res["plan"] else "",
+                     until=res["until"], credits_added=res["credits_added"],
+                     credits_balance=res["credits_balance"], message=message)
 
 
 @app.post("/billing/checkout", response_model=CheckoutOut)
@@ -1352,7 +1433,7 @@ def create_session(req: QueryRequest, owner: str = Depends(current_owner)):
     /sessions/async for a long lesson that would outlast a proxy timeout)."""
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
-    _enforce_quota(owner, req.lang)
+    _enforce_quota(owner, req.lang, req.intent)
 
     # Lock the chat's mode to the intent chosen on this first turn; every follow-up stays in it.
     sid = db.create_session(req.question.strip(), mode=req.intent or None, owner_id=owner)
@@ -1365,7 +1446,7 @@ def session_query(session_id: str, req: QueryRequest, owner: str = Depends(curre
     """Continue an existing session (synchronous)."""
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
-    _enforce_quota(owner, req.lang)
+    _enforce_quota(owner, req.lang, req.intent)
     history, intent = _prepare_continue(session_id, req, owner)
     return _continue_query_work(session_id, req, history, intent, owner)
 
@@ -1378,7 +1459,7 @@ def session_query(session_id: str, req: QueryRequest, owner: str = Depends(curre
 def query_async(req: QueryRequest, owner: str = Depends(current_owner)):
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
-    _enforce_quota(owner, req.lang)
+    _enforce_quota(owner, req.lang, req.intent)
     q = _augment_question(req.question, req.attachments)
     jid = jobs.submit(owner, lambda: jsonable_encoder(
         _run_query(q, req.lang, req.intent, [], audience=req.audience,
@@ -1392,7 +1473,7 @@ def create_session_async(req: QueryRequest, owner: str = Depends(current_owner))
     query in the background."""
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
-    _enforce_quota(owner, req.lang)
+    _enforce_quota(owner, req.lang, req.intent)
     sid = db.create_session(req.question.strip(), mode=req.intent or None, owner_id=owner)
     db.save_message(sid, "user", req.question)
     jid = jobs.submit(owner, lambda: jsonable_encoder(_first_query_work(sid, req, owner)))
@@ -1403,7 +1484,7 @@ def create_session_async(req: QueryRequest, owner: str = Depends(current_owner))
 def session_query_async(session_id: str, req: QueryRequest, owner: str = Depends(current_owner)):
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
-    _enforce_quota(owner, req.lang)
+    _enforce_quota(owner, req.lang, req.intent)
     # The ownership gate + user-turn save happen NOW (before returning) so an unauthorized caller
     # gets a synchronous 404 and the user message is durable even if generation later fails.
     history, intent = _prepare_continue(session_id, req, owner)

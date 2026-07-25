@@ -127,7 +127,11 @@ export const api = {
   cancelAccountDeletion: () => req<Deletion>("/account/delete/cancel", { method: "POST" }),
 
   // Billing: is it available, start a checkout (returns a hosted payment URL), cancel the subscription.
-  billingConfig: () => req<{ enabled: boolean }>("/billing/config"),
+  billingConfig: () => req<{ enabled: boolean; tiers: Tier[] }>("/billing/config"),
+
+  // Coupons: the user-facing half. Issuing is operator-only (scripts/manage_coupons.py).
+  redeemCoupon: (code: string) =>
+    req<Redeemed>("/coupons/redeem", { method: "POST", body: JSON.stringify({ code }) }),
   checkout: (email: string, name: string) =>
     req<{ url: string }>("/billing/checkout", { method: "POST", body: JSON.stringify({ email, name }) }),
   cancelSubscription: () => req<{ ok: boolean }>("/billing/cancel", { method: "POST" }),
@@ -139,13 +143,34 @@ export interface Me {
   owner: string;
   authenticated: boolean;
   plan: string;
+  plan_name: string;
   daily_quota: number | null;
   used_today: number;
   remaining: number | null;
+  credits: number;                          // prepaid generations, spent once the daily quota is out
+  plan_until: string | null;                // ISO ts a coupon-granted plan lapses; null = no end date
   deletion_scheduled_for: string | null;   // ISO ts if the account is pending deletion
   blocked: boolean;
   blocked_until: string | null;             // ISO ts the block lifts (null + blocked ⇒ permanent)
   blocked_reason: string;
+}
+
+export interface Tier {
+  id: string;
+  name: string;
+  price_ils: number;
+  daily_quota: number;      // 0 ⇒ unlimited
+}
+
+export interface Redeemed {
+  ok: boolean;
+  kind: "plan" | "credits" | "";
+  plan: string | null;
+  plan_name: string;
+  until: string | null;
+  credits_added: number;
+  credits_balance: number;
+  message: string;          // already localized by the server
 }
 
 export interface Deletion {

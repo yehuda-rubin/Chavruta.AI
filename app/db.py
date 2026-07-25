@@ -60,7 +60,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -138,7 +138,38 @@ def _migrate(conn: sqlite3.Connection) -> None:
             owner_id               TEXT PRIMARY KEY,
             deletion_requested_at  TEXT,      -- ISO ts when the user asked to delete (NULL = not asked)
             deletion_scheduled_for TEXT,      -- ISO ts when the purge runs (NULL = nothing scheduled)
-            plan                   TEXT NOT NULL DEFAULT 'free'   -- 'free' | 'paid'; flipped by billing
+            plan                   TEXT NOT NULL DEFAULT 'free',  -- see app/plans.py; flipped by billing
+            -- Prepaid generations, spent only once the day's plan quota is used up. Granted by coupon
+            -- today; a credit pack purchase would write the same column.
+            credits                INTEGER NOT NULL DEFAULT 0
+        );
+
+        -- Coupons — operator-issued codes granting either a time-boxed plan or a pile of credits.
+        -- Created by scripts/manage_coupons.py (no admin HTTP surface); redeemed by users at
+        -- POST /coupons/redeem. `redeemed_count` is bumped in the same transaction as the redemption
+        -- row, so a single-use code cannot be spent twice by concurrent requests.
+        CREATE TABLE IF NOT EXISTS coupons (
+            code            TEXT PRIMARY KEY,     -- stored normalised (upper, no dashes)
+            kind            TEXT NOT NULL,        -- 'plan' | 'credits'
+            plan            TEXT,                 -- kind='plan': which tier (app/plans.py)
+            days            INTEGER,              -- kind='plan': how long the tier lasts
+            credits         INTEGER,              -- kind='credits': how many generations
+            max_redemptions INTEGER NOT NULL DEFAULT 1,   -- 0 = unlimited
+            redeemed_count  INTEGER NOT NULL DEFAULT 0,
+            expires_at      TEXT,                 -- ISO ts the CODE stops working; NULL = never
+            active          INTEGER NOT NULL DEFAULT 1,   -- 0 = revoked by the operator
+            note            TEXT,                 -- why it was issued (campaign, person, event)
+            created_at      TEXT NOT NULL
+        );
+
+        -- One row per (code, owner): the uniqueness that stops the same user redeeming a
+        -- multi-use code repeatedly.
+        CREATE TABLE IF NOT EXISTS coupon_redemptions (
+            code        TEXT NOT NULL,
+            owner_id    TEXT NOT NULL,
+            redeemed_at TEXT NOT NULL,
+            granted     TEXT,                     -- human-readable summary of what was given
+            PRIMARY KEY (code, owner_id)
         );
 
         -- Blocklist — an account can be blocked for a bounded window (hours / days / months) or for
@@ -208,6 +239,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
         acols = {r[1] for r in conn.execute("PRAGMA table_info(accounts)")}
         if "plan" not in acols:
             conn.execute("ALTER TABLE accounts ADD COLUMN plan TEXT NOT NULL DEFAULT 'free'")
+
+    if version < 12:
+        # Credit balance on the account (coupons / prepaid packs). The coupons tables themselves are
+        # created by the CREATE TABLE IF NOT EXISTS block above, so only the column needs a step here.
+        acols = {r[1] for r in conn.execute("PRAGMA table_info(accounts)")}
+        if "credits" not in acols:
+            conn.execute("ALTER TABLE accounts ADD COLUMN credits INTEGER NOT NULL DEFAULT 0")
 
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
@@ -573,6 +611,160 @@ def set_plan(owner_id: str, plan: str) -> None:
         conn.execute(
             "INSERT INTO accounts (owner_id, plan) VALUES (?,?) "
             "ON CONFLICT(owner_id) DO UPDATE SET plan=excluded.plan", (owner_id, plan))
+
+
+# ── Credits ───────────────────────────────────────────────────────────────────
+def get_credits(owner_id: str) -> int:
+    conn = get_conn()
+    with _LOCK:
+        row = conn.execute("SELECT credits FROM accounts WHERE owner_id=?", (owner_id,)).fetchone()
+    return int(row["credits"]) if row else 0
+
+
+def add_credits(owner_id: str, amount: int) -> int:
+    """Grant credits and return the new balance."""
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        conn.execute(
+            "INSERT INTO accounts (owner_id, credits) VALUES (?,?) "
+            "ON CONFLICT(owner_id) DO UPDATE SET credits = credits + excluded.credits",
+            (owner_id, int(amount)))
+        row = conn.execute("SELECT credits FROM accounts WHERE owner_id=?", (owner_id,)).fetchone()
+    return int(row["credits"]) if row else 0
+
+
+def spend_credits(owner_id: str, amount: int) -> tuple[bool, int]:
+    """Atomically spend `amount` credits. Returns (spent, balance_after).
+
+    The balance check and the decrement are one transaction under the shared lock, so two concurrent
+    generations cannot both pass on the same last credit. A caller that gets False must not generate.
+    """
+    amount = max(0, int(amount))
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        row = conn.execute("SELECT credits FROM accounts WHERE owner_id=?", (owner_id,)).fetchone()
+        have = int(row["credits"]) if row else 0
+        if amount == 0:
+            return True, have
+        if have < amount:
+            return False, have
+        conn.execute("UPDATE accounts SET credits = credits - ? WHERE owner_id=?", (amount, owner_id))
+        return True, have - amount
+
+
+# ── Coupons ───────────────────────────────────────────────────────────────────
+def create_coupon(code: str, *, kind: str, created_at: str, plan: str | None = None,
+                  days: int | None = None, credits: int | None = None,
+                  max_redemptions: int = 1, expires_at: str | None = None,
+                  note: str = "") -> bool:
+    """Insert a coupon. Returns False if the code already exists (never silently overwrites one that
+    may already have been handed out)."""
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        exists = conn.execute("SELECT 1 FROM coupons WHERE code=?", (code,)).fetchone()
+        if exists:
+            return False
+        conn.execute(
+            "INSERT INTO coupons (code, kind, plan, days, credits, max_redemptions, redeemed_count,"
+            " expires_at, active, note, created_at) VALUES (?,?,?,?,?,?,0,?,1,?,?)",
+            (code, kind, plan, days, credits, int(max_redemptions), expires_at, note, created_at))
+        return True
+
+
+def get_coupon(code: str) -> dict[str, Any] | None:
+    conn = get_conn()
+    with _LOCK:
+        row = conn.execute("SELECT * FROM coupons WHERE code=?", (code,)).fetchone()
+    return dict(row) if row else None
+
+
+def list_coupons() -> list[dict[str, Any]]:
+    conn = get_conn()
+    with _LOCK:
+        rows = conn.execute("SELECT * FROM coupons ORDER BY created_at DESC").fetchall()
+    return [dict(r) for r in rows]
+
+
+def set_coupon_active(code: str, active: bool) -> bool:
+    """Revoke (or restore) a code. Returns True if the code exists. Already-granted benefits stay —
+    revoking stops future redemptions, it does not claw back."""
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        cur = conn.execute("UPDATE coupons SET active=? WHERE code=?", (int(active), code))
+        return cur.rowcount > 0
+
+
+def list_redemptions(code: str | None = None) -> list[dict[str, Any]]:
+    conn = get_conn()
+    sql = "SELECT * FROM coupon_redemptions"
+    args: tuple = ()
+    if code:
+        sql += " WHERE code=?"
+        args = (code,)
+    with _LOCK:
+        rows = conn.execute(sql + " ORDER BY redeemed_at DESC", args).fetchall()
+    return [dict(r) for r in rows]
+
+
+def redeem_coupon(code: str, owner_id: str, now_iso: str, granted: str, *,
+                  set_plan_to: str | None = None, period_end: str | None = None,
+                  add_credits_amount: int = 0) -> str:
+    """Validate a coupon and apply its benefit — all in ONE transaction.
+
+    Returns "ok" | "not_found" | "inactive" | "expired" | "exhausted" | "already_redeemed".
+
+    Eligibility, the redemption row, the counter bump AND the grant commit together or not at all.
+    Splitting them would mean a failure between "reserved" and "granted" burns the code and gives the
+    user nothing — the one outcome a coupon must never produce. It also makes the last use of a
+    single-use code impossible to hand to two concurrent requests.
+
+    The caller decides WHAT to grant (which tier, how long) — see app/coupons.py; this decides
+    whether the grant is allowed to happen and writes it.
+    """
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        row = conn.execute("SELECT * FROM coupons WHERE code=?", (code,)).fetchone()
+        if row is None:
+            return "not_found"
+        c = dict(row)
+        if not c["active"]:
+            return "inactive"
+        if c["expires_at"] and c["expires_at"] <= now_iso:
+            return "expired"
+        already = conn.execute(
+            "SELECT 1 FROM coupon_redemptions WHERE code=? AND owner_id=?", (code, owner_id)).fetchone()
+        if already:
+            return "already_redeemed"
+        cap = int(c["max_redemptions"] or 0)
+        if cap > 0 and int(c["redeemed_count"]) >= cap:
+            return "exhausted"
+
+        conn.execute(
+            "INSERT INTO coupon_redemptions (code, owner_id, redeemed_at, granted) VALUES (?,?,?,?)",
+            (code, owner_id, now_iso, granted))
+        conn.execute("UPDATE coupons SET redeemed_count = redeemed_count + 1 WHERE code=?", (code,))
+
+        if add_credits_amount:
+            conn.execute(
+                "INSERT INTO accounts (owner_id, credits) VALUES (?,?) "
+                "ON CONFLICT(owner_id) DO UPDATE SET credits = credits + excluded.credits",
+                (owner_id, int(add_credits_amount)))
+        if set_plan_to:
+            conn.execute(
+                "INSERT INTO accounts (owner_id, plan) VALUES (?,?) "
+                "ON CONFLICT(owner_id) DO UPDATE SET plan=excluded.plan", (owner_id, set_plan_to))
+            # status='canceled' + cancel_at_period_end=1 is how a non-renewing grant is spelled here,
+            # and it is exactly what the existing downgrade sweep already looks for — so a coupon
+            # plan lapses on its own with no new expiry machinery.
+            conn.execute(
+                "INSERT INTO subscriptions (owner_id, provider, provider_ref, status, "
+                "current_period_end, cancel_at_period_end, updated_at) VALUES (?,?,?,?,?,1,?) "
+                "ON CONFLICT(owner_id) DO UPDATE SET provider=excluded.provider, "
+                "provider_ref=excluded.provider_ref, status=excluded.status, "
+                "current_period_end=excluded.current_period_end, cancel_at_period_end=1, "
+                "updated_at=excluded.updated_at",
+                (owner_id, "coupon", code, "canceled", period_end, now_iso))
+        return "ok"
 
 
 # ── Blocklist ─────────────────────────────────────────────────────────────────
