@@ -345,4 +345,11 @@ Hebrew/English UI. Halachic *rulings* remain advisory only, never a substitute f
 ## Credits
 
 Texts from **[Sefaria](https://www.sefaria.org)** (open, free API). Embeddings: BAAI bge-m3.
-Inspired by Sefaria's [Virtual Havruta](https://github.com/Sefaria/AppliedAI). MIT-licensed code.
+Inspired by Sefaria's [Virtual Havruta](https://github.com/Sefaria/AppliedAI).
+
+## Licence
+
+The **code** is MIT — see [LICENSE](LICENSE). The **texts are not**: each edition carries its own
+licence, and the shipped corpus is restricted to Public Domain / CC0 / CC-BY / CC-BY-SA with
+attribution and share-alike obligations that attach when a source is reproduced. Read
+[NOTICE.md](NOTICE.md) before redistributing anything the system retrieves.
