@@ -109,11 +109,20 @@ def cancel_recurring(recurring_uid: str, terminal_uid: str | None = None) -> Non
 def verify_webhook(raw_body: bytes, user_agent: str | None, hash_header: str | None) -> bool:
     """True iff the callback is authentically from PayPlus: user-agent 'PayPlus' and the `hash` header
     equals base64(HMAC-SHA256(raw body bytes, secret-key)). Hash the EXACT raw bytes, never re-serialized
-    JSON. Constant-time compare."""
+    JSON. Constant-time compare.
+
+    Fails closed when no secret is configured. Without that check the HMAC key is the empty string —
+    which the attacker knows too, so anyone could compute a valid `hash` for a body of their choosing
+    and post a forged "payment succeeded" for any account. The webhook route is unauthenticated by
+    necessity (the provider cannot send a bearer token), so this signature IS the authentication."""
+    secret = _secret_key()
+    if not secret:
+        _log.warning("webhook rejected: PAYPLUS_SECRET_KEY is not configured")
+        return False
     if user_agent != "PayPlus" or not hash_header:
         return False
     expected = base64.b64encode(
-        hmac.new(_secret_key().encode(), raw_body, hashlib.sha256).digest()).decode()
+        hmac.new(secret.encode(), raw_body, hashlib.sha256).digest()).decode()
     return hmac.compare_digest(expected, hash_header)
 
 
