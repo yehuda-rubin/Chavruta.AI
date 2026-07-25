@@ -19,7 +19,7 @@ Set-Location (Join-Path $PSScriptRoot "..")
 $env:CHAVRUTA_PROFILE              = "local"
 $env:CHAVRUTA_QDRANT_MODE          = "server"
 $env:CHAVRUTA_QDRANT_URL           = "http://localhost:6333"
-$env:CHAVRUTA_COLLECTION           = "chavruta"
+$env:CHAVRUTA_COLLECTION           = "chavruta_commercial"  # commercial-licensed corpus (replaced the old 'chavruta' 2026-07-19)
 $env:CHAVRUTA_EMBEDDING_DEVICE     = "cpu"
 $env:CHAVRUTA_HYBRID               = "true"
 $env:CHAVRUTA_RERANK               = "false"  # cross-encoder is GPU-only in practice (too slow on CPU)

@@ -7,7 +7,8 @@ Set-Location (Join-Path $PSScriptRoot "..")
 $env:CHAVRUTA_PROFILE              = "local"
 $env:CHAVRUTA_QDRANT_MODE          = "server"
 $env:CHAVRUTA_QDRANT_URL           = "http://localhost:6333"
-$env:CHAVRUTA_COLLECTION           = "chavruta"
+$env:CHAVRUTA_COLLECTION           = "chavruta_commercial"   # the live production collection (old 'chavruta' was deleted 2026-07-20)
+$env:CHAVRUTA_MEM_TIER             = "ssd"
 $env:CHAVRUTA_EMBEDDING_DEVICE     = "cpu"
 $env:CHAVRUTA_HYBRID               = "true"
 $env:CHAVRUTA_RERANK               = "false"
