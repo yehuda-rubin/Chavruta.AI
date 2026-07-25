@@ -139,3 +139,7 @@ sample_lessons/
 
 # ---- Vendored third-party tooling (cc10x plugin: local dev aid, not part of the product) ----
 .claude/cc10x/
+
+# ---- Poster: brand-licensed Nebius assets/fonts + heavy PDF/PNG exports — keep the WHOLE folder out of git ----
+design/brand/
+design/poster/

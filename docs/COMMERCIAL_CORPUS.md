@@ -1,6 +1,16 @@
 # מסלול הקורפוס המסחרי — איזו מהדורה לשלוף לכל שכבה
 **נבדק חי מול ה-API של Sefaria: 2026-07-17.** כל שורה כאן אומתה, לא נלקחה מהערכה.
 
+> ## ✅ סטטוס: בוצע וחי בפרודקשן (2026-07-20)
+> המסמך הזה הוא ה**תכנון**. הוא **הושלם**: כל 15 השכבות נשלפו, אומבדו (bge-m3), אונדקסו, וטעונים
+> כעת בקולקציה החיה **`chavruta_commercial`** (**2,403,599 נקודות**, on-disk/ssd), שדרסה את הקולקציה
+> הישנה `chavruta`. הרישיונות אומתו: **100% מסחרי** (PD 5,338 · CC0 1,205 · CC-BY 464 · CC-BY-SA 87,
+> **אפס** NC/copyright/unknown). המאגרים על HF: טקסט ב-`Yehuda-Rubin/chavruta-commercial-<slug>` (15),
+> וה-index+snapshot ב-`Yehuda-Rubin/chavruta-commercial-index`. בנייה על H100 בענן; שחזור מקומי דרך
+> `scripts/restore_commercial_tonight.ps1`. אימות bridge מלא עבר (explain/compare/halacha/lesson +
+> כנות). ראה `Chavruta_Production_Audit/14-SESSION-2026-07-20-commercial-rag-live.md` ו-[[commercial-corpus-on-hf]].
+> **פתוח (לא חוסם):** שדה `license` per-chunk ריק ב-payload (backfill עתידי ל-attribution של CC-BY).
+
 מסמך זה עונה על שאלה אחת: **אם המוצר גובה כסף, איזו מהדורה של כל טקסט מותר לשכפל למשתמש?**
 הרקע וההסבר המלא: `src/chavruta/corpus/rights.py` ו-`docs/CORPUS.md §8`.
 

@@ -1,5 +1,13 @@
 # Resume — loading the RAG into local Qdrant
 
+> ## ⚠️ SUPERSEDED (2026-07-20)
+> This runbook resumed a paused load of the OLD mixed-licence `chavruta` corpus. That collection was
+> **deleted** and replaced by **`chavruta_commercial`** (restored from a Qdrant snapshot, not re-loaded
+> tier-by-tier). To bring the live RAG up now: start Docker + `docker compose start qdrant` (the
+> collection is already in the volume), or — if rebuilding from the snapshot — run
+> `scripts/restore_commercial_tonight.ps1`. See `docs/COMMERCIAL_CORPUS.md` and
+> `Chavruta_Production_Audit/14-SESSION-2026-07-20-commercial-rag-live.md`. Kept below for historical reference.
+
 Paused mid-load (needed the machine). State is saved; resume is 2 commands.
 
 ## Where we stopped

@@ -3,8 +3,15 @@
 היקף הטקסטים שהמערכת מאחזרת מהם. מקור: **Sefaria** (API + bulk export). כל טקסט נשמר
 **בעברית ובאנגלית** (דרישה #5).
 
-> **מצב נוכחי (עודכן 2026-07-13):** הקורפוס גדל מבסיס התנ"ך המאומת אל **כל ספריית Sefaria**.
-> השליפה בצד שרת מתבצעת מ-**אינדקס Qdrant היברידי חי בן ~2.93M נקודות ב-15 שכבות (work_id)** —
+> ## ⚠️ קולקציית הפרודקשן החליפה ל-`chavruta_commercial` (2026-07-20)
+> הקולקציה החיה כעת היא **`chavruta_commercial`** — **2,403,599 נקודות**, 15 שכבות, **100% מסחרי**
+> (PD/CC0/CC-BY/CC-BY-SA בלבד), on-disk (ssd). היא **דרסה** את `chavruta` הישן (המעורב). המסמך הזה
+> מתאר את הקורפוס המלא/מעורב כ**רפרנס** — פרטי המהדורות המסחריות ב-`docs/COMMERCIAL_CORPUS.md`,
+> והמצב החי ב-[[commercial-corpus-on-hf]] / `Chavruta_Production_Audit/14-SESSION-2026-07-20-commercial-rag-live.md`.
+> המספרים למטה (~2.93M, מאגרי `chavruta-index-<slug>`) מתייחסים לקורפוס המעורב הישן.
+>
+> **מצב היסטורי (עודכן 2026-07-13):** הקורפוס גדל מבסיס התנ"ך המאומת אל **כל ספריית Sefaria**.
+> השליפה בצד שרת מתבצעת מ-**אינדקס Qdrant היברידי היה בן ~2.93M נקודות ב-15 שכבות (work_id)** —
 > talmud_bavli · halacha · tanakh · mishnah · midrash · **talmud_yerushalmi (התלמוד הירושלמי + כל
 > מפרשיו, נוסף 2026-07-13)** · chasidut · jewish_thought · responsa · liturgy · kabbalah · tosefta ·
 > reference · musar · second_temple. שכבות חדשות נטענות בהדרגה (`bootstrap_rag.py --append`). ראה §0 ו-§6.
