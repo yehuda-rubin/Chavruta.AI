@@ -234,6 +234,10 @@ class QueryResponse(BaseModel):
     caveats: list[str] = []
     lesson_plan: LessonPlanOut | None = None   # the lesson arc (spec 003), present for LESSON
     files: list[FileOut] = []                   # LESSON mode → 3 files (source sheet · flow · full)
+    # Set when this answer was also filed in 'My Shiurim'. Carried so the turn that persists the
+    # message can link the two — the documents live in both places, and deleting the library entry
+    # has to be able to find the chat copy.
+    lesson_id: str = ""
 
 
 # ── Lesson audience / grade / length ─────────────────────────────────────────
@@ -724,16 +728,19 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
         caveats.append("הערה: השיעור אינו קשור למקור מצוטט — יש לוודא מול המקורות." if he
                        else "Note: this lesson is not tied to a cited source — verify against the sources.")
     # Persist to the 'My Shiurim' library so the teacher can reopen/reuse it later.
+    lesson_id = ""
     if files:
         try:
             import uuid
-            db.save_lesson(uuid.uuid4().hex[:12], topic, aud or "", band or "", length, lang,
+            lesson_id = uuid.uuid4().hex[:12]
+            db.save_lesson(lesson_id, topic, aud or "", band or "", length, lang,
                            [f.model_dump() for f in files], [c.model_dump() for c in used],
                            owner_id=owner_id)
         except Exception:
-            pass
+            lesson_id = ""
+            _log.exception("saving the lesson to the library failed (topic=%r)", topic)
     return QueryResponse(answer="", citations=used, grounded=bool(used),
-                         intent="lesson", caveats=caveats, files=files)
+                         intent="lesson", caveats=caveats, files=files, lesson_id=lesson_id)
 
 
 def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bool = False) -> str:
@@ -1482,7 +1489,7 @@ class JobAccepted(BaseModel):
 def _save_assistant(session_id: str, result: QueryResponse) -> None:
     """Persist a generated answer as the assistant turn — the one place that maps a QueryResponse
     onto the message columns, shared by every (sync/async, create/continue) path."""
-    db.save_message(
+    message_id = db.save_message(
         session_id,
         "assistant",
         result.answer,
@@ -1492,6 +1499,14 @@ def _save_assistant(session_id: str, result: QueryResponse) -> None:
         grounded=result.grounded,
         files=[f.model_dump() for f in result.files],
     )
+    # Point the library entry at the turn that now holds the same documents, so deleting the lesson
+    # can clear both copies. Best-effort: a lesson that stays unlinked still deletes from the
+    # library, it just leaves the chat copy — worth a log line, not a failed request.
+    if result.lesson_id:
+        try:
+            db.link_lesson_message(result.lesson_id, message_id)
+        except Exception:
+            _log.warning("could not link lesson %s to message %s", result.lesson_id, message_id)
 
 
 def _first_query_work(sid: str, req: QueryRequest, owner: str) -> dict:

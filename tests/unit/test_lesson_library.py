@@ -83,3 +83,54 @@ def test_delete_removes_it_from_both_views(fresh_db):
     assert fresh_db.get_lesson("L1", "u-1") is None
     assert fresh_db.list_lessons("u-1") == []
     assert fresh_db.delete_lesson("L1", "u-1") is False      # idempotent
+
+
+# ── Delete means delete: the documents are stored twice ───────────────────────
+def _lesson_in_a_chat(d, owner="u-1"):
+    """A lesson as it really lands: a library row AND a chat turn holding the same documents."""
+    sid = d.create_session("שיעור על סוכה", owner_id=owner)
+    mid = d.save_message(sid, "assistant", "📚 שיעור", intent="lesson", files=FILES)
+    _save(d, owner=owner)
+    d.link_lesson_message("L1", mid)
+    return sid, mid
+
+
+def test_deleting_a_lesson_strips_the_chat_copy_too(fresh_db):
+    """The reported bug: the library entry went, and a full copy of the Word files stayed in the
+    chat. Deleting has to reach both places or it hasn't deleted anything."""
+    sid, _mid = _lesson_in_a_chat(fresh_db)
+    assert fresh_db.get_messages(sid, "u-1")[0]["files"]        # present to begin with
+
+    assert fresh_db.delete_lesson("L1", "u-1") is True
+    msgs = fresh_db.get_messages(sid, "u-1")
+    assert msgs[0]["files"] == []
+
+
+def test_deleting_a_lesson_keeps_the_conversation(fresh_db):
+    """Only the downloads go. Removing the whole chat because a library entry was tidied away is
+    the more destructive surprise."""
+    sid, _mid = _lesson_in_a_chat(fresh_db)
+    fresh_db.delete_lesson("L1", "u-1")
+
+    msgs = fresh_db.get_messages(sid, "u-1")
+    assert len(msgs) == 1 and msgs[0]["text"] == "📚 שיעור"
+    assert fresh_db.list_sessions("u-1")
+
+
+def test_a_legacy_unlinked_lesson_still_deletes_from_the_library(fresh_db):
+    """Rows saved before the link existed have no message_id — their chat copy can't be found, but
+    deletion must not fail because of it."""
+    _save(fresh_db)                                    # no link
+    assert fresh_db.delete_lesson("L1", "u-1") is True
+    assert fresh_db.get_lesson("L1", "u-1") is None
+
+
+def test_delete_cannot_reach_another_owners_message(fresh_db):
+    """A lesson row must never be usable to clear a message belonging to someone else."""
+    sid = fresh_db.create_session("שיחה של מישהו אחר", owner_id="u-2")
+    victim = fresh_db.save_message(sid, "assistant", "שיעור", intent="lesson", files=FILES)
+    _save(fresh_db, owner="u-1")
+    fresh_db.link_lesson_message("L1", victim)          # points at u-2's message
+
+    fresh_db.delete_lesson("L1", "u-1")
+    assert fresh_db.get_messages(sid, "u-2")[0]["files"]        # untouched

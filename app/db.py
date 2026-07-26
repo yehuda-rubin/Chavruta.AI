@@ -60,7 +60,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -117,7 +117,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
             files       TEXT NOT NULL,   -- JSON [{name,title,content}]
             citations   TEXT,            -- JSON
             created_at  TEXT NOT NULL,
-            owner_id    TEXT NOT NULL DEFAULT 'local'  -- who this belongs to; 'local' = single-user
+            owner_id    TEXT NOT NULL DEFAULT 'local',  -- who this belongs to; 'local' = single-user
+            -- Where this lesson also lives as a chat turn. The Word documents are stored twice — in
+            -- `files` here and in messages.files — so without this link, deleting from the library
+            -- left a full copy in the chat and "delete" did not delete. Written after the message is
+            -- persisted (its id only exists then); NULL on rows predating the link.
+            message_id  INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_saved_lessons_time ON saved_lessons(created_at DESC);
 
@@ -290,6 +295,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
                 );
                 DROP TABLE usage_counters_old;
             """)
+
+    if version < 15:
+        # Link a saved lesson to its chat turn, so deleting it from the library also removes the
+        # duplicate copy of the Word documents from the conversation. Existing rows keep NULL —
+        # their message can no longer be identified, so deleting them clears the library only.
+        lcols = {r[1] for r in conn.execute("PRAGMA table_info(saved_lessons)")}
+        if "message_id" not in lcols:
+            conn.execute("ALTER TABLE saved_lessons ADD COLUMN message_id INTEGER")
 
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
@@ -556,9 +569,35 @@ def get_lesson(lesson_id: str, owner_id: str = "local") -> dict[str, Any] | None
     return d
 
 
-def delete_lesson(lesson_id: str, owner_id: str = "local") -> bool:
+def link_lesson_message(lesson_id: str, message_id: int) -> None:
+    """Record which chat turn holds this lesson's second copy of the documents. Called once the
+    message exists — its id is only assigned at insert."""
     conn = get_conn()
     with _LOCK, _tx(conn):
+        conn.execute("UPDATE saved_lessons SET message_id=? WHERE id=?", (message_id, lesson_id))
+
+
+def delete_lesson(lesson_id: str, owner_id: str = "local") -> bool:
+    """Delete a lesson from the library AND strip its documents from the chat turn that duplicates
+    them, so "delete" means deleted rather than "hidden from one of the two places it is kept".
+
+    The conversation itself is left intact — the message keeps its text, and only the downloads go.
+    Removing the whole chat because a library entry was tidied away would be the more destructive
+    surprise. Rows saved before the link existed have no message_id; those clear the library only.
+    """
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        row = conn.execute(
+            "SELECT message_id FROM saved_lessons WHERE id=? AND owner_id=?",
+            (lesson_id, owner_id)).fetchone()
+        if row is None:
+            return False
+        if row["message_id"] is not None:
+            # Scoped through the session's owner as well, so a lesson row can never be used to reach
+            # into another account's message.
+            conn.execute(
+                "UPDATE messages SET files='[]' WHERE id=? AND session_id IN "
+                "(SELECT id FROM sessions WHERE owner_id=?)", (row["message_id"], owner_id))
         cur = conn.execute(
             "DELETE FROM saved_lessons WHERE id=? AND owner_id=?", (lesson_id, owner_id))
     return cur.rowcount > 0
