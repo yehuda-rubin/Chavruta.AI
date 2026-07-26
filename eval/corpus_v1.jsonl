@@ -1,0 +1,112 @@
+# Chavruta.AI FULL-CORPUS retrieval eval v1 — the gate for `chavruta_commercial` (Principle V).
+#
+# WHY THIS EXISTS
+#   eval/tanakh_v1.jsonl is historical: it was written for a Tanakh-only index, and several of its
+#   "unanswerable" items (Mishnah, Shulchan Aruch, Gemara) are now IN the corpus, so a low score there
+#   measures the dataset, not the system. This set covers the 15 tiers actually loaded, across every
+#   intent the product ships.
+#
+# FORMAT  {"qid","question","lang","expected_refs":[...],"intent","note"}
+#   expected_refs are refs in the corpus's own scheme — Sefaria underscore-dot ('Genesis.1.1',
+#   'Bava_Metzia.3.1'), Talmud amud-linear (N = 2·daf−1 for amud a, so Berakhot 2a → Berakhot.3.1).
+#   The harness matches SEGMENT-WISE, so a shorter ref is a legitimate looser expectation:
+#   'Rashi_on_Genesis.1.1' matches 'Rashi_on_Genesis.1.1.3', and 'Genesis.1' matches 'Genesis.1.3'.
+#   expected_refs == [] ⇒ the question names a work the corpus does NOT hold and an honest no-source
+#   answer is the pass (SC-002).
+#
+# HOW THE REFS WERE CHOSEN
+#   From the sugya, then verified to exist in the live collection — never from what retrieval
+#   happened to return. An eval assembled out of the retriever's own output measures nothing, and an
+#   eval expecting a source the index does not hold measures less than that. Every non-empty ref
+#   below was confirmed present in chavruta_commercial on 2026-07-27.
+#
+# THE UNANSWERABLE ITEMS ARE STABLE BY LICENCE, NOT BY ACCIDENT
+#   They name 20th-century works (Rav Kook, Soloveitchik, Igrot Moshe, Shemirat Shabbat KeHilchata,
+#   Tzitz Eliezer). The corpus is 100% commercially-licensed — PD/CC0/CC-BY/CC-BY-SA only — so those
+#   cannot enter it without a licence change, and the item stays valid as the corpus grows.
+#
+# Run:  python scripts/run_eval.py --retrieval-only --dataset eval/corpus_v1.jsonl
+#
+# ── Tanakh: base text (qa) ──────────────────────────────────────────────────────────────────────
+{"qid": "cor-tan-001-he", "question": "מה כתוב בפסוק הראשון של ספר בראשית", "lang": "he", "expected_refs": ["Genesis.1.1"], "intent": "qa", "note": "the opening pasuk itself — the base-text floor must surface a source, not only meforshim"}
+{"qid": "cor-tan-001-en", "question": "What does the first verse of Genesis say?", "lang": "en", "expected_refs": ["Genesis.1.1"], "intent": "qa", "note": "pair — English retrieval over a Hebrew-majority corpus"}
+{"qid": "cor-tan-002-he", "question": "מה נאמר בעשרת הדיברות על 'אנכי ה' אלהיך'", "lang": "he", "expected_refs": ["Exodus.20"], "intent": "qa", "note": "landmark → chapter-level expectation (עשרת הדיברות)"}
+{"qid": "cor-tan-003-he", "question": "מה מצווה התורה על אהבת הרֵע", "lang": "he", "expected_refs": ["Leviticus.19.18"], "intent": "qa", "note": "ואהבת לרעך כמוך"}
+{"qid": "cor-tan-004-he", "question": "מהו נוסח פסוק שמע ישראל", "lang": "he", "expected_refs": ["Deuteronomy.6.4"], "intent": "qa", "note": "Shema — landmark resolution"}
+{"qid": "cor-tan-005-he", "question": "כיצד נפתחת נבואת ישעיהו", "lang": "he", "expected_refs": ["Isaiah.1"], "intent": "qa", "note": "Nach, not Torah — the corpus is not Chumash-only"}
+{"qid": "cor-tan-006-he", "question": "מה קורה ליונה כשהוא בורח תרשישה", "lang": "he", "expected_refs": ["Jonah.1"], "intent": "qa", "note": "narrative in a minor prophet"}
+{"qid": "cor-tan-007-en", "question": "How does the book of Esther open?", "lang": "en", "expected_refs": ["Esther.1"], "intent": "qa", "note": "Ketuvim, English"}
+# ── Tanakh: a NAMED commentator (explain) ───────────────────────────────────────────────────────
+# These are the regression gate for the 2026-07-26 fix: `commentator_id` is EMPTY on all 2.4M points
+# and `anchor_ref` with it, so a named commentator is reachable only by deriving its own exact ref
+# (corpus/refs.py::commentary_refs). Before the fix every one of these answered "no such commentary".
+{"qid": "cor-exp-001-he", "question": "מה אומר רש\"י על 'בראשית ברא אלהים'", "lang": "he", "expected_refs": ["Rashi_on_Genesis.1.1"], "intent": "explain", "note": "the canonical case — Rashi on the first pasuk"}
+{"qid": "cor-exp-001-en", "question": "What does Rashi say on the first verse of Genesis?", "lang": "en", "expected_refs": ["Rashi_on_Genesis.1.1"], "intent": "explain", "note": "pair"}
+{"qid": "cor-exp-002-he", "question": "מה מפרש הרמב\"ן על תחילת פרשת העקדה", "lang": "he", "expected_refs": ["Ramban_on_Genesis.22.1"], "intent": "explain", "note": "Ramban on the Akedah"}
+{"qid": "cor-exp-003-he", "question": "מה אומר אבן עזרא על 'אנכי ה' אלהיך'", "lang": "he", "expected_refs": ["Ibn_Ezra_on_Exodus.20.2"], "intent": "explain", "note": "Ibn Ezra — slug capitalisation differs from naive title-case"}
+{"qid": "cor-exp-004-he", "question": "מה מפרש אור החיים על תחילת העקדה", "lang": "he", "expected_refs": ["Or_HaChaim_on_Genesis.22.1"], "intent": "explain", "note": "Or HaChaim — Sefaria spells it Or_HaChaim, not Or_Hachaim"}
+{"qid": "cor-exp-005-he", "question": "מה אומר רד\"ק על הפסוק הראשון בתהילים", "lang": "he", "expected_refs": ["Radak_on_Psalms.1.1"], "intent": "explain", "note": "Radak is a Nach commentator — absent on Chumash, present here"}
+{"qid": "cor-exp-006-he", "question": "מה מפרש מצודת דוד על 'אשרי האיש'", "lang": "he", "expected_refs": ["Metzudat_David_on_Psalms.1.1"], "intent": "explain", "note": "two-word commentator id"}
+{"qid": "cor-exp-007-he", "question": "כיצד מתרגם אונקלוס את 'אנכי ה' אלהיך'", "lang": "he", "expected_refs": ["Onkelos_Exodus.20.2"], "intent": "explain", "note": "filed as a plain prefix — no '_on_' join and no comment index"}
+{"qid": "cor-exp-008-he", "question": "מה אומר רש\"י על 'ואהבת לרעך כמוך'", "lang": "he", "expected_refs": ["Rashi_on_Leviticus.19.18"], "intent": "explain", "note": "Rashi outside Bereshit"}
+{"qid": "cor-exp-009-he", "question": "מה מפרש רש\"י על פסוק שמע ישראל", "lang": "he", "expected_refs": ["Rashi_on_Deuteronomy.6.4"], "intent": "explain", "note": "Rashi on the Shema"}
+{"qid": "cor-exp-010-he", "question": "מה מפרש רש\"י על תחילת בבא מציעא", "lang": "he", "expected_refs": ["Rashi_on_Bava_Metzia.3.1"], "intent": "explain", "note": "Rashi on the DAF — amud-linear base ref, not a pasuk"}
+# ── Two commentators side by side (compare) ─────────────────────────────────────────────────────
+{"qid": "cor-cmp-001-he", "question": "השווה בין רש\"י לרמב\"ן על 'בראשית ברא'", "lang": "he", "expected_refs": ["Rashi_on_Genesis.1.1", "Ramban_on_Genesis.1.1"], "intent": "compare", "note": "both must be retrieved — a compare that reaches one of two is a half-answer"}
+{"qid": "cor-cmp-002-he", "question": "מה ההבדל בין רש\"י לרמב\"ן בהסבר העקדה", "lang": "he", "expected_refs": ["Rashi_on_Genesis.22.1", "Ramban_on_Genesis.22.1"], "intent": "compare", "note": "Akedah, two rishonim"}
+{"qid": "cor-cmp-003-he", "question": "השווה בין ספורנו למלבי\"ם על פסוק הבריאה הראשון", "lang": "he", "expected_refs": ["Sforno_on_Genesis.1.1", "Malbim_on_Genesis.1.1"], "intent": "compare", "note": "a rishon and an acharon on the same pasuk"}
+{"qid": "cor-cmp-004-en", "question": "Compare Rashi and Ibn Ezra on the opening of Genesis", "lang": "en", "expected_refs": ["Rashi_on_Genesis.1.1", "Ibn_Ezra_on_Genesis.1.1"], "intent": "compare", "note": "pair — English compare"}
+# ── Mishnah ─────────────────────────────────────────────────────────────────────────────────────
+{"qid": "cor-mis-001-he", "question": "מאימתי קורין את שמע בערבין לפי המשנה", "lang": "he", "expected_refs": ["Mishnah_Berakhot.1.1"], "intent": "qa", "note": "the opening mishnah of Berakhot"}
+{"qid": "cor-mis-002-he", "question": "מה אומרת המשנה על שניים אוחזין בטלית", "lang": "he", "expected_refs": ["Mishnah_Bava_Metzia.1.1"], "intent": "qa", "note": "opening mishnah of Bava Metzia"}
+{"qid": "cor-mis-003-he", "question": "מה נאמר במשנה על 'משה קיבל תורה מסיני'", "lang": "he", "expected_refs": ["Pirkei_Avot.1.1"], "intent": "qa", "note": "stored as Pirkei_Avot, NOT Mishnah_Avot"}
+{"qid": "cor-mis-004-he", "question": "מהו שיעור סוכה פסולה לפי המשנה בסוכה", "lang": "he", "expected_refs": ["Mishnah_Sukkah.3.5"], "intent": "qa", "note": "a specific mishnah deep inside a masechet"}
+{"qid": "cor-mis-005-he", "question": "מה מבאר הברטנורא על המשנה הראשונה באבות", "lang": "he", "expected_refs": ["Bartenura_on_Pirkei_Avot.1.1"], "intent": "explain", "note": "a Mishnah commentator, reached the same way as a Chumash one"}
+# ── Talmud Bavli (amud-linear) ──────────────────────────────────────────────────────────────────
+{"qid": "cor-bav-001-he", "question": "מה נידון בתחילת מסכת ברכות לגבי זמן קריאת שמע", "lang": "he", "expected_refs": ["Berakhot.3.1"], "intent": "qa", "note": "Berakhot 2a → corpus Berakhot.3.1 (N = 2·daf−1)"}
+{"qid": "cor-bav-002-he", "question": "מה הדין בשניים אוחזין בטלית בגמרא", "lang": "he", "expected_refs": ["Bava_Metzia.3.1"], "intent": "qa", "note": "Bava Metzia 2a"}
+{"qid": "cor-bav-003-he", "question": "מהם ארבעה אבות נזיקין", "lang": "he", "expected_refs": ["Bava_Kamma.3.1"], "intent": "qa", "note": "Bava Kamma 2a"}
+{"qid": "cor-bav-004-he", "question": "מה נאמר בתחילת מסכת קידושין על קניין האישה", "lang": "he", "expected_refs": ["Kiddushin.3.1"], "intent": "qa", "note": "Kiddushin 2a"}
+{"qid": "cor-bav-005-he", "question": "מה נידון בתחילת מסכת פסחים לגבי אור לארבעה עשר", "lang": "he", "expected_refs": ["Pesachim.3.1"], "intent": "qa", "note": "Pesachim 2a — בדיקת חמץ"}
+{"qid": "cor-bav-006-he", "question": "מה אומרת הגמרא בתחילת שבת על יציאות השבת", "lang": "he", "expected_refs": ["Shabbat.3.1"], "intent": "qa", "note": "Shabbat 2a"}
+{"qid": "cor-bav-007-he", "question": "מה מפרשים התוספות בתחילת מסכת ברכות", "lang": "he", "expected_refs": ["Tosafot_on_Berakhot.3.1"], "intent": "explain", "note": "Tosafot on the daf — a commentator the router does not alias, reached by ref shape alone"}
+{"qid": "cor-bav-008-en", "question": "What does the Gemara at the start of Bava Metzia discuss?", "lang": "en", "expected_refs": ["Bava_Metzia.3.1"], "intent": "qa", "note": "pair — English over a Hebrew/Aramaic sugya"}
+# ── Yerushalmi & Tosefta ────────────────────────────────────────────────────────────────────────
+{"qid": "cor-yer-001-he", "question": "מה אומר התלמוד הירושלמי בתחילת ברכות", "lang": "he", "expected_refs": ["Jerusalem_Talmud_Berakhot.1.1"], "intent": "qa", "note": "Yerushalmi is a separate tier from Bavli"}
+{"qid": "cor-tos-001-he", "question": "מה נאמר בתוספתא בתחילת מסכת ברכות", "lang": "he", "expected_refs": ["Tosefta_Berakhot.1.1"], "intent": "qa", "note": "Tosefta tier"}
+# ── Halacha ─────────────────────────────────────────────────────────────────────────────────────
+{"qid": "cor-hal-001-he", "question": "מה פוסק הרמב\"ם בהלכות קריאת שמע", "lang": "he", "expected_refs": ["Mishneh_Torah,_Reading_the_Shema.1"], "intent": "halacha", "note": "Mishneh Torah ref carries a comma inside the book name"}
+{"qid": "cor-hal-002-he", "question": "מה דין בשר בחלב לפי הרמב\"ם", "lang": "he", "expected_refs": ["Mishneh_Torah,_Forbidden_Foods.9"], "intent": "halacha", "note": "Ma'achalot Assurot"}
+{"qid": "cor-hal-003-he", "question": "מה כותב הרמב\"ם בהלכות תשובה על עיקר התשובה", "lang": "he", "expected_refs": ["Mishneh_Torah,_Repentance.1"], "intent": "halacha", "note": "Hilchot Teshuvah"}
+{"qid": "cor-hal-004-he", "question": "מה פוסק השולחן ערוך בסימן הראשון באורח חיים", "lang": "he", "expected_refs": ["Shulchan_Arukh,_Orach_Chayim.1"], "intent": "halacha", "note": "SA OC 1 — יתגבר כארי"}
+{"qid": "cor-hal-005-he", "question": "מה דין קידוש בשבת לפי השולחן ערוך", "lang": "he", "expected_refs": ["Shulchan_Arukh,_Orach_Chayim.271"], "intent": "halacha", "note": "OC 271"}
+{"qid": "cor-hal-006-he", "question": "מה פוסק השולחן ערוך ביורה דעה על בשר בחלב", "lang": "he", "expected_refs": ["Shulchan_Arukh,_Yoreh_De'ah.87"], "intent": "halacha", "note": "YD 87 — the ref carries an apostrophe"}
+{"qid": "cor-hal-007-he", "question": "מה כותב הטור בסימן הראשון", "lang": "he", "expected_refs": ["Tur,_Orach_Chayim.1"], "intent": "halacha", "note": "stored Orach_Chayim, not Orach_Chaim"}
+{"qid": "cor-hal-008-he", "question": "מה מביא בית יוסף על הלכות ברכות השחר", "lang": "he", "expected_refs": ["Beit_Yosef,_Orach_Chayim.46"], "intent": "halacha", "note": "Beit Yosef as its own work"}
+{"qid": "cor-hal-009-he", "question": "מה דין כבוד שבת בהכנת הבית", "lang": "he", "expected_refs": ["Shulchan_Arukh,_Orach_Chayim.242"], "intent": "halacha", "note": "OC 242"}
+{"qid": "cor-hal-010-en", "question": "What does the Rambam rule about the laws of Shabbat?", "lang": "en", "expected_refs": ["Mishneh_Torah,_Sabbath.1"], "intent": "halacha", "note": "pair — English halachic query"}
+# ── Responsa (שו\"ת) ─────────────────────────────────────────────────────────────────────────────
+{"qid": "cor-sht-001-he", "question": "מה משיב הנודע ביהודה בשאלה באורח חיים", "lang": "he", "expected_refs": ["Noda_BiYehudah_II,_Orach_Chaim"], "intent": "halacha", "note": "shut tier — work-level expectation; this one really does spell it Chaim"}
+# ── Midrash ─────────────────────────────────────────────────────────────────────────────────────
+{"qid": "cor-mid-001-he", "question": "מה דורש מדרש תנחומא על תחילת בראשית", "lang": "he", "expected_refs": ["Midrash_Tanchuma,_Bereshit.1"], "intent": "qa", "note": "Tanchuma"}
+{"qid": "cor-mid-002-he", "question": "מה מספרים פרקי דרבי אליעזר בפרק הראשון", "lang": "he", "expected_refs": ["Pirkei_DeRabbi_Eliezer.1"], "intent": "qa", "note": "aggadic midrash"}
+{"qid": "cor-mid-003-he", "question": "מה דורש ויקרא רבה על מעלת הצדיקים בפרשת קדושים", "lang": "he", "expected_refs": ["Vayikra_Rabbah.21"], "intent": "qa", "note": "Midrash Rabbah is stored under its Hebrew name (Vayikra_Rabbah), not Leviticus_Rabbah"}
+# ── Musar, מחשבה, קבלה, עיון ────────────────────────────────────────────────────────────────────
+{"qid": "cor-mus-001-he", "question": "כיצד פותח מסילת ישרים את דרכו בעבודת ה'", "lang": "he", "expected_refs": ["Mesillat_Yesharim.1"], "intent": "qa", "note": "musar tier"}
+{"qid": "cor-mus-002-he", "question": "מה כותב השל\"ה בשער האותיות על דרך ארץ", "lang": "he", "expected_refs": ["Shenei_Luchot_HaBerit,_Shaar_HaOtiyot,_Derech_Eretz"], "intent": "qa", "note": "a deeply-nested section ref — three comma-separated name segments before the number"}
+{"qid": "cor-mch-001-he", "question": "מה מבאר מורה נבוכים בתחילת החלק הראשון", "lang": "he", "expected_refs": ["Guide_for_the_Perplexed,_Part_1.1"], "intent": "qa", "note": "jewish_thought — the corpus files it under its English title"}
+{"qid": "cor-kab-001-he", "question": "מה מבאר שער הפסוקים על פרשת בראשית", "lang": "he", "expected_refs": ["Sha'ar_HaPesukim,_Parashat_Bereshit"], "intent": "qa", "note": "kabbalah tier; the ref carries an apostrophe"}
+{"qid": "cor-ref-001-he", "question": "מה מביא ספר הערוך בערכים שבאות גימ\"ל", "lang": "he", "expected_refs": ["Sefer_HeArukh,_Letter_Gimel"], "intent": "qa", "note": "reference tier — a lexicon, not a running text"}
+{"qid": "cor-st-001-en", "question": "What does the Book of Jubilees recount about the festival of Shavuot?", "lang": "en", "expected_refs": ["Book_of_Jubilees.16"], "intent": "qa", "note": "second_temple tier, English"}
+# ── Lessons (the source-sheet must rest on a primary source) ────────────────────────────────────
+{"qid": "cor-les-001-he", "question": "הכן שיעור על עשרת הדיברות", "lang": "he", "expected_refs": ["Exodus.20"], "intent": "lesson", "note": "landmark-anchored lesson — the base pasuk must be in the sheet, not only meforshim"}
+{"qid": "cor-les-002-he", "question": "הכן שיעור על סוגיית שניים אוחזין בטלית", "lang": "he", "expected_refs": ["Bava_Metzia.3.1", "Mishnah_Bava_Metzia.1.1"], "intent": "lesson", "note": "a gemara lesson: either the daf or its mishnah is a legitimate opening"}
+{"qid": "cor-les-003-he", "question": "הכן שיעור על מצוות ואהבת לרעך כמוך", "lang": "he", "expected_refs": ["Leviticus.19.18"], "intent": "lesson", "note": "the pasuk the whole lesson hangs on"}
+{"qid": "cor-les-004-he", "question": "הכן שיעור על עקדת יצחק", "lang": "he", "expected_refs": ["Genesis.22"], "intent": "lesson", "note": "chapter-level — any pasuk in the perek is a fair opening"}
+# ── Honest no-source (SC-002) — works the licence keeps out, so these stay valid as the corpus grows
+{"qid": "cor-uns-001-he", "question": "מה מלמד הראי\"ה קוק באורות התשובה על התשובה הטבעית", "lang": "he", "expected_refs": [], "intent": "qa", "note": "Rav Kook — 20th century, not commercially licensed; honest no-source"}
+{"qid": "cor-uns-002-he", "question": "מה פוסק הרב משה פיינשטיין באגרות משה בעניין זה", "lang": "he", "expected_refs": [], "intent": "halacha", "note": "Igrot Moshe — not in the corpus"}
+{"qid": "cor-uns-003-he", "question": "מה כותב שמירת שבת כהלכתה על שימוש בחשמל בשבת", "lang": "he", "expected_refs": [], "intent": "halacha", "note": "SSK — modern, not loaded; must not be answered from a look-alike"}
+{"qid": "cor-uns-004-he", "question": "מה פוסק שו\"ת ציץ אליעזר בשאלות רפואיות", "lang": "he", "expected_refs": [], "intent": "halacha", "note": "Tzitz Eliezer — the shut tier is loaded but this work is not; the tier must not paper over it"}
+{"qid": "cor-uns-005-he", "question": "הכן שיעור על תורת הרב סולוביצ'יק באיש ההלכה", "lang": "he", "expected_refs": [], "intent": "lesson", "note": "Soloveitchik — honest no-source under the LESSON path too"}
+{"qid": "cor-uns-006-en", "question": "What does Rav Kook write in Orot HaTeshuvah about natural repentance?", "lang": "en", "expected_refs": [], "intent": "qa", "note": "pair — honesty must not depend on the query language"}
