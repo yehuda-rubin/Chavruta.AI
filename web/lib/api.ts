@@ -27,13 +27,28 @@ async function req<T>(path: string, opts?: RequestInit): Promise<T> {
       const j = JSON.parse(raw);
       detail = typeof j.detail === "string" ? j.detail : raw;
     } catch {
-      /* not JSON — keep raw */
+      // Not JSON. If it's a whole HTML document, the request never reached the API — Next owns the
+      // origin and served its own 404 page for a path that has no rewrite (see next.config.mjs).
+      // Say that, because dumping the markup at the user is what made this bug look like a model
+      // failure rather than a missing route.
+      if (looksLikeHtml(raw)) detail = `הבקשה לא הגיעה לשרת (${path}) — HTTP ${res.status}`;
     }
     const err = new Error(detail || `HTTP ${res.status}`);
     (err as Error & { status?: number }).status = res.status;
     throw err;
   }
-  return res.json() as Promise<T>;
+  // A 200 carrying HTML means the same routing problem, just without an error status to catch it.
+  const body = await res.text();
+  if (looksLikeHtml(body)) {
+    throw new Error(`הבקשה לא הגיעה לשרת (${path}) — התקבל HTML במקום JSON`);
+  }
+  return JSON.parse(body) as T;
+}
+
+/** Whether a response body is an HTML document rather than the JSON the API always returns. */
+function looksLikeHtml(body: string): boolean {
+  const head = body.trimStart().slice(0, 200).toLowerCase();
+  return head.startsWith("<!doctype html") || head.startsWith("<html");
 }
 
 export interface CreatedSession {
