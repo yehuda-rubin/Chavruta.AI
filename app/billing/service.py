@@ -73,11 +73,32 @@ def handle_event(normalized: dict, *, now: datetime | None = None) -> None:
     db.set_plan(owner, tier)
     _log.info("subscription active for %s: %s/%s (renewal=%s) until %s",
               owner, tier, cycle, normalized.get("is_renewal"), period_end)
-    # Invoice is best-effort — the charge already went through; a failed invoice must not 500 the hook.
-    amount = normalized.get("amount")
-    greeninvoice.issue_receipt(
-        email=normalized.get("email", "") or "", name=normalized.get("name", "") or "",
-        amount=float(amount) if amount else 0.0, description=_description(cycle), now=now.timestamp())
+    amount = float(normalized.get("amount") or 0.0)
+
+    # Record the charge in the accounting ledger BEFORE issuing the invoice. The money has already
+    # moved by the time this callback arrives, so the record of it must not depend on a third-party
+    # call succeeding — and unlike the subscription row, the ledger survives the account being
+    # deleted, because the bookkeeping obligation outlives the customer relationship.
+    invoice_ref = ""
+    try:
+        # Invoice is best-effort: the charge went through; a failed invoice must not 500 the hook.
+        doc = greeninvoice.issue_receipt(
+            email=normalized.get("email", "") or "", name=normalized.get("name", "") or "",
+            amount=amount, description=_description(cycle), now=now.timestamp())
+        # The human-facing document NUMBER is what an accountant reconciles against, so prefer it
+        # over the internal id. Empty when invoicing is unconfigured or failed — the charge is still
+        # recorded, since a missing invoice is a gap to chase, not a reason to lose the row.
+        if doc:
+            invoice_ref = str(doc.get("number") or doc.get("id") or "")
+    except Exception:               # noqa: BLE001 — never let invoicing break a paid subscription
+        _log.exception("issuing the receipt failed (amount=%s cycle=%s)", amount, cycle)
+    try:
+        db.record_charge(charged_at=now.isoformat(), amount=amount, plan=tier, cycle=cycle,
+                         provider="payplus", provider_ref=normalized.get("recurring_uid"),
+                         invoice_ref=invoice_ref,
+                         note="renewal" if normalized.get("is_renewal") else "new")
+    except Exception:               # noqa: BLE001 — same reasoning; log loudly, don't fail the hook
+        _log.exception("could not write the charge to the ledger (amount=%s)", amount)
 
 
 def cancel(owner_id: str, *, now: datetime | None = None) -> None:

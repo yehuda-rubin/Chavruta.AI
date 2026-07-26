@@ -60,7 +60,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -172,6 +172,26 @@ def _migrate(conn: sqlite3.Connection) -> None:
             note            TEXT,                 -- why it was issued (campaign, person, event)
             created_at      TEXT NOT NULL
         );
+
+        -- Accounting ledger. Deliberately has NO owner_id and is NEVER purged: tax law requires
+        -- keeping records of what was charged for ~7 years, while a user may ask to be forgotten
+        -- long before that. Storing the money without storing the person satisfies both — a row
+        -- says a charge happened, for how much, under which invoice, and nothing about who.
+        -- `provider_ref` is the processor's own handle, which is how a dispute is traced back
+        -- through them if it ever has to be.
+        CREATE TABLE IF NOT EXISTS billing_ledger (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            charged_at    TEXT NOT NULL,      -- ISO ts of the charge
+            amount        REAL NOT NULL,
+            currency      TEXT NOT NULL DEFAULT 'ILS',
+            plan          TEXT,               -- tier sold
+            cycle         TEXT,               -- monthly | annual
+            provider      TEXT,               -- e.g. 'payplus'
+            provider_ref  TEXT,               -- the processor's subscription/charge handle
+            invoice_ref   TEXT,               -- the accounting document's id at the invoicing service
+            note          TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_ledger_time ON billing_ledger(charged_at DESC);
 
         -- One row per (code, owner): the uniqueness that stops the same user redeeming a
         -- multi-use code repeatedly.
@@ -567,6 +587,48 @@ def get_lesson(lesson_id: str, owner_id: str = "local") -> dict[str, Any] | None
     d["files"] = json.loads(d["files"]) if d.get("files") else []
     d["citations"] = json.loads(d["citations"]) if d.get("citations") else []
     return d
+
+
+def record_charge(*, charged_at: str, amount: float, currency: str = "ILS", plan: str | None = None,
+                  cycle: str | None = None, provider: str | None = None,
+                  provider_ref: str | None = None, invoice_ref: str | None = None,
+                  note: str = "") -> int:
+    """Append a charge to the accounting ledger. Returns the row id.
+
+    Append-only and deliberately anonymous — see the table comment. Called on every successful
+    payment, INCLUDING renewals, so the ledger is a complete record of revenue rather than a list of
+    subscriptions that happen to still exist.
+    """
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        cur = conn.execute(
+            "INSERT INTO billing_ledger (charged_at, amount, currency, plan, cycle, provider, "
+            "provider_ref, invoice_ref, note) VALUES (?,?,?,?,?,?,?,?,?)",
+            (charged_at, float(amount), currency, plan, cycle, provider, provider_ref,
+             invoice_ref, note))
+        return int(cur.lastrowid)
+
+
+def list_charges(since: str | None = None, until: str | None = None) -> list[dict[str, Any]]:
+    """The ledger, newest first — for reconciliation and for handing an accountant a period."""
+    sql = "SELECT * FROM billing_ledger"
+    args: list[Any] = []
+    where = []
+    if since:
+        where.append("charged_at >= ?")
+        args.append(since)
+    if until:
+        where.append("charged_at <= ?")
+        args.append(until)
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    with _LOCK:
+        rows = get_conn().execute(sql + " ORDER BY charged_at DESC", args).fetchall()
+    return [dict(r) for r in rows]
+
+
+def revenue_total(since: str | None = None, until: str | None = None) -> float:
+    return round(sum(float(r["amount"]) for r in list_charges(since, until)), 2)
 
 
 def link_lesson_message(lesson_id: str, message_id: int) -> None:
