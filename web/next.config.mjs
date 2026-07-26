@@ -1,6 +1,17 @@
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Self-contained server bundle for the container (docker/Dockerfile.web) — only the dependencies
+  // actually imported, so the runtime image needs no npm install.
+  output: "standalone",
+  // Pin the tracing root to this directory. Left to infer it, Next walks up looking for a workspace
+  // root, finds a lockfile somewhere above the repo, and nests the bundle under a path mirroring the
+  // machine's directory layout (.next/standalone/Documents/Chavruta.AI/web/…) — so the Dockerfile's
+  // COPY lands nothing and the image has no server.js.
+  outputFileTracingRoot: dirname(fileURLToPath(import.meta.url)),
   // The app uses no next/image anywhere, but Next still serves the /_next/image optimizer. Turning
   // optimization off costs nothing here and takes the app off that path — which also means `sharp`
   // and its inherited libvips CVEs are never invoked. remotePatterns stays empty (the default), so
