@@ -1,11 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  // The app uses no next/image anywhere, but Next still serves the /_next/image optimizer, which
-  // 14.2.x has a known DoS advisory against. Turning optimization off costs nothing here and takes
-  // the app off that path. remotePatterns stays empty (the default), so no external host can be
-  // fetched through it either. The advisory itself is only fully closed by the Next 16 upgrade,
-  // which is a breaking migration (React 19) and tracked separately.
+  // The app uses no next/image anywhere, but Next still serves the /_next/image optimizer. Turning
+  // optimization off costs nothing here and takes the app off that path — which also means `sharp`
+  // and its inherited libvips CVEs are never invoked. remotePatterns stays empty (the default), so
+  // nothing external can be fetched through it either.
   images: { unoptimized: true },
   // The FastAPI backend serves the API. In dev, proxy the bare endpoints to it so the client can
   // call same-origin paths exactly like the static UI does (no CORS, no hardcoded host).
