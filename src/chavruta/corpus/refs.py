@@ -102,6 +102,41 @@ def with_ref_variants(refs) -> list[str]:
     return out
 
 
+# Sefaria names a commentary "<Commentator>_on_<Base>" — 'Rashi_on_Genesis.1.1.1',
+# 'Kessef_Mishneh_on_Mishneh_Torah,_Prayer.12.17.4'. Match is CASE-SENSITIVE on purpose: title words
+# are capitalised, so a lowercase '_on_' is the join and never a fragment of a name. Without that,
+# 'Targum_Onkelos_on_Genesis' would split at 'Onkelos' and yield the commentator 'targum'.
+_ON = "_on_"
+
+
+def _slug(name: str) -> str:
+    """The commentator-id form used everywhere else (corpus/sources/sefaria.py, router aliases)."""
+    return re.sub(r"[^a-z0-9]+", "_", (name or "").lower()).strip("_")
+
+
+def commentator_from_ref(ref: str | None) -> str | None:
+    """The commentator id a ref belongs to, or None for a base text.
+
+        'Rashi_on_Genesis.1.1.1'                  -> 'rashi'
+        'Or_HaChaim_on_Genesis.1.25.1'            -> 'or_hachaim'
+        'Mizrachi_on_Rashi_on_Genesis.1.1.1'      -> 'mizrachi'   (supercommentary: FIRST author wins)
+        'Genesis.1.1'                             -> None
+
+    This exists because the commercial corpus was built without a `commentator_id` payload field,
+    which the explain/compare intents filter on — so every "what does Rashi say here" question came
+    back empty while Rashi sat in the index. The name is recoverable from the ref itself, so this is
+    metadata that can be backfilled without re-embedding anything (see scripts/backfill_structure.py).
+    """
+    if not ref or _ON not in ref:
+        return None
+    return _slug(ref.split(_ON, 1)[0]) or None
+
+
+def is_commentary_ref(ref: str | None) -> bool:
+    """Whether a ref names a commentary rather than a base text."""
+    return bool(ref) and _ON in ref
+
+
 def canonical_ref(s: str | None) -> str:
     """Loose, separator-agnostic join key for a Sefaria-style ref (empty string for falsy input)."""
     if not s:

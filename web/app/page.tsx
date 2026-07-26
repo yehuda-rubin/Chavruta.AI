@@ -228,13 +228,34 @@ export default function Home() {
     refreshMe();
   }, [refreshMe]);
 
-  const openLesson = useCallback((l: SavedLesson) => {
+  const openLesson = useCallback(async (l: SavedLesson) => {
     setShowLessons(false);
     setActiveId(null);
     setIntent("lesson");
     setSubtitle(l.topic);
-    setMessages([{ role: "assistant", text: "📚 " + l.topic, files: l.files || [], citations: l.citations || [], caveats: [] }]);
-  }, []);
+    // GET /lessons deliberately omits `files` and `citations` — the Word documents are large and
+    // would bloat the list. So the row we were handed has neither, and reading them off it showed a
+    // lesson with no downloads at all. Fetch the full record; the list stays light.
+    setMessages([{ role: "assistant", text: "📚 " + l.topic, files: [], citations: [], caveats: [] }]);
+    try {
+      const full = await api.getLesson(l.id);
+      setMessages([{
+        role: "assistant",
+        text: "📚 " + full.topic,
+        files: full.files || [],
+        citations: full.citations || [],
+        caveats: [],
+      }]);
+    } catch {
+      // Keep the header we already showed rather than blanking the screen; the lesson is still in
+      // My Shiurim and re-opening retries.
+      setMessages([{
+        role: "assistant",
+        text: "📚 " + l.topic + "\n\n" + tr(lang, "lessonLoadFailed"),
+        files: [], citations: [], caveats: [],
+      }]);
+    }
+  }, [lang]);
 
   const send = useCallback(
     async (text: string) => {

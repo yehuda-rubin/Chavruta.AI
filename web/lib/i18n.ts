@@ -167,6 +167,7 @@ export const STRINGS = {
     annualNote: "תשלום שנתי מראש. ביטול עוצר את החידוש בתום השנה — הגישה נשמרת עד אז.",
     quotaExplainer: "לכל תוכנית שתי מגבלות: יומית ושבועית. המגבלה היומית מתאפסת כל יום, "
       + "והשבועית ביום ראשון. אין תוכנית ללא הגבלה.",
+    lessonLoadFailed: "לא הצלחנו לטעון את קבצי השיעור. נסה לפתוח אותו שוב מ״השיעורים שלי״.",
     usageLeft: "נותר",
     lessonsLeft: "שיעורים",
     timesUsage: "פי {n} שימוש בשיחה",
@@ -336,6 +337,7 @@ export const STRINGS = {
       + "— your access runs to the end of the year you paid for.",
     quotaExplainer: "Every plan has two caps: daily and weekly. The daily one resets each day, the "
       + "weekly one on Sunday. No plan is unlimited.",
+    lessonLoadFailed: "Couldn't load this lesson's files. Try opening it again from My Shiurim.",
     usageLeft: "left",
     lessonsLeft: "Lessons",
     timesUsage: "{n}x conversation usage",
