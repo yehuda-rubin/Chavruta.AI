@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 import threading
@@ -18,6 +19,8 @@ from typing import Any
 DB_PATH = Path(
     os.environ.get("CHAVRUTA_DB_PATH", Path(__file__).resolve().parent.parent / "chavruta.db")
 )
+
+_telemetry_log = logging.getLogger("chavruta.telemetry")
 
 
 def _connect() -> sqlite3.Connection:
@@ -60,7 +63,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -172,6 +175,43 @@ def _migrate(conn: sqlite3.Connection) -> None:
             note            TEXT,                 -- why it was issued (campaign, person, event)
             created_at      TEXT NOT NULL
         );
+
+        -- Usage telemetry — one row per generation, for understanding how the product is actually
+        -- used and what it costs: which modes people reach for, when they work, how much a real
+        -- answer consumes, how often retrieval comes back empty.
+        --
+        -- What it deliberately does NOT hold: the question, the answer, the sources, or any file the
+        -- user attached. Those already live in `messages` under the user's control; copying them
+        -- into an analytics table would create a second store of personal content with a different
+        -- lifetime and no way for anyone to see or delete it. Everything here is a measurement.
+        --
+        -- owner_id is kept so per-account usage can be understood and abuse traced, and is NULLed by
+        -- purge_owner rather than deleted — the aggregate survives, the person does not.
+        CREATE TABLE IF NOT EXISTS usage_events (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            at             TEXT NOT NULL,      -- ISO ts (UTC)
+            hour_local     INTEGER,            -- 0-23 in Israel time: "when do teachers prepare?"
+            dow            INTEGER,            -- 0=Sunday .. 6=Saturday
+            owner_id       TEXT,               -- NULLed on account purge
+            plan           TEXT,
+            intent         TEXT,               -- qa | explain | compare | halacha | chavruta | lesson
+            lang           TEXT,
+            prompt_tokens     INTEGER NOT NULL DEFAULT 0,
+            completion_tokens INTEGER NOT NULL DEFAULT 0,
+            billed_tokens     INTEGER NOT NULL DEFAULT 0,   -- normalized (prompt + 3x completion)
+            llm_calls      INTEGER NOT NULL DEFAULT 0,      -- >1 means the agentic loop ran
+            ms             INTEGER NOT NULL DEFAULT 0,      -- wall time, to find what feels slow
+            grounded       INTEGER,            -- 1/0 — the quality signal that matters most
+            no_source      INTEGER,            -- 1 = answered honestly with nothing found
+            citations      INTEGER NOT NULL DEFAULT 0,
+            audience       TEXT,               -- lesson: yeshiva | school
+            grade_band     TEXT,               -- lesson: a-c | d-f | g-i | j-l
+            length         TEXT,               -- lesson: short | medium | long
+            attachments    INTEGER NOT NULL DEFAULT 0,
+            error          TEXT                -- exception class when the request failed
+        );
+        CREATE INDEX IF NOT EXISTS idx_usage_events_at ON usage_events(at DESC);
+        CREATE INDEX IF NOT EXISTS idx_usage_events_owner ON usage_events(owner_id);
 
         -- Accounting ledger. Deliberately has NO owner_id and is NEVER purged: tax law requires
         -- keeping records of what was charged for ~7 years, while a user may ask to be forgotten
@@ -587,6 +627,118 @@ def get_lesson(lesson_id: str, owner_id: str = "local") -> dict[str, Any] | None
     d["files"] = json.loads(d["files"]) if d.get("files") else []
     d["citations"] = json.loads(d["citations"]) if d.get("citations") else []
     return d
+
+
+def record_usage_event(**fields: Any) -> None:
+    """Append one generation's measurements. Never raises — telemetry must not be able to fail a
+    request that otherwise worked."""
+    cols = ("at", "hour_local", "dow", "owner_id", "plan", "intent", "lang", "prompt_tokens",
+            "completion_tokens", "billed_tokens", "llm_calls", "ms", "grounded", "no_source",
+            "citations", "audience", "grade_band", "length", "attachments", "error")
+    row = {k: fields.get(k) for k in cols}
+    try:
+        conn = get_conn()
+        with _LOCK, _tx(conn):
+            conn.execute(
+                f"INSERT INTO usage_events ({','.join(cols)}) "     # noqa: S608 — fixed column list
+                f"VALUES ({','.join('?' * len(cols))})",
+                tuple(row[k] for k in cols))
+    except Exception:                       # noqa: BLE001
+        _telemetry_log.exception("failed to record a usage event")
+
+
+def _agg(sql: str, args: tuple = ()) -> list[dict[str, Any]]:
+    with _LOCK:
+        return [dict(r) for r in get_conn().execute(sql, args).fetchall()]
+
+
+def usage_by_owner(since: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    """Per-account totals — who is using it and what they cost."""
+    where = "WHERE at >= ?" if since else ""
+    return _agg(
+        f"SELECT owner_id, COUNT(*) AS requests, SUM(billed_tokens) AS tokens, "   # noqa: S608
+        f"SUM(llm_calls) AS calls, AVG(ms) AS avg_ms, "
+        f"SUM(CASE WHEN grounded=1 THEN 1 ELSE 0 END) AS grounded "
+        f"FROM usage_events {where} GROUP BY owner_id ORDER BY tokens DESC LIMIT ?",
+        ((since, limit) if since else (limit,)))
+
+
+def usage_by_intent(since: str | None = None) -> list[dict[str, Any]]:
+    """Which modes people actually reach for, and what each one costs on average."""
+    where = "WHERE at >= ?" if since else ""
+    return _agg(
+        f"SELECT intent, COUNT(*) AS requests, SUM(billed_tokens) AS tokens, "     # noqa: S608
+        f"AVG(billed_tokens) AS avg_tokens, AVG(ms) AS avg_ms, "
+        f"SUM(CASE WHEN grounded=1 THEN 1 ELSE 0 END) AS grounded, "
+        f"SUM(CASE WHEN no_source=1 THEN 1 ELSE 0 END) AS no_source "
+        f"FROM usage_events {where} GROUP BY intent ORDER BY requests DESC",
+        ((since,) if since else ()))
+
+
+def usage_by_hour(since: str | None = None) -> list[dict[str, Any]]:
+    """When the product is used, in local time — what a maintenance window has to avoid."""
+    where = "WHERE at >= ?" if since else ""
+    return _agg(
+        f"SELECT hour_local AS hour, COUNT(*) AS requests, SUM(billed_tokens) AS tokens "  # noqa: S608
+        f"FROM usage_events {where} GROUP BY hour_local ORDER BY hour_local",
+        ((since,) if since else ()))
+
+
+def usage_by_dow(since: str | None = None) -> list[dict[str, Any]]:
+    return _agg(
+        f"SELECT dow, COUNT(*) AS requests FROM usage_events "                    # noqa: S608
+        f"{'WHERE at >= ?' if since else ''} GROUP BY dow ORDER BY dow",
+        ((since,) if since else ()))
+
+
+def lesson_breakdown(since: str | None = None) -> list[dict[str, Any]]:
+    """Who lessons are being built for — the audience/grade mix drives which templates matter."""
+    where = "WHERE intent='lesson'" + (" AND at >= ?" if since else "")
+    return _agg(
+        f"SELECT audience, grade_band, length, COUNT(*) AS requests, "            # noqa: S608
+        f"AVG(billed_tokens) AS avg_tokens FROM usage_events {where} "
+        f"GROUP BY audience, grade_band, length ORDER BY requests DESC",
+        ((since,) if since else ()))
+
+
+def usage_health(since: str | None = None) -> dict[str, Any]:
+    """The headline numbers: volume, cost, how often we answer from real sources, what breaks."""
+    where = "WHERE at >= ?" if since else ""
+    rows = _agg(
+        f"SELECT COUNT(*) AS requests, SUM(billed_tokens) AS tokens, "            # noqa: S608
+        f"SUM(CASE WHEN grounded=1 THEN 1 ELSE 0 END) AS grounded, "
+        f"SUM(CASE WHEN no_source=1 THEN 1 ELSE 0 END) AS no_source, "
+        f"SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) AS errors, "
+        f"SUM(CASE WHEN llm_calls > 1 THEN 1 ELSE 0 END) AS agentic, "
+        f"AVG(ms) AS avg_ms, COUNT(DISTINCT owner_id) AS users "
+        f"FROM usage_events {where}", ((since,) if since else ()))
+    return rows[0] if rows else {}
+
+
+def delete_sessions_older_than(cutoff_iso: str) -> int:
+    """Delete chats untouched since `cutoff_iso`. Messages cascade. Returns how many went.
+
+    Retention, not cleanup: a conversation is kept for a bounded window and then goes, rather than
+    forever by default. Keyed on `updated_at` (falling back to `created_at` for rows that predate
+    it), so an old chat someone still returns to is not taken out from under them.
+
+    Saved lessons are deliberately NOT swept — they are a teacher's work product, and quietly
+    deleting one would be taking away something they made rather than tidying a transcript.
+    """
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        cur = conn.execute(
+            "DELETE FROM sessions WHERE COALESCE(updated_at, created_at) < ?", (cutoff_iso,))
+        return cur.rowcount
+
+
+def count_sessions_older_than(cutoff_iso: str) -> int:
+    """How many chats a sweep would remove — for a dry run before turning retention on."""
+    with _LOCK:
+        row = get_conn().execute(
+            "SELECT COUNT(*) AS n FROM sessions WHERE COALESCE(updated_at, created_at) < ?",
+            (cutoff_iso,)).fetchone()
+    return int(row["n"])
 
 
 def record_charge(*, charged_at: str, amount: float, currency: str = "ILS", plan: str | None = None,
@@ -1098,3 +1250,7 @@ def purge_owner(owner_id: str) -> None:
         # never decremented, so a spent code stays spent whether or not this row survives. (Nor
         # would keeping it stop re-redemption — a re-registered person gets a new owner_id anyway.)
         conn.execute("DELETE FROM coupon_redemptions WHERE owner_id=?", (owner_id,))
+        # Telemetry is anonymised rather than deleted: the rows carry no content, only measurements,
+        # and dropping them would silently rewrite history for every aggregate that has already been
+        # reported. Detaching the identity satisfies the deletion request; the counts stay true.
+        conn.execute("UPDATE usage_events SET owner_id=NULL WHERE owner_id=?", (owner_id,))

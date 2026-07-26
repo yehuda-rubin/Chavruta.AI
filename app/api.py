@@ -13,7 +13,10 @@ import os
 import re
 import sys
 import threading
+import time
+from datetime import UTC, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -1185,8 +1188,8 @@ def _settle_tokens(owner: str, reserved: int, usage: dict, intent: str) -> None:
               owner, reserved, actual, usage.get("calls", 0), total)
 
 
-def _metered(owner: str, reserved: int, intent: str, fn):
-    """Wrap a generation so its real token spend replaces the reservation.
+def _metered(owner: str, reserved: int, intent: str, fn, req: QueryRequest | None = None):
+    """Wrap a generation so its real token spend replaces the reservation, and record what happened.
 
     Returns a callable rather than running immediately because the async endpoints hand this to the
     job queue: the meter uses a ContextVar, and a worker thread starts with an empty context, so it
@@ -1196,12 +1199,61 @@ def _metered(owner: str, reserved: int, intent: str, fn):
     before failing, and leaving the reservation standing would over-charge instead.
     """
     def run():
+        t0 = time.monotonic()
+        result = error = None
         with metering.meter() as usage:
             try:
-                return fn()
+                result = fn()
+                return result
+            except Exception as exc:
+                error = type(exc).__name__
+                raise
             finally:
                 _settle_tokens(owner, reserved, usage, intent)
+                _record_event(owner, intent, req, usage, result, error,
+                              ms=int((time.monotonic() - t0) * 1000))
     return run
+
+
+# Telemetry is written in Israel local time for the hour-of-day view: "when do teachers prepare?" is
+# a question about their evening, not about UTC.
+_LOCAL_TZ = ZoneInfo(os.environ.get("CHAVRUTA_TZ", "Asia/Jerusalem"))
+
+
+def _record_event(owner: str, intent: str, req: QueryRequest | None, usage: dict,
+                  result, error: str | None, *, ms: int) -> None:
+    """Append one generation's measurements. Measurements only — no question, answer, source or
+    attachment text ever reaches this table (see the schema comment)."""
+    try:
+        now = datetime.now(UTC)
+        local = now.astimezone(_LOCAL_TZ)
+        payload = result if isinstance(result, dict) else None
+        got = payload if payload is not None else (result.model_dump() if result is not None else {})
+        db.record_usage_event(
+            at=now.isoformat(),
+            hour_local=local.hour,
+            dow=(local.weekday() + 1) % 7,          # 0 = Sunday, the week this product works in
+            owner_id=None if owner == "local" else owner,
+            plan=None if owner == "local" else plans.canonical(db.get_plan(owner)),
+            intent=(got.get("intent") or intent or "qa"),
+            lang=(req.lang if req else "") or "he",
+            prompt_tokens=usage.get("prompt_tokens", 0),
+            completion_tokens=usage.get("completion_tokens", 0),
+            billed_tokens=plans.normalized_tokens(usage.get("prompt_tokens", 0),
+                                                  usage.get("completion_tokens", 0)),
+            llm_calls=usage.get("calls", 0),
+            ms=ms,
+            grounded=int(bool(got.get("grounded"))) if got else None,
+            no_source=int(not got.get("citations")) if got else None,
+            citations=len(got.get("citations") or []),
+            audience=(req.audience or None) if req else None,
+            grade_band=(req.grade_band or None) if req else None,
+            length=(req.length or None) if req else None,
+            attachments=len(req.attachments) if req else 0,
+            error=error,
+        )
+    except Exception:                       # noqa: BLE001 — analytics must never break a request
+        _log.exception("failed to record usage telemetry")
 
 
 def _enforce_quota(owner: str, lang: str, intent: str = "") -> int:
@@ -1237,7 +1289,7 @@ def query(req: QueryRequest, owner: str = Depends(current_owner)):
     reserved = _enforce_quota(owner, req.lang, req.intent)
     return _metered(owner, reserved, req.intent, lambda: _run_query(
         _augment_question(req.question, req.attachments), req.lang, req.intent, [],
-        audience=req.audience, grade_band=req.grade_band, length=req.length, owner_id=owner))()
+        audience=req.audience, grade_band=req.grade_band, length=req.length, owner_id=owner), req)()
 
 
 class MeOut(BaseModel):
@@ -1565,7 +1617,8 @@ def create_session(req: QueryRequest, owner: str = Depends(current_owner)):
     # Lock the chat's mode to the intent chosen on this first turn; every follow-up stays in it.
     sid = db.create_session(req.question.strip(), mode=req.intent or None, owner_id=owner)
     db.save_message(sid, "user", req.question)
-    return _metered(owner, reserved, req.intent, lambda: _first_query_work(sid, req, owner))()
+    return _metered(owner, reserved, req.intent,
+                    lambda: _first_query_work(sid, req, owner), req)()
 
 
 @app.post("/sessions/{session_id}/query", response_model=SessionQueryResponse)
@@ -1576,7 +1629,7 @@ def session_query(session_id: str, req: QueryRequest, owner: str = Depends(curre
     reserved = _enforce_quota(owner, req.lang, req.intent)
     history, intent = _prepare_continue(session_id, req, owner)
     return _metered(owner, reserved, req.intent,
-                    lambda: _continue_query_work(session_id, req, history, intent, owner))()
+                    lambda: _continue_query_work(session_id, req, history, intent, owner), req)()
 
 
 # ── Async generation (job queue) ──────────────────────────────────────────────
@@ -1591,7 +1644,7 @@ def query_async(req: QueryRequest, owner: str = Depends(current_owner)):
     q = _augment_question(req.question, req.attachments)
     jid = jobs.submit(owner, _metered(owner, reserved, req.intent, lambda: jsonable_encoder(
         _run_query(q, req.lang, req.intent, [], audience=req.audience,
-                   grade_band=req.grade_band, length=req.length, owner_id=owner))))
+                   grade_band=req.grade_band, length=req.length, owner_id=owner)), req))
     return JobAccepted(job_id=jid)
 
 
@@ -1605,7 +1658,8 @@ def create_session_async(req: QueryRequest, owner: str = Depends(current_owner))
     sid = db.create_session(req.question.strip(), mode=req.intent or None, owner_id=owner)
     db.save_message(sid, "user", req.question)
     jid = jobs.submit(owner, _metered(owner, reserved, req.intent,
-                                      lambda: jsonable_encoder(_first_query_work(sid, req, owner))))
+                                      lambda: jsonable_encoder(_first_query_work(sid, req, owner)),
+                                      req))
     return JobAccepted(job_id=jid, session_id=sid)
 
 
@@ -1618,7 +1672,7 @@ def session_query_async(session_id: str, req: QueryRequest, owner: str = Depends
     # gets a synchronous 404 and the user message is durable even if generation later fails.
     history, intent = _prepare_continue(session_id, req, owner)
     jid = jobs.submit(owner, _metered(owner, reserved, req.intent, lambda: jsonable_encoder(
-        _continue_query_work(session_id, req, history, intent, owner))))
+        _continue_query_work(session_id, req, history, intent, owner)), req))
     return JobAccepted(job_id=jid, session_id=session_id)
 
 

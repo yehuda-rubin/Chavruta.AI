@@ -110,6 +110,33 @@ def run_due_purges(now_iso: str | None = None) -> int:
     return len(due)
 
 
+# ── Chat retention ────────────────────────────────────────────────────────────
+def retention_days() -> int:
+    """How long a conversation is kept after its last activity. 0 disables retention entirely
+    (chats are kept forever), which is the old behaviour and not the default any more."""
+    try:
+        return max(0, int(os.environ.get("CHAVRUTA_CHAT_RETENTION_DAYS", "90")))
+    except ValueError:
+        return 90
+
+
+def run_retention(now: datetime | None = None) -> int:
+    """Delete chats untouched for longer than the retention window. Returns how many.
+
+    Data minimisation: keeping every conversation forever is a growing store of personal content
+    with no stated purpose past a point. The window is disclosed to users in the Terms and the
+    Privacy Policy — deleting quietly would be worse than not deleting at all.
+    """
+    days = retention_days()
+    if days <= 0:
+        return 0
+    cutoff = ((now or datetime.now(UTC)) - timedelta(days=days)).isoformat()
+    n = db.delete_sessions_older_than(cutoff)
+    if n:
+        _log.info("retention: deleted %d chat(s) untouched since %s (%dd window)", n, cutoff[:10], days)
+    return n
+
+
 # ── Background sweeper ────────────────────────────────────────────────────────
 _sweeper_started = False
 _sweeper_lock = threading.Lock()
@@ -136,10 +163,17 @@ def start_sweeper() -> None:
     def _loop() -> None:
         while True:
             time.sleep(interval)
+            # Two independent jobs, each guarded on its own: a failure in one must not stop the
+            # other from running for the rest of the process's life.
             try:
                 run_due_purges()
             except Exception:               # noqa: BLE001 — keep the sweeper alive across errors
                 _log.exception("deletion sweep failed")
+            try:
+                run_retention()
+            except Exception:               # noqa: BLE001
+                _log.exception("chat retention sweep failed")
 
     threading.Thread(target=_loop, name="deletion-sweeper", daemon=True).start()
-    _log.info("account-deletion sweeper started (every %.0fs, grace %dd)", interval, grace_days())
+    _log.info("account sweeper started (every %.0fs, grace %dd, chat retention %dd)",
+              interval, grace_days(), retention_days())
