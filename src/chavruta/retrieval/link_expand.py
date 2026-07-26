@@ -8,7 +8,7 @@ vector hits by the retriever. Activates the full cross-corpus reach as corpora a
 
 from __future__ import annotations
 
-from chavruta.corpus.refs import canonical_ref
+from chavruta.corpus.refs import canonical_ref, commentator_from_ref
 from chavruta.corpus.schema import Query
 from chavruta.retrieval.base import RankedHit
 
@@ -53,7 +53,7 @@ class LinkExpander:
                 ref=p.get("ref", ""),
                 text=p.get("text", ""),
                 score=self.link_score,
-                commentator_id=p.get("commentator_id"),
+                commentator_id=p.get("commentator_id") or commentator_from_ref(p.get("ref")),
                 deep_link=p.get("deep_link", ""),
                 work_id=p.get("work_id", ""),
                 anchor_ref=p.get("anchor_ref"),

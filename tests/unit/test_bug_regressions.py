@@ -295,6 +295,42 @@ def test_perek_demonstrative_not_gematria(text):
     assert not any(r.split()[0] in ("Shabbat", "Gittin") and r[-2:] != "2a" for r in resolve_landmarks(text))
 
 
+# ── Tier1 (2026-07-26): naming a commentator from its ref, and the inverse ──────────────────────
+# The commercial corpus carries neither `commentator_id` nor `anchor_ref`, so both directions have to
+# be recovered from the ref string: reading one names the commentator, writing one reaches its
+# comment on a given verse. Every expectation below is a ref verified to exist in the live corpus.
+@pytest.mark.parametrize("ref,cid", [
+    ("Rashi_on_Genesis.1.1.1", "rashi"),
+    ("Or_HaChaim_on_Genesis.22.1.1", "or_hachaim"),
+    ("Metzudat_David_on_Psalms.1.1.1", "metzudat_david"),
+    ("Mizrachi_on_Rashi_on_Genesis.1.1.1", "mizrachi"),       # supercommentary: the FIRST author
+    ("Targum_Onkelos_on_Genesis.1.1.1", "targum_onkelos"),    # '_on_' wins over the bare prefix
+    ("Onkelos_Exodus.20.2", "onkelos"),                       # filed as a prefix, not a commentary
+    ("Genesis.1.1", None),
+    ("Netinah_LaGer,_Genesis.1.1.2", None),                   # a base text, not 'netinah_lager'
+    ("", None),
+])
+def test_commentator_is_named_from_its_ref(ref, cid):
+    from chavruta.corpus.refs import commentator_from_ref
+    assert commentator_from_ref(ref) == cid
+
+
+def test_commentary_refs_reach_the_named_commentator_on_a_verse():
+    """The inverse: exact refs to fetch, since neither commentator_id nor anchor_ref can be filtered."""
+    from chavruta.corpus.refs import commentary_refs
+
+    out = commentary_refs(["Genesis.1.1", "Genesis 1.1"], ["rashi"], max_comments=3)
+    assert out == ["Rashi_on_Genesis.1.1.1", "Rashi_on_Genesis.1.1.2", "Rashi_on_Genesis.1.1.3"]
+    # The space form carries no commentaries — generating refs from it would be pure waste.
+    assert not any(" " in r for r in out)
+    # Capitalisation follows Sefaria, not naive title-case.
+    assert commentary_refs(["Genesis.1.1"], ["or_hachaim"], max_comments=1) == \
+        ["Or_HaChaim_on_Genesis.1.1.1"]
+    # Onkelos has no '_on_' join and no comment index.
+    assert commentary_refs(["Exodus.20.2"], ["onkelos"]) == ["Onkelos_Exodus.20.2"]
+    assert commentary_refs(["Genesis.1.1"], []) == []
+
+
 def test_amud_to_corpus_ignores_volume_numbered_works():
     """Talmud amud→corpus must not fire on volume-numbered refs like the Zohar ('Zohar 1.15a')."""
     from chavruta.corpus.refs import with_ref_variants
@@ -342,7 +378,7 @@ def test_anchoring_resolves_dotted_named_ref_against_space_form_corpus():
                         payload={"chunk_id": "c1", "ref": "Rashi on Genesis 1.3", "text": "פירוש",
                                  "commentator_id": "rashi", "unit_type": "commentary"})]
 
-        def fetch_by_refs(self, name, refs, filters=None):     # base verse stored SPACE-form only
+        def fetch_by_refs(self, name, refs, filters=None, *, limit=None):  # base verse stored SPACE-form only
             if "Genesis 1.3" in refs:
                 return [Hit(chunk_id="g13", score=1.0,
                             payload={"chunk_id": "g13", "ref": "Genesis 1.3", "text": "ויאמר אלהים יהי אור",
@@ -358,6 +394,63 @@ def test_anchoring_resolves_dotted_named_ref_against_space_form_corpus():
     res = HybridRetriever(_Emb(), _Store(), prof).retrieve(q, top_k=8)
     anchored = [h for h in res.hits if h.ref == "Genesis 1.3"]
     assert anchored and anchored[0].score >= 1.0               # the base pasuk anchored despite dot↔space
+
+
+# ── Tier1 (2026-07-26): a named commentator on a corpus whose `commentator_id` payload is EMPTY ──
+# chavruta_commercial was indexed without the field on any of its 2.4M points, so the server-side
+# filter matched nothing and "what does Rashi say on this verse" anchored to zero sources — the model
+# was told there is no Rashi here while Rashi_on_Genesis.1.3.1 sat in the index. The name is
+# recoverable from the ref, so it is derived on READ and the anchor is scoped by work instead.
+def test_named_commentator_resolves_when_the_payload_field_is_empty():
+    from chavruta.retrieval.hybrid import HybridRetriever
+
+    class _Emb:
+        def embed_query(self, text):
+            return SimpleNamespace(dense=[0.1, 0.2], sparse={1: 0.5})
+
+    class _Store:
+        def __init__(self):
+            self.anchor_filters = []
+            self.asked = []
+
+        def search(self, name, q, top_k, filters=None):
+            return []                                   # a commentator-scoped search finds nothing
+
+        def fetch_by_refs(self, name, refs, filters=None, *, limit=None):
+            self.anchor_filters.append(filters)
+            self.asked.append(list(refs))
+            # As the corpus really stores it: `anchor_ref` is empty, so a lookup of the BASE ref
+            # returns the verse alone. A commentary is reachable only under its own exact ref.
+            out = []
+            for r in refs:
+                if r == "Rashi_on_Genesis.1.3.1":
+                    out.append(Hit(chunk_id="r13", score=1.0,
+                                   payload={"chunk_id": "r13", "ref": r,
+                                            "text": "יהי אור — נעשה אור", "work_id": "tanakh"}))
+                elif r == "Ibn_Ezra_on_Genesis.1.3.1":
+                    out.append(Hit(chunk_id="i13", score=1.0,
+                                   payload={"chunk_id": "i13", "ref": r,
+                                            "text": "פירוש אחר", "work_id": "tanakh"}))
+            return out
+
+        def dense_scores(self, name, dense, filters=None, top_k=30):
+            return {}
+
+    store = _Store()
+    prof = SimpleNamespace(hybrid=True, collection="c", relevance_threshold=0.5, rerank=False)
+    q = Query(text="מה אומר רש\"י?", commentator_ids=["rashi"])
+    q.named_refs = ["Genesis.1.3"]
+    res = HybridRetriever(_Emb(), store, prof).retrieve(q, top_k=8)
+
+    by_ref = {h.ref: h for h in res.hits}
+    assert "Rashi_on_Genesis.1.3.1" in by_ref, "the named commentator never anchored"
+    assert by_ref["Rashi_on_Genesis.1.3.1"].commentator_id == "rashi"     # derived, not stored
+    assert not res.is_empty
+    # It was reached by its OWN ref — asking for the base ref alone returns the verse and nothing else.
+    assert "Rashi_on_Genesis.1.3.1" in store.asked[0]
+    assert "Ibn_Ezra_on_Genesis.1.3.1" not in store.asked[0]   # only what was actually asked about
+    # And never scoped by a field the corpus does not carry.
+    assert all(not (f or {}).get("commentator_id") for f in store.anchor_filters)
 
 
 # ── Tier1 (2026-07): the api _run_query graceful-error wrapper (degrade, not 500; keep real 4xx) ──
@@ -381,7 +474,7 @@ def test_base_sources_for_refs_canonicalises_dedups_and_scores(monkeypatch):
     calls = []
 
     class _Store:
-        def fetch_by_refs(self, name, refs, filters=None):
+        def fetch_by_refs(self, name, refs, filters=None, *, limit=None):
             calls.append((refs, filters))
             # emulate the corpus: the base verse exists under the SPACE form only
             if refs == ["Genesis 1.1"]:
@@ -507,7 +600,7 @@ def test_wrong_scope_falls_back_to_unscoped_semantic():
         def dense_scores(self, name, dense, filters=None, top_k=30):
             return {"s1": 0.72}
 
-        def fetch_by_refs(self, name, refs, filters=None):
+        def fetch_by_refs(self, name, refs, filters=None, *, limit=None):
             return []
 
         def top_dense_score(self, name, dense, filters=None):

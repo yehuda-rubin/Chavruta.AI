@@ -13,7 +13,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import replace
 
-from chavruta.corpus.refs import with_ref_variants
+from chavruta.corpus.refs import commentary_refs, commentator_from_ref, with_ref_variants
 from chavruta.corpus.schema import Query
 from chavruta.retrieval.base import RankedHit, RetrievalResult
 from chavruta.store.base import Filter, HybridQuery
@@ -46,7 +46,11 @@ def _to_hit(h) -> RankedHit:
         ref=p.get("ref", ""),
         text=p.get("text", ""),
         score=h.score,
-        commentator_id=p.get("commentator_id"),
+        # The commercial corpus was indexed with `commentator_id` empty on all 2.4M points, and the
+        # name is fully recoverable from the ref ('Rashi_on_Genesis.1.1.1' → 'rashi'). Deriving it
+        # here costs a string split and needs no rewrite of an on-disk collection; the payload value
+        # still wins where a fresh ingest wrote one.
+        commentator_id=p.get("commentator_id") or commentator_from_ref(p.get("ref")),
         deep_link=p.get("deep_link", ""),
         work_id=p.get("work_id", ""),
         anchor_ref=p.get("anchor_ref"),
@@ -79,7 +83,7 @@ class HybridRetriever:
     def _work_filter(self, query: Query) -> Filter | None:
         """Work scope only — used for ref anchoring so the verse itself and ALL its
         commentaries are fetched, not just the named commentators (the named ones are
-        still boosted to score 1.0; this also brings the pasuk in for context)."""
+        still boosted above the rest; this also brings the pasuk in for context)."""
         return {"work_id": list(query.work_ids)} if query.work_ids else None
 
     def retrieve(self, query: Query, *, top_k: int) -> RetrievalResult:
@@ -89,6 +93,12 @@ class HybridRetriever:
             emb = self.embedding.embed_query(query.search_text or query.text)
         use_sparse = self.profile.hybrid and bool(emb.sparse)
         hquery = HybridQuery(dense=emb.dense, sparse=emb.sparse if use_sparse else None)
+
+        # Read the named commentators BEFORE the empty-scope fallback below can clear them: on a
+        # corpus where the `commentator_id` payload is empty the scoped search always comes back
+        # empty, and that is precisely the question ("what does Rashi say here") whose anchoring
+        # still has to know which commentator was asked for.
+        wanted = {c.lower() for c in (query.commentator_ids or ())}
 
         filters = self._filters(query)
         try:
@@ -138,20 +148,31 @@ class HybridRetriever:
         # everything anchored on it (exact, score above the relevance threshold by design).
         anchored_ids: set[str] = set()   # true named-ref anchors — the honest is_empty signal below
         if query.named_refs:
-            # Named commentators → fetch them *specifically* on the ref (small, never
-            # truncated), guaranteeing e.g. Rashi AND Ramban on Genesis.1.1. No named
-            # commentator → fetch the verse + all its commentaries (work scope) for context.
             # The router emits dotted refs ('Genesis.1.1') but the corpus stores base texts with a
             # space ('Genesis 1.1'); pass BOTH forms so the anchor actually resolves (without this the
             # exact match silently returned 0 → the base pasuk/daf never anchored).
-            anchor_filter = self._filters(query) if query.commentator_ids else self._work_filter(query)
+            # The scope here is by WORK, never by commentator. `commentator_id` is empty on every
+            # point of the commercial corpus, so a server-side filter on it matched nothing and the
+            # anchor came back empty — the bug that answered "there is no Rashi here" with Rashi
+            # sitting in the index.
+            # `anchor_ref` is empty there too, so a ref lookup returns the base segment ALONE and
+            # never its commentaries. A named commentator is therefore fetched by its own exact ref
+            # ('Rashi_on_Genesis.1.1.k'), derived from the base ref — the one construction that does
+            # not depend on either missing field. Refs that don't exist simply return nothing, so a
+            # commentator with no comment here stays honestly absent.
+            ref_variants = with_ref_variants(query.named_refs)
+            targets = ref_variants + commentary_refs(ref_variants, wanted)
             with _timed(t, "anchor"):
                 anchored = self.store.fetch_by_refs(
-                    self.profile.collection, with_ref_variants(query.named_refs), filters=anchor_filter
+                    self.profile.collection, targets,
+                    filters=self._work_filter(query),
+                    limit=600 if wanted else None,
                 )
             for h in anchored:
                 rh = _to_hit(h)
-                rh.score = max(rh.score, 1.0)
+                # A named commentator outranks the rest of the verse's commentaries; without a name
+                # every anchor is equal, as before.
+                rh.score = max(rh.score, 1.1 if (rh.commentator_id or "") in wanted else 1.0)
                 anchored_ids.add(rh.chunk_id)          # explicit anchor set (see has_anchor below)
                 hits.append(rh)
 

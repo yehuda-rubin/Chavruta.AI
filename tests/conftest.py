@@ -101,14 +101,15 @@ class InMemoryStore:
         for cid in [cid for cid, c in coll.items() if self._matches(c.payload, filters)]:
             del coll[cid]
 
-    def fetch_by_refs(self, name: str, refs: list[str], filters: Filter | None = None) -> list[Hit]:
+    def fetch_by_refs(self, name: str, refs: list[str], filters: Filter | None = None,
+                      *, limit: int | None = None) -> list[Hit]:
         coll = self._data.get(name, {})
         out = []
         for c in coll.values():
             in_refs = c.payload.get("ref") in refs or c.payload.get("anchor_ref") in refs
             if in_refs and self._matches(c.payload, filters):
                 out.append(Hit(chunk_id=c.chunk_id, score=1.0, payload=c.payload))
-        return out
+        return out[:limit] if limit else out
 
 
 # ── Fake LLM (cites the first source so the grounding gate passes) ──

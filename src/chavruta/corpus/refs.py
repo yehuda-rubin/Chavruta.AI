@@ -127,14 +127,72 @@ def commentator_from_ref(ref: str | None) -> str | None:
     back empty while Rashi sat in the index. The name is recoverable from the ref itself, so this is
     metadata that can be backfilled without re-embedding anything (see scripts/backfill_structure.py).
     """
-    if not ref or _ON not in ref:
+    if not ref:
+        return None
+    if _ON not in ref:
+        # A handful of works are filed as a plain prefix rather than a commentary ('Onkelos_Exodus.
+        # 20.2'). Only the explicitly known ones are recognised — guessing from the first underscore
+        # would rename base texts like 'Netinah_LaGer,_Genesis.1.1.2' after their own title.
+        for cid in _TARGUM_PREFIXED:
+            if ref.startswith(commentator_title(cid) + "_"):
+                return cid
         return None
     return _slug(ref.split(_ON, 1)[0]) or None
 
 
 def is_commentary_ref(ref: str | None) -> bool:
-    """Whether a ref names a commentary rather than a base text."""
+    """Whether a ref carries the '<Title>_on_<Base>' commentary form.
+
+    Narrower than `commentator_from_ref`, which also names the prefix-filed targumim — those are
+    stored as their own running text and the corpus files them as `unit_type: source`.
+    """
     return bool(ref) and _ON in ref
+
+
+# The Sefaria title behind a commentator id. Title-casing the slug is right for almost all of them
+# ('metzudat_david' → 'Metzudat_David'); these are the ones whose capitalisation it gets wrong.
+# Verified against the live collection 2026-07-27.
+_TITLE_SPECIAL = {"or_hachaim": "Or_HaChaim", "ibn_ezra": "Ibn_Ezra"}
+
+# Onkelos is not filed as a commentary at all: the corpus stores 'Onkelos_Genesis.1.1' — no '_on_'
+# join and no trailing comment index, one segment per verse.
+_TARGUM_PREFIXED = {"onkelos"}
+
+
+def commentator_title(cid: str) -> str:
+    """'or_hachaim' -> 'Or_HaChaim', 'metzudat_david' -> 'Metzudat_David'."""
+    return _TITLE_SPECIAL.get(cid, "_".join(w.capitalize() for w in (cid or "").split("_")))
+
+
+def commentary_refs(base_refs, commentator_ids, *, max_comments: int = 8) -> list[str]:
+    """Exact refs for the named commentators ON the given base refs.
+
+    The inverse of `commentator_from_ref`, and the reason it can be: Sefaria names a commentary
+    '<Title>_on_<Base>.<k>', where k enumerates the comments on that one segment. Deriving the refs
+    lets a "what does Rashi say here" question anchor by EXACT lookup — which the `ref` keyword index
+    answers in milliseconds — rather than depending on the named commentator happening to surface in
+    a semantic search. It is what makes named-commentator retrieval work at all on a corpus whose
+    `commentator_id` and `anchor_ref` payload fields were never populated.
+
+    Refs that do not exist simply return nothing from the store, so over-generating k is cheap and a
+    commentator with no comment here stays honestly absent (Principle I).
+    """
+    out: list[str] = []
+    seen = set()
+    for base in base_refs or []:
+        if " " in base:          # commercial underscore-dot form only; the space form has no commentaries
+            continue
+        for cid in commentator_ids or []:
+            title = commentator_title(str(cid).lower())
+            if str(cid).lower() in _TARGUM_PREFIXED:
+                cands = [f"{title}_{base}"]
+            else:
+                cands = [f"{title}{_ON}{base}.{k}" for k in range(1, max_comments + 1)]
+            for c in cands:
+                if c not in seen:
+                    seen.add(c)
+                    out.append(c)
+    return out
 
 
 def canonical_ref(s: str | None) -> str:

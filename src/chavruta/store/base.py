@@ -48,7 +48,7 @@ class VectorStore(Protocol):
     def delete(self, name: str, filters: Filter) -> None: ...
 
     def fetch_by_refs(
-        self, name: str, refs: list[str], filters: Filter | None = None
+        self, name: str, refs: list[str], filters: Filter | None = None, *, limit: int | None = None
     ) -> list[Hit]: ...
     # Non-vector lookup: returns chunks whose `ref` OR `anchor_ref` is in `refs` —
     # i.e. the verses themselves plus everything anchored on them (commentaries).

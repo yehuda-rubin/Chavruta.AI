@@ -240,12 +240,16 @@ class QdrantStore:
         )
 
     def fetch_by_refs(
-        self, name: str, refs: list[str], filters: Filter | None = None
+        self, name: str, refs: list[str], filters: Filter | None = None, *, limit: int | None = None
     ) -> list[Hit]:
         """Non-vector lookup: chunks whose `ref` OR `anchor_ref` is in `refs`.
 
         Returns the verses plus everything anchored on them (commentaries) — used by
         link-based retrieval and named-ref anchoring. Uses scroll + filter.
+
+        `limit` overrides the default page size. A named-commentator question needs it: a busy verse
+        carries hundreds of commentaries, and the default 16-per-ref page can cut off before the one
+        that was actually asked about.
         """
         from qdrant_client import models
 
@@ -266,7 +270,7 @@ class QdrantStore:
         points, _ = self._client_().scroll(
             collection_name=name,
             scroll_filter=combined,
-            limit=max(len(refs) * 16, 64),
+            limit=limit if limit else max(len(refs) * 16, 64),
             with_payload=True,
             timeout=8,
         )

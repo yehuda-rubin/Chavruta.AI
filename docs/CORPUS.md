@@ -191,6 +191,37 @@ lesson primary-source floor both use them. Do NOT confuse this with `canonical_r
 lowercased join key used by the link graph. (There is no populated `search_he` payload field — its
 lexical index is empty, so a `MatchText` on it will time out; the live path uses dense + `fetch_by_refs`.)
 
+### 7.2b Empty payload fields — `commentator_id` and `anchor_ref` (measured 2026-07-27)
+
+`chavruta_commercial` was indexed with **`commentator_id` empty and `anchor_ref` empty on all
+2,403,599 points**. `unit_type` (`source`/`commentary`), `ref`, `work_id`, `lang` and `text` ARE
+populated. Two consequences, both of which used to break named-commentator questions:
+
+* a server-side filter on `commentator_id` matched **nothing**, so "what does Rashi say here" came
+  back empty and was answered *"there is no Rashi in the corpus"* — with `Rashi_on_Genesis.1.1.1`
+  sitting in the index;
+* with `anchor_ref` empty, `fetch_by_refs("Genesis.1.1")` returns the **verse alone**, never its
+  commentaries. Anchoring could not reach a commentary at all.
+
+**Both are solved from the ref string, with no write to the collection.** Sefaria names a commentary
+`<Title>_on_<Base>.<k>`, so `corpus/refs.py` reads it in both directions:
+
+| direction | function | example |
+|---|---|---|
+| ref → commentator | `commentator_from_ref` | `Rashi_on_Genesis.1.1.1` → `rashi` |
+| commentator → refs | `commentary_refs` | `Genesis.1.1` + `rashi` → `Rashi_on_Genesis.1.1.{1..8}` |
+
+`retrieval/hybrid.py` derives the id on read (`_to_hit`) and anchors a named commentator by its own
+**exact** ref, which the `ref` keyword index answers in milliseconds. Titles follow Sefaria's
+capitalisation, not naive title-case (`or_hachaim` → `Or_HaChaim`), and Onkelos is filed as a plain
+prefix with no `_on_` and no comment index (`Onkelos_Exodus.20.2`) — both handled explicitly.
+
+**Why not backfill the fields?** It was tried. `set_payload` against the on-disk collection sustained
+~5 points/sec — days for 2.4M, to store something a string split already yields. A ref that does not
+exist simply returns nothing, so a commentator that genuinely has no comment here stays honestly
+absent (Principle I). Verified live across Torah, Nach and Bavli: rashi, ramban, ibn_ezra, rashbam,
+or_hachaim, sforno, malbim, radak, metzudat_david, metzudat_zion and onkelos all resolve.
+
 ### 7.3 Talmud amud-linear numbering & perek→daf
 
 Talmud base texts are NOT stored with the amud letter. The corpus uses a FLAT amud-linear number:
