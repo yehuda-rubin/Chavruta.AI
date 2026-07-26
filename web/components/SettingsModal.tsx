@@ -41,6 +41,23 @@ function Seg<T extends string>({
   );
 }
 
+/** A remaining-allowance bar. Percentage only — the absolute figure behind it is deliberately not
+ *  published (see app/plans.py), and a token count would mean nothing to a reader anyway. */
+function Gauge({ label, value }: { label: string; value: number }) {
+  const pct = Math.round(value * 100);
+  const bar = value === 0 ? "bg-red-500" : value <= 0.15 ? "bg-amber-500" : "bg-tekhelet/60";
+  return (
+    <div className="flex items-center gap-2 text-xs text-ink/60">
+      <span className="w-20 shrink-0">{label}</span>
+      <span className="flex-1 h-1.5 rounded-full bg-ink/10 overflow-hidden"
+            role="img" aria-label={`${label}: ${pct}%`}>
+        <span className={"block h-full rounded-full " + bar} style={{ width: `${pct}%` }} />
+      </span>
+      <span className="w-9 text-end tabular-nums">{pct}%</span>
+    </div>
+  );
+}
+
 /** Coupon entry. Keeps its own state so a failed attempt doesn't disturb the rest of settings; the
  *  result line is whatever the server said (already localized there, so the two never disagree). */
 function CouponField({ lang, onRedeem }: { lang: Lang; onRedeem: (c: string) => Promise<string> }) {
@@ -130,6 +147,8 @@ export function SettingsModal({
   credits,
   cycle,
   cancelAtPeriodEnd,
+  weekLeft,
+  lessonsLeft,
   billingEnabled,
   onUpgrade,
   onCancelSubscription,
@@ -155,6 +174,8 @@ export function SettingsModal({
   credits?: number;                        // prepaid generations left
   cycle?: string;                          // 'monthly' | 'annual' | 'coupon'
   cancelAtPeriodEnd?: boolean;             // cancelled: access runs to planUntil, then lapses
+  weekLeft?: number | null;                // fraction of this week's conversation allowance left
+  lessonsLeft?: number | null;             // fraction of this week's lessons left (separate pool)
   billingEnabled?: boolean;
   onUpgrade?: () => void;
   onCancelSubscription?: () => void;
@@ -266,6 +287,19 @@ export function SettingsModal({
                 )
               )}
             </div>
+
+            {/* Two gauges because there are two independent pools: running out of conversation
+                usage does not touch lessons, and a single combined bar would imply it does. */}
+            {(typeof weekLeft === "number" || typeof lessonsLeft === "number") && (
+              <div className="mt-2 flex flex-col gap-1.5">
+                {typeof weekLeft === "number" && (
+                  <Gauge label={tr(lang, "usageLeft")} value={weekLeft} />
+                )}
+                {typeof lessonsLeft === "number" && (
+                  <Gauge label={tr(lang, "lessonsLeft")} value={lessonsLeft} />
+                )}
+              </div>
+            )}
 
             {/* Coupon redemption — grants a time-boxed plan or prepaid credits. Always shown to a
                 signed-in user, including when billing is off: coupons are the one way to get paid

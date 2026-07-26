@@ -147,12 +147,13 @@ export interface Me {
   authenticated: boolean;
   plan: string;
   plan_name: string;
-  daily_quota: number | null;
-  used_today: number;
-  remaining: number | null;                 // of the DAILY cap
-  weekly_quota: number | null;
-  used_this_week: number;
-  remaining_week: number | null;
+  // Allowances arrive as FRACTIONS remaining (1 = untouched, 0 = spent), never absolute figures.
+  // A published number becomes a promise; a ratio stays true as the budget underneath it moves.
+  day_left: number | null;                  // conversation pool, today. null ⇒ uncapped
+  week_left: number | null;                 // conversation pool, this week
+  lessons_left: number | null;              // lesson pool, this week — its own, independent pool
+  lessons_exhausted: boolean;
+  multiple: number;                         // usage relative to free: the only allowance figure shown
   credits: number;                          // prepaid generations, spent once a cap is hit
   plan_until: string | null;                // ISO ts the paid/coupon period ends
   cycle: string;                            // 'monthly' | 'annual' | 'coupon'
@@ -169,8 +170,7 @@ export interface Tier {
   price_ils: number;              // per month
   annual_price_ils: number;       // the whole year up front, discounted
   annual_saving_pct: number;
-  daily_quota: number;
-  weekly_quota: number;
+  multiple: number;               // "3x the free tier" — no absolute allowance is published
 }
 
 export interface Redeemed {

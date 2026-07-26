@@ -60,7 +60,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -121,14 +121,20 @@ def _migrate(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_saved_lessons_time ON saved_lessons(created_at DESC);
 
-        -- Per-owner daily usage counter — the free-tier quota (public hosting). One row per
-        -- (owner, UTC day); the generation endpoints bump it and reject over the configured limit.
-        -- Persisted (not in-memory) so a restart can't reset a user's daily allowance.
+        -- Per-owner daily usage, one row per (owner, UTC day, meter). Two meters, two independent
+        -- pools (see app/plans.py):
+        --   'tokens' — normalized conversation tokens (prompt + 3x completion), capped per day AND
+        --              per week. A message count would charge a pasted daf like a one-line question.
+        --   'lesson' — a COUNT of lessons, capped per week only. Discrete, planned around, and
+        --              deliberately unaffected by the token pool running out.
+        -- Weekly figures are SUMMED from these daily rows — one source of truth, no second table
+        -- that could disagree. Persisted so a restart can't hand back a spent allowance.
         CREATE TABLE IF NOT EXISTS usage_counters (
             owner_id  TEXT NOT NULL,
             day       TEXT NOT NULL,          -- UTC date, YYYY-MM-DD
+            meter     TEXT NOT NULL DEFAULT 'tokens',
             count     INTEGER NOT NULL DEFAULT 0,
-            PRIMARY KEY (owner_id, day)
+            PRIMARY KEY (owner_id, day, meter)
         );
 
         -- Account lifecycle — currently just scheduled deletion. A user can request deletion; it's
@@ -263,6 +269,27 @@ def _migrate(conn: sqlite3.Connection) -> None:
         if "cycle" not in scols:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN cycle TEXT NOT NULL DEFAULT 'monthly'")
+
+    if version < 14:
+        # usage_counters gains a `meter` column and a wider primary key. SQLite cannot alter a PK,
+        # so rebuild. Old rows counted GENERATIONS, which the new scheme has no equivalent for —
+        # they are dropped rather than mislabelled as tokens or lessons, which would hand users a
+        # wrong allowance on the changeover day. Losing at most one day of counters is the cheaper
+        # error, and only for accounts that generated on that day.
+        ucols = {r[1] for r in conn.execute("PRAGMA table_info(usage_counters)")}
+        if "meter" not in ucols:
+            conn.executescript("""
+                DROP TABLE IF EXISTS usage_counters_old;
+                ALTER TABLE usage_counters RENAME TO usage_counters_old;
+                CREATE TABLE usage_counters (
+                    owner_id  TEXT NOT NULL,
+                    day       TEXT NOT NULL,
+                    meter     TEXT NOT NULL DEFAULT 'tokens',
+                    count     INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (owner_id, day, meter)
+                );
+                DROP TABLE usage_counters_old;
+            """)
 
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
@@ -559,65 +586,89 @@ def week_days(day: str | None = None) -> list[str]:
     return [(sunday + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)]
 
 
-def bump_usage(owner_id: str, limit: int, day: str | None = None, *,
-               weekly_limit: int = 0, units: int = 1) -> tuple[bool, int, int]:
-    """Atomically account one generation and enforce BOTH the daily and the weekly cap.
+TOKENS, LESSON = "tokens", "lesson"
 
-    Returns (allowed, day_count, week_count) — the counts AFTER a successful bump, or the current
+
+def _counts(conn, owner_id: str, day: str, meter: str) -> tuple[int, int]:
+    """(day total, week total) for one meter. Caller must already hold the lock."""
+    row = conn.execute(
+        "SELECT count FROM usage_counters WHERE owner_id=? AND day=? AND meter=?",
+        (owner_id, day, meter)).fetchone()
+    days = week_days(day)
+    wrow = conn.execute(
+        f"SELECT COALESCE(SUM(count), 0) AS c FROM usage_counters "   # noqa: S608 — placeholders below
+        f"WHERE owner_id=? AND meter=? AND day IN ({','.join('?' * len(days))})",
+        (owner_id, meter, *days)).fetchone()
+    return (int(row["count"]) if row else 0), int(wrow["c"])
+
+
+def bump_usage(owner_id: str, limit: int, day: str | None = None, *, weekly_limit: int = 0,
+               units: int = 1, meter: str = TOKENS) -> tuple[bool, int, int]:
+    """Atomically charge `units` to one meter and enforce BOTH its daily and weekly cap.
+
+    Returns (allowed, day_total, week_total) — the totals AFTER a successful charge, or the current
     ones when refused. A limit <= 0 disables that cap (usage is still counted, so it stays
-    observable). `units` is how much this generation consumes; see plans.quota_units.
+    observable).
 
-    Both caps are checked and the counter incremented inside ONE transaction under the shared lock,
-    so concurrent requests cannot each see room and both proceed. The week total is summed from the
-    daily rows rather than kept in its own counter: one source of truth, so the two figures can
-    never disagree, and no extra table to migrate.
+    Check and increment happen in ONE transaction under the shared lock, so concurrent requests
+    cannot each see room and both proceed. Week totals are summed from the daily rows rather than
+    kept in a counter of their own: one source of truth, so the two can never disagree.
     """
     day = day or today_utc()
-    units = max(1, int(units))
+    units = max(0, int(units))
     conn = get_conn()
     with _LOCK, _tx(conn):
-        row = conn.execute(
-            "SELECT count FROM usage_counters WHERE owner_id=? AND day=?", (owner_id, day)).fetchone()
-        day_count = row["count"] if row else 0
-        days = week_days(day)
-        wrow = conn.execute(
-            f"SELECT COALESCE(SUM(count), 0) AS c FROM usage_counters "  # noqa: S608 — placeholders below
-            f"WHERE owner_id=? AND day IN ({','.join('?' * len(days))})",
-            (owner_id, *days)).fetchone()
-        week_count = int(wrow["c"])
-
+        day_count, week_count = _counts(conn, owner_id, day, meter)
         if limit > 0 and day_count + units > limit:
             return False, day_count, week_count
         if weekly_limit > 0 and week_count + units > weekly_limit:
             return False, day_count, week_count
-
-        conn.execute(
-            "INSERT INTO usage_counters (owner_id, day, count) VALUES (?,?,?) "
-            "ON CONFLICT(owner_id, day) DO UPDATE SET count = count + excluded.count",
-            (owner_id, day, units))
+        if units:
+            conn.execute(
+                "INSERT INTO usage_counters (owner_id, day, meter, count) VALUES (?,?,?,?) "
+                "ON CONFLICT(owner_id, day, meter) DO UPDATE SET count = count + excluded.count",
+                (owner_id, day, meter, units))
         return True, day_count + units, week_count + units
 
 
-def usage_today(owner_id: str, day: str | None = None) -> int:
-    """Today's generation count for `owner_id` (0 if none) — for the /me quota readout."""
+def settle_usage(owner_id: str, reserved: int, actual: int, day: str | None = None,
+                 meter: str = TOKENS) -> int:
+    """Replace a reservation with what was actually spent. Returns the day total afterwards.
+
+    A quota is checked before generation but the true cost is only known after, so a turn is admitted
+    against an estimate and corrected here. The delta may be negative (the estimate was generous,
+    which is the normal case); the counter is floored at zero so a bad estimate can never mint
+    allowance out of an earlier charge.
+    """
+    day = day or today_utc()
+    delta = int(actual) - int(reserved)
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        row = conn.execute(
+            "SELECT count FROM usage_counters WHERE owner_id=? AND day=? AND meter=?",
+            (owner_id, day, meter)).fetchone()
+        current = int(row["count"]) if row else 0
+        new = max(0, current + delta)
+        conn.execute(
+            "INSERT INTO usage_counters (owner_id, day, meter, count) VALUES (?,?,?,?) "
+            "ON CONFLICT(owner_id, day, meter) DO UPDATE SET count = excluded.count",
+            (owner_id, day, meter, new))
+        return new
+
+
+def usage_today(owner_id: str, day: str | None = None, meter: str = TOKENS) -> int:
+    """Today's total for one meter (0 if none) — for the /me readout."""
     day = day or today_utc()
     conn = get_conn()
     with _LOCK:
-        row = conn.execute(
-            "SELECT count FROM usage_counters WHERE owner_id=? AND day=?", (owner_id, day)).fetchone()
-    return row["count"] if row else 0
+        return _counts(conn, owner_id, day, meter)[0]
 
 
-def usage_this_week(owner_id: str, day: str | None = None) -> int:
-    """This week's generation count (Sunday-start), summed from the daily rows."""
-    days = week_days(day)
+def usage_this_week(owner_id: str, day: str | None = None, meter: str = TOKENS) -> int:
+    """This week's total for one meter (Sunday-start), summed from the daily rows."""
     conn = get_conn()
     with _LOCK:
-        row = conn.execute(
-            f"SELECT COALESCE(SUM(count), 0) AS c FROM usage_counters "  # noqa: S608 — placeholders below
-            f"WHERE owner_id=? AND day IN ({','.join('?' * len(days))})",
-            (owner_id, *days)).fetchone()
-    return int(row["c"])
+        return _counts(conn, owner_id, day or today_utc(), meter)[1]
 
 
 # ── Account deletion (scheduled, with a grace period) ─────────────────────────
@@ -941,3 +992,8 @@ def purge_owner(owner_id: str) -> None:
         conn.execute("DELETE FROM usage_counters WHERE owner_id=?", (owner_id,))
         conn.execute("DELETE FROM subscriptions WHERE owner_id=?", (owner_id,))
         conn.execute("DELETE FROM accounts WHERE owner_id=?", (owner_id,))
+        # Coupon redemptions too. Keeping them would leave a user identifier behind after an account
+        # deletion, and it buys nothing: the cap is enforced by coupons.redeemed_count, which is
+        # never decremented, so a spent code stays spent whether or not this row survives. (Nor
+        # would keeping it stop re-redemption — a re-registered person gets a new owner_id anyway.)
+        conn.execute("DELETE FROM coupon_redemptions WHERE owner_id=?", (owner_id,))

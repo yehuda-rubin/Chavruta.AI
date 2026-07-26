@@ -7,8 +7,8 @@ import { Icon } from "./Icon";
 export function Header({
   lang,
   theme,
-  remaining,
-  remainingWeek,
+  dayLeft,
+  weekLeft,
   onToggleLang,
   onToggleTheme,
   onOpenSessions,
@@ -16,8 +16,8 @@ export function Header({
 }: {
   lang: Lang;
   theme: "light" | "dark";
-  remaining?: number | null;      // questions left today; null/undefined = uncapped (no pill)
-  remainingWeek?: number | null;  // left this week — shown instead when it's the tighter of the two
+  dayLeft?: number | null;     // fraction of today's conversation allowance left; null = uncapped
+  weekLeft?: number | null;    // fraction of the week's left — the gauge shows whichever is lower
   onToggleLang: () => void;
   onToggleTheme: () => void;
   onOpenSessions?: () => void;  // mobile only — opens the sessions drawer
@@ -39,27 +39,27 @@ export function Header({
         <h1 className="font-serif text-2xl font-bold text-tekhelet">{tr(lang, "brand")}</h1>
       </div>
       <div className="flex items-center gap-2">
-        {/* Show whichever cap is closer to stopping them. Showing only the daily figure would read
-            as "38 left" right up to the moment the WEEK runs out, which is the one number that
-            would have let them plan. */}
+        {/* A gauge of whichever pool is closest to empty — no absolute figure, by design (see
+            app/plans.py). The daily fraction alone would read as "plenty left" right up to the
+            moment the WEEK runs out, which is the one thing a user needs to see coming. */}
         {(() => {
-          const binding =
-            typeof remainingWeek === "number" &&
-            (typeof remaining !== "number" || remainingWeek < remaining)
-              ? { n: remainingWeek, label: tr(lang, "weeklyRemaining") }
-              : typeof remaining === "number"
-                ? { n: remaining, label: tr(lang, "remainingToday") }
-                : null;
-          if (!binding) return null;
+          const pools = [dayLeft, weekLeft].filter((v): v is number => typeof v === "number");
+          if (!pools.length) return null;
+          const left = Math.min(...pools);
+          const pct = Math.round(left * 100);
+          const tone = left === 0 ? "text-red-500" : left <= 0.15 ? "text-amber-600" : "text-ink/60";
+          const bar = left === 0 ? "bg-red-500" : left <= 0.15 ? "bg-amber-500" : "bg-tekhelet/60";
           return (
             <span
-              className={
-                "px-3 py-1.5 rounded-full glass text-xs font-semibold " +
-                (binding.n === 0 ? "text-red-500" : "text-ink/60")
-              }
-              title={binding.label}
+              className={"px-3 py-1.5 rounded-full glass text-xs font-semibold flex items-center gap-2 " + tone}
+              title={`${tr(lang, "usageLeft")} — ${pct}%`}
+              role="img"
+              aria-label={`${tr(lang, "usageLeft")}: ${pct}%`}
             >
-              {binding.n} {binding.label}
+              <span className="hidden sm:inline">{tr(lang, "usageLeft")}</span>
+              <span className="w-12 h-1.5 rounded-full bg-ink/10 overflow-hidden" aria-hidden="true">
+                <span className={"block h-full rounded-full " + bar} style={{ width: `${pct}%` }} />
+              </span>
             </span>
           );
         })()}

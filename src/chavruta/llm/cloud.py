@@ -18,6 +18,7 @@ import threading
 import time
 from collections.abc import Iterator
 
+from chavruta.llm import metering
 from chavruta.llm.base import GroundedPrompt, LLMResult, render_messages
 
 _log = logging.getLogger("chavruta.llm.cloud")
@@ -109,7 +110,9 @@ class CloudLLM:
 
     def request(self, body_md: str, *, lang: str = "he", token_budget: int | None = None):
         """Answer a pre-formatted job (markdown) — the lesson/chavruta path. Runs the same agentic
-        ===NEED_SOURCES=== loop as the bridge, over completion calls. Returns (answer, fetched)."""
+        ===NEED_SOURCES=== loop as the bridge, over completion calls. Returns (answer, fetched).
+
+        Token spend needs no plumbing here: every round goes through _complete, which meters."""
         from chavruta.llm.agentic import agentic_request
 
         return agentic_request(self, body_md, lang=lang, token_budget=token_budget)
@@ -166,6 +169,9 @@ class CloudLLM:
             getattr(usage, "total_tokens", "?"),
             choice.finish_reason,
         )
+        # The single metering point for this backend: every provider call passes through here, so the
+        # agentic loop's extra rounds are counted without any caller having to know they happened.
+        metering.record(getattr(usage, "prompt_tokens", 0), getattr(usage, "completion_tokens", 0))
         return choice, usage
 
     def generate(self, prompt: GroundedPrompt, *, lang: str, max_tokens: int,

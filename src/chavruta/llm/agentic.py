@@ -160,6 +160,9 @@ def agentic_request(llm, body_md: str, *, lang: str = "he",
     `max_tokens` bounds ONE round's output. `token_budget` bounds the request's TOTAL output across
     every round — the thing that actually determines what a question costs, since the loop re-sends
     the whole growing job up to MAX_RETRIEVAL_ROUNDS times. Without it, per-round caps multiply.
+
+    Token spend is not returned: every round's call meters itself in the backend (llm/metering.py),
+    so the whole loop is already counted by the time this returns.
     """
     # Imported here, not at module scope: cloud.py imports agentic_request, so a top-level import
     # back into cloud would be circular.

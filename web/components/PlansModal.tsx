@@ -81,9 +81,10 @@ export function PlansModal({
                     / {tr(lang, cycle === "annual" ? "perYear" : "perMonth")}
                   </span>
                 </p>
+                {/* A ratio, never a token or lesson count. See app/plans.py public_catalogue. */}
                 <ul className="text-xs text-ink/70 flex flex-col gap-1 mt-1">
-                  <li>{t.daily_quota} {tr(lang, "perDayUnit")}</li>
-                  <li>{t.weekly_quota} {tr(lang, "perWeekUnit")}</li>
+                  <li>{tr(lang, "timesUsage").replace("{n}", String(t.multiple))}</li>
+                  <li>{tr(lang, "timesLessons").replace("{n}", String(t.multiple))}</li>
                 </ul>
                 <button
                   onClick={() => onChoose(t.id, cycle)}
@@ -99,10 +100,7 @@ export function PlansModal({
         </div>
 
         {free && (
-          <p className="text-xs text-ink/50 text-center">
-            {tr(lang, "planFree")}: {free.daily_quota} {tr(lang, "perDayUnit")} ·{" "}
-            {free.weekly_quota} {tr(lang, "perWeekUnit")}
-          </p>
+          <p className="text-xs text-ink/50 text-center">{tr(lang, "freeBaseline")}</p>
         )}
 
         <p className="text-xs text-ink/50 leading-relaxed">{tr(lang, "quotaExplainer")}</p>

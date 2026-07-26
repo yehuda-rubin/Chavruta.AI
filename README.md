@@ -339,7 +339,8 @@ Hebrew/English UI. Halachic *rulings* remain advisory only, never a substitute f
 
 - [specs/001-chavruta-redesign/](specs/001-chavruta-redesign/) — spec · plan · research · data-model · contracts · quickstart
 - [docs/CORPUS.md](docs/CORPUS.md) — corpus scope & commentators
-- [docs/PLANS_AND_COUPONS.md](docs/PLANS_AND_COUPONS.md) — subscription tiers, credits, and coupon codes
+- [docs/PLANS_AND_COUPONS.md](docs/PLANS_AND_COUPONS.md) — subscription tiers, token metering, credits, coupons
+- [docs/USER_DATA.md](docs/USER_DATA.md) — what the system stores about users, why, and for how long
 - [docs/NEBIUS_HALACHA_JOB.md](docs/NEBIUS_HALACHA_JOB.md) — Nebius embedding-job guide (no Docker) + screenshots
 - [.specify/memory/constitution.md](.specify/memory/constitution.md) — the project constitution (governing principles)
 

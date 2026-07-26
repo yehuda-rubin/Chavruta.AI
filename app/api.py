@@ -56,6 +56,7 @@ from chavruta import __version__
 from chavruta.config.profile import Profile
 from chavruta.corpus import rights
 from chavruta.corpus.schema import Intent, Query, Turn
+from chavruta.llm import metering
 from chavruta.llm.agentic import is_degrade_message
 from chavruta.pipeline.pipeline import _max_tokens_for
 
@@ -1086,57 +1087,128 @@ def _augment_question(question: str, attachments: list[Attachment] | None) -> st
 
 
 # ── Daily quota, per subscription plan ────────────────────────────────────────
-def _plan_daily_quota(plan: str) -> int:
-    """Generations allowed per authenticated user per UTC day for their plan. 0 ⇒ unlimited.
-    Tier table + env overrides live in app/plans.py; 'paid' still maps to the standard paid tier."""
-    return plans.daily_quota(plan)
-
-
-def _enforce_quota(owner: str, lang: str, intent: str = "") -> None:
-    """Per-plan DAILY and WEEKLY caps, with prepaid credits as the overflow.
-
-    Only bites authenticated users (owner != 'local'); local/offline use is uncapped. Both caps are
-    enforced — the daily one bounds a spike, the weekly one bounds the month, and a daily cap alone
-    would permit seven maxed days in a row. Once either is hit we try to spend credits rather than
-    refuse; only with none left does this 429. Enforced before ownership checks so an over-quota
-    user probing session ids learns nothing.
-    """
-    if owner == "local":
-        return
-    plan = db.get_plan(owner)
-    daily, weekly = plans.daily_quota(plan), plans.weekly_quota(plan)
-    if daily <= 0 and weekly <= 0:
-        return
-
-    units = plans.quota_units(intent)
-    allowed, used_day, used_week = db.bump_usage(owner, daily, weekly_limit=weekly, units=units)
-    if allowed:
-        return
-
-    # Which cap actually stopped it — the message has to be actionable, and "come back tomorrow" is
-    # wrong (and infuriating) when it is the week that is exhausted.
-    weekly_hit = weekly > 0 and used_week + units > weekly
-
-    cost = plans.credit_cost(intent)
-    spent, balance = db.spend_credits(owner, cost)
-    if spent:
-        _log.info("owner=%s over %s quota; spent %d credit(s), %d left",
-                  owner, "weekly" if weekly_hit else "daily", cost, balance)
-        return
-
+def _quota_message(kind: str, lang: str, balance: int, cost: int) -> str:
+    """The 429 body. States WHEN the allowance returns — "come back tomorrow" is wrong and
+    infuriating when it is the week that is spent — and never prints an absolute allowance, so a
+    budget change is not a broken promise to a paying customer."""
     he = (lang or "he").startswith("he")
-    if weekly_hit:
-        head = (f"הגעת למכסה השבועית ({weekly}). היא מתאפסת ביום ראשון."
-                if he else f"Weekly limit reached ({weekly}). It resets on Sunday.")
-    else:
-        head = (f"הגעת למכסה היומית ({daily}). היא מתאפסת מחר."
-                if he else f"Daily limit reached ({daily}). It resets tomorrow.")
+    heads = {
+        "lesson": ("הגעת למכסת השיעורים השבועית. היא מתאפסת ביום ראשון.",
+                   "You've used this week's lessons. It resets on Sunday."),
+        "week": ("הגעת למכסת השימוש השבועית. היא מתאפסת ביום ראשון.",
+                 "You've reached this week's usage limit. It resets on Sunday."),
+        "day": ("הגעת למכסת השימוש היומית. היא מתאפסת מחר.",
+                "You've reached today's usage limit. It resets tomorrow."),
+    }
+    head = heads[kind][0 if he else 1]
     tail = (f" נותרו לך {balance} קרדיטים (הפעולה הזו עולה {cost}). "
             "אפשר לשדרג את התוכנית או להזין קוד קופון."
             if he else
             f" You have {balance} credits (this action costs {cost}). "
             "You can upgrade your plan or redeem a coupon.")
-    raise HTTPException(status_code=429, detail=head + tail)
+    return head + tail
+
+
+def _enforce_lesson_quota(owner: str, lang: str) -> None:
+    """The lesson pool: a weekly COUNT, entirely independent of conversation tokens.
+
+    A lesson is a discrete thing a teacher plans around, so it is counted, not metered. Running out
+    of conversation tokens must NOT block a lesson, and a lesson must not spend them — the whole
+    point of keeping the two pools apart. Cost stays bounded by (lessons per week x the per-lesson
+    token budget the pipeline already enforces).
+    """
+    limit = plans.weekly_lessons(db.get_plan(owner))
+    if limit <= 0:
+        return
+    allowed, _d, _w = db.bump_usage(owner, 0, weekly_limit=limit, units=1, meter=db.LESSON)
+    if allowed:
+        return
+    cost = plans.credit_cost("lesson")
+    spent, balance = db.spend_credits(owner, cost)
+    if spent:
+        _log.info("owner=%s over weekly lesson quota; spent %d credit(s), %d left", owner, cost, balance)
+        return
+    raise HTTPException(status_code=429, detail=_quota_message("lesson", lang, balance, cost))
+
+
+def _reserve_tokens(owner: str, lang: str, intent: str) -> int:
+    """Admit a conversation turn against an ESTIMATE of its token cost; return what was reserved.
+
+    The quota is denominated in tokens but they are only known after the call, so the turn is
+    charged an estimate up front and corrected by _settle_tokens once the real figure comes back.
+    Without the reservation an account with almost nothing left could still launch the largest
+    request in the system, and we would pay for it.
+    """
+    estimate = plans.token_estimate(intent)
+    plan = db.get_plan(owner)
+    daily, weekly = plans.daily_tokens(plan), plans.weekly_tokens(plan)
+    if daily <= 0 and weekly <= 0:
+        return 0
+
+    allowed, _d, used_week = db.bump_usage(owner, daily, weekly_limit=weekly, units=estimate,
+                                           meter=db.TOKENS)
+    if allowed:
+        return estimate
+
+    weekly_hit = weekly > 0 and used_week + estimate > weekly
+    cost = plans.credit_cost(intent)
+    spent, balance = db.spend_credits(owner, cost)
+    if spent:
+        _log.info("owner=%s over %s token quota; spent %d credit(s), %d left",
+                  owner, "weekly" if weekly_hit else "daily", cost, balance)
+        return 0            # paid for with credits — nothing reserved, so nothing to settle
+    raise HTTPException(status_code=429,
+                        detail=_quota_message("week" if weekly_hit else "day", lang, balance, cost))
+
+
+def _settle_tokens(owner: str, reserved: int, usage: dict, intent: str) -> None:
+    """Replace the reservation with what the request actually spent.
+
+    Lessons are skipped entirely: they are metered as a weekly count in their own pool, so charging
+    their (large) token spend to the conversation pool would silently couple the two — the exact
+    thing keeping them separate is for.
+    """
+    if owner == "local" or plans.is_lesson(intent):
+        return
+    actual = plans.normalized_tokens(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
+    if not actual and not reserved:
+        return
+    total = db.settle_usage(owner, reserved, actual, meter=db.TOKENS)
+    _log.info("owner=%s tokens reserved=%d actual=%d calls=%d day_total=%d",
+              owner, reserved, actual, usage.get("calls", 0), total)
+
+
+def _metered(owner: str, reserved: int, intent: str, fn):
+    """Wrap a generation so its real token spend replaces the reservation.
+
+    Returns a callable rather than running immediately because the async endpoints hand this to the
+    job queue: the meter uses a ContextVar, and a worker thread starts with an empty context, so it
+    has to be opened INSIDE the job — not around the submit call, where it would collect nothing.
+
+    Settlement runs in a finally block: a failed generation still burned whatever tokens it burned
+    before failing, and leaving the reservation standing would over-charge instead.
+    """
+    def run():
+        with metering.meter() as usage:
+            try:
+                return fn()
+            finally:
+                _settle_tokens(owner, reserved, usage, intent)
+    return run
+
+
+def _enforce_quota(owner: str, lang: str, intent: str = "") -> int:
+    """Route a request to its pool and admit it. Returns the tokens reserved (0 for a lesson).
+
+    Only bites authenticated users (owner != 'local'); local/offline use is uncapped. Enforced
+    before ownership checks so an over-quota user probing session ids learns nothing.
+    """
+    if owner == "local":
+        return 0
+    if plans.is_lesson(intent):
+        _enforce_lesson_quota(owner, lang)
+        return 0
+    return _reserve_tokens(owner, lang, intent)
 
 
 class QueryRequest(BaseModel):
@@ -1155,10 +1227,10 @@ class QueryRequest(BaseModel):
 def query(req: QueryRequest, owner: str = Depends(current_owner)):
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
-    _enforce_quota(owner, req.lang, req.intent)
-    return _run_query(_augment_question(req.question, req.attachments), req.lang, req.intent, [],
-                      audience=req.audience, grade_band=req.grade_band, length=req.length,
-                      owner_id=owner)
+    reserved = _enforce_quota(owner, req.lang, req.intent)
+    return _metered(owner, reserved, req.intent, lambda: _run_query(
+        _augment_question(req.question, req.attachments), req.lang, req.intent, [],
+        audience=req.audience, grade_band=req.grade_band, length=req.length, owner_id=owner))()
 
 
 class MeOut(BaseModel):
@@ -1166,13 +1238,15 @@ class MeOut(BaseModel):
     authenticated: bool
     plan: str = "free"               # tier id — see app/plans.py
     plan_name: str = ""              # localized display name for the UI
-    daily_quota: int | None = None   # None ⇒ uncapped (local user, or caps disabled)
-    used_today: int = 0
-    remaining: int | None = None     # of the DAILY cap; None ⇒ uncapped
-    weekly_quota: int | None = None  # generations per week (Sunday-start); None ⇒ uncapped
-    used_this_week: int = 0
-    remaining_week: int | None = None
-    credits: int = 0                 # prepaid generations, spent once a cap is hit
+    # Allowances are reported as FRACTIONS REMAINING (1.0 = untouched, 0.0 = spent), never as
+    # absolute tokens or lessons. A published number becomes a promise, and a token figure means
+    # nothing to a reader anyway; a gauge and a tier multiple say everything a user needs.
+    day_left: float | None = None      # conversation pool, today. None ⇒ uncapped
+    week_left: float | None = None     # conversation pool, this week
+    lessons_left: float | None = None  # lesson pool, this week (its own pool)
+    lessons_exhausted: bool = False    # so the UI can grey out lesson mode specifically
+    multiple: int = 1                  # this tier's usage relative to free — the only figure shown
+    credits: int = 0                   # prepaid generations, spent once a cap is hit
     plan_until: str | None = None    # ISO ts the paid/coupon period ends
     cycle: str = "monthly"           # 'monthly' | 'annual' | 'coupon'
     cancel_at_period_end: bool = False   # true ⇒ cancelled, access runs to plan_until then lapses
@@ -1188,22 +1262,32 @@ def me(owner: str = Depends(current_owner)):
     remain, whether a deletion is pending, and whether the account is blocked."""
     plan = "free" if owner == "local" else plans.canonical(db.get_plan(owner))
     is_local = owner == "local"
-    daily, weekly = plans.daily_quota(plan), plans.weekly_quota(plan)
-    used = 0 if is_local else db.usage_today(owner)
-    used_week = 0 if is_local else db.usage_this_week(owner)
     ban = None if is_local else accounts.active_ban(owner)
     sub = (None if is_local else db.get_subscription(owner)) or {}
+
+    def _left(used: int, cap: int) -> float | None:
+        """Fraction of an allowance still available, rounded to whole percent — fine enough for a
+        gauge, coarse enough that nobody can reverse-engineer the cap by watching it move."""
+        if is_local or cap <= 0:
+            return None
+        return round(max(0.0, min(1.0, (cap - used) / cap)), 2)
+
+    day_left = _left(0 if is_local else db.usage_today(owner, meter=db.TOKENS),
+                     plans.daily_tokens(plan))
+    week_left = _left(0 if is_local else db.usage_this_week(owner, meter=db.TOKENS),
+                      plans.weekly_tokens(plan))
+    lessons_left = _left(0 if is_local else db.usage_this_week(owner, meter=db.LESSON),
+                         plans.weekly_lessons(plan))
     return MeOut(
         owner=owner,
         authenticated=not is_local,
         plan=plan,
         plan_name=plans.tier(plan).name_he,
-        daily_quota=None if is_local or daily <= 0 else daily,
-        used_today=used,
-        remaining=None if is_local or daily <= 0 else max(0, daily - used),
-        weekly_quota=None if is_local or weekly <= 0 else weekly,
-        used_this_week=used_week,
-        remaining_week=None if is_local or weekly <= 0 else max(0, weekly - used_week),
+        day_left=day_left,
+        week_left=week_left,
+        lessons_left=lessons_left,
+        lessons_exhausted=lessons_left == 0.0,
+        multiple=plans.tier(plan).multiple,
         credits=0 if is_local else db.get_credits(owner),
         plan_until=sub.get("current_period_end") if plan != "free" else None,
         cycle=sub.get("cycle") or "monthly",
@@ -1461,12 +1545,12 @@ def create_session(req: QueryRequest, owner: str = Depends(current_owner)):
     /sessions/async for a long lesson that would outlast a proxy timeout)."""
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
-    _enforce_quota(owner, req.lang, req.intent)
+    reserved = _enforce_quota(owner, req.lang, req.intent)
 
     # Lock the chat's mode to the intent chosen on this first turn; every follow-up stays in it.
     sid = db.create_session(req.question.strip(), mode=req.intent or None, owner_id=owner)
     db.save_message(sid, "user", req.question)
-    return _first_query_work(sid, req, owner)
+    return _metered(owner, reserved, req.intent, lambda: _first_query_work(sid, req, owner))()
 
 
 @app.post("/sessions/{session_id}/query", response_model=SessionQueryResponse)
@@ -1474,9 +1558,10 @@ def session_query(session_id: str, req: QueryRequest, owner: str = Depends(curre
     """Continue an existing session (synchronous)."""
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
-    _enforce_quota(owner, req.lang, req.intent)
+    reserved = _enforce_quota(owner, req.lang, req.intent)
     history, intent = _prepare_continue(session_id, req, owner)
-    return _continue_query_work(session_id, req, history, intent, owner)
+    return _metered(owner, reserved, req.intent,
+                    lambda: _continue_query_work(session_id, req, history, intent, owner))()
 
 
 # ── Async generation (job queue) ──────────────────────────────────────────────
@@ -1487,11 +1572,11 @@ def session_query(session_id: str, req: QueryRequest, owner: str = Depends(curre
 def query_async(req: QueryRequest, owner: str = Depends(current_owner)):
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
-    _enforce_quota(owner, req.lang, req.intent)
+    reserved = _enforce_quota(owner, req.lang, req.intent)
     q = _augment_question(req.question, req.attachments)
-    jid = jobs.submit(owner, lambda: jsonable_encoder(
+    jid = jobs.submit(owner, _metered(owner, reserved, req.intent, lambda: jsonable_encoder(
         _run_query(q, req.lang, req.intent, [], audience=req.audience,
-                   grade_band=req.grade_band, length=req.length, owner_id=owner)))
+                   grade_band=req.grade_band, length=req.length, owner_id=owner))))
     return JobAccepted(job_id=jid)
 
 
@@ -1501,10 +1586,11 @@ def create_session_async(req: QueryRequest, owner: str = Depends(current_owner))
     query in the background."""
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
-    _enforce_quota(owner, req.lang, req.intent)
+    reserved = _enforce_quota(owner, req.lang, req.intent)
     sid = db.create_session(req.question.strip(), mode=req.intent or None, owner_id=owner)
     db.save_message(sid, "user", req.question)
-    jid = jobs.submit(owner, lambda: jsonable_encoder(_first_query_work(sid, req, owner)))
+    jid = jobs.submit(owner, _metered(owner, reserved, req.intent,
+                                      lambda: jsonable_encoder(_first_query_work(sid, req, owner))))
     return JobAccepted(job_id=jid, session_id=sid)
 
 
@@ -1512,12 +1598,12 @@ def create_session_async(req: QueryRequest, owner: str = Depends(current_owner))
 def session_query_async(session_id: str, req: QueryRequest, owner: str = Depends(current_owner)):
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
-    _enforce_quota(owner, req.lang, req.intent)
+    reserved = _enforce_quota(owner, req.lang, req.intent)
     # The ownership gate + user-turn save happen NOW (before returning) so an unauthorized caller
     # gets a synchronous 404 and the user message is durable even if generation later fails.
     history, intent = _prepare_continue(session_id, req, owner)
-    jid = jobs.submit(owner, lambda: jsonable_encoder(
-        _continue_query_work(session_id, req, history, intent, owner)))
+    jid = jobs.submit(owner, _metered(owner, reserved, req.intent, lambda: jsonable_encoder(
+        _continue_query_work(session_id, req, history, intent, owner))))
     return JobAccepted(job_id=jid, session_id=session_id)
 
 

@@ -47,10 +47,9 @@ def cmd_plan(args: argparse.Namespace) -> None:
         plan=args.plan, days=args.days, code=args.code or "", max_redemptions=args.max,
         expires_in_days=args.expires_in, note=args.note or "")
     t = plans.tier(args.plan)
-    quota = plans.daily_quota(t.id)
     print(f"✅ {code}")
     print(f"   grants : {t.name_en} ({t.id}) for {args.days} days "
-          f"— {'unlimited' if quota == 0 else str(quota) + '/day'}")
+          f"— {plans.daily_tokens(t.id):,} tokens/day, {plans.weekly_lessons(t.id)} lessons/week")
     print(f"   uses   : {'unlimited' if args.max == 0 else args.max}")
     if args.expires_in:
         print(f"   code expires in {args.expires_in} days")
@@ -121,14 +120,21 @@ def cmd_restore(args: argparse.Namespace) -> None:
 
 
 def cmd_tiers(args: argparse.Namespace) -> None:
-    print(f"{'TIER':<14} {'₪/MONTH':>9} {'₪/YEAR':>9} {'SAVE':>6} {'PER DAY':>9} {'PER WEEK':>10}")
+    """The real numbers — operator view. Users never see these; the UI publishes only the multiple."""
+    print(f"{'TIER':<14} {'₪/MO':>7} {'₪/YEAR':>8} {'SAVE':>5} {'x':>4} "
+          f"{'TOKENS/DAY':>12} {'TOKENS/WEEK':>13} {'LESSONS/WK':>11}")
     for t in plans.TIERS:
         save = plans.annual_saving_pct(t.id)
-        print(f"{t.id:<14} {plans.price_ils(t.id, plans.MONTHLY):>9.2f} "
-              f"{plans.price_ils(t.id, plans.ANNUAL):>9.2f} {(str(save) + '%') if save else '-':>6} "
-              f"{plans.daily_quota(t.id):>9} {plans.weekly_quota(t.id):>10}")
-    print("\nNo tier is unlimited — on a per-token product that is an open-ended liability.")
-    print(f"credit cost per generation: qa={plans.credit_cost('qa')} "
+        print(f"{t.id:<14} {plans.price_ils(t.id, plans.MONTHLY):>7.2f} "
+              f"{plans.price_ils(t.id, plans.ANNUAL):>8.2f} {(str(save) + '%') if save else '-':>5} "
+              f"{'x' + str(t.multiple):>4} {plans.daily_tokens(t.id):>12,} "
+              f"{plans.weekly_tokens(t.id):>13,} {plans.weekly_lessons(t.id):>11}")
+    print("\nTwo INDEPENDENT pools: conversation is metered in tokens (daily + weekly); lessons are")
+    print("a weekly COUNT. Exhausting one never blocks the other.")
+    print(f"Tokens are normalized: prompt + {plans.COMPLETION_WEIGHT}x completion.")
+    print("No tier is unlimited — on a per-token product that is an open-ended liability.")
+    print("Users are shown the multiple and a gauge, never these figures (see public_catalogue).")
+    print(f"\ncredit cost per generation: qa={plans.credit_cost('qa')} "
           f"halacha={plans.credit_cost('halacha')} lesson={plans.credit_cost('lesson')}")
     print("override any of it with env vars — see app/plans.py")
 

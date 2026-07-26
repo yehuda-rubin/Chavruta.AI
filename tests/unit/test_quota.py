@@ -135,5 +135,62 @@ def test_a_refused_weekly_bump_counts_nothing(fresh_db):
     assert fresh_db.usage_this_week("w4", day="2026-07-20") == 3
 
 
+# ── Two independent pools ─────────────────────────────────────────────────────
+def test_token_and_lesson_meters_do_not_touch_each_other(fresh_db):
+    """The whole point of the split: exhausting conversation tokens must not cost a lesson, and a
+    lesson must not eat conversation tokens."""
+    d = "2026-07-20"
+    fresh_db.bump_usage("m1", 100, day=d, units=100, meter=fresh_db.TOKENS)   # tokens fully spent
+    assert not fresh_db.bump_usage("m1", 100, day=d, units=1, meter=fresh_db.TOKENS)[0]
+
+    # Lessons are untouched and still available.
+    allowed, _d, week = fresh_db.bump_usage("m1", 0, day=d, weekly_limit=3, units=1,
+                                            meter=fresh_db.LESSON)
+    assert allowed and week == 1
+    # And the lesson did not consume token allowance.
+    assert fresh_db.usage_today("m1", day=d, meter=fresh_db.TOKENS) == 100
+
+
+def test_lesson_pool_is_weekly_only(fresh_db):
+    """Three lessons a week means three, whether taken in one day or spread out."""
+    for _ in range(3):
+        assert fresh_db.bump_usage("m2", 0, day="2026-07-20", weekly_limit=3, units=1,
+                                   meter=fresh_db.LESSON)[0]
+    assert not fresh_db.bump_usage("m2", 0, day="2026-07-21", weekly_limit=3, units=1,
+                                   meter=fresh_db.LESSON)[0]
+    # Next week is a fresh allowance.
+    assert fresh_db.bump_usage("m2", 0, day="2026-07-27", weekly_limit=3, units=1,
+                               meter=fresh_db.LESSON)[0]
+
+
+# ── Reserve then settle ───────────────────────────────────────────────────────
+def test_settling_below_the_reservation_refunds_the_difference(fresh_db):
+    """The normal case: the estimate is generous, so most of it comes back."""
+    fresh_db.bump_usage("s1", 0, units=20_000, meter=fresh_db.TOKENS)     # reserved
+    fresh_db.settle_usage("s1", reserved=20_000, actual=6_000)
+    assert fresh_db.usage_today("s1", meter=fresh_db.TOKENS) == 6_000
+
+
+def test_settling_above_the_reservation_charges_the_overrun(fresh_db):
+    """An under-estimate must still be paid for, or a big request is partly free."""
+    fresh_db.bump_usage("s2", 0, units=20_000, meter=fresh_db.TOKENS)
+    fresh_db.settle_usage("s2", reserved=20_000, actual=90_000)
+    assert fresh_db.usage_today("s2", meter=fresh_db.TOKENS) == 90_000
+
+
+def test_settlement_cannot_mint_allowance_from_earlier_usage(fresh_db):
+    """A wrong reservation must never drive the counter below what other requests already spent."""
+    fresh_db.bump_usage("s3", 0, units=5_000, meter=fresh_db.TOKENS)      # an earlier request
+    fresh_db.settle_usage("s3", reserved=50_000, actual=0)                # never reserved that much
+    assert fresh_db.usage_today("s3", meter=fresh_db.TOKENS) == 0         # floored, not negative
+
+
+def test_settlement_is_isolated_per_meter(fresh_db):
+    fresh_db.bump_usage("s4", 0, units=2, meter=fresh_db.LESSON)
+    fresh_db.settle_usage("s4", reserved=0, actual=7_000, meter=fresh_db.TOKENS)
+    assert fresh_db.usage_today("s4", meter=fresh_db.LESSON) == 2
+    assert fresh_db.usage_today("s4", meter=fresh_db.TOKENS) == 7_000
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

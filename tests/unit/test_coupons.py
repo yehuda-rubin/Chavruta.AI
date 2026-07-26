@@ -216,6 +216,23 @@ def test_same_tier_coupons_stack_instead_of_truncating():
     assert (end2 - end1).days == 30
 
 
+def test_account_deletion_removes_the_redemption_trail_but_not_the_spend():
+    """A deleted account must leave no identifier behind — and the coupon must stay spent anyway."""
+    import app.coupons as coupons
+    import app.db as db
+
+    code = coupons.issue_credit_coupon(credits=50)
+    coupons.redeem("mia", code)
+    db.purge_owner("mia")
+
+    stored = coupons.normalize(code)
+    assert db.list_redemptions(stored) == []                       # no owner_id survives
+    assert db.get_coupon(stored)["redeemed_count"] == 1            # still spent
+    with pytest.raises(coupons.RedeemError) as e:
+        coupons.redeem("someone-else", code)
+    assert e.value.reason == "exhausted"
+
+
 def test_a_failed_redemption_grants_nothing_and_burns_nothing():
     import app.coupons as coupons
     import app.db as db
@@ -313,7 +330,8 @@ def test_legacy_paid_plan_still_maps_to_a_real_tier():
     from app import plans
 
     assert plans.canonical("paid") == "pro"
-    assert plans.daily_quota("paid") == plans.daily_quota("pro")
+    assert plans.daily_tokens("paid") == plans.daily_tokens("pro")
+    assert plans.weekly_lessons("paid") == plans.weekly_lessons("pro")
 
 
 def test_unknown_plan_falls_back_to_free_not_to_access():
@@ -339,5 +357,7 @@ def test_credit_costs_can_be_flattened_by_env(monkeypatch):
 def test_quota_env_overrides_apply(monkeypatch):
     from app import plans
 
-    monkeypatch.setenv("CHAVRUTA_QUOTA_BASIC", "99")
-    assert plans.daily_quota("basic") == 99
+    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_BASIC", "99")
+    monkeypatch.setenv("CHAVRUTA_LESSONS_WEEK_BASIC", "7")
+    assert plans.daily_tokens("basic") == 99
+    assert plans.weekly_lessons("basic") == 7

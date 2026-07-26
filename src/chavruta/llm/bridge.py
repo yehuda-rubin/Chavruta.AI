@@ -23,6 +23,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
+from chavruta.llm import metering
 from chavruta.llm.agentic import (  # noqa: F401 — re-exported for back-compat
     MAX_RETRIEVAL_ROUNDS,
     SOURCE_REQUEST_INSTRUCTION,
@@ -33,6 +34,16 @@ from chavruta.llm.base import GroundedPrompt, LLMResult, SourceBlock
 BRIDGE_DIR = Path(os.environ.get("CHAVRUTA_BRIDGE_DIR", "data/llm_bridge"))
 PENDING = BRIDGE_DIR / "pending"
 ANSWERS = BRIDGE_DIR / "answers"
+
+
+def _estimate_tokens(text: str) -> int:
+    """Rough token count for text this backend never gets a real usage figure for.
+
+    ~3.5 characters per token: Hebrew tokenizes worse than English on the multilingual vocabularies
+    these models use, so the usual 4.0 rule of thumb undercounts here. Deliberately an over-estimate
+    — for a quota, charging slightly too much is a smaller error than serving compute for free.
+    """
+    return int(len(text or "") / 3.5)
 
 
 class BridgeLLM:
@@ -101,7 +112,9 @@ class BridgeLLM:
 
     def generate(self, prompt: GroundedPrompt, *, lang: str, max_tokens: int,
                  temperature: float) -> LLMResult:
-        text, fetched = self._dispatch("# job", self._write_job_md(prompt), lang)
+        job_md = self._write_job_md(prompt)
+        text, fetched = self._dispatch("# job", job_md, lang)
+        metering.record(_estimate_tokens(job_md), _estimate_tokens(text or ""))   # see request()
         return LLMResult(text=text, finish_reason="stop" if text else "timeout", fetched_sources=fetched)
 
     def stream(self, prompt: GroundedPrompt, *, lang: str, max_tokens: int,
@@ -113,6 +126,13 @@ class BridgeLLM:
         (answer, fetched_sources). Used by the lesson / chavruta paths. Runs the agentic loop.
 
         token_budget is accepted for interface parity and ignored: this backend answers in-session
-        and bills no tokens, so there is nothing to meter.
+        and bills no provider tokens, so there is nothing to meter for COST.
+
+        It still meters for QUOTA, from an estimate — the account allowance is denominated in tokens,
+        so recording nothing would make every bridge request free and the quota silently inert in
+        bridge mode. A metering difference between backends is exactly the kind of thing nobody
+        notices until the bridge is running in front of users.
         """
-        return self._dispatch("# lesson job", body_md, lang)
+        answer, fetched = self._dispatch("# lesson job", body_md, lang)
+        metering.record(_estimate_tokens(body_md), _estimate_tokens(answer or ""))
+        return answer, fetched
