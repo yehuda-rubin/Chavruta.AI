@@ -132,8 +132,11 @@ export const api = {
   // Coupons: the user-facing half. Issuing is operator-only (scripts/manage_coupons.py).
   redeemCoupon: (code: string) =>
     req<Redeemed>("/coupons/redeem", { method: "POST", body: JSON.stringify({ code }) }),
-  checkout: (email: string, name: string) =>
-    req<{ url: string }>("/billing/checkout", { method: "POST", body: JSON.stringify({ email, name }) }),
+  checkout: (email: string, name: string, plan = "pro", cycle: "monthly" | "annual" = "monthly") =>
+    req<{ url: string }>("/billing/checkout", {
+      method: "POST",
+      body: JSON.stringify({ email, name, plan, cycle }),
+    }),
   cancelSubscription: () => req<{ ok: boolean }>("/billing/cancel", { method: "POST" }),
 };
 
@@ -146,9 +149,14 @@ export interface Me {
   plan_name: string;
   daily_quota: number | null;
   used_today: number;
-  remaining: number | null;
-  credits: number;                          // prepaid generations, spent once the daily quota is out
-  plan_until: string | null;                // ISO ts a coupon-granted plan lapses; null = no end date
+  remaining: number | null;                 // of the DAILY cap
+  weekly_quota: number | null;
+  used_this_week: number;
+  remaining_week: number | null;
+  credits: number;                          // prepaid generations, spent once a cap is hit
+  plan_until: string | null;                // ISO ts the paid/coupon period ends
+  cycle: string;                            // 'monthly' | 'annual' | 'coupon'
+  cancel_at_period_end: boolean;            // cancelled: access runs to plan_until, then lapses
   deletion_scheduled_for: string | null;   // ISO ts if the account is pending deletion
   blocked: boolean;
   blocked_until: string | null;             // ISO ts the block lifts (null + blocked ⇒ permanent)
@@ -158,8 +166,11 @@ export interface Me {
 export interface Tier {
   id: string;
   name: string;
-  price_ils: number;
-  daily_quota: number;      // 0 ⇒ unlimited
+  price_ils: number;              // per month
+  annual_price_ils: number;       // the whole year up front, discounted
+  annual_saving_pct: number;
+  daily_quota: number;
+  weekly_quota: number;
 }
 
 export interface Redeemed {

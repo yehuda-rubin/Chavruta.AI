@@ -60,7 +60,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -190,10 +190,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
             owner_id             TEXT PRIMARY KEY,
             provider             TEXT,
             provider_ref         TEXT,
-            status               TEXT NOT NULL DEFAULT 'none',   -- none | active | past_due | canceled
+            status               TEXT NOT NULL DEFAULT 'none',   -- none|pending|active|past_due|canceled
             current_period_end   TEXT,                           -- ISO ts the paid period ends
             cancel_at_period_end INTEGER NOT NULL DEFAULT 0,     -- 1 = don't renew, lapse at period end
-            updated_at           TEXT
+            updated_at           TEXT,
+            -- What was bought, recorded at CHECKOUT: the provider callback reports a successful
+            -- charge and for whom, not which tier or period it was for. Without these an annual
+            -- purchase would come back and be granted a single month.
+            plan                 TEXT,                           -- tier id (app/plans.py)
+            cycle                TEXT NOT NULL DEFAULT 'monthly' -- monthly | annual
         );
     """)
 
@@ -246,6 +251,18 @@ def _migrate(conn: sqlite3.Connection) -> None:
         acols = {r[1] for r in conn.execute("PRAGMA table_info(accounts)")}
         if "credits" not in acols:
             conn.execute("ALTER TABLE accounts ADD COLUMN credits INTEGER NOT NULL DEFAULT 0")
+
+    if version < 13:
+        # Which tier and billing cycle a subscription is for. Existing rows predate multiple tiers
+        # and the annual option, so they are exactly what the defaults describe: the paid tier,
+        # billed monthly.
+        scols = {r[1] for r in conn.execute("PRAGMA table_info(subscriptions)")}
+        if "plan" not in scols:
+            conn.execute("ALTER TABLE subscriptions ADD COLUMN plan TEXT")
+            conn.execute("UPDATE subscriptions SET plan='pro' WHERE plan IS NULL")
+        if "cycle" not in scols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN cycle TEXT NOT NULL DEFAULT 'monthly'")
 
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
@@ -529,27 +546,56 @@ def today_utc() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%d")
 
 
-def bump_usage(owner_id: str, limit: int, day: str | None = None) -> tuple[bool, int]:
-    """Atomically account one generation for `owner_id` today and enforce the free-tier quota.
+def week_days(day: str | None = None) -> list[str]:
+    """The seven YYYY-MM-DD dates of `day`'s week, Sunday first.
 
-    Returns (allowed, count). With limit <= 0 the quota is OFF: always allowed, still counted (so
-    usage is observable). With limit > 0, if the day's count already reached the limit we do NOT
-    increment and return (False, count) — the caller turns that into a 429. The read-and-increment
-    runs under the shared lock in one transaction, so two concurrent requests can't both slip past
-    the limit."""
+    Sunday-start because the product is Israeli and that is the week a user here means. A calendar
+    week (rather than a rolling 7 days) is what the UI can state plainly — "resets Sunday" — and a
+    predictable reset matters more here than closing the small boundary burst, which the daily cap
+    bounds anyway.
+    """
+    d = datetime.strptime(day or today_utc(), "%Y-%m-%d").replace(tzinfo=UTC)
+    sunday = d - timedelta(days=(d.weekday() + 1) % 7)      # Python: Monday==0, so Sunday==6
+    return [(sunday + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)]
+
+
+def bump_usage(owner_id: str, limit: int, day: str | None = None, *,
+               weekly_limit: int = 0, units: int = 1) -> tuple[bool, int, int]:
+    """Atomically account one generation and enforce BOTH the daily and the weekly cap.
+
+    Returns (allowed, day_count, week_count) — the counts AFTER a successful bump, or the current
+    ones when refused. A limit <= 0 disables that cap (usage is still counted, so it stays
+    observable). `units` is how much this generation consumes; see plans.quota_units.
+
+    Both caps are checked and the counter incremented inside ONE transaction under the shared lock,
+    so concurrent requests cannot each see room and both proceed. The week total is summed from the
+    daily rows rather than kept in its own counter: one source of truth, so the two figures can
+    never disagree, and no extra table to migrate.
+    """
     day = day or today_utc()
+    units = max(1, int(units))
     conn = get_conn()
     with _LOCK, _tx(conn):
         row = conn.execute(
             "SELECT count FROM usage_counters WHERE owner_id=? AND day=?", (owner_id, day)).fetchone()
-        current = row["count"] if row else 0
-        if limit > 0 and current >= limit:
-            return False, current
+        day_count = row["count"] if row else 0
+        days = week_days(day)
+        wrow = conn.execute(
+            f"SELECT COALESCE(SUM(count), 0) AS c FROM usage_counters "  # noqa: S608 — placeholders below
+            f"WHERE owner_id=? AND day IN ({','.join('?' * len(days))})",
+            (owner_id, *days)).fetchone()
+        week_count = int(wrow["c"])
+
+        if limit > 0 and day_count + units > limit:
+            return False, day_count, week_count
+        if weekly_limit > 0 and week_count + units > weekly_limit:
+            return False, day_count, week_count
+
         conn.execute(
-            "INSERT INTO usage_counters (owner_id, day, count) VALUES (?,?,1) "
-            "ON CONFLICT(owner_id, day) DO UPDATE SET count = count + 1",
-            (owner_id, day))
-        return True, current + 1
+            "INSERT INTO usage_counters (owner_id, day, count) VALUES (?,?,?) "
+            "ON CONFLICT(owner_id, day) DO UPDATE SET count = count + excluded.count",
+            (owner_id, day, units))
+        return True, day_count + units, week_count + units
 
 
 def usage_today(owner_id: str, day: str | None = None) -> int:
@@ -560,6 +606,18 @@ def usage_today(owner_id: str, day: str | None = None) -> int:
         row = conn.execute(
             "SELECT count FROM usage_counters WHERE owner_id=? AND day=?", (owner_id, day)).fetchone()
     return row["count"] if row else 0
+
+
+def usage_this_week(owner_id: str, day: str | None = None) -> int:
+    """This week's generation count (Sunday-start), summed from the daily rows."""
+    days = week_days(day)
+    conn = get_conn()
+    with _LOCK:
+        row = conn.execute(
+            f"SELECT COALESCE(SUM(count), 0) AS c FROM usage_counters "  # noqa: S608 — placeholders below
+            f"WHERE owner_id=? AND day IN ({','.join('?' * len(days))})",
+            (owner_id, *days)).fetchone()
+    return int(row["c"])
 
 
 # ── Account deletion (scheduled, with a grace period) ─────────────────────────
@@ -758,12 +816,13 @@ def redeem_coupon(code: str, owner_id: str, now_iso: str, granted: str, *,
             # plan lapses on its own with no new expiry machinery.
             conn.execute(
                 "INSERT INTO subscriptions (owner_id, provider, provider_ref, status, "
-                "current_period_end, cancel_at_period_end, updated_at) VALUES (?,?,?,?,?,1,?) "
+                "current_period_end, cancel_at_period_end, updated_at, plan, cycle) "
+                "VALUES (?,?,?,?,?,1,?,?,'coupon') "
                 "ON CONFLICT(owner_id) DO UPDATE SET provider=excluded.provider, "
                 "provider_ref=excluded.provider_ref, status=excluded.status, "
                 "current_period_end=excluded.current_period_end, cancel_at_period_end=1, "
-                "updated_at=excluded.updated_at",
-                (owner_id, "coupon", code, "canceled", period_end, now_iso))
+                "updated_at=excluded.updated_at, plan=excluded.plan, cycle=excluded.cycle",
+                (owner_id, "coupon", code, "canceled", period_end, now_iso, set_plan_to))
         return "ok"
 
 
@@ -810,28 +869,32 @@ def list_bans() -> list[dict[str, Any]]:
 # ── Subscriptions (billing) ───────────────────────────────────────────────────
 def upsert_subscription(owner_id: str, *, provider: str | None = None, provider_ref: str | None = None,
                         status: str | None = None, current_period_end: str | None = None,
-                        cancel_at_period_end: bool | None = None, updated_at: str) -> None:
+                        cancel_at_period_end: bool | None = None, updated_at: str,
+                        plan: str | None = None, cycle: str | None = None) -> None:
     """Create or update an owner's subscription row. A passed field is written; None means "leave as-is"
     (merged over the current row), so a webhook can update just status+period without clobbering the
     stored provider_ref. Read-merge-write under the lock keeps concurrent webhooks consistent."""
     conn = get_conn()
     with _LOCK, _tx(conn):
         row = conn.execute(
-            "SELECT provider, provider_ref, status, current_period_end, cancel_at_period_end "
-            "FROM subscriptions WHERE owner_id=?", (owner_id,)).fetchone()
+            "SELECT provider, provider_ref, status, current_period_end, cancel_at_period_end, "
+            "plan, cycle FROM subscriptions WHERE owner_id=?", (owner_id,)).fetchone()
         cur = dict(row) if row else {
             "provider": None, "provider_ref": None, "status": "none",
-            "current_period_end": None, "cancel_at_period_end": 0}
+            "current_period_end": None, "cancel_at_period_end": 0, "plan": None, "cycle": "monthly"}
         conn.execute(
             "INSERT OR REPLACE INTO subscriptions (owner_id, provider, provider_ref, status, "
-            "current_period_end, cancel_at_period_end, updated_at) VALUES (?,?,?,?,?,?,?)",
+            "current_period_end, cancel_at_period_end, updated_at, plan, cycle) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
             (owner_id,
              provider if provider is not None else cur["provider"],
              provider_ref if provider_ref is not None else cur["provider_ref"],
              status if status is not None else cur["status"],
              current_period_end if current_period_end is not None else cur["current_period_end"],
              cur["cancel_at_period_end"] if cancel_at_period_end is None else int(cancel_at_period_end),
-             updated_at))
+             updated_at,
+             plan if plan is not None else cur["plan"],
+             cycle if cycle is not None else (cur["cycle"] or "monthly")))
 
 
 def get_subscription(owner_id: str) -> dict[str, Any] | None:
@@ -839,7 +902,8 @@ def get_subscription(owner_id: str) -> dict[str, Any] | None:
     with _LOCK:
         row = conn.execute(
             "SELECT owner_id, provider, provider_ref, status, current_period_end, "
-            "cancel_at_period_end, updated_at FROM subscriptions WHERE owner_id=?", (owner_id,)).fetchone()
+            "cancel_at_period_end, updated_at, plan, cycle "
+            "FROM subscriptions WHERE owner_id=?", (owner_id,)).fetchone()
     return dict(row) if row else None
 
 

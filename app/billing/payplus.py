@@ -62,14 +62,28 @@ def _price() -> float:
         return 49.9
 
 
-def create_payment_page(owner_id: str, email: str, name: str) -> dict:
+def create_payment_page(owner_id: str, email: str, name: str, *,
+                        amount: float | None = None, cycle: str = "monthly") -> dict:
     """Create a hosted recurring-payment page and return {link, page_request_uid}. `owner_id` is
-    threaded through `more_info` so the webhook can tie the charge back to the account."""
+    threaded through `more_info` so the webhook can tie the charge back to the account.
+
+    `cycle` picks the recurrence: monthly, or yearly for a prepaid year. Either way the subscription
+    renews until cancelled — cancelling stops the NEXT charge and leaves the period already paid for
+    intact, which for an annual plan means access runs to the end of that year.
+
+    ⚠️ `recurring_type: "yearly"` is the documented value but has NOT been exercised against a live
+    PayPlus terminal here (no annual charge has run yet). Verify it on the first real annual
+    checkout before advertising the plan; override with PAYPLUS_ANNUAL_RECURRING_TYPE if their API
+    names it differently.
+    """
     import requests
 
+    annual = cycle == "annual"
+    recurring_type = (os.environ.get("PAYPLUS_ANNUAL_RECURRING_TYPE", "yearly").strip()
+                      if annual else "monthly")
     body = {
         "payment_page_uid": _page_uid(),
-        "amount": _price(),
+        "amount": _price() if amount is None else float(amount),
         "currency_code": "ILS",
         "charge_method": 3,          # 3 = recurring
         "create_token": True,
@@ -79,7 +93,7 @@ def create_payment_page(owner_id: str, email: str, name: str) -> dict:
         "customer": {"customer_name": name or email or "user", "email": email or ""},
         "recurring_settings": {
             "instant_first_payment": True,
-            "recurring_type": "monthly",
+            "recurring_type": recurring_type,
             "number_of_charges": 0,   # 0 = until cancelled
         },
         "more_info": owner_id,

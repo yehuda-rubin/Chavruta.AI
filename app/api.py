@@ -1093,38 +1093,50 @@ def _plan_daily_quota(plan: str) -> int:
 
 
 def _enforce_quota(owner: str, lang: str, intent: str = "") -> None:
-    """Per-plan daily cap, with prepaid credits as the overflow.
+    """Per-plan DAILY and WEEKLY caps, with prepaid credits as the overflow.
 
-    Only bites authenticated users (owner != 'local') when a quota is configured for their plan —
-    local/offline use is always unlimited. Once the day's allowance is gone we try to spend credits
-    instead of refusing; only when there are none does this 429. Enforced before ownership checks so
-    an over-quota user probing session ids learns nothing.
+    Only bites authenticated users (owner != 'local'); local/offline use is uncapped. Both caps are
+    enforced — the daily one bounds a spike, the weekly one bounds the month, and a daily cap alone
+    would permit seven maxed days in a row. Once either is hit we try to spend credits rather than
+    refuse; only with none left does this 429. Enforced before ownership checks so an over-quota
+    user probing session ids learns nothing.
     """
     if owner == "local":
         return
-    limit = _plan_daily_quota(db.get_plan(owner))
-    if limit <= 0:
+    plan = db.get_plan(owner)
+    daily, weekly = plans.daily_quota(plan), plans.weekly_quota(plan)
+    if daily <= 0 and weekly <= 0:
         return
-    allowed, _ = db.bump_usage(owner, limit)
+
+    units = plans.quota_units(intent)
+    allowed, used_day, used_week = db.bump_usage(owner, daily, weekly_limit=weekly, units=units)
     if allowed:
         return
+
+    # Which cap actually stopped it — the message has to be actionable, and "come back tomorrow" is
+    # wrong (and infuriating) when it is the week that is exhausted.
+    weekly_hit = weekly > 0 and used_week + units > weekly
 
     cost = plans.credit_cost(intent)
     spent, balance = db.spend_credits(owner, cost)
     if spent:
-        _log.info("owner=%s over daily quota (%d); spent %d credit(s), %d left", owner, limit, cost, balance)
+        _log.info("owner=%s over %s quota; spent %d credit(s), %d left",
+                  owner, "weekly" if weekly_hit else "daily", cost, balance)
         return
 
     he = (lang or "he").startswith("he")
-    raise HTTPException(
-        status_code=429,
-        detail=(f"הגעת למכסת השאלות היומית ({limit}). "
-                f"נותרו לך {balance} קרדיטים (הפעולה הזו עולה {cost}). "
-                "המכסה מתאפסת מחר — או שדרג את התוכנית / הזן קוד קופון."
-                if he else
-                f"Daily limit reached ({limit}). You have {balance} credits "
-                f"(this action costs {cost}). It resets tomorrow — or upgrade, or redeem a coupon."),
-    )
+    if weekly_hit:
+        head = (f"הגעת למכסה השבועית ({weekly}). היא מתאפסת ביום ראשון."
+                if he else f"Weekly limit reached ({weekly}). It resets on Sunday.")
+    else:
+        head = (f"הגעת למכסה היומית ({daily}). היא מתאפסת מחר."
+                if he else f"Daily limit reached ({daily}). It resets tomorrow.")
+    tail = (f" נותרו לך {balance} קרדיטים (הפעולה הזו עולה {cost}). "
+            "אפשר לשדרג את התוכנית או להזין קוד קופון."
+            if he else
+            f" You have {balance} credits (this action costs {cost}). "
+            "You can upgrade your plan or redeem a coupon.")
+    raise HTTPException(status_code=429, detail=head + tail)
 
 
 class QueryRequest(BaseModel):
@@ -1154,11 +1166,16 @@ class MeOut(BaseModel):
     authenticated: bool
     plan: str = "free"               # tier id — see app/plans.py
     plan_name: str = ""              # localized display name for the UI
-    daily_quota: int | None = None   # None ⇒ unlimited (local user, or quota disabled)
+    daily_quota: int | None = None   # None ⇒ uncapped (local user, or caps disabled)
     used_today: int = 0
-    remaining: int | None = None     # None ⇒ unlimited
-    credits: int = 0                 # prepaid generations, spent once the daily quota runs out
-    plan_until: str | None = None    # ISO ts a time-boxed (coupon) plan lapses; None = no end date
+    remaining: int | None = None     # of the DAILY cap; None ⇒ uncapped
+    weekly_quota: int | None = None  # generations per week (Sunday-start); None ⇒ uncapped
+    used_this_week: int = 0
+    remaining_week: int | None = None
+    credits: int = 0                 # prepaid generations, spent once a cap is hit
+    plan_until: str | None = None    # ISO ts the paid/coupon period ends
+    cycle: str = "monthly"           # 'monthly' | 'annual' | 'coupon'
+    cancel_at_period_end: bool = False   # true ⇒ cancelled, access runs to plan_until then lapses
     deletion_scheduled_for: str | None = None   # ISO ts if the account is pending deletion
     blocked: bool = False            # account on the blocklist
     blocked_until: str | None = None  # ISO ts the block lifts (None + blocked ⇒ permanent)
@@ -1170,21 +1187,27 @@ def me(owner: str = Depends(current_owner)):
     """Account + today's quota state — lets the UI show who's signed in, their plan, how many questions
     remain, whether a deletion is pending, and whether the account is blocked."""
     plan = "free" if owner == "local" else plans.canonical(db.get_plan(owner))
-    limit = _plan_daily_quota(plan)
-    unlimited = owner == "local" or limit <= 0
-    used = 0 if owner == "local" else db.usage_today(owner)
-    ban = None if owner == "local" else accounts.active_ban(owner)
-    sub = None if owner == "local" else db.get_subscription(owner)
+    is_local = owner == "local"
+    daily, weekly = plans.daily_quota(plan), plans.weekly_quota(plan)
+    used = 0 if is_local else db.usage_today(owner)
+    used_week = 0 if is_local else db.usage_this_week(owner)
+    ban = None if is_local else accounts.active_ban(owner)
+    sub = (None if is_local else db.get_subscription(owner)) or {}
     return MeOut(
         owner=owner,
-        authenticated=owner != "local",
+        authenticated=not is_local,
         plan=plan,
         plan_name=plans.tier(plan).name_he,
-        daily_quota=None if unlimited else limit,
+        daily_quota=None if is_local or daily <= 0 else daily,
         used_today=used,
-        remaining=None if unlimited else max(0, limit - used),
-        credits=0 if owner == "local" else db.get_credits(owner),
-        plan_until=(sub or {}).get("current_period_end") if plan != "free" else None,
+        remaining=None if is_local or daily <= 0 else max(0, daily - used),
+        weekly_quota=None if is_local or weekly <= 0 else weekly,
+        used_this_week=used_week,
+        remaining_week=None if is_local or weekly <= 0 else max(0, weekly - used_week),
+        credits=0 if is_local else db.get_credits(owner),
+        plan_until=sub.get("current_period_end") if plan != "free" else None,
+        cycle=sub.get("cycle") or "monthly",
+        cancel_at_period_end=bool(sub.get("cancel_at_period_end")),
         deletion_scheduled_for=None if owner == "local" else accounts.scheduled_for(owner),
         blocked=ban is not None,
         blocked_until=ban["until"] if ban else None,
@@ -1219,6 +1242,8 @@ def cancel_account_deletion(owner: str = Depends(current_owner)):
 class CheckoutRequest(BaseModel):
     email: str = ""
     name: str = ""
+    plan: str = "pro"                        # tier id — see app/plans.py
+    cycle: str = "monthly"                   # 'monthly' | 'annual' (a prepaid, discounted year)
 
 
 class CheckoutOut(BaseModel):
@@ -1300,7 +1325,10 @@ def billing_checkout(req: CheckoutRequest, owner: str = Depends(current_owner)):
     if not billing.enabled():
         raise HTTPException(status_code=503, detail="billing not configured")
     try:
-        return CheckoutOut(url=billing.start_checkout(owner, req.email, req.name))
+        return CheckoutOut(url=billing.start_checkout(owner, req.email, req.name,
+                                                      plan=req.plan, cycle=req.cycle))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:            # noqa: BLE001 — surface a clean 502 rather than a stack trace
         _log.exception("checkout failed for %s", owner)
         raise HTTPException(status_code=502, detail="could not start checkout") from exc

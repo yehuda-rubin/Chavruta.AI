@@ -14,6 +14,7 @@ import time
 from datetime import UTC, datetime, timedelta
 
 import app.db as db
+from app import plans
 from app.billing import greeninvoice, payplus
 
 _log = logging.getLogger("chavruta.billing")
@@ -23,22 +24,33 @@ def enabled() -> bool:
     return payplus.enabled()
 
 
-def _description() -> str:
-    return os.environ.get("CHAVRUTA_SUB_DESCRIPTION", "חברותא AI — מנוי חודשי")
+def _description(cycle: str = plans.MONTHLY) -> str:
+    """Invoice line. Must say which period was actually charged — an annual receipt reading
+    "monthly subscription" is a bookkeeping problem, not a cosmetic one."""
+    if env := os.environ.get("CHAVRUTA_SUB_DESCRIPTION", "").strip():
+        return env
+    return ("חברותא AI — מנוי שנתי" if plans.canonical_cycle(cycle) == plans.ANNUAL
+            else "חברותא AI — מנוי חודשי")
 
 
-def _period_days() -> int:
-    try:
-        return max(1, int(os.environ.get("CHAVRUTA_SUB_PERIOD_DAYS", "30")))
-    except ValueError:
-        return 30
+def start_checkout(owner_id: str, email: str, name: str, *,
+                   plan: str = "pro", cycle: str = plans.MONTHLY) -> str:
+    """Create a hosted payment page and return its URL for the client to redirect to.
 
-
-def start_checkout(owner_id: str, email: str, name: str) -> str:
-    """Create a hosted payment page and return its URL for the client to redirect to."""
+    The chosen tier and cycle are recorded as 'pending' BEFORE the redirect: the webhook only tells
+    us a charge succeeded and for whom, not what was bought, so without this an annual purchase
+    would come back and be granted a month.
+    """
     if not payplus.enabled():
         raise RuntimeError("billing not configured")
-    return payplus.create_payment_page(owner_id, email, name)["link"]
+    tier = plans.canonical(plan)
+    cyc = plans.canonical_cycle(cycle)
+    if tier == "free":
+        raise ValueError("cannot check out the free tier")
+    db.upsert_subscription(owner_id, provider="payplus", status="pending", plan=tier, cycle=cyc,
+                           updated_at=datetime.now(UTC).isoformat())
+    return payplus.create_payment_page(owner_id, email, name,
+                                       amount=plans.price_ils(tier, cyc), cycle=cyc)["link"]
 
 
 def handle_event(normalized: dict, *, now: datetime | None = None) -> None:
@@ -49,23 +61,32 @@ def handle_event(normalized: dict, *, now: datetime | None = None) -> None:
         _log.info("billing event ignored (owner=%s success=%s)", owner, normalized.get("success"))
         return
     now = now or datetime.now(UTC)
-    period_end = (now + timedelta(days=_period_days())).isoformat()
+    # What was bought was decided at checkout, not here — the callback carries a charge, not a
+    # basket. A renewal reads the same stored row, so an annual plan renews for another year.
+    sub = db.get_subscription(owner) or {}
+    tier = plans.canonical(sub.get("plan") or "pro")
+    cycle = plans.canonical_cycle(sub.get("cycle"))
+    period_end = (now + timedelta(days=plans.period_days(cycle))).isoformat()
     db.upsert_subscription(owner, provider="payplus", provider_ref=normalized.get("recurring_uid"),
-                           status="active", current_period_end=period_end,
+                           status="active", plan=tier, cycle=cycle, current_period_end=period_end,
                            cancel_at_period_end=False, updated_at=now.isoformat())
-    db.set_plan(owner, "paid")
-    _log.info("subscription active for %s (renewal=%s) until %s",
-              owner, normalized.get("is_renewal"), period_end)
+    db.set_plan(owner, tier)
+    _log.info("subscription active for %s: %s/%s (renewal=%s) until %s",
+              owner, tier, cycle, normalized.get("is_renewal"), period_end)
     # Invoice is best-effort — the charge already went through; a failed invoice must not 500 the hook.
     amount = normalized.get("amount")
     greeninvoice.issue_receipt(
         email=normalized.get("email", "") or "", name=normalized.get("name", "") or "",
-        amount=float(amount) if amount else 0.0, description=_description(), now=now.timestamp())
+        amount=float(amount) if amount else 0.0, description=_description(cycle), now=now.timestamp())
 
 
 def cancel(owner_id: str, *, now: datetime | None = None) -> None:
     """Stop future charges and mark the subscription cancelled. Paid access is retained until the
-    current period ends (Consumer Protection: billing stops, but the user keeps what they paid for)."""
+    current period ends (Consumer Protection: billing stops, but the user keeps what they paid for).
+
+    This is what makes the annual plan safe to sell: cancelling a prepaid year stops the renewal at
+    the twelve-month mark and leaves every remaining day of the year already paid for intact. The
+    mechanism is the same for both cycles — only current_period_end differs."""
     now = now or datetime.now(UTC)
     sub = db.get_subscription(owner_id)
     # Only a real provider subscription has anything to cancel upstream. A coupon-granted plan stores

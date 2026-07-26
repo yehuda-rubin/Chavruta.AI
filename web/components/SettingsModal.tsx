@@ -128,6 +128,8 @@ export function SettingsModal({
   planName,
   planUntil,
   credits,
+  cycle,
+  cancelAtPeriodEnd,
   billingEnabled,
   onUpgrade,
   onCancelSubscription,
@@ -151,6 +153,8 @@ export function SettingsModal({
   planName?: string;                       // localized tier name from /me
   planUntil?: string | null;               // ISO ts a coupon-granted plan lapses
   credits?: number;                        // prepaid generations left
+  cycle?: string;                          // 'monthly' | 'annual' | 'coupon'
+  cancelAtPeriodEnd?: boolean;             // cancelled: access runs to planUntil, then lapses
   billingEnabled?: boolean;
   onUpgrade?: () => void;
   onCancelSubscription?: () => void;
@@ -232,10 +236,17 @@ export function SettingsModal({
             <div className="mt-2 flex items-center justify-between gap-2">
               <span className="text-xs text-ink/60">
                 {tr(lang, "planLabel")}: {planName || tr(lang, "planFree")}
+                {cycle === "annual" && <> ({tr(lang, "cycleAnnual")})</>}
                 {planUntil && <> · {tr(lang, "planUntil")} {fmtDate(planUntil)}</>}
                 {!!credits && <> · {credits} {tr(lang, "creditsLabel")}</>}
               </span>
-              {plan && plan !== "free" ? (
+              {/* Already cancelled: there is nothing left to cancel, and offering the button again
+                  would suggest access is still being billed for. State the end date instead. */}
+              {plan && plan !== "free" && cancelAtPeriodEnd ? (
+                <span className="text-xs text-ink/50 shrink-0">
+                  {tr(lang, "subCanceledNotice")} {planUntil ? fmtDate(planUntil) : ""}
+                </span>
+              ) : plan && plan !== "free" ? (
                 <button
                   onClick={() => {
                     if (window.confirm(tr(lang, "cancelSubscriptionConfirm"))) onCancelSubscription?.();

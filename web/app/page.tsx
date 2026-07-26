@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Attachment, FileOut, Lang, Message, SavedLesson, Session } from "@/lib/types";
-import { api, LessonExtras, Me } from "@/lib/api";
+import { api, LessonExtras, Me, Tier } from "@/lib/api";
 import { IntentId } from "@/lib/i18n";
 import { tr } from "@/lib/i18n";
 import { LessonFields } from "@/components/LessonOptions";
@@ -13,6 +13,7 @@ import { Rail } from "@/components/Rail";
 import { AddSourceModal } from "@/components/AddSourceModal";
 import { LessonsModal } from "@/components/LessonsModal";
 import { SettingsModal, Theme } from "@/components/SettingsModal";
+import { PlansModal } from "@/components/PlansModal";
 import { SupportModal } from "@/components/SupportModal";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
 import { SignIn } from "@/components/SignIn";
@@ -33,6 +34,8 @@ export default function Home() {
   const [previewFile, setPreviewFile] = useState<FileOut | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const [billingEnabled, setBillingEnabled] = useState(false);
+  const [tiers, setTiers] = useState<Tier[]>([]);
+  const [plansOpen, setPlansOpen] = useState(false);
 
   // Preferences (persisted)
   const [theme, setTheme] = useState<Theme>("light");
@@ -161,7 +164,9 @@ export default function Home() {
   }, [sessions, newDiscussion, refreshSessions]);
 
   useEffect(() => {
-    api.billingConfig().then((c) => setBillingEnabled(c.enabled)).catch(() => setBillingEnabled(false));
+    api.billingConfig()
+      .then((c) => { setBillingEnabled(c.enabled); setTiers(c.tiers || []); })
+      .catch(() => { setBillingEnabled(false); setTiers([]); });
   }, [auth.user?.id]);
 
   // Esc closes an open mobile drawer (keyboard accessibility).
@@ -174,12 +179,16 @@ export default function Home() {
     return () => window.removeEventListener("keydown", onKey);
   }, [mobileSessions, mobileSources]);
 
-  const upgrade = useCallback(async () => {
+  // Opening the picker is the "upgrade" action now — the tier and the billing cycle are the user's
+  // choice, so checkout can't start until they've made it.
+  const upgrade = useCallback(() => setPlansOpen(true), []);
+
+  const choosePlan = useCallback(async (plan: string, cycle: "monthly" | "annual") => {
     try {
-      const { url } = await api.checkout(auth.user?.email || "", "");
+      const { url } = await api.checkout(auth.user?.email || "", "", plan, cycle);
       window.location.href = url;   // redirect to the hosted payment page
     } catch {
-      /* ignore — button stays */
+      /* ignore — the modal stays open so they can retry */
     }
   }, [auth.user?.email]);
 
@@ -330,6 +339,7 @@ export default function Home() {
         lang={lang}
         theme={effectiveDark ? "dark" : "light"}
         remaining={me?.remaining ?? null}
+        remainingWeek={me?.remaining_week ?? null}
         onToggleLang={() => setLang((l) => (l === "he" ? "en" : "he"))}
         onToggleTheme={() => setTheme(effectiveDark ? "light" : "dark")}
         onOpenSessions={() => setMobileSessions(true)}
@@ -421,6 +431,15 @@ export default function Home() {
         onAdd={(items) => setUserSources((prev) => [...prev, ...items])}
       />
       <LessonsModal open={showLessons} lang={lang} onClose={() => setShowLessons(false)} onOpenLesson={openLesson} />
+      <PlansModal
+        open={plansOpen}
+        lang={lang}
+        tiers={tiers}
+        currentPlan={me?.plan}
+        onClose={() => setPlansOpen(false)}
+        onChoose={choosePlan}
+      />
+
       <SettingsModal
         open={showSettings}
         lang={lang}
@@ -440,6 +459,8 @@ export default function Home() {
         planName={me?.plan_name}
         planUntil={me?.plan_until}
         credits={me?.credits}
+        cycle={me?.cycle}
+        cancelAtPeriodEnd={me?.cancel_at_period_end}
         billingEnabled={billingEnabled}
         onUpgrade={upgrade}
         onCancelSubscription={cancelSubscription}

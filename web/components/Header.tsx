@@ -8,6 +8,7 @@ export function Header({
   lang,
   theme,
   remaining,
+  remainingWeek,
   onToggleLang,
   onToggleTheme,
   onOpenSessions,
@@ -15,7 +16,8 @@ export function Header({
 }: {
   lang: Lang;
   theme: "light" | "dark";
-  remaining?: number | null;   // free-tier questions left today; null/undefined = unlimited (no pill)
+  remaining?: number | null;      // questions left today; null/undefined = uncapped (no pill)
+  remainingWeek?: number | null;  // left this week — shown instead when it's the tighter of the two
   onToggleLang: () => void;
   onToggleTheme: () => void;
   onOpenSessions?: () => void;  // mobile only — opens the sessions drawer
@@ -37,17 +39,30 @@ export function Header({
         <h1 className="font-serif text-2xl font-bold text-tekhelet">{tr(lang, "brand")}</h1>
       </div>
       <div className="flex items-center gap-2">
-        {typeof remaining === "number" && (
-          <span
-            className={
-              "px-3 py-1.5 rounded-full glass text-xs font-semibold " +
-              (remaining === 0 ? "text-red-500" : "text-ink/60")
-            }
-            title={tr(lang, "remainingToday")}
-          >
-            {remaining} {tr(lang, "remainingToday")}
-          </span>
-        )}
+        {/* Show whichever cap is closer to stopping them. Showing only the daily figure would read
+            as "38 left" right up to the moment the WEEK runs out, which is the one number that
+            would have let them plan. */}
+        {(() => {
+          const binding =
+            typeof remainingWeek === "number" &&
+            (typeof remaining !== "number" || remainingWeek < remaining)
+              ? { n: remainingWeek, label: tr(lang, "weeklyRemaining") }
+              : typeof remaining === "number"
+                ? { n: remaining, label: tr(lang, "remainingToday") }
+                : null;
+          if (!binding) return null;
+          return (
+            <span
+              className={
+                "px-3 py-1.5 rounded-full glass text-xs font-semibold " +
+                (binding.n === 0 ? "text-red-500" : "text-ink/60")
+              }
+              title={binding.label}
+            >
+              {binding.n} {binding.label}
+            </span>
+          );
+        })()}
         <button
           onClick={onOpenSources}
           className="lg:hidden h-10 w-10 rounded-full glass grid place-items-center text-tekhelet"

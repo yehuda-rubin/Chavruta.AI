@@ -121,11 +121,14 @@ def cmd_restore(args: argparse.Namespace) -> None:
 
 
 def cmd_tiers(args: argparse.Namespace) -> None:
-    print(f"{'TIER':<14} {'₪/MONTH':>9} {'PER DAY':>10}")
+    print(f"{'TIER':<14} {'₪/MONTH':>9} {'₪/YEAR':>9} {'SAVE':>6} {'PER DAY':>9} {'PER WEEK':>10}")
     for t in plans.TIERS:
-        q = plans.daily_quota(t.id)
-        print(f"{t.id:<14} {plans.price_ils(t.id):>9.2f} {'unlimited' if q == 0 else q:>10}")
-    print(f"\ncredit cost per generation: qa={plans.credit_cost('qa')} "
+        save = plans.annual_saving_pct(t.id)
+        print(f"{t.id:<14} {plans.price_ils(t.id, plans.MONTHLY):>9.2f} "
+              f"{plans.price_ils(t.id, plans.ANNUAL):>9.2f} {(str(save) + '%') if save else '-':>6} "
+              f"{plans.daily_quota(t.id):>9} {plans.weekly_quota(t.id):>10}")
+    print("\nNo tier is unlimited — on a per-token product that is an open-ended liability.")
+    print(f"credit cost per generation: qa={plans.credit_cost('qa')} "
           f"halacha={plans.credit_cost('halacha')} lesson={plans.credit_cost('lesson')}")
     print("override any of it with env vars — see app/plans.py")
 
