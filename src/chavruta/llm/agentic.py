@@ -50,6 +50,10 @@ _CONFIG_MSG = {"he": "שירות המודל אינו זמין עקב תקלת ת
 _BUDGET_MSG = {"he": "התשובה חרגה מתקציב העיבוד המוקצה לבקשה. נסה לצמצם את השאלה או לבקש אורך קצר יותר.",
                "en": "This request exceeded its processing budget. Try narrowing the question or "
                      "asking for a shorter length."}
+# The model answered with nothing but its own reasoning. Same user-facing advice as a budget stop —
+# from the reader's side the two are the same event, an output allowance spent before an answer
+# appeared — but a DIFFERENT line in the log, because the fix is the model's floor, not the question.
+_REASONING_MSG = _BUDGET_MSG
 DEGRADE_MESSAGES = (frozenset(_TIMEOUT_MSG.values()) | frozenset(_NOFETCH_MSG.values())
                     | frozenset(_CONFIG_MSG.values()) | frozenset(_BUDGET_MSG.values()))
 
@@ -166,7 +170,7 @@ def agentic_request(llm, body_md: str, *, lang: str = "he",
     """
     # Imported here, not at module scope: cloud.py imports agentic_request, so a top-level import
     # back into cloud would be circular.
-    from chavruta.llm.cloud import LLMConfigError
+    from chavruta.llm.cloud import LLMConfigError, LLMEmptyAnswerError
 
     state: dict = {"out_tokens": 0, "prompt_tokens": 0}
 
@@ -192,6 +196,13 @@ def agentic_request(llm, body_md: str, *, lang: str = "he",
             _log.error("agentic: unrecoverable LLM config error, aborting loop: %s", exc)
             state["config_error"] = True
             return None
+        except LLMEmptyAnswerError as exc:
+            # Not transient: the same prompt at the same budget will spend it on reasoning again, so
+            # retrying only buys another wait. Abort the loop and log what to change — this is the
+            # failure a reasoning model produces on a budget sized for a model that answers directly.
+            _log.error("agentic: model returned reasoning but no answer, aborting loop: %s", exc)
+            state["empty_answer"] = True
+            return None
         except Exception as exc:
             _log.warning("agentic: transient LLM failure, degrading this round: %s", exc, exc_info=True)
             return None
@@ -205,6 +216,6 @@ def agentic_request(llm, body_md: str, *, lang: str = "he",
     if state.get("config_error"):
         return _CONFIG_MSG.get(lang, _CONFIG_MSG["en"]), fetched
     # A budget stop mid-loop leaves no answer text; say so rather than returning the timeout lie.
-    if state.get("budget_exhausted") and not (answer or "").strip():
+    if (state.get("budget_exhausted") or state.get("empty_answer")) and not (answer or "").strip():
         return _BUDGET_MSG.get(lang, _BUDGET_MSG["en"]), fetched
     return answer, fetched

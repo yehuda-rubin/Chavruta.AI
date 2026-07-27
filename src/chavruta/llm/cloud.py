@@ -77,6 +77,49 @@ class LLMTransientError(RuntimeError):
     """The call failed but could plausibly succeed later — rate limit, timeout, 5xx, connection."""
 
 
+class LLMEmptyAnswerError(RuntimeError):
+    """The call SUCCEEDED and returned no answer.
+
+    Its own class because it is neither of the two above and behaves like neither. A reasoning model
+    can spend an entire output budget on `reasoning_content` and return `content` = "" with
+    finish_reason "length" — an HTTP 200 carrying nothing. Measured on Macaron V1 Venti (Novita)
+    on 2026-07-27: ~86,000 characters of reasoning and an empty answer at a 24,000-token budget; the
+    same prompt completed normally at 96,000.
+
+    Before this existed, `content or ""` handed that empty string on as if it were an answer, and the
+    grounding gate downstream reported "no sources" — a wrong diagnosis of a budget problem, which is
+    the kind of bug that costs a day. Raising here names it, and the message says what to change.
+    """
+
+
+def _answer_text(choice) -> str:
+    """The answer from a completion choice, or raise if the model produced none.
+
+    `reasoning_content` (Novita/DeepSeek/GLM-family) and `thinking` are the model's scratchpad, NOT
+    the answer: they are excluded deliberately, because putting a chain of thought in front of a user
+    who asked about a sugya would be both wrong and, on some of these models, in Chinese.
+    """
+    msg = getattr(choice, "message", None)
+    text = (getattr(msg, "content", None) or "").strip()
+    if text:
+        return text
+
+    reasoning = ""
+    for attr in ("reasoning_content", "reasoning", "thinking"):
+        raw = getattr(msg, attr, None)
+        if isinstance(raw, str) and raw.strip():
+            reasoning = raw.strip()
+            break
+    finish = getattr(choice, "finish_reason", "") or "?"
+    if reasoning:
+        raise LLMEmptyAnswerError(
+            f"the model returned only reasoning and no answer ({len(reasoning)} chars of "
+            f"reasoning, finish_reason={finish}). Its thinking used the whole output budget — "
+            f"raise CHAVRUTA_LLM_MIN_OUTPUT_TOKENS (or the per-intent budget) for this model."
+        )
+    raise LLMEmptyAnswerError(f"the model returned an empty answer (finish_reason={finish})")
+
+
 def _classify(exc: Exception) -> Exception:
     """Map an SDK exception onto our two-way split.
 
@@ -100,12 +143,19 @@ class CloudLLM:
     source_fetcher = None       # injected by the pipeline for agentic retrieval
 
     def __init__(self, model_id: str, base_url: str, api_key: str,
-                 timeout_s: float = 180.0, max_retries: int = 1):
+                 timeout_s: float = 180.0, max_retries: int = 1,
+                 min_output_tokens: int = 0):
         self.model_id = model_id
         self.base_url = base_url
         self.api_key = api_key
         self.timeout_s = timeout_s
         self.max_retries = max_retries
+        # A floor under every output budget, for models that think before they answer. The per-intent
+        # budgets (QA 3,000; LESSON 30,000) were sized for a model that answers directly; a reasoning
+        # model can burn 3,000 tokens before it writes a word, so on those the floor is what stands
+        # between a working deployment and every short answer coming back empty. 0 = no floor, which
+        # is right for a non-reasoning model and is the default.
+        self.min_output_tokens = max(0, int(min_output_tokens or 0))
         self._client = None  # lazy
 
     def request(self, body_md: str, *, lang: str = "he", token_budget: int | None = None):
@@ -134,6 +184,7 @@ class CloudLLM:
 
         Raises LLMConfigError / LLMTransientError.
         """
+        max_tokens = max(int(max_tokens), self.min_output_tokens)
         t0 = time.monotonic()
         _BREAKER.before(t0)     # fail fast if the provider is currently flagged down
         try:
@@ -181,7 +232,7 @@ class CloudLLM:
             max_tokens=max_tokens, temperature=temperature, what="generate",
         )
         return LLMResult(
-            text=choice.message.content or "",
+            text=_answer_text(choice),
             finish_reason=choice.finish_reason or "stop",
             prompt_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
             completion_tokens=int(getattr(usage, "completion_tokens", 0) or 0),

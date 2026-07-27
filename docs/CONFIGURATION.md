@@ -115,6 +115,30 @@ These variables override the default subscription tiers and credit costs defined
 | `CHAVRUTA_TZ` | Timezone for datetime operations | `Asia/Jerusalem` | `app/api.py:1220` |
 | `CHAVRUTA_SEED_DEMO` | If `1`, seed showcase conversations into a brand-new database | `0` | `app/db.py:373` |
 
+## Switching the model
+
+The API backend is a plain OpenAI-compatible client, so the provider is a base URL, a model id and a
+key — changing it is configuration, never code. `CHAVRUTA_LLM_BACKEND` accepts `api` (or `openai`, or
+the historical `nebius`) for any such provider, and `bridge` for the no-API path.
+
+| Variable | Meaning |
+|---|---|
+| `CHAVRUTA_LLM_PRESET` | A named provider from `src/chavruta/llm/presets.py` — fills in base URL, model and output floor. Explicit variables below always win. |
+| `CHAVRUTA_LLM_BASE_URL` / `CHAVRUTA_LLM_MODEL` / `CHAVRUTA_LLM_API_KEY` | The provider, spelled out. |
+| `CHAVRUTA_LLM_MIN_OUTPUT_TOKENS` | A floor under every per-call output budget. `0` (default) for a model that answers directly. |
+
+**The floor exists for reasoning models, and it is not optional on them.** A model that thinks before
+it answers can spend an entire output allowance on `reasoning_content` and return HTTP 200 with an
+empty answer. The per-intent budgets in `pipeline.py` (a question gets 3,000 tokens) were sized for a
+model that answers directly, so on a reasoning model every short answer comes back empty. Measured on
+Macaron V1 Venti on 2026-07-27: ~86,000 characters of reasoning and no answer at 24,000 tokens;
+normal completion at 96,000. That case now raises `LLMEmptyAnswerError` naming the variable to raise,
+instead of returning `""` and being misdiagnosed downstream as a retrieval failure.
+
+**The baseline is `nebius` / `Qwen/Qwen3-235B-A22B-Instruct-2507`.** Every quality figure we have —
+the eval, citation behaviour, the Hebrew-only rule, `_strip_foreign` — was measured on it. Any other
+model is unmeasured until the eval is run against it.
+
 ## Notes
 
 - The `NEBIUS_API_KEY` environment variable is accepted as a fallback for `CHAVRUTA_LLM_API_KEY` for convenience.

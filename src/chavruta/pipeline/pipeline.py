@@ -30,6 +30,10 @@ def _detect_lang(text: str) -> str:
 # Per-intent generation budgets (user decision 2026-06-18): lessons need room for a full
 # scaffold, comparisons are medium, regular Q&A / explanations stay tight. Falls back to
 # the profile's llm_max_tokens for any other intent.
+# Backend names that mean "an OpenAI-compatible HTTP API". 'nebius' is the historical name and is
+# kept working; 'api' and 'openai' say what it actually is.
+_API_BACKENDS = frozenset({"api", "openai", "nebius"})
+
 _INTENT_MAX_TOKENS = {
     Intent.QA: 3000,
     Intent.EXPLAIN: 3000,
@@ -81,22 +85,31 @@ def build_backends(profile: Profile):
     store = QdrantStore(mode=profile.qdrant_mode, path=profile.qdrant_path,
                         url=profile.qdrant_url, api_key=profile.qdrant_api_key)
 
-    # Two backends only: 'nebius' (the API — DEFAULT) and 'bridge' (Claude answers in-session, no
-    # external API). The local DictaLM/Ollama backend was removed by product decision.
-    if profile.llm_backend == "nebius":
+    # Two backends: 'api' — any OpenAI-compatible provider (DEFAULT) — and 'bridge' (Claude answers
+    # in-session, no external API). The local DictaLM/Ollama backend was removed by product decision.
+    #
+    # The backend names a TRANSPORT, not a vendor. 'nebius' is kept as an alias because it is what
+    # every script, compose file and .env in this repo already says, but it was always a misnomer:
+    # CloudLLM is a plain OpenAI-compatible client and the provider is just a base URL. Naming the
+    # backend after one vendor made switching look like a code change when it is an env change, so
+    # the capability name is now the real one and the vendor name follows it.
+    if profile.llm_backend in _API_BACKENDS:
         from chavruta.llm.cloud import CloudLLM
 
         llm = CloudLLM(profile.llm_model, profile.llm_base_url, profile.llm_api_key,
-                       timeout_s=profile.llm_timeout_s, max_retries=profile.llm_max_retries)
+                       timeout_s=profile.llm_timeout_s, max_retries=profile.llm_max_retries,
+                       min_output_tokens=getattr(profile, "llm_min_output_tokens", 0))
     elif profile.llm_backend == "bridge":
         from chavruta.llm.bridge import BridgeLLM
 
         llm = BridgeLLM()
     else:
         raise ValueError(
-            f"unknown CHAVRUTA_LLM_BACKEND={profile.llm_backend!r}. Supported: 'nebius' (the API — "
-            f"default) or 'bridge' (Claude in-session, no external API). The local DictaLM/Ollama "
-            f"backend has been removed."
+            f"unknown CHAVRUTA_LLM_BACKEND={profile.llm_backend!r}. Supported: "
+            f"{', '.join(sorted(_API_BACKENDS))} (any OpenAI-compatible provider — default) or "
+            f"'bridge' (Claude in-session, no external API). Point it at a provider with "
+            f"CHAVRUTA_LLM_PRESET, or with CHAVRUTA_LLM_BASE_URL + CHAVRUTA_LLM_MODEL. The local "
+            f"DictaLM/Ollama backend has been removed."
         )
 
     reranker = None
