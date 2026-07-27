@@ -92,13 +92,19 @@ def test_handle_event_ignores_failure(fresh_db, monkeypatch):
 
 def test_cancel_keeps_paid_until_period_end_then_sweep_downgrades(fresh_db, monkeypatch):
     monkeypatch.setattr(service.greeninvoice, "issue_receipt", lambda **k: None)
-    monkeypatch.setattr(service.payplus, "cancel_recurring", lambda *a, **k: None)   # no network
+    stopped = {}
+    monkeypatch.setattr(service.payplus, "cancel_recurring",
+                        lambda ref, *a, **k: stopped.update(ref=ref))   # no network
     # Activate, then cancel.
     service.handle_event({"owner_id": "u-3", "success": True, "recurring_uid": "rec_3"},
                          now=datetime(2026, 7, 19, tzinfo=UTC))
     service.cancel("u-3", now=datetime(2026, 7, 20, tzinfo=UTC))
     sub = fresh_db.get_subscription("u-3")
     assert sub["status"] == "canceled" and sub["cancel_at_period_end"] == 1
+    # The terms promise the NEXT CHARGE STOPS IMMEDIATELY, so the provider must actually be told.
+    # Marking the row cancelled locally while the recurring charge keeps running would go on taking
+    # money from someone who cancelled — and the local state would look correct throughout.
+    assert stopped["ref"] == "rec_3"
     assert fresh_db.get_plan("u-3") == "pro"         # still paid — keeps what they paid for
     # Before period end → no downgrade; after → downgraded to free.
     assert service.sweep_downgrades(now=datetime(2026, 8, 1, tzinfo=UTC)) == 0

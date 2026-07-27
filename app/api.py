@@ -1400,6 +1400,18 @@ def billing_config(lang: str = "he"):
     return {"enabled": billing.enabled(), "tiers": plans.public_catalogue(lang)}
 
 
+@app.get("/billing/limits")
+def billing_limits(lang: str = "he"):
+    """The absolute usage limits for each tier — for the /limits page.
+
+    This is a public, unauthenticated endpoint because the figures must be readable before buying.
+    The marketing UI shows only a ratio ("3x the usage"); this endpoint provides the absolute
+    numbers (daily_tokens, weekly_tokens, weekly_lessons) that a customer needs to know what they
+    are actually purchasing. See plans.limits_catalogue() for the rationale.
+    """
+    return {"tiers": plans.limits_catalogue(lang)}
+
+
 # ── Coupons ───────────────────────────────────────────────────────────────────
 class RedeemRequest(BaseModel):
     code: str = Field(max_length=64)

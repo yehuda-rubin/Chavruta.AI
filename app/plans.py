@@ -315,3 +315,32 @@ def public_catalogue(lang: str = "he") -> list[dict]:
         "annual_saving_pct": annual_saving_pct(t.id),
         "multiple": t.multiple,          # "3x the free tier" — the only allowance figure shown
     } for t in TIERS]
+
+
+def limits_catalogue(lang: str = "he") -> list[dict]:
+    """The absolute usage limits for each tier — for the /limits page.
+
+    This exists separately from public_catalogue() because the marketing UI deliberately shows only
+    a ratio ("3x the usage") and never an absolute token or lesson count. A published number becomes
+    a promise, so trimming a budget or moving to a costlier model would be a downgrade to a paying
+    customer, while a ratio stays true as the numbers underneath it move.
+
+    However, a usage cap is a material feature of what someone is buying, and "3x of something we
+    won't tell you" leaves a customer unable to know what they bought or whether it later shrank.
+    Both can be had: the marketing UI keeps the ratio, and the absolute numbers live in exactly
+    one place (this function, exposed at /billing/limits) that is linked from pricing and checkout.
+
+    This function reads the current values through the accessor functions (daily_tokens, weekly_tokens,
+    weekly_lessons, price_ils, annual_total_ils) so environment overrides are reflected.
+    """
+    he = (lang or "he").startswith("he")
+    return [{
+        "id": t.id,
+        "name": t.name_he if he else t.name_en,
+        "price_ils": price_ils(t.id, MONTHLY),
+        "annual_price_ils": annual_total_ils(t.id),        # the year's total
+        "annual_monthly_ils": price_ils(t.id, ANNUAL),     # what is actually charged each month
+        "daily_tokens": daily_tokens(t.id),
+        "weekly_tokens": weekly_tokens(t.id),
+        "weekly_lessons": weekly_lessons(t.id),
+    } for t in TIERS]

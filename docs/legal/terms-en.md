@@ -78,6 +78,8 @@ associate your content with you.
 The Service may include a free plan with a daily quota, and paid plans. We may change quotas, prices
 and features from time to time, with reasonable notice.
 **Prices listed include VAT.**
+The current limits for each plan are published on the "Current limits" page in the app; a material
+reduction in limits entitles a paying subscriber to cancel.
 
 **All billing is monthly — including the "annual" plan.** The annual plan is a **discounted rate
 charged in twelve monthly instalments**, not a year taken up front. You never pay in advance for a

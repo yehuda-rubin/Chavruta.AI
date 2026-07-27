@@ -164,7 +164,7 @@ export const STRINGS = {
     perWeekUnit: "לשבוע",
     choosePlan: "בחר",
     currentPlan: "התוכנית שלך",
-    annualNote: "תשלום שנתי מראש. ביטול עוצר את החידוש בתום השנה — הגישה נשמרת עד אז.",
+    annualNote: "תשלום שנתי בשנים-עשר תשלומים חודשיים באותו תעריף מוזל. ביטול עוצר את החיוב הבא — הגישה נמשכת עד תום החודש ששולם.",
     quotaExplainer: "לכל תוכנית שתי מגבלות: יומית ושבועית. המגבלה היומית מתאפסת כל יום, "
       + "והשבועית ביום ראשון. אין תוכנית ללא הגבלה.",
     lessonLoadFailed: "לא הצלחנו לטעון את קבצי השיעור. נסה לפתוח אותו שוב מ״השיעורים שלי״.",
@@ -179,6 +179,17 @@ export const STRINGS = {
     couponRedeem: "מימוש",
     couponRedeeming: "מממש…",
     couponFailed: "מימוש הקוד נכשל.",
+    // limits page
+    limitsTitle: "מכסות הנוכחיות",
+    limitsSubtitle: "המכסות של כל תוכנית, נכון להיום. המספרים האלה עשויים להשתנות עם הודעה סבירה מראש; הרעה מהותית מזכה מנוי משלם לבטל.",
+    limitsTablePlan: "תוכנית",
+    limitsTableTokensDay: "טוקנים ליום",
+    limitsTableTokensWeek: "טוקנים לשבוע",
+    limitsTableLessonsWeek: "שיעורים לשבוע",
+    limitsTableMonthly: "מחיר חודשי",
+    limitsExplainer1: "טוקן היא יחידת מדידה של טקסט שהמודל מעבד. שאלה אחת עשויה להשתמש באלפי טוקנים, תלוי באורך השאלה והתשובה. שיעור נספר כמותגורה שלמה, לא ממוצע.",
+    limitsExplainer2: "שתי המכסות הן עצמאיות לחלוטין: אם נגמרים הטוקנים לשיחה, עדיין אפשר לבנות שיעור. שיעור לעולם לא צורך טוקנים ממכסת השיחה.",
+    limitsLink: "המכסות הנוכחיות",
   },
   en: {
     brand: "Chavruta",
@@ -333,8 +344,7 @@ export const STRINGS = {
     perWeekUnit: "per week",
     choosePlan: "Choose",
     currentPlan: "Your plan",
-    annualNote: "Paid up front for the year. Cancelling stops the renewal at the twelve-month mark "
-      + "— your access runs to the end of the year you paid for.",
+    annualNote: "Annual billing in twelve monthly instalments at the same discounted rate. Cancelling stops the next charge — access continues to the end of the month you paid for.",
     quotaExplainer: "Every plan has two caps: daily and weekly. The daily one resets each day, the "
       + "weekly one on Sunday. No plan is unlimited.",
     lessonLoadFailed: "Couldn't load this lesson's files. Try opening it again from My Shiurim.",
@@ -349,6 +359,17 @@ export const STRINGS = {
     couponRedeem: "Redeem",
     couponRedeeming: "Redeeming…",
     couponFailed: "Could not redeem that code.",
+    // limits page
+    limitsTitle: "Current Limits",
+    limitsSubtitle: "The limits for each plan, as of today. These figures may change with reasonable notice; a material reduction entitles a paying subscriber to cancel.",
+    limitsTablePlan: "Plan",
+    limitsTableTokensDay: "Tokens/day",
+    limitsTableTokensWeek: "Tokens/week",
+    limitsTableLessonsWeek: "Lessons/week",
+    limitsTableMonthly: "Monthly",
+    limitsExplainer1: "A token is a unit of text the model processes. A single question may use thousands of tokens, depending on the length of the question and answer. A lesson is counted as a whole unit, not averaged.",
+    limitsExplainer2: "The two pools are completely independent: if you run out of conversation tokens, you can still build a lesson. A lesson never spends conversation tokens.",
+    limitsLink: "Current limits",
   },
 } as const;
 

@@ -183,7 +183,8 @@ export interface Tier {
   id: string;
   name: string;
   price_ils: number;              // per month
-  annual_price_ils: number;       // the whole year up front, discounted
+  annual_price_ils: number;       // the year's total, for "₪1,990 a year"
+  annual_monthly_ils: number;     // what is actually charged each month (instalment)
   annual_saving_pct: number;
   multiple: number;               // "3x the free tier" — no absolute allowance is published
 }

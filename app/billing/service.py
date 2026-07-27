@@ -62,7 +62,8 @@ def handle_event(normalized: dict, *, now: datetime | None = None) -> None:
         return
     now = now or datetime.now(UTC)
     # What was bought was decided at checkout, not here — the callback carries a charge, not a
-    # basket. A renewal reads the same stored row, so an annual plan renews for another year.
+    # basket. A renewal reads the same stored row — and on either cycle that grants another MONTH,
+    # since an annual plan is twelve monthly instalments rather than one yearly charge.
     sub = db.get_subscription(owner) or {}
     tier = plans.canonical(sub.get("plan") or "pro")
     cycle = plans.canonical_cycle(sub.get("cycle"))
@@ -105,9 +106,15 @@ def cancel(owner_id: str, *, now: datetime | None = None) -> None:
     """Stop future charges and mark the subscription cancelled. Paid access is retained until the
     current period ends (Consumer Protection: billing stops, but the user keeps what they paid for).
 
-    This is what makes the annual plan safe to sell: cancelling a prepaid year stops the renewal at
-    the twelve-month mark and leaves every remaining day of the year already paid for intact. The
-    mechanism is the same for both cycles — only current_period_end differs."""
+    Identical on both cycles, because there is no prepaid year to unwind: since 2026-07-27 the annual
+    plan is a discounted rate billed in twelve monthly instalments, so cancelling stops the next
+    instalment and leaves the month already paid for intact. Nothing is held that would have to be
+    refunded — which is the whole reason the plan was restructured (see app/plans.py
+    ANNUAL_INSTALMENTS).
+
+    NOT a refund. The statutory 14-day cancellation right on a distance sale is handled manually via
+    the contact address in the terms; there is no refund call in payplus.py. See finding A in
+    docs/legal/REVIEW-2026-07-27.md."""
     now = now or datetime.now(UTC)
     sub = db.get_subscription(owner_id)
     # Only a real provider subscription has anything to cancel upstream. A coupon-granted plan stores
