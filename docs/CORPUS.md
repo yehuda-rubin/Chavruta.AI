@@ -185,11 +185,25 @@ features silently degrade. `ensure_text_index` auto-creates only the `search_he`
 `ref`/`anchor_ref` **keyword** indexes are NOT auto-created. Re-run the script whenever the
 collection is rebuilt (indexes don't survive a fresh collection).
 
-### 7.2 Reference format (dotted router refs vs space-form corpus refs)
-The intent router emits **dotted** refs — `Genesis.1.1`, `Exodus.20`, `Bava Metzia.2a` — but the
-corpus stores base-text `ref` payloads with a **space after the book name**: `Genesis 1.1`,
+### 7.2 Reference format (router refs vs stored corpus refs)
+
+> ⚠️ **The live `chavruta_commercial` corpus stores refs in Sefaria UNDERSCORE-DOT form**, not the
+> space form this section originally described. Sampled from the running collection 2026-07-27:
+> `Genesis.1.1` · `Beitzah.27.4` · `Bava_Metzia.3.1` · `Mishnah_Kelim.23.2` ·
+> `Mishneh_Torah,_Forbidden_Foods.11.18` · `Rashi_on_I_Samuel.27.7.1` — **underscores for the spaces
+> inside a book's name.** The space form below (`Genesis 1.1`) belongs to the **retired** `chavruta`
+> collection, deleted 2026-07-20.
+>
+> **The mechanism is unchanged and this is why it survived the swap:** `with_ref_variants` emits
+> **both** spellings, so an exact lookup resolves against either corpus. That is the whole point of
+> emitting both — do not "simplify" it to one, and do not assume from a ref you see in a log which
+> collection it came from.
+
+The intent router emits **dotted** refs — `Genesis.1.1`, `Exodus.20`, `Bava Metzia.2a`. The retired
+space-form corpus stored base-text `ref` payloads with a **space after the book name**: `Genesis 1.1`,
 `Kiddushin 82.4`, `Mishnah Sukkah 3.5` (base Tanakh verses also carry `anchor_ref = null`;
-`unit_type ∈ {source, commentary}`). An **exact** `MatchAny` lookup therefore needs the space form.
+`unit_type ∈ {source, commentary}`). An **exact** `MatchAny` lookup needs whichever form the target
+collection actually holds.
 `corpus/refs.py::canon_corpus_ref` converts the book↔chapter dot to a space, and `with_ref_variants`
 passes both spellings (plus the chapter→opening-verse `.1`); the retriever's anchoring path and the
 lesson primary-source floor both use them. Do NOT confuse this with `canonical_ref`, the loose
