@@ -288,6 +288,36 @@ def test_perek_ordinal_resolves(text, expected):
     assert expected in resolve_landmarks(text)
 
 
+# ── Tier1 (2026-07-27): "the opening of X" must resolve however Hebrew stacks the connectors ──
+# The corpus_v1 eval showed the right commentator arriving on the WRONG verse — "מה מפרש רש\"י על
+# תחילת בבא מציעא" returned Rashi on BM 148. The cause was upstream of retrieval: no named_ref was
+# produced, so the anchoring path never ran. The connector lists were enumerated rather than composed,
+# so "של ספר" (both words) and a tractate without the word "מסכת" fell through.
+@pytest.mark.parametrize("text,expected", [
+    ("מה כתוב בפסוק הראשון של ספר בראשית", "Genesis.1.1"),   # 'של' + 'ספר' together
+    ("מה אומר רש\"י על הפסוק הראשון בבראשית", "Genesis.1.1"),  # the form that already worked
+    ("הפסוק הראשון של התורה", "Genesis.1.1"),
+    ("תחילת ספר ויקרא", "Leviticus.1.1"),
+    ("מה מפרש רש\"י על תחילת בבא מציעא", "Bava Metzia.2a"),   # tractate WITHOUT 'מסכת'
+    ("מה נידון בתחילת מסכת ברכות", "Berakhot.2a"),            # and with it
+    ("הדף הראשון בבבא מציעא", "Bava Metzia.2a"),
+])
+def test_opening_reference_resolves_across_connector_forms(text, expected):
+    from chavruta.intents.landmarks import resolve_landmarks
+    assert expected in resolve_landmarks(text)
+
+
+@pytest.mark.parametrize("text", [
+    "בתחילת הדרך החלטנו ללמוד",        # 'תחילת' with no work named
+    "מה קרה בתחילת השיעור",
+    "הפסוק הראשון שקראנו אתמול",       # 'first verse' with no book
+])
+def test_opening_reference_needs_an_actual_work(text):
+    """Loosening the connectors must not let 'תחילת' alone invent a ref — the work has to be named."""
+    from chavruta.intents.landmarks import resolve_landmarks
+    assert resolve_landmarks(text) == []
+
+
 @pytest.mark.parametrize("text", ["פרק זה בשבת", "בפרק זה במסכת שבת", "פרק הוא בגיטין"])
 def test_perek_demonstrative_not_gematria(text):
     """'פרק זה' = 'THIS chapter' — gematria('זה')=12 must NOT fabricate a perek number/daf."""
