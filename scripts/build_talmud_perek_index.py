@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Build the Talmud perek→opening-ref index from Sefaria, in the CORPUS ref format.
 
 Sefaria's index alt_structs give each perek's daf range ('Sanhedrin 23a:1-31b:21' → opens 23a).

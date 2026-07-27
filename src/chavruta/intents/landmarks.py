@@ -60,13 +60,22 @@ ABSOLUTE_LANDMARKS: dict[str, str] = {
     "מעשה בראשית": "Genesis.1",
     "עשרת הדיברות": "Exodus.20",
     "עשרת הדברות": "Exodus.20",
+    "עשרת המכות": "Exodus.7",
+    "עשר המכות": "Exodus.7",
+    "מכות מצרים": "Exodus.7",
     "קריאת שמע": "Deuteronomy.6.4",
     "שמע ישראל": "Deuteronomy.6.4",
     "ואהבת לרעך כמוך": "Leviticus.19.18",
     "פרשת העקדה": "Genesis.22",
+    "פרשת העקידה": "Genesis.22",
     "עקדת יצחק": "Genesis.22",
+    "עקידת יצחק": "Genesis.22",
+    "העקדה": "Genesis.22",
+    "העקידה": "Genesis.22",
     "שירת הים": "Exodus.15",
     "ברכת כהנים": "Numbers.6.24",
+    "שניים אוחזין": "Bava Metzia.2a",
+    "שנים אוחזין": "Bava Metzia.2a",
 }
 
 # English famous-passage map — English queries otherwise ride entirely on cross-lingual dense (which

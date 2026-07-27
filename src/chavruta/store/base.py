@@ -7,7 +7,7 @@ embedded (local) and server (cloud). `Filter` scopes search per work / commentat
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 Filter = dict   # e.g. {"work_id": "tanakh", "commentator_id": ["rashi", "ramban"]}
 
@@ -23,7 +23,7 @@ class StoredChunk:
 @dataclass
 class HybridQuery:
     dense: list[float]
-    sparse: Optional[dict[int, float]] = None
+    sparse: dict[int, float] | None = None
 
 
 @dataclass
@@ -40,15 +40,15 @@ class VectorStore(Protocol):
     def upsert(self, name: str, chunks: list[StoredChunk]) -> None: ...
 
     def search(
-        self, name: str, query: HybridQuery, top_k: int, filters: Optional[Filter] = None
+        self, name: str, query: HybridQuery, top_k: int, filters: Filter | None = None
     ) -> list[Hit]: ...
 
-    def count(self, name: str, filters: Optional[Filter] = None) -> int: ...
+    def count(self, name: str, filters: Filter | None = None) -> int: ...
 
     def delete(self, name: str, filters: Filter) -> None: ...
 
     def fetch_by_refs(
-        self, name: str, refs: list[str], filters: Optional[Filter] = None
+        self, name: str, refs: list[str], filters: Filter | None = None, *, limit: int | None = None
     ) -> list[Hit]: ...
     # Non-vector lookup: returns chunks whose `ref` OR `anchor_ref` is in `refs` —
     # i.e. the verses themselves plus everything anchored on them (commentaries).

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """load_to_store.py — load pre-embedded vectors into the configured store (task T020).
 
 Reuses the existing Tanakh corpus (out/corpus_vectors.npy + out/corpus_meta.jsonl, dense

@@ -1,0 +1,204 @@
+// API client. Uses the SAME bare paths the active static UI calls (/query, /sessions, /lessons);
+// next.config.mjs rewrites them to the FastAPI backend, so there is no hardcoded host and no CORS.
+
+import type { Attachment, Message, QueryResponse, SavedLesson, Session } from "./types";
+
+// The current Supabase access token, kept in sync by the auth provider (setAuthToken). When set, it's
+// attached as `Authorization: Bearer <token>` so the backend can verify the user and scope their data;
+// when null (Supabase not configured / signed out) requests go out unauthenticated, unchanged.
+let _authToken: string | null = null;
+export function setAuthToken(token: string | null) {
+  _authToken = token;
+}
+
+async function req<T>(path: string, opts?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (_authToken) headers.Authorization = `Bearer ${_authToken}`;
+  const res = await fetch(path, {
+    ...opts,
+    headers: { ...headers, ...(opts?.headers as Record<string, string> | undefined) },
+  });
+  if (!res.ok) {
+    // Surface the server's human-readable `detail` (often bilingual, e.g. the quota/429 message)
+    // rather than a raw "API 502: {json}" blob. Tag with the status so callers can special-case.
+    const raw = await res.text().catch(() => "");
+    let detail = raw;
+    try {
+      const j = JSON.parse(raw);
+      detail = typeof j.detail === "string" ? j.detail : raw;
+    } catch {
+      // Not JSON. If it's a whole HTML document, the request never reached the API — Next owns the
+      // origin and served its own 404 page for a path that has no rewrite (see next.config.mjs).
+      // Say that, because dumping the markup at the user is what made this bug look like a model
+      // failure rather than a missing route.
+      if (looksLikeHtml(raw)) detail = `הבקשה לא הגיעה לשרת (${path}) — HTTP ${res.status}`;
+    }
+    const err = new Error(detail || `HTTP ${res.status}`);
+    (err as Error & { status?: number }).status = res.status;
+    throw err;
+  }
+  // A 200 carrying HTML means the same routing problem, just without an error status to catch it.
+  const body = await res.text();
+  if (looksLikeHtml(body)) {
+    throw new Error(`הבקשה לא הגיעה לשרת (${path}) — התקבל HTML במקום JSON`);
+  }
+  return JSON.parse(body) as T;
+}
+
+/** Whether a response body is an HTML document rather than the JSON the API always returns. */
+function looksLikeHtml(body: string): boolean {
+  const head = body.trimStart().slice(0, 200).toLowerCase();
+  return head.startsWith("<!doctype html") || head.startsWith("<html");
+}
+
+export interface CreatedSession {
+  id: string;
+  first_q: string;
+  created_at: string;
+  result: QueryResponse;
+}
+
+// Extra fields only lesson mode sends (audience / grade band / length). Empty strings are dropped
+// so the backend applies its own auto-detection, matching the static UI.
+export interface LessonExtras {
+  audience?: string;
+  grade_band?: string;
+  length?: string;
+}
+
+function body(question: string, intent: string, lang: string, extras?: LessonExtras, attachments?: Attachment[]) {
+  const b: Record<string, unknown> = { question, intent, lang };
+  if (extras) for (const [k, v] of Object.entries(extras)) if (v) b[k] = v;
+  if (attachments && attachments.length) b.attachments = attachments;
+  return JSON.stringify(b);
+}
+
+// Async generation (job queue). A full lesson can take minutes — longer than a proxy's 504 window —
+// so the backend returns a job id immediately and we poll GET /jobs/{id} until it flips to done/error.
+// This is what keeps long lessons from failing on a hosted deployment behind nginx/Cloudflare.
+interface JobAccepted {
+  job_id: string;
+  session_id?: string;
+}
+interface JobStatus<T> {
+  status: "pending" | "running" | "done" | "error";
+  result?: T;
+  error?: string;
+}
+
+async function pollJob<T>(jobId: string, intervalMs = 1400, timeoutMs = 10 * 60 * 1000): Promise<T> {
+  const start = Date.now();
+  for (;;) {
+    const s = await req<JobStatus<T>>(`/jobs/${jobId}`);
+    if (s.status === "done") return s.result as T;
+    if (s.status === "error") throw new Error(s.error || "generation failed");
+    if (Date.now() - start > timeoutMs) throw new Error("timed out waiting for generation");
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+}
+
+export const api = {
+  listSessions: () => req<Session[]>("/sessions"),
+  sessionMessages: (id: string) => req<Message[]>(`/sessions/${id}/messages`),
+  deleteSession: (id: string) => req<{ ok: boolean }>(`/sessions/${id}`, { method: "DELETE" }),
+
+  // POST /sessions creates a session and runs the first query atomically (synchronous).
+  createSession: (q: string, intent: string, lang: string, extras?: LessonExtras, att?: Attachment[]) =>
+    req<CreatedSession>("/sessions", { method: "POST", body: body(q, intent, lang, extras, att) }),
+
+  // POST /sessions/{id}/query continues an existing conversation (sticky mode enforced server-side).
+  sessionQuery: (id: string, q: string, intent: string, lang: string, extras?: LessonExtras, att?: Attachment[]) =>
+    req<QueryResponse>(`/sessions/${id}/query`, { method: "POST", body: body(q, intent, lang, extras, att) }),
+
+  // Async variants — the ones the UI actually uses. The session is created server-side immediately
+  // (onSession fires with its id so the chat can appear in the list while it generates); the result
+  // is polled off the job queue so a long lesson never trips a gateway timeout.
+  createSessionAsync: async (
+    q: string, intent: string, lang: string, extras?: LessonExtras, att?: Attachment[],
+    onSession?: (id: string) => void,
+  ) => {
+    const acc = await req<JobAccepted>("/sessions/async", { method: "POST", body: body(q, intent, lang, extras, att) });
+    if (acc.session_id && onSession) onSession(acc.session_id);
+    return pollJob<CreatedSession>(acc.job_id);
+  },
+
+  sessionQueryAsync: async (
+    id: string, q: string, intent: string, lang: string, extras?: LessonExtras, att?: Attachment[],
+  ) => {
+    const acc = await req<JobAccepted>(`/sessions/${id}/query/async`, { method: "POST", body: body(q, intent, lang, extras, att) });
+    return pollJob<QueryResponse>(acc.job_id);
+  },
+
+  // My Shiurim — saved lessons.
+  listLessons: () => req<SavedLesson[]>("/lessons"),
+  getLesson: (id: string) => req<SavedLesson>(`/lessons/${id}`),
+  deleteLesson: (id: string) => req<void>(`/lessons/${id}`, { method: "DELETE" }),
+
+  ready: () => req<{ status: string; points?: number; reason?: string }>("/ready"),
+  me: () => req<Me>("/me"),
+
+  // Account deletion (scheduled, with a grace period). deleteAccount schedules it; cancel undoes it.
+  deleteAccount: () => req<Deletion>("/account/delete", { method: "POST" }),
+  cancelAccountDeletion: () => req<Deletion>("/account/delete/cancel", { method: "POST" }),
+
+  // Billing: is it available, start a checkout (returns a hosted payment URL), cancel the subscription.
+  billingConfig: () => req<{ enabled: boolean; tiers: Tier[] }>("/billing/config"),
+
+  // Coupons: the user-facing half. Issuing is operator-only (scripts/manage_coupons.py).
+  redeemCoupon: (code: string) =>
+    req<Redeemed>("/coupons/redeem", { method: "POST", body: JSON.stringify({ code }) }),
+  checkout: (email: string, name: string, plan = "pro", cycle: "monthly" | "annual" = "monthly") =>
+    req<{ url: string }>("/billing/checkout", {
+      method: "POST",
+      body: JSON.stringify({ email, name, plan, cycle }),
+    }),
+  cancelSubscription: () => req<{ ok: boolean }>("/billing/cancel", { method: "POST" }),
+};
+
+// Account + today's free-tier quota (GET /me). daily_quota / remaining are null when unlimited
+// (the local user, or quota disabled) — the UI then shows no counter.
+export interface Me {
+  owner: string;
+  authenticated: boolean;
+  plan: string;
+  plan_name: string;
+  // Allowances arrive as FRACTIONS remaining (1 = untouched, 0 = spent), never absolute figures.
+  // A published number becomes a promise; a ratio stays true as the budget underneath it moves.
+  day_left: number | null;                  // conversation pool, today. null ⇒ uncapped
+  week_left: number | null;                 // conversation pool, this week
+  lessons_left: number | null;              // lesson pool, this week — its own, independent pool
+  lessons_exhausted: boolean;
+  multiple: number;                         // usage relative to free: the only allowance figure shown
+  credits: number;                          // prepaid generations, spent once a cap is hit
+  plan_until: string | null;                // ISO ts the paid/coupon period ends
+  cycle: string;                            // 'monthly' | 'annual' | 'coupon'
+  cancel_at_period_end: boolean;            // cancelled: access runs to plan_until, then lapses
+  deletion_scheduled_for: string | null;   // ISO ts if the account is pending deletion
+  blocked: boolean;
+  blocked_until: string | null;             // ISO ts the block lifts (null + blocked ⇒ permanent)
+  blocked_reason: string;
+}
+
+export interface Tier {
+  id: string;
+  name: string;
+  price_ils: number;              // per month
+  annual_price_ils: number;       // the whole year up front, discounted
+  annual_saving_pct: number;
+  multiple: number;               // "3x the free tier" — no absolute allowance is published
+}
+
+export interface Redeemed {
+  ok: boolean;
+  kind: "plan" | "credits" | "";
+  plan: string | null;
+  plan_name: string;
+  until: string | null;
+  credits_added: number;
+  credits_balance: number;
+  message: string;          // already localized by the server
+}
+
+export interface Deletion {
+  deletion_scheduled_for: string | null;
+}

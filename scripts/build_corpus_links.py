@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """build_corpus_links.py — build the link graph from the corpus itself (NO API, NO external fetch).
 
 A Sefaria commentary ref encodes what it comments on: ``Rashi on Chullin 11.3.1`` comments on
@@ -21,7 +20,6 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
-from chavruta.corpus.refs import canonical_ref
 
 DB = REPO / "data" / "ref_index.db"
 OUT = REPO / "data" / "links_corpus.jsonl"
@@ -91,7 +89,7 @@ def main() -> None:
           f"({written/max(len(commentaries),1)*100:.1f}% of commentaries)")
     print(f"  dropped (base not resolvable in corpus):       {base_missing:,}")
     print(f"  distinct nodes connected:                      {len(nodes):,}")
-    print(f"  vs stale data/links.jsonl usable edges: 0")
+    print("  vs stale data/links.jsonl usable edges: 0")
 
 
 if __name__ == "__main__":

@@ -23,6 +23,11 @@ class RankedHit:
     work_id: str = ""
     anchor_ref: str | None = None
     period: str | None = None      # halachic era for sources w/o a commentator (e.g. responsa)
+    # Rights of the edition this chunk's text came from — carried through so the caller can credit
+    # it (CC-BY requires TASL) and so a paid tier can refuse to reproduce what it may not.
+    # Empty = unknown = treat as all-rights-reserved (see corpus/rights.py).
+    license: str = ""
+    version_title: str = ""
 
 
 @dataclass

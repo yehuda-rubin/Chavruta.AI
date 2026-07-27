@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Generate one live lesson per template and save readable Markdown + raw JSON.
 
     python scripts/make_sample_lessons.py        # backend must be up on :8080

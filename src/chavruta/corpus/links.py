@@ -77,7 +77,7 @@ class LinkGraph:
         return len(self._adj)
 
     @classmethod
-    def load(cls, path: str | Path) -> "LinkGraph":
+    def load(cls, path: str | Path) -> LinkGraph:
         g = cls()
         p = Path(path)
         if not p.exists():

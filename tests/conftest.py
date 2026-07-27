@@ -101,14 +101,15 @@ class InMemoryStore:
         for cid in [cid for cid, c in coll.items() if self._matches(c.payload, filters)]:
             del coll[cid]
 
-    def fetch_by_refs(self, name: str, refs: list[str], filters: Filter | None = None) -> list[Hit]:
+    def fetch_by_refs(self, name: str, refs: list[str], filters: Filter | None = None,
+                      *, limit: int | None = None) -> list[Hit]:
         coll = self._data.get(name, {})
         out = []
         for c in coll.values():
             in_refs = c.payload.get("ref") in refs or c.payload.get("anchor_ref") in refs
             if in_refs and self._matches(c.payload, filters):
                 out.append(Hit(chunk_id=c.chunk_id, score=1.0, payload=c.payload))
-        return out
+        return out[:limit] if limit else out
 
 
 # ── Fake LLM (cites the first source so the grounding gate passes) ──
@@ -130,10 +131,12 @@ class FakeLLM:
                temperature: float) -> Iterator[str]:
         yield self.generate(prompt, lang=lang, max_tokens=max_tokens, temperature=temperature).text
 
-    def request(self, body_md: str, *, lang: str = "he"):
+    def request(self, body_md: str, *, lang: str = "he", token_budget: int | None = None):
         """Agentic-path (job markdown) answer — mirrors generate(): cite the first ### [S#] source. No
-        self-fetch. Returns (text, fetched)."""
+        self-fetch. Returns (text, fetched). token_budget is accepted for interface parity (the real
+        backends meter it); this fake bills nothing, so it is recorded and ignored."""
         import re
+        self.last_token_budget = token_budget
         m = re.search(r"###\s*\[\s*(S\d+)\s*\]", body_md or "")
         if not m:
             return ("No sources." if lang == "en" else "אין מקורות.", [])

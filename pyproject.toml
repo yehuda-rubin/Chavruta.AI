@@ -7,6 +7,27 @@ name = "chavruta"
 dynamic = ["version"]          # single source of truth: src/chavruta/__init__.py::__version__
 description = "A trustworthy Jewish-text study partner (RAG over the Jewish bookshelf)"
 requires-python = ">=3.11"
+# Declared, so `pip install .` yields something that imports. This table was empty, and both
+# Dockerfiles papered over it with `pip install -e . --no-deps` plus a parallel requirements file.
+# Ranges (not the pins in requirements.txt) because a library shouldn't dictate a consumer's
+# resolution — requirements.txt stays the pinned, reproducible set for running THIS app.
+dependencies = [
+    "FlagEmbedding>=1.3",
+    "sentence-transformers>=3.0",
+    "numpy>=1.26",
+    "qdrant-client>=1.12",
+    "requests>=2.32",
+    "huggingface_hub>=0.23",
+    "tqdm>=4.66",
+    "openai>=1.30",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "pydantic>=2.10",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.5"]
 
 [tool.setuptools.dynamic]
 version = {attr = "chavruta.__version__"}
@@ -18,10 +39,28 @@ where = ["src"]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests", "scripts"]
+# Notebooks are exploratory build/embedding jobs, not the served product: they are run top-to-bottom
+# on Kaggle/Lightning, deliberately re-import per cell, and their import order is tuned to those
+# hosts. Linting them produces noise with no bearing on what ships.
+extend-exclude = ["notebooks", ".claude"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
-ignore = ["E501"]  # line length handled by formatter; long Hebrew strings are fine
+# E501: line length handled by the formatter; long Hebrew strings are fine.
+# The rest are pre-existing style in working, tested code (compact `a = 1; b = 2` lines in scripts,
+# `l`/`I` locals, zip() without strict=). Ruff had never been run despite being configured, so
+# turning it on found 288 of these at once. They are not defects, and rewriting them would bury a
+# security/cost diff in unrelated churn. Enforce the rules that catch REAL bugs (F821 undefined
+# names, F811 redefinitions, unused imports) and leave cosmetics to a dedicated pass.
+ignore = ["E501", "E702", "E701", "E741", "B905", "UP042", "E731", "B007"]
+
+[tool.ruff.lint.per-file-ignores]
+# LOAD-BEARING IMPORT ORDER — do not let isort "tidy" these.
+# On Windows, torch/FlagEmbedding must be imported before qdrant_client or pyarrow's DLL load order
+# segfaults the process. isort sorts alphabetically and would place `app.db` (and others) ahead of
+# `torch`, silently reintroducing a crash that looks like a random hang, not a lint change.
+"app/api.py" = ["I001", "E402"]
+"scripts/*.py" = ["I001", "E402"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

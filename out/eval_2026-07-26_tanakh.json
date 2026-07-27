@@ -1,0 +1,1491 @@
+{
+  "dataset": "eval/tanakh_v1.jsonl",
+  "profile": "local",
+  "top_k": 8,
+  "n_items": 120,
+  "retrieval_at_k": 0.2727,
+  "grounding_rate": 0.2727,
+  "honesty_rate": 0.2,
+  "n_answerable": 110,
+  "n_unanswerable": 10,
+  "seconds": 1891.1,
+  "failures": [
+    {
+      "qid": "gen-002-he",
+      "kind": "retrieval",
+      "expected": [
+        "Genesis.1.1"
+      ],
+      "got": []
+    },
+    {
+      "qid": "gen-002-en",
+      "kind": "retrieval",
+      "expected": [
+        "Genesis.1.1"
+      ],
+      "got": [
+        "Rashi_on_Genesis.49.3.1",
+        "Rashi_on_Genesis.30.6.1",
+        "Or_HaChaim_on_Genesis.1.25.1",
+        "Rashi_on_Genesis.27.7.1",
+        "Megillah.42.10",
+        "Rashi_on_Genesis.9.9.1",
+        "Rashi_on_Genesis.31.44.1",
+        "Rashi_on_Genesis.11.1.1"
+      ]
+    },
+    {
+      "qid": "gen-003-he",
+      "kind": "retrieval",
+      "expected": [
+        "Genesis.1.3",
+        "Genesis.1.4"
+      ],
+      "got": [
+        "Malbim_on_Genesis.1.3.1",
+        "Ramban_on_Genesis.1.1.3",
+        "Bnei_Yissaschar,_Kislev_and_Tevet.4.88.3",
+        "Ramban_on_Genesis.1.14.2",
+        "Abarbanel_on_Torah,_Genesis.1.5.2",
+        "Abarbanel_on_Torah,_Genesis.1.14.5",
+        "Tur_HaArokh,_Genesis.2.3.3",
+        "Shem_MiShmuel,_Beha'alotcha.6.7"
+      ]
+    },
+    {
+      "qid": "gen-003-en",
+      "kind": "retrieval",
+      "expected": [
+        "Genesis.1.3",
+        "Genesis.1.4"
+      ],
+      "got": [
+        "Shadal_on_Genesis.1.3.2",
+        "Chagigah.23.8",
+        "Ein_Yaakov_(Glick_Edition),_Khagigah.2.4",
+        "Rashbam_on_Genesis.1.4.2",
+        "Ein_Yaakov_(Glick_Edition),_Khagigah.2.6",
+        "Chagigah.23.12",
+        "Genesis.1.14",
+        "Ramban_on_Genesis.1.14.2"
+      ]
+    },
+    {
+      "qid": "gen-004-en",
+      "kind": "retrieval",
+      "expected": [
+        "Genesis.1.3",
+        "Genesis.1.4"
+      ],
+      "got": [
+        "Rashbam_on_Genesis.1.4.2",
+        "Rashi_on_Leviticus.22.30.2",
+        "Rashi_on_Isaiah.45.7.1",
+        "Rashi_on_Habakkuk.3.4.2",
+        "Rashi_on_Shabbat.46.4.3",
+        "Rashi_on_Genesis.1.4.1",
+        "Rashi_on_Habakkuk.3.11.2",
+        "Rashi_on_Bereshit_Rabbah.27.2.1"
+      ]
+    },
+    {
+      "qid": "gen-005-he",
+      "kind": "retrieval",
+      "expected": [
+        "Genesis.1.26",
+        "Genesis.1.27"
+      ],
+      "got": [
+        "Ohr_HaTzafun,_Shemot,_XIV.2",
+        "Derekh_Chayyim,_intro.3.14.22",
+        "A_New_Israeli_Commentary_on_Pirkei_Avot.3.14.13",
+        "Derekh_Chayyim.3.14.10",
+        "Derekh_Chayyim.3.14.22",
+        "The_Midrash_of_Philo.2.7.2",
+        "Notes_and_Corrections_on_Midrash_Aggadah,_Genesis.9.6",
+        "Toledot_Yitzchak_on_Torah,_Genesis.5.3.1"
+      ]
+    },
+    {
+      "qid": "gen-006-he",
+      "kind": "retrieval",
+      "expected": [
+        "Genesis.2.1",
+        "Genesis.2.2",
+        "Genesis.2.3"
+      ],
+      "got": [
+        "Genesis.1.1",
+        "Midrash_Lekach_Tov,_Genesis.2.1.3",
+        "Chatam_Sofer_on_Torah,_Kedoshim.5",
+        "Midrash_Lekach_Tov,_Exodus.16.29.4",
+        "Peri_Tzadik,_Sefer_Kedushat_Shabbat.1.2",
+        "Derekh_Chayyim,_intro.1.18.17",
+        "Derekh_Chayyim.1.18.17",
+        "Sefat_Emet,_Deuteronomy,_Vaetchanan.19.3"
+      ]
+    },
+    {
+      "qid": "gen-007-he",
+      "kind": "retrieval",
+      "expected": [
+        "Genesis.2.17",
+        "Genesis.2.16"
+      ],
+      "got": [
+        "Saadia_Gaon_on_Genesis.2.17.2",
+        "Kitzur_Ba'al_HaTurim_on_Genesis.3.11.1",
+        "Shenei_Luchot_HaBerit,_Shaar_HaOtiyot,_Kedushat_HaAchilah,_Maachalot_Asurot.7.1",
+        "Etz_Yosef_on_Bamidbar_Rabbah.13.5.3",
+        "Midrash_Tehillim.1.6",
+        "Talmud_Eser_HaSefirot,_Section_XI.81",
+        "Sha'arei_Orah,_Fifth_Gate,_Sixth_Sefirah.250",
+        "Abarbanel_on_Torah,_Deuteronomy.14.3.5"
+      ]
+    },
+    {
+      "qid": "gen-007-en",
+      "kind": "retrieval",
+      "expected": [
+        "Genesis.2.17",
+        "Genesis.2.16"
+      ],
+      "got": [
+        "Genesis.3.17",
+        "Kitzur_Ba'al_HaTurim_on_Genesis.3.11.1",
+        "Targum_Jonathan_on_Genesis.3.17",
+        "Tafsir_Rasag,_Genesis.3.17",
+        "Targum_Jonathan_on_Genesis.2.16",
+        "Sermons_Unto_My_People,_Chanuka,_Purim,_and_Special_Shabbatot.15.63",
+        "Targum_Jonathan_on_Genesis.3.12",
+        "Shenei_Luchot_HaBerit,_Shaar_HaOtiyot,_Kedushat_HaAchilah,_Maachalot_Asurot.7.1"
+      ]
+    },
+    {
+      "qid": "gen-008-he",
+      "kind": "retrieval",
+      "expected": [
+        "Genesis.4.9"
+      ],
+      "got": [
+        "Rashi_on_Genesis.4.1.4",
+        "Malbim_on_Genesis.4.9.2",
+        "Tzror_HaMor_on_Torah,_Genesis.4.8.1",
+        "Torah_Temimah_on_Torah,_Genesis.4.2.1",
+        "Midrash_Aggadah,_Genesis.4.8.2",
+        "The_Midrash_of_Philo.4.9.7",
+        "Toledot_Yitzchak_on_Torah,_Genesis.4.8.1",
+        "Rashi_on_Bereshit_Rabbah.32.5.1"
+      ]
+    },
+    {
+      "qid": "gen-009-he",
+      "kind": "retrieval",
+      "expected": [
+        "Genesis.6.2",
+        "Genesis.6.4"
+      ],
+      "got": [
+        "The_Antiquities_of_the_Jews.1.3.1",
+        "Toledot_Yitzchak_on_Torah,_Genesis.6.4.2",
+        "The_Antiquities_of_the_Jews,_preface.1.3.1",
+        "Torah_Temimah_on_Torah,_Genesis.6.2.1",
+        "Tzror_HaMor_on_Torah,_Genesis.6.1.1",
+        "Tur_HaArokh,_Genesis.6.4.2",
+        "Tur_HaArokh,_Genesis.6.4.3",
+        "Rosh_on_Torah,_Genesis.6.2.1"
+      ]
+    },
+    {
+      "qid": "gen-010-en",
+      "kind": "retrieval",
+      "expected": [
+        "Genesis.12.1"
+      ],
+      "got": [
+        "Genesis.26.1",
+        "Ibn_Ezra_on_Genesis.12.1.1",
+        "Genesis.21.29",
+        "Kitzur_Ba'al_HaTurim_on_Genesis.12.1.1",
+        "Kitzur_Ba'al_HaTurim_on_Genesis.12.1.2",
+        "Genesis.20.1",
+        "Genesis.20.10",
+        "Weekday_Siddur_Sefard_Linear,_Mincha,_Shemoneh_Esrei.8"
+      ]
+    },
+    {
+      "qid": "gen-011-he",
+      "kind": "retrieval",
+      "expected": [
+        "Genesis.22.4"
+      ],
+      "got": [
+        "Genesis.22.1",
+        "Beur_HaRadal_on_Pirkei_DeRabbi_Eliezer.32.32",
+        "Aggadat_Bereshit.82.3",
+        "Bereshit_Rabbah.65.10",
+        "Tzror_HaMor_on_Torah,_Genesis.22.13.1",
+        "Aggadat_Bereshit.54.2",
+        "Midrash_Sekhel_Tov,_Bereshit.22.4.2",
+        "Noam_Elimelekh,_Sefer_Bereshit,_Vayera.10.2"
+      ]
+    },
+    {
+      "qid": "gen-012-en",
+      "kind": "retrieval",
+      "expected": [
+        "Genesis.22.11",
+        "Genesis.22.12"
+      ],
+      "got": [
+        "Genesis.22.1",
+        "Targum_Jonathan_on_Genesis.22.11",
+        "Genesis.48.16",
+        "Weekday_Siddur_Sefard_Linear,_The_Morning_Prayers,_Akeidah_(The_Binding_of_Isaac).90",
+        "Bereshit_Rabbah.56.7",
+        "Joshua.24.3",
+        "Genesis.22.15",
+        "Genesis.21.12"
+      ]
+    },
+    {
+      "qid": "gen-013-he",
+      "kind": "retrieval",
+      "expected": [
+        "Genesis.28.12"
+      ],
+      "got": [
+        "Abarbanel_on_Torah,_Genesis.28.10.12",
+        "Beur_HaRadal_on_Pirkei_DeRabbi_Eliezer.35.76",
+        "Midrash_Sekhel_Tov,_Bereshit.30.13.3",
+        "Haamek_Davar_on_Genesis.28.10.1",
+        "Tur_HaArokh,_Genesis.28.10.1",
+        "Beit_HaLevi_on_Torah,_Vayetzei.1",
+        "Midrash_Sekhel_Tov,_Bereshit.28.12.1",
+        "Toldot_Yaakov_Yosef,_Vayetzei.22"
+      ]
+    },
+    {
+      "qid": "gen-013-en",
+      "kind": "retrieval",
+      "expected": [
+        "Genesis.28.12"
+      ],
+      "got": [
+        "Genesis.28.10",
+        "Haamek_Davar_on_Genesis.28.10.1",
+        "Me'or_Einayim,_Vayetzei.20",
+        "Targum_Jonathan_on_Genesis.46.5",
+        "Genesis.46.5",
+        "Genesis.31.11",
+        "Midrash_Sekhel_Tov,_Bereshit.28.12.1",
+        "Genesis.31.24"
+      ]
+    },
+    {
+      "qid": "gen-014-he",
+      "kind": "retrieval",
+      "expected": [
+        "Genesis.45.3",
+        "Genesis.45.4",
+        "Genesis.45.5"
+      ],
+      "got": [
+        "Midrash_Tanchuma_Buber,_Miketz.10.1",
+        "Perush_Maharzu_on_Bereshit_Rabbah.100.10.1",
+        "Shem_MiShmuel,_Vayigash.10.2",
+        "Midrash_Yelamdenu,_Selections_from_Yalkut_Talmud_Torah.177.2",
+        "Midrash_Sekhel_Tov,_Bereshit.45.1.4",
+        "Reggio_on_Torah,_Genesis.42.9.2",
+        "Sichot_Avodat_Levi,_intro.25.4",
+        "Reggio_on_Torah,_Genesis.46.31.1"
+      ]
+    },
+    {
+      "qid": "gen-015-he",
+      "kind": "retrieval",
+      "expected": [
+        "Genesis.9.11",
+        "Genesis.9.13"
+      ],
+      "got": [
+        "Saadia_Gaon_on_Genesis.17.11.1",
+        "Ohr_HaTzafun,_Shemot,_IX.7",
+        "Yismach_Moshe,_Noach.20.1",
+        "Malbim_on_Genesis.9.17.1",
+        "Nachalat_Ya'akov,_Genesis.9.13.1",
+        "Tzror_HaMor_on_Torah,_Genesis.8.9.4",
+        "Abarbanel_on_Torah,_Genesis.9.8.1",
+        "Abarbanel_on_Torah,_Genesis.8.15.16"
+      ]
+    },
+    {
+      "qid": "exo-001-he",
+      "kind": "retrieval",
+      "expected": [
+        "Exodus.3.2"
+      ],
+      "got": [
+        "Abarbanel_on_Torah,_Exodus.3.7.1",
+        "Yismach_Moshe,_Shemot.16.3",
+        "Toledot_Yitzchak_on_Torah,_Exodus.3.4.1",
+        "Rabbeinu_Bahya,_Shemot.3.1.2",
+        "Shadal_on_Exodus.3.2.3",
+        "Yismach_Moshe,_Noach.15.2",
+        "Midrash_Lekach_Tov,_Exodus.3.3.3",
+        "Abarbanel_on_Torah,_Exodus.3.1.2"
+      ]
+    },
+    {
+      "qid": "exo-002-he",
+      "kind": "retrieval",
+      "expected": [
+        "Exodus.20.2"
+      ],
+      "got": [
+        "Exodus.20.1",
+        "Birkat_Asher_on_Torah,_Exodus.20.1.4",
+        "Mishnat_Eretz_Yisrael_on_Mishnah_Demai,_Preface.1.56",
+        "A_New_Israeli_Commentary_on_Pirkei_Avot.5.9.13",
+        "Birkat_Asher_on_Torah,_Deuteronomy.5.19.1",
+        "A_New_Israeli_Commentary_on_Pirkei_Avot.5.1.10",
+        "Otzar_Midrashim,_Midrash_on_the_Ten_Commandments.1.3",
+        "Ohr_HaTzafun,_Vayikra,_V.7"
+      ]
+    },
+    {
+      "qid": "exo-002-en",
+      "kind": "retrieval",
+      "expected": [
+        "Exodus.20.2"
+      ],
+      "got": [
+        "Exodus.20.1",
+        "Otzar_Midrashim,_Midrash_on_the_Ten_Commandments.1.3",
+        "Rashi_on_Deuteronomy.5.12.1",
+        "Hasagot_HaRamban_on_Sefer_HaMitzvot,_Positive_Commandments.1.1",
+        "Selichot_Nusach_Lita_Linear,_Fast_of_Gedaliah.16.24",
+        "Rashi_on_Numbers.7.20.2",
+        "Midrash_Tanchuma_Buber,_Ki_Tisa.20.1",
+        "Jerusalem_Talmud_Challah.1.6.3"
+      ]
+    },
+    {
+      "qid": "exo-003-he",
+      "kind": "retrieval",
+      "expected": [
+        "Exodus.20.12"
+      ],
+      "got": [
+        "Exodus.20.1",
+        "Midrash_Aggadah,_Exodus.20.12.1",
+        "Mishnat_Eretz_Yisrael_on_Mishnah_Nedarim.9.1.16",
+        "Shem_MiShmuel,_Kedoshim.2.10",
+        "Birkat_Asher_on_Torah,_Exodus.20.12.5",
+        "Mishnat_Eretz_Yisrael_on_Mishnah_Peah.1.1.21",
+        "A_New_Israeli_Commentary_on_Pirkei_Avot.4.12.8",
+        "Sefer_Yereim.221.1"
+      ]
+    },
+    {
+      "qid": "exo-004-he",
+      "kind": "retrieval",
+      "expected": [
+        "Exodus.15.1"
+      ],
+      "got": [
+        "Sermons_Unto_My_People,_The_Three_Festivals.17.34",
+        "Derekh_Chayyim,_intro.5.4.4",
+        "Malbim_on_Jeremiah.49.21.1",
+        "Ohr_HaTzafun,_Shemot,_XIX.4",
+        "Siftei_Kohen_on_Torah,_Exodus.15.14.1",
+        "Derekh_Chayyim.5.4.4",
+        "Birkat_Asher_on_Torah,_Exodus.15.1.2",
+        "Shadal_on_Exodus.14.21.1"
+      ]
+    },
+    {
+      "qid": "exo-005-he",
+      "kind": "retrieval",
+      "expected": [
+        "Exodus.24.7"
+      ],
+      "got": [
+        "Sichot_Avodat_Levi.41.11",
+        "Ohr_HaTzafun,_Shemot,_XXXII.3",
+        "Birkat_Asher_on_Torah,_Exodus.19.1.3",
+        "Etz_Yosef_on_Shemot_Rabbah.32.7.2",
+        "Sichot_Avodat_Levi,_intro.41.11",
+        "Otzar_Midrashim,_Chanukah,_Megilat_Antiochus,_Called_\"The_Greek_Scroll\".115",
+        "Kaf_Achat.25.7",
+        "Reggio_on_Torah,_Deuteronomy.33.2.1"
+      ]
+    },
+    {
+      "qid": "exo-006-he",
+      "kind": "retrieval",
+      "expected": [
+        "Exodus.16.31",
+        "Exodus.16.14"
+      ],
+      "got": [
+        "Midrash_Lekach_Tov,_Exodus.16.13.4",
+        "A_New_Israeli_Commentary_on_Pirkei_Avot.5.6.6",
+        "Abarbanel_on_Torah,_Exodus.16.14.2",
+        "Etz_Yosef_on_Bamidbar_Rabbah.1.2.11",
+        "Siftei_Kohen_on_Torah,_Exodus.16.21.4",
+        "Shadal_on_Isaiah,_Introduction.5",
+        "Mekhilta_DeRabbi_Shimon_Ben_Yochai.16.32",
+        "Imrei_Binah,_Part_I;_Oseh_Pele.2.21"
+      ]
+    },
+    {
+      "qid": "exo-007-en",
+      "kind": "retrieval",
+      "expected": [
+        "Exodus.14.28",
+        "Exodus.14.27"
+      ],
+      "got": [
+        "Targum_Jerusalem,_Exodus.15.4",
+        "Song_of_Songs.1.9",
+        "Machzor_Rosh_Hashanah_Ashkenaz,_The_Morning_Prayers,_Hodu.30",
+        "Midrash_BeChiddush_on_Pesach_Haggadah,_Hallel,_Songs_of_Praise_and_Thanks.1.13",
+        "Exodus.15.4",
+        "Ezekiel.32.31",
+        "II_Kings.18.21",
+        "Exodus.15.19"
+      ]
+    },
+    {
+      "qid": "exo-008-he",
+      "kind": "retrieval",
+      "expected": [
+        "Exodus.33.18"
+      ],
+      "got": [
+        "Zikaron_leYom_Rishon,_Part_II;_Selichot,_Radiant_Countenance.19",
+        "Mizrachi,_Exodus.33.18.1",
+        "Shemot_Rabbah.45.5",
+        "Avodat_HaMelekh_on_Mishneh_Torah,_Foundations_of_the_Torah.1.10.1",
+        "Bekhor_Shor,_Exodus.33.17.3",
+        "Em_LaMikra,_Exodus.33.18.1",
+        "Chizkuni,_Exodus.33.19.1",
+        "Recanati_on_the_Torah,_Ki_Tisa.26"
+      ]
+    },
+    {
+      "qid": "lev-002-he",
+      "kind": "retrieval",
+      "expected": [
+        "Leviticus.16.31",
+        "Leviticus.23.32"
+      ],
+      "got": [
+        "Al_Kapot_HaMan'ul;_Homilies_for_the_Days_of_Awe,_\"that_we_sinned_before_You_by_a_begrudging_eye\".35",
+        "Mishnat_Eretz_Yisrael_on_Mishnah_Yoma,_Preface.6.2",
+        "Midrash_Lekach_Tov,_Leviticus.23.3.1",
+        "Chizkuni,_Leviticus.23.32.6",
+        "Meshekh_Chokhmah,_Akharei_Mot.33",
+        "Gur_Aryeh_on_Shemot.16.26.2",
+        "Malbim_on_Leviticus,_Behar.7.1",
+        "Al_Kapot_HaMan'ul;_Homilies_for_the_Days_of_Awe,_\"that_we_sinned_before_You_by_a_begrudging_eye\".36"
+      ]
+    },
+    {
+      "qid": "lev-003-he",
+      "kind": "retrieval",
+      "expected": [
+        "Leviticus.23.4",
+        "Leviticus.23.2"
+      ],
+      "got": [
+        "Birkat_Asher_on_Torah,_Leviticus.23.3.1",
+        "Hegyonot_El_Ami,_Volume_I,_Yom_Kippur.40.12",
+        "Or_HaChaim_on_Leviticus.23.2.2",
+        "Sforno_on_Leviticus.23.4.1",
+        "Haamek_Davar_on_Leviticus.23.1.1",
+        "Gur_Aryeh_on_Vayikra.23.2.1",
+        "Peri_Tzadik,_Emor.6.1",
+        "Mishnat_Eretz_Yisrael_on_Mishnah_Megillah.3.5.2"
+      ]
+    },
+    {
+      "qid": "num-001-he",
+      "kind": "retrieval",
+      "expected": [
+        "Numbers.6.24",
+        "Numbers.6.25",
+        "Numbers.6.26"
+      ],
+      "got": [
+        "Mishnat_Eretz_Yisrael_on_Mishnah_Megillah.4.10.7",
+        "Siddur_Edot_HaMizrach,_Shabbat_Shacharit,_Amidah.34",
+        "Chayyei_Adam.32.2",
+        "Rabbeinu_Bahya,_Bamidbar.6.23.2",
+        "Mishnat_Eretz_Yisrael_on_Mishnah_Berakhot,_Preface.13.8",
+        "Siddur_Edot_HaMizrach,_Prayers_for_Three_Festivals,_Amidah.40",
+        "Chayyei_Adam.24.25",
+        "Sefat_Emet,_Numbers,_Nasso.15.5"
+      ]
+    },
+    {
+      "qid": "num-002-he",
+      "kind": "retrieval",
+      "expected": [
+        "Numbers.24.5"
+      ],
+      "got": [
+        "Midrash_Lekach_Tov,_Numbers.24.2.1",
+        "Midrash_Aggadah,_Numbers.24.2.1",
+        "Rabbeinu_Bahya,_Bamidbar.24.2.1",
+        "Ohr_HaMeir,_Balak.6",
+        "Malbim_on_Numbers.24.2.1",
+        "Perush_Maharzu_on_Ruth_Rabbah.5.6.15",
+        "Tzror_HaMor_on_Torah,_Numbers.24.1.1",
+        "Sod_Yesharim,_Shabbat_Chol_HaMoed_Sukkot.36.1"
+      ]
+    },
+    {
+      "qid": "num-003-he",
+      "kind": "retrieval",
+      "expected": [
+        "Numbers.13.27",
+        "Numbers.13.28",
+        "Numbers.13.32"
+      ],
+      "got": [
+        "Peri_Tzadik,_Sh'lach.3.1",
+        "HaKtav_VeHaKabalah,_Genesis.42.9.3",
+        "Rosh_on_Torah,_Numbers.15.2.1",
+        "Chatam_Sofer_on_Torah,_Sh'lach.7",
+        "Siftei_Kohen_on_Torah,_Numbers.13.2.9",
+        "Ramban_on_Genesis.42.9.2",
+        "HaKtav_VeHaKabalah,_Numbers.13.16.1",
+        "Sha'ar_HaPesukim,_Parashat_Shemot.145"
+      ]
+    },
+    {
+      "qid": "num-004-en",
+      "kind": "retrieval",
+      "expected": [
+        "Numbers.16.32",
+        "Numbers.16.31"
+      ],
+      "got": [
+        "Targum_Jerusalem,_Numbers.16.1",
+        "Midrash_Tanchuma_Buber,_Korach.23.5",
+        "Targum_Jonathan_on_Numbers.16.32",
+        "Targum_Jonathan_on_Numbers.16.6",
+        "Targum_Jonathan_on_Numbers.33.22",
+        "Targum_Jonathan_on_Numbers.16.16",
+        "Targum_Jerusalem,_Numbers.21.29",
+        "Targum_Jerusalem,_Numbers.26.11"
+      ]
+    },
+    {
+      "qid": "deu-002-he",
+      "kind": "retrieval",
+      "expected": [
+        "Deuteronomy.6.5"
+      ],
+      "got": [
+        "Divrei_Yirmiyahu_on_Mishneh_Torah,_Foundations_of_the_Torah.2.2.1",
+        "Brit_Moshe,_Positive_Commandments.3.1.1",
+        "Penei_Moshe_on_Jerusalem_Talmud_Sotah.5.6.2.9",
+        "Sefer_Mitzvot_Gadol,_Positive_Commandments,_Remazim.3",
+        "Sefer_Yereim.404.1",
+        "Arvei_Nachal,_Balak.2.25",
+        "Tanna_DeBei_Eliyahu_Rabbah.28.1",
+        "Midrash_Aggadah,_Numbers.10.29.3"
+      ]
+    },
+    {
+      "qid": "deu-003-he",
+      "kind": "retrieval",
+      "expected": [
+        "Deuteronomy.30.19"
+      ],
+      "got": [
+        "Sforno_on_Deuteronomy.30.19.1",
+        "Reggio_on_Torah,_Deuteronomy.30.19.2",
+        "Yismach_Moshe,_Re'eh.2.1",
+        "Or_HaChaim_on_Deuteronomy.30.19.6",
+        "Talmud_Eser_HaSefirot,_Introduction.19",
+        "Torah_Temimah_on_Torah,_Deuteronomy.30.19.1",
+        "Yismach_Moshe,_Re'eh.2.4",
+        "Rashi_on_Deuteronomy.30.19.2"
+      ]
+    },
+    {
+      "qid": "deu-003-en",
+      "kind": "retrieval",
+      "expected": [
+        "Deuteronomy.30.19"
+      ],
+      "got": [
+        "Torah_Temimah_on_Torah,_Deuteronomy.30.19.1",
+        "Rashi_on_Deuteronomy.12.20.1",
+        "Sefer_HaMiddot,_The_Sabbath.1",
+        "Reggio_on_Torah,_Deuteronomy.30.19.2",
+        "Bartenura_on_Pirkei_Avot.2.7.4",
+        "Siddur_Sefard,_Simchat_Torah,_Hakafot.112",
+        "Ralbag_Beur_HaMilot_on_Torah,_Deuteronomy.30.19.2",
+        "Ralbag_on_Torah,_Deuteronomy.3.23.5"
+      ]
+    },
+    {
+      "qid": "deu-004-he",
+      "kind": "retrieval",
+      "expected": [
+        "Deuteronomy.34.10"
+      ],
+      "got": [
+        "Abarbanel_on_Torah,_Deuteronomy.34.10.1",
+        "Midrash_Lekach_Tov,_Deuteronomy.34.10.1",
+        "Toledot_Yitzchak_on_Torah,_Deuteronomy.34.10.1",
+        "Etz_Yosef_on_Shir_HaShirim_Rabbah.1.15.3.6",
+        "Ralbag_Beur_HaMilot_on_Torah,_Deuteronomy.34.10.1",
+        "Sefer_HaIkkarim,_Maamar_3.20.3",
+        "Reggio_on_Torah,_Deuteronomy.34.10.1",
+        "Tiferet_Yisrael.21.3"
+      ]
+    },
+    {
+      "qid": "deu-005-he",
+      "kind": "retrieval",
+      "expected": [
+        "Deuteronomy.16.20"
+      ],
+      "got": [
+        "Ralbag_Beur_HaMilot_on_Torah,_Deuteronomy.16.20.1",
+        "LeNevukhei_HaTekufah.3.3.17",
+        "Maor_VaShemesh,_Shoftim.7",
+        "Sifrei_Devarim.144.12",
+        "Sermons_Unto_My_People,_The_Three_Festivals.22.44",
+        "Malbim_on_Deuteronomy.16.18.4",
+        "Perush_Maharzu_on_Eichah_Rabbah,_Petichta.11.6",
+        "Sforno_on_Deuteronomy.16.20.1"
+      ]
+    },
+    {
+      "qid": "jos-002-en",
+      "kind": "retrieval",
+      "expected": [
+        "Joshua.6.20"
+      ],
+      "got": [
+        "Guide_for_the_Perplexed,_Part_3.50.10",
+        "I_Kings.16.34",
+        "Rashi_on_Nehemiah.1.3.3",
+        "Berakhot.108.11",
+        "Joshua.4.13",
+        "Rashi_on_Nehemiah.3.34.9",
+        "Joshua.6.2",
+        "Nehemiah.1.3"
+      ]
+    },
+    {
+      "qid": "jud-001-he",
+      "kind": "retrieval",
+      "expected": [
+        "Judges.5.1",
+        "Judges.5.2"
+      ],
+      "got": [
+        "Aggadat_Bereshit.60.1",
+        "Rosh_on_Torah,_Deuteronomy.33.29.1",
+        "Ohev_Yisrael,_Parsaht_Zachor_and_Purim.3.1",
+        "Akeidat_Yitzchak.42.1.3",
+        "Mekhilta_DeRabbi_Shimon_Ben_Yochai.15.1",
+        "Torah_Temimah_on_Torah,_Exodus.16.25.3",
+        "Maor_VaShemesh,_Beshalach.19",
+        "Midrash_Lekach_Tov,_Exodus.15.1.4"
+      ]
+    },
+    {
+      "qid": "sam-001-he",
+      "kind": "retrieval",
+      "expected": [
+        "I Samuel.1.11",
+        "I Samuel.1.27"
+      ],
+      "got": [
+        "Mishnat_Eretz_Yisrael_on_Mishnah_Nedarim.6.2.4",
+        "Midrash_Shmuel.1.9",
+        "Nefesh_HaChayim,_Gate_II.12.4",
+        "Mishnat_Eretz_Yisrael_on_Mishnah_Berakhot.6.5.17",
+        "Chatam_Sofer_on_Torah,_Nitzavim.49",
+        "Melammed_Lehoil_Part_I.12.3",
+        "Mishnat_Eretz_Yisrael_on_Mishnah_Moed_Katan.2.5.9",
+        "Shelom_Esther.4.16.3"
+      ]
+    },
+    {
+      "qid": "sam-002-he",
+      "kind": "retrieval",
+      "expected": [
+        "I Samuel.15.22"
+      ],
+      "got": [
+        "Rashi_on_I_Samuel.15.22.1",
+        "Ralbag_on_I_Samuel.15.22.2",
+        "Romemot_El_on_Psalms.40.7.1",
+        "Chatam_Sofer_on_Torah,_Tetzaveh.90",
+        "Rashi_on_I_Samuel.15.22.2",
+        "Meiri_on_Psalms.40.7.1",
+        "Metzudat_David_on_II_Samuel.24.21.2",
+        "Metzudat_David_on_Psalms.40.7.2"
+      ]
+    },
+    {
+      "qid": "kin-002-he",
+      "kind": "retrieval",
+      "expected": [
+        "I Kings.18.38",
+        "I Kings.18.39"
+      ],
+      "got": [
+        "Perush_Maharzu_on_Vayikra_Rabbah.26.1.7",
+        "Meshekh_Chokhmah,_Re'eh.9",
+        "Mechokekei_Yehudah;_Yahel_Ohr,_Exodus.24.16.1",
+        "Sha'ar_HaGilgulim.32.12",
+        "Chidushei_Agadot_on_Taanit.29.5",
+        "Rashi_on_II_Kings.3.11.1",
+        "Devash_LeFi,_Letter_Alef.13",
+        "Ralbag_on_Judges.6.21.1"
+      ]
+    },
+    {
+      "qid": "isa-001-he",
+      "kind": "retrieval",
+      "expected": [
+        "Isaiah.2.4"
+      ],
+      "got": [
+        "Haamek_Davar_on_Numbers.24.14.2",
+        "Aggadat_Bereshit.67.3",
+        "Pardes_Rimmonim.23.1.99",
+        "Beit_Aharon,_Teachings_on_Torah_and_Holidays,_R'_Aharon_(the_Second)_of_Karlin,_Genesis,_Vayechi.24",
+        "Malbim_on_I_Chronicles.6.45.1",
+        "Yefeh_To'ar_on_Shemot_Rabbah.45.6.2",
+        "Sermons_Unto_My_People,_Chanuka,_Purim,_and_Special_Shabbatot.10.130",
+        "Da'at_Zekenim_on_Numbers.23.10.2"
+      ]
+    },
+    {
+      "qid": "isa-001-en",
+      "kind": "retrieval",
+      "expected": [
+        "Isaiah.2.4"
+      ],
+      "got": [
+        "Joel.4.10",
+        "Shabbat.125.5",
+        "Ezekiel.21.19",
+        "Isaiah.32.12",
+        "Essay_on_Fundamentals.7.2",
+        "Isaiah.7.25",
+        "Jeremiah.14.15",
+        "Selichot_Nusach_Lita_Linear,_Third_Day_of_the_Ten_Days_of_Penitence.7.79"
+      ]
+    },
+    {
+      "qid": "isa-002-he",
+      "kind": "retrieval",
+      "expected": [
+        "Isaiah.6.3"
+      ],
+      "got": [
+        "Shadal_on_Isaiah.4.3.1",
+        "Shadal_on_Isaiah.6.2.2",
+        "Ibn_Ezra_on_Isaiah.6.3.3",
+        "Shadal_on_Isaiah.6.4.3",
+        "Etz_Yosef_on_Bereishit_Rabbah.21.1.3",
+        "Shadal_on_Isaiah.6.3.1",
+        "Menorat_HaMaor,_ii;_On_Prayer,_Order_of_Amidah.43",
+        "Otzar_Midrashim,_The_Angel_Metatron_(Chanoch),_Seder_Machanot_(Groups_of_Angels).8"
+      ]
+    },
+    {
+      "qid": "isa-003-he",
+      "kind": "retrieval",
+      "expected": [
+        "Isaiah.40.1"
+      ],
+      "got": [
+        "Sermons_Unto_My_People,_Chanuka,_Purim,_and_Special_Shabbatot.28.21",
+        "Ahavat_Yehonatan,_Haftarah_of_Vaetchanan.1",
+        "Nachal_Sorek,_Haftarah_of_Vaetchanan.1",
+        "Chatam_Sofer_on_Torah,_Vaetchanan.48",
+        "Aderet_Eliyahu_(Rabbi_Yosef_Chaim),_Vaetchanan.27",
+        "Sermons_Unto_My_People,_Chanuka,_Purim,_and_Special_Shabbatot.27.3",
+        "Pesikta_Rabbati.30.1",
+        "Metzudat_David_on_Isaiah.40.1.1"
+      ]
+    },
+    {
+      "qid": "isa-004-he",
+      "kind": "retrieval",
+      "expected": [
+        "Isaiah.11.6"
+      ],
+      "got": [
+        "Shadal_on_Isaiah.11.6.1",
+        "Metzudat_David_on_Isaiah.11.6.1",
+        "LeNevukhei_HaTekufah.3.10.20",
+        "Ibn_Ezra_on_Isaiah.11.6.1",
+        "Machberet_Menachem,_Letter_Zayin.1.2",
+        "Rabbeinu_Bahya,_Vayikra.11.4.4",
+        "Ibn_Ezra_on_Isaiah.65.25.1",
+        "Shadal_on_Isaiah.11.1.1"
+      ]
+    },
+    {
+      "qid": "jer-001-he",
+      "kind": "retrieval",
+      "expected": [
+        "Jeremiah.2.2"
+      ],
+      "got": [
+        "Malbim_on_Jeremiah.31.2.1",
+        "Perush_Maharzu_on_Bereshit_Rabbah.29.3.3",
+        "Nachal_Sorek,_Haftarah_for_the_Second_Day_of_Rosh_Hashanah.1",
+        "Otzar_Midrashim,_Perek_Tzedakot.1.15",
+        "Malbim_on_Jeremiah.31.3.1",
+        "Alshekh_on_Torah,_Deuteronomy.32.10.1",
+        "Sod_Yesharim,_Rosh_Hashanah.16.1",
+        "Leshon_Chakhamim,_Part_I.10.81"
+      ]
+    },
+    {
+      "qid": "jer-002-he",
+      "kind": "retrieval",
+      "expected": [
+        "Jeremiah.31.20"
+      ],
+      "got": [
+        "Aggadat_Bereshit.5.1",
+        "Aggadat_Bereshit.5.3",
+        "Ibn_Ezra_on_Psalms.78.9.1",
+        "Metzudat_David_on_Jeremiah.31.20.1",
+        "Vayikra_Rabbah.2.1",
+        "Rashi_on_Jeremiah.31.20.1",
+        "Ohr_HaMeir,_Rosh_Hashana.26",
+        "Zera_Kodesh,_On_Festivals,_Rosh_HaShanah.22"
+      ]
+    },
+    {
+      "qid": "eze-001-he",
+      "kind": "retrieval",
+      "expected": [
+        "Ezekiel.1.4",
+        "Ezekiel.1.26"
+      ],
+      "got": [
+        "Malbim_on_Ezekiel.43.3.1",
+        "Malbim_on_Ezekiel,_Introduction.8",
+        "Malbim_on_Ezekiel.1.4.1",
+        "Rashi_on_Ezekiel.41.21.2",
+        "Malbim_on_Ezekiel.1.1.1",
+        "Perush_Maharzu_on_Shemot_Rabbah.23.5.5",
+        "Rabbeinu_Bahya,_Shemot.9.14.3",
+        "Perush_Maharzu_on_Bereshit_Rabbah.47.5.7"
+      ]
+    },
+    {
+      "qid": "eze-002-he",
+      "kind": "retrieval",
+      "expected": [
+        "Ezekiel.37.4",
+        "Ezekiel.37.5"
+      ],
+      "got": [
+        "Malbim_on_Ezekiel.37.11.1",
+        "Ohr_HaChammah_on_Zohar.2.284.6",
+        "Ran_on_Megillah.21.8",
+        "Ibn_Ezra_on_Psalms.103.14.2",
+        "Maaseh_Rokeach_on_Prayer_and_the_Priestly_Blessing.13.16.1",
+        "Aderet_Eliyahu,_Genesis.1.9.5",
+        "Sermons_Unto_My_People,_The_Three_Festivals.18.24",
+        "Mishnat_Eretz_Yisrael_on_Mishnah_Ketubot,_Preface.3.11"
+      ]
+    },
+    {
+      "qid": "jon-001-he",
+      "kind": "retrieval",
+      "expected": [
+        "Jonah.1.2",
+        "Jonah.1.3"
+      ],
+      "got": [
+        "Otzar_Midrashim,_Midrashim_on_Sefer_Yonah,_Midrash_Yonah_(From_Pirkei_d'Rabi_Eliezer).3",
+        "Malbim_on_Jonah.1.3.2",
+        "Etz_Yosef_on_Bereishit_Rabbah.21.5.7",
+        "Gevurot_Hashem.47.18",
+        "Otzar_Midrashim,_Midrashim_on_Sefer_Yonah,_Midrash_Yonah_(version_1).3",
+        "Beur_HaRadal_on_Pirkei_DeRabbi_Eliezer.10.58",
+        "Footnotes_on_Mekhilta_DeRabbi_Shimon_Ben_Yochai.12.1.2",
+        "Ohr_HaTzafun,_Bereshit,_XIV.23"
+      ]
+    },
+    {
+      "qid": "jon-002-he",
+      "kind": "retrieval",
+      "expected": [
+        "Jonah.1.1",
+        "Jonah.1.2"
+      ],
+      "got": [
+        "Rosh_David,_Ki_Tisa.24",
+        "Perush_Maharzu_on_Shemot_Rabbah.21.5.1",
+        "Eliyah_Rabbah_on_Shulchan_Arukh,_Orach_Chayim.81.8",
+        "Ibn_Ezra_on_Psalms.55.7.3",
+        "Sermons_Unto_My_People,_The_High_Holidays.34.28",
+        "Ein_Yaakov,_Shabbat.14.7",
+        "Torah_Temimah_on_Song_of_Songs.1.15.13",
+        "Malbim_on_Leviticus,_Tazria.25.1"
+      ]
+    },
+    {
+      "qid": "jon-003-he",
+      "kind": "retrieval",
+      "expected": [
+        "Jonah.3.6",
+        "Jonah.3.8",
+        "Jonah.3.10"
+      ],
+      "got": [
+        "Malbim_on_Jonah.3.10.1",
+        "Ohr_HaTzafun,_Shemot,_VI.13",
+        "Ohr_HaTzafun,_Bereshit,_XIV.21",
+        "Otzar_Midrashim,_Perek_Tzedakot.1.18",
+        "Malbim_on_Jonah.3.5.1",
+        "Beit_Elohim,_Shaar_HaTeshuvah.14.3",
+        "Otzar_Midrashim,_Midrashim_on_Sefer_Yonah,_Midrash_Yonah_(Version_2).3",
+        "Beit_Elohim,_Shaar_HaTeshuvah.13.5"
+      ]
+    },
+    {
+      "qid": "jon-004-he",
+      "kind": "retrieval",
+      "expected": [
+        "Jonah.4.6",
+        "Jonah.4.10"
+      ],
+      "got": [
+        "Rosh_David,_Ki_Tisa.24",
+        "Tzaverei_Shalal,_Haftarah_for_Minchah_of_Yom_Kippur.4.1",
+        "Rashi_on_Jonah.4.6.3",
+        "Malbim_on_Jonah.4.6.2",
+        "Al_Kapot_HaMan'ul;_Homilies_for_the_Days_of_Awe,_Mercy_and_Compassion.14",
+        "Ibn_Ezra_on_Jonah.4.7.1",
+        "Tzaverei_Shalal,_Haftarah_for_Minchah_of_Yom_Kippur.4.3",
+        "Ohr_HaTzafun,_Bereshit,_XIV.24"
+      ]
+    },
+    {
+      "qid": "mic-001-he",
+      "kind": "retrieval",
+      "expected": [
+        "Micah.6.8"
+      ],
+      "got": [
+        "Ahavat_Yehonatan,_Haftarah_of_Balak.17",
+        "Ahavat_Chesed,_Part_II.1.4",
+        "Ahavat_Chesed,_Part_II.1.1",
+        "Kedushat_Levi,_Deuteronomy,_Shoftim.1",
+        "Marpeh_la'Nefesh,_Introduction_of_the_Author.86",
+        "Perush_Maharzu_on_Devarim_Rabbah.3.7.1",
+        "Ahavat_Chesed,_Part_II.12.1",
+        "Ahavat_Chesed,_Foreword.7"
+      ]
+    },
+    {
+      "qid": "psa-001-he",
+      "kind": "retrieval",
+      "expected": [
+        "Psalms.23.1"
+      ],
+      "got": [
+        "Ibn_Ezra_on_Psalms.23.1.1",
+        "Midrash_Tehillim.23.1",
+        "Peri_Tzadik,_Terumah.11.1",
+        "Midrash_Tehillim.23.2",
+        "Noam_Elimelekh,_Sefer_Bereshit,_Vayera.9.6",
+        "Pri_Etz_Chaim,_Gate_of_the_Recitation_of_the_Shema_Before_Retiring.11.42",
+        "Torah_Temimah_on_Song_of_Songs.7.3.4",
+        "Rashi_on_Psalms.23.1.2"
+      ]
+    },
+    {
+      "qid": "psa-003-he",
+      "kind": "retrieval",
+      "expected": [
+        "Psalms.126.1"
+      ],
+      "got": [
+        "Malbim_on_Psalms.126.1.1",
+        "Shomer_Yisrael.4.21",
+        "Midrash_Tehillim.126.1",
+        "Torah_Temimah_on_Psalms.126.1.1",
+        "Sod_Yesharim,_Shemini_Atzeret.5.2",
+        "Meiri_on_Psalms.132.1.1",
+        "Ibn_Ezra_on_Psalms.126.1.1",
+        "Maggid_Devarav_leYaakov.113.1"
+      ]
+    },
+    {
+      "qid": "psa-004-he",
+      "kind": "retrieval",
+      "expected": [
+        "Psalms.19.2"
+      ],
+      "got": [
+        "Radak_on_Psalms.19.2.1",
+        "Malbim_on_Psalms.19.2.1",
+        "Marpeh_la'Nefesh,_Ninth_Treatise_on_Abstinence.5.24",
+        "Midrash_Tehillim.19.4",
+        "Otzar_Midrashim,_Perek_Shirah_('Chapter_of_Song').1.3",
+        "Rashi_on_Psalms.19.6.1",
+        "Arvei_Nachal,_Balak.2.97",
+        "Metzudat_David_on_Psalms.19.2.1"
+      ]
+    },
+    {
+      "qid": "pro-001-he",
+      "kind": "retrieval",
+      "expected": [
+        "Proverbs.1.7",
+        "Proverbs.9.10"
+      ],
+      "got": [
+        "Malbim_on_Psalms.112.1.1",
+        "Sefat_Emet,_Genesis,_For_Chanuka.4.8",
+        "Malbim_on_Proverbs.9.10.1",
+        "Malbim_on_Proverbs.8.13.1",
+        "Malbim_on_Proverbs.1.7.1",
+        "Malbim_on_Psalms.111.10.1",
+        "Rashi_on_Proverbs.1.7.2",
+        "Nefesh_HaChayim,_Gate_IV.5.6"
+      ]
+    },
+    {
+      "qid": "pro-002-he",
+      "kind": "retrieval",
+      "expected": [
+        "Proverbs.31.10"
+      ],
+      "got": [
+        "Ibn_Ezra_on_Proverbs.31.10.1",
+        "Perush_Maharzu_on_Devarim_Rabbah.1.10.7",
+        "Etz_Yosef_on_Devarim_Rabbah.1.10.9",
+        "Aggadat_Bereshit.34.1",
+        "Metzudat_David_on_Proverbs.31.10.2",
+        "Peri_Tzadik,_Tazria.6.1",
+        "Yefeh_To'ar_on_Bereshit_Rabbah.45.1.1",
+        "Akeidat_Yitzchak.22.1.8"
+      ]
+    },
+    {
+      "qid": "pro-002-en",
+      "kind": "retrieval",
+      "expected": [
+        "Proverbs.31.10"
+      ],
+      "got": [
+        "Bereshit_Rabbah.47.1",
+        "Mishnat_Eretz_Yisrael_on_Mishnah_Peah,_Appendix_1.10",
+        "Siddur_Edot_HaMizrach,_Shabbat_Evening,_Eshet_Hayil.1",
+        "Akeidat_Yitzchak.6.1.3",
+        "Etz_Yosef_on_Kohelet_Rabbah.1.8.4.11",
+        "Targum_Jonathan_on_Genesis.20.7",
+        "Leket_Yosher,_Volume_I_(Orach_Chayim).134.3",
+        "Metzudat_David_on_Judges.5.24.1"
+      ]
+    },
+    {
+      "qid": "job-001-he",
+      "kind": "retrieval",
+      "expected": [
+        "Job.1.21"
+      ],
+      "got": [
+        "Rosh_on_Torah,_Exodus.12.29.1",
+        "Midrash_Lekach_Tov_on_Lamentations,_intro.3.1.1",
+        "Bava_Batra.30.7",
+        "Midrash_Lekach_Tov_on_Lamentations.3.1.1",
+        "Devarim_Nichumim_on_Lamentations.3.32.1",
+        "Midrash_Aggadah,_Genesis.25.22.2",
+        "Chatam_Sofer_on_Torah,_Shmini.16",
+        "Ibn_Ezra_on_Job.42.17.2"
+      ]
+    },
+    {
+      "qid": "sos-001-he",
+      "kind": "retrieval",
+      "expected": [
+        "Song of Songs.6.3"
+      ],
+      "got": [
+        "Ralbag_on_Song_of_Songs.6.3.1",
+        "Torah_Temimah_on_Song_of_Songs.6.3.1",
+        "Tzror_HaMor_on_Song_of_Songs.6.3.1",
+        "Ralbag_on_Song_of_Songs.7.11.1",
+        "Midrash_Lekach_Tov_on_Song_of_Songs,_intro.6.3.1",
+        "Sefat_Emet,_Deuteronomy,_For_the_Month_of_Elul.12.2",
+        "Midrash_Lekach_Tov_on_Song_of_Songs.7.11.1",
+        "Sefat_Emet,_Deuteronomy,_For_the_Month_of_Elul.5.2"
+      ]
+    },
+    {
+      "qid": "rut-001-he",
+      "kind": "retrieval",
+      "expected": [
+        "Ruth.1.16"
+      ],
+      "got": [
+        "Torah_Temimah_on_Ruth.1.16.7",
+        "Torah_Temimah_on_Ruth.1.16.8",
+        "Ralbag_Ruth.1.14.1",
+        "Iggeret_Shmuel_on_Ruth.1.16.11",
+        "Nachal_Eshkol_on_Ruth.1.16.1",
+        "Sermons_Unto_My_People,_The_Three_Festivals.25.25",
+        "Iggeret_Shmuel_on_Ruth.2.20.6",
+        "Shemot_Rabbah.42.6"
+      ]
+    },
+    {
+      "qid": "rut-001-en",
+      "kind": "retrieval",
+      "expected": [
+        "Ruth.1.16"
+      ],
+      "got": [
+        "Ralbag_Ruth.1.14.1",
+        "Ibn_Ezra_on_Ruth.1.19.2",
+        "Ruth.1.21",
+        "Ruth.4.9",
+        "Ruth.2.2",
+        "Ruth.1.20",
+        "Ruth.1.19",
+        "Ruth.2.20"
+      ]
+    },
+    {
+      "qid": "ecc-001-he",
+      "kind": "retrieval",
+      "expected": [
+        "Ecclesiastes.1.2"
+      ],
+      "got": [
+        "Midrash_Lekach_Tov_on_Ecclesiastes,_intro.12.8.1",
+        "Rashi_on_Ecclesiastes.1.2.1",
+        "Midrash_Lekach_Tov_on_Ecclesiastes.12.8.1",
+        "Midrash_Lekach_Tov_on_Ecclesiastes.1.2.1",
+        "Torah_Temimah_on_Ecclesiastes.1.2.6",
+        "Midrash_Lekach_Tov_on_Ecclesiastes,_intro.1.2.1",
+        "Metzudat_David_on_Ecclesiastes.1.2.1",
+        "Nachal_Eshkol_on_Ecclesiastes.1.2.1"
+      ]
+    },
+    {
+      "qid": "ecc-002-he",
+      "kind": "retrieval",
+      "expected": [
+        "Ecclesiastes.3.1"
+      ],
+      "got": [
+        "Nachal_Eshkol_on_Ecclesiastes.3.1.1",
+        "Pat_Lechem,_First_Treatise_on_Unity.6.12",
+        "Ta'alumot_Chokhmah_on_Ecclesiastes.3.1.1",
+        "Perush_Maharzu_on_Kohelet_Rabbah.3.1.1.1",
+        "Pat_Lechem,_Fourth_Treatise_on_Trust.3.43",
+        "Torah_Temimah_on_Ecclesiastes.8.6.1",
+        "Netzach_Yisrael,_intro.27.1",
+        "Derush_al_HaTorah.13.3"
+      ]
+    },
+    {
+      "qid": "ecc-003-he",
+      "kind": "retrieval",
+      "expected": [
+        "Ecclesiastes.12.13"
+      ],
+      "got": [
+        "Torah_Temimah_on_Ecclesiastes.12.13.1",
+        "Perush_Maharzu_on_Kohelet_Rabbah.12.13.1.1",
+        "Maor_VaShemesh,_Kohelet.11",
+        "Etz_Yosef_on_Kohelet_Rabbah.12.13.1.1",
+        "Chatam_Sofer_on_Torah,_Ha'Azinu.105",
+        "Rashi_on_Ecclesiastes.12.13.1",
+        "Torah_Temimah_on_Ecclesiastes.12.13.2",
+        "Yismach_Moshe,_Shoftim.1.2"
+      ]
+    },
+    {
+      "qid": "est-001-he",
+      "kind": "retrieval",
+      "expected": [
+        "Esther.4.14"
+      ],
+      "got": [
+        "Ohr_Chadash.4.13.1",
+        "Ibn_Ezra_on_Esther.4.14.1",
+        "Midrash_Lekach_Tov_on_Esther,_Introduction.2",
+        "Yachin_on_Pirkei_Avot.6.117.1",
+        "Rishon_LeTzion_on_Esther.2.10.1",
+        "Sifrei_Aggadah_on_Esther,_Midrash_Panim_Acherim,_Version_II.2.18",
+        "Yefeh_Anaf_on_Esther_Rabbah.5.4.1",
+        "Midrash_Lekach_Tov_on_Esther.8.15.1"
+      ]
+    },
+    {
+      "qid": "est-001-en",
+      "kind": "retrieval",
+      "expected": [
+        "Esther.4.14"
+      ],
+      "got": [
+        "Aramaic_Targum_to_Esther.4.12",
+        "Esther.2.22",
+        "Esther.4.5",
+        "Rashi_on_Psalms.30.12.1",
+        "Rashi_on_Megillah.26.1.3",
+        "Esther.4.9",
+        "Mishnah_Berurah.686.2",
+        "Weekday_Siddur_Sefard_Linear,_Birkas_Hamazon.158"
+      ]
+    },
+    {
+      "qid": "est-002-he",
+      "kind": "retrieval",
+      "expected": [
+        "Esther.8.16"
+      ],
+      "got": [
+        "Leshon_Chakhamim,_Part_I.39.123",
+        "Nachal_Eshkol_on_Esther.8.16.1",
+        "Ralbag_Esther.8.16.1",
+        "Midrash_Lekach_Tov_on_Esther.8.16.1",
+        "Ein_Yaakov_(Glick_Edition),_Megillah.1.40",
+        "Masat_Moshe_on_Esther.8.16.1",
+        "Ein_Yaakov,_Megillah.1.47",
+        "Siddur_Ashkenaz,_Shabbat,_Havdalah.7"
+      ]
+    },
+    {
+      "qid": "dan-001-he",
+      "kind": "retrieval",
+      "expected": [
+        "Daniel.6.23",
+        "Daniel.6.17"
+      ],
+      "got": [
+        "Malbim_on_Daniel.6.20.1",
+        "Etz_Yosef_on_Devarim_Rabbah.2.29.16",
+        "Joseph_ibn_Yahya_on_Daniel.6.17.1",
+        "Yedei_Moshe_on_Bamidbar_Rabbah.13.4.2",
+        "Arukh_HaShulchan,_Even_HaEzer.17.209",
+        "Malbim_on_Daniel.6.29.1",
+        "Joseph_ibn_Yahya_on_Daniel.6.28.1",
+        "Malbim_on_Daniel.6.21.1"
+      ]
+    },
+    {
+      "qid": "lam-001-he",
+      "kind": "retrieval",
+      "expected": [
+        "Lamentations.1.1"
+      ],
+      "got": [
+        "Otzar_Midrashim,_Baraita_of_Rabbi_Pinchas_Ben_Yair.1.29",
+        "Torah_Temimah_on_Lamentations.1.1.7",
+        "Torah_Temimah_on_Lamentations.1.1.11",
+        "Otzar_Midrashim,_Midrash_on_Lamentations.1",
+        "Torah_Temimah_on_Lamentations.1.1.8",
+        "Perush_Maharzu_on_Eichah_Rabbah,_Petichta.5.16",
+        "Torah_Temimah_on_Lamentations.1.1.9",
+        "Matnot_Kehunah_on_Eichah_Rabbah,_Petichta.10.18"
+      ]
+    },
+    {
+      "qid": "lam-002-he",
+      "kind": "retrieval",
+      "expected": [
+        "Lamentations.5.21"
+      ],
+      "got": [
+        "Torah_Temimah_on_Lamentations.5.21.1",
+        "Midrash_Lekach_Tov_on_Lamentations,_intro.5.21.1",
+        "Ibn_Ezra_on_Lamentations.5.21.1",
+        "Midrash_Aggadah,_Exodus.15.6.2",
+        "Midrash_Lekach_Tov_on_Lamentations.5.21.1",
+        "Perush_Maharzu_on_Eichah_Rabbah,_Petichta.25.16",
+        "Etz_Yosef_on_Eichah_Rabbah.5.21.1",
+        "Sefat_Emet,_Deuteronomy,_Shabbat_Shuva.21.2"
+      ]
+    },
+    {
+      "qid": "exp-001-he",
+      "kind": "retrieval",
+      "expected": [
+        "Genesis.1.26",
+        "Genesis.1.27"
+      ],
+      "got": [
+        "A_New_Israeli_Commentary_on_Pirkei_Avot.3.14.13",
+        "Aderet_Eliyahu,_Genesis.1.27.1",
+        "Ohr_HaTzafun,_Shemot,_XIV.2",
+        "Ohr_HaTzafun,_Shemot,_XXXVII.4",
+        "Toledot_Yitzchak_on_Torah,_Genesis.1.26.3",
+        "Otzar_Midrashim,_Avraham_our_Father,_Introduction.6",
+        "Sforno_on_Genesis.5.1.1",
+        "Alshekh_on_Torah,_Genesis.1.26.1"
+      ]
+    },
+    {
+      "qid": "exp-002-he",
+      "kind": "retrieval",
+      "expected": [
+        "Isaiah.6.3"
+      ],
+      "got": [
+        "Malbim_Beur_Hamilot_on_Isaiah.12.6.1",
+        "Shadal_on_Isaiah.1.4.6",
+        "Malbim_Beur_Hamilot_on_Isaiah.1.4.7",
+        "Malbim_Beur_Hamilot_on_Isaiah.55.5.1",
+        "Malbim_Beur_Hamilot_on_Jeremiah.50.29.5",
+        "Malbim_Beur_Hamilot_on_Isaiah.43.3.1",
+        "Malbim_Beur_Hamilot_on_Isaiah.41.15.5",
+        "Malbim_Beur_Hamilot_on_Isaiah.31.1.2"
+      ]
+    },
+    {
+      "qid": "les-001-he",
+      "kind": "retrieval",
+      "expected": [
+        "Jonah.3",
+        "Jonah.3.10",
+        "Jonah.3.8"
+      ],
+      "got": [
+        "Sermons_Unto_My_People,_The_High_Holidays.34.28",
+        "Beur_HaRadal_on_Pirkei_DeRabbi_Eliezer.10.7",
+        "Metzudat_Zion_on_I_Kings.11.39.1",
+        "Responsa_Chatam_Sofer,_Even_HaEzer.1.10.7",
+        "Kad_HaKemach,_Lulav.1.2",
+        "Tosefta_Kiddushin_(Lieberman).1.16",
+        "Agra_DeKala,_Bereshit.397",
+        "Beur_HaRadal_on_Pirkei_DeRabbi_Eliezer.49.32"
+      ]
+    },
+    {
+      "qid": "les-002-en",
+      "kind": "retrieval",
+      "expected": [
+        "Jonah.3",
+        "Jonah.3.10"
+      ],
+      "got": [
+        "Targum_Jonathan_on_Deuteronomy.34.9",
+        "Jonah.2.1",
+        "Siddur_Ashkenaz,_Festivals,_Selichot,_Seventeen_of_Tamuz.41",
+        "Siddur_Sefard,_Fast_Days,_Selichot_for_Thursday.41",
+        "Siddur_Sefard,_Fast_Days,_Selichot_for_17_Tamuz.39",
+        "Bereshit_Rabbah.56.1",
+        "Siddur_Ashkenaz,_Festivals,_Selichot,_Fast_of_Esther.46",
+        "Siddur_Sefard,_Fast_Days,_Selichot_for_Childrens'_Illness.3"
+      ]
+    },
+    {
+      "qid": "uns-001-he",
+      "kind": "honesty",
+      "got_refs": [
+        "Deuteronomy.6.4",
+        "Mishnat_Eretz_Yisrael,_Preface,_Preface.7",
+        "Mishnat_Eretz_Yisrael_on_Mishnah_Berakhot.1.1.1",
+        "Mishnat_Eretz_Yisrael_on_Mishnah_Berakhot.1.1.5",
+        "Divrei_Yirmiyahu_on_Mishneh_Torah,_Reading_the_Shema.1.9.1"
+      ]
+    },
+    {
+      "qid": "uns-001-en",
+      "kind": "honesty",
+      "got_refs": [
+        "Ikar_Tosafot_Yom_Tov_on_Mishnah_Berakhot.1.1.1",
+        "Machzor_Rosh_Hashanah_Ashkenaz,_The_Morning_Prayers,_Second_Day_of_Rosh_Hashana,_Recitation_of_Shema.1",
+        "Weekday_Siddur_Sefard_Linear,_The_Morning_Prayers,_Recitation_of_Shema.1",
+        "Bartenura_on_Mishnah_Berakhot.1.4.3",
+        "Bartenura_on_Mishnah_Berakhot.1.1.2"
+      ]
+    },
+    {
+      "qid": "uns-002-he",
+      "kind": "honesty",
+      "got_refs": [
+        "Shulchan_Arukh,_Orach_Chayim.261.1",
+        "B'Mareh_HaBazak_Volume_VII.25.6",
+        "Shulchan_Arukh,_Orach_Chayim.263.10",
+        "Kaf_HaChayim_on_Shulchan_Arukh,_Orach_Chayim.250.9.1",
+        "Shulchan_Arukh,_Orach_Chayim.680.1"
+      ]
+    },
+    {
+      "qid": "uns-002-en",
+      "kind": "honesty",
+      "got_refs": [
+        "Shulchan_Arukh,_Orach_Chayim.527.19",
+        "Shulchan_Arukh,_Orach_Chayim.263.14",
+        "Avodat_Yisrael,_Sefer_Vayikra,_Shabbat_HaGadol.6",
+        "Shulchan_Arukh,_Orach_Chayim.275.7",
+        "Shulchan_Arukh,_Orach_Chayim.298.5"
+      ]
+    },
+    {
+      "qid": "uns-003-he",
+      "kind": "honesty",
+      "got_refs": [
+        "Bava_Metzia.3.1",
+        "Rambam_on_Mishnah_Bava_Metzia.1.1.1",
+        "Bartenura_on_Mishnah_Bava_Metzia.1.1.1",
+        "Yachin_on_Mishnah_Bava_Metzia.1.1.1",
+        "Melekhet_Shelomoh_on_Mishnah_Bava_Metzia.1.1.1"
+      ]
+    },
+    {
+      "qid": "uns-004-en",
+      "kind": "honesty",
+      "got_refs": [
+        "Genesis.1.1",
+        "Genesis.23.8",
+        "Tosafot_Yom_Tov_on_Pirkei_Avot.5.1.1",
+        "Mitpachat_Sefarim.1.45",
+        "Yahel_Ohr_on_Zohar.1.22.4"
+      ]
+    },
+    {
+      "qid": "uns-005-he",
+      "kind": "honesty",
+      "got_refs": [
+        "Mishneh_Torah,_Overview_of_Mishneh_Torah_Contents.1.22",
+        "Seder_Mishnah_on_Mishneh_Torah,_Repentance.7.5.1",
+        "Benei_Binyamin_on_Mishneh_Torah,_Repentance.2.2.1",
+        "Annotations_of_R'_Yeshaya_Berlin_on_Mishneh_Torah,_Repentance.7.5.1",
+        "Lechem_Mishneh_on_Mishneh_Torah,_Repentance.2.9.1"
+      ]
+    },
+    {
+      "qid": "uns-008-he",
+      "kind": "honesty",
+      "got_refs": [
+        "Mishnat_Eretz_Yisrael_on_Mishnah_Niddah.3.7.20",
+        "Mishneh_Torah,_The_Order_of_Prayer.2.5",
+        "Mishnat_Eretz_Yisrael_on_Mishnah_Berakhot.9.3.13",
+        "Mishnah_Berurah.261.25",
+        "Aggadat_Bereshit.77.2"
+      ]
+    }
+  ]
+}

@@ -19,7 +19,6 @@ from chavruta.intents.router import (
     detect_requested_works,
 )
 
-
 # ── Tier 0-C: whole-word alias matching (COMMENTATOR / WORK) ──────────────────────
 # Bug: a bare substring test fired 'רשי' inside 'מפרשים' / 'שרשי', and 'משנה' inside
 # 'משנה תורה' / 'משנה ברורה'. Fixed with word-boundary matching + a one-hop prefix class
@@ -201,11 +200,13 @@ def _fake_pipeline(result, captured):
     class _LLM:
         source_fetcher = None
 
-        def request(self, body_md, *, lang="he"):
+        def request(self, body_md, *, lang="he", token_budget=None):
             captured["job"] = body_md
             return ("תשובה מעוגנת [S1]" if result.hits else "רגע, תכוון אותי"), []
 
-    return SimpleNamespace(retriever=_Retriever(), llm=_LLM(), _resolve_query=lambda q: q)
+    # `profile` mirrors the real pipeline: _run_chavruta reads it to budget the request's tokens.
+    return SimpleNamespace(retriever=_Retriever(), llm=_LLM(), _resolve_query=lambda q: q,
+                           profile=SimpleNamespace(llm_max_tokens=512))
 
 
 def test_chavruta_not_weak_on_good_hybrid_retrieval(monkeypatch):
@@ -250,10 +251,17 @@ def test_with_ref_variants_covers_dot_space_and_chapter_opening():
     from chavruta.corpus.refs import with_ref_variants
     # verse-level: dot + corpus-space forms so anchoring matches whichever the store uses
     assert with_ref_variants(["Genesis.1.1"]) == ["Genesis.1.1", "Genesis 1.1"]
-    # chapter-level: also the opening verse, since base texts are stored per-verse
-    assert with_ref_variants(["Exodus.20"]) == ["Exodus.20", "Exodus 20", "Exodus 20.1"]
-    # already-spaced ref (Mishnah) isn't corrupted or duplicated
-    assert with_ref_variants(["Mishnah Sukkah 3.5"]) == ["Mishnah Sukkah 3.5"]
+    # chapter-level: also the opening verse, since base texts are stored per-verse — in BOTH
+    # spellings, because the commercial corpus stores 'Exodus.20.1' and the old one 'Exodus 20.1'
+    assert with_ref_variants(["Exodus.20"]) == [
+        "Exodus.20", "Exodus 20", "Exodus 20.1", "Exodus.20.1"]
+    # a book whose name contains spaces: the commercial corpus underscores them. Emitting only the
+    # spaced form is what made every base pasuk miss after the corpus swap (recall 50% -> 83%).
+    assert with_ref_variants(["Mishnah Sukkah 3.5"]) == [
+        "Mishnah Sukkah 3.5", "Mishnah_Sukkah.3.5"]
+    # Talmud amud -> amud-linear opening segment, again in both spellings
+    assert with_ref_variants(["Bava Metzia 2a"]) == [
+        "Bava Metzia 2a", "Bava Metzia 3.1", "Bava_Metzia.3.1"]
 
 
 # ── Tier1 (2026-07): Talmud daf amud form → corpus amud-linear ref (N = 2·daf − 1/2·daf) ──────────
@@ -285,6 +293,42 @@ def test_perek_demonstrative_not_gematria(text):
     """'פרק זה' = 'THIS chapter' — gematria('זה')=12 must NOT fabricate a perek number/daf."""
     from chavruta.intents.landmarks import resolve_landmarks
     assert not any(r.split()[0] in ("Shabbat", "Gittin") and r[-2:] != "2a" for r in resolve_landmarks(text))
+
+
+# ── Tier1 (2026-07-26): naming a commentator from its ref, and the inverse ──────────────────────
+# The commercial corpus carries neither `commentator_id` nor `anchor_ref`, so both directions have to
+# be recovered from the ref string: reading one names the commentator, writing one reaches its
+# comment on a given verse. Every expectation below is a ref verified to exist in the live corpus.
+@pytest.mark.parametrize("ref,cid", [
+    ("Rashi_on_Genesis.1.1.1", "rashi"),
+    ("Or_HaChaim_on_Genesis.22.1.1", "or_hachaim"),
+    ("Metzudat_David_on_Psalms.1.1.1", "metzudat_david"),
+    ("Mizrachi_on_Rashi_on_Genesis.1.1.1", "mizrachi"),       # supercommentary: the FIRST author
+    ("Targum_Onkelos_on_Genesis.1.1.1", "targum_onkelos"),    # '_on_' wins over the bare prefix
+    ("Onkelos_Exodus.20.2", "onkelos"),                       # filed as a prefix, not a commentary
+    ("Genesis.1.1", None),
+    ("Netinah_LaGer,_Genesis.1.1.2", None),                   # a base text, not 'netinah_lager'
+    ("", None),
+])
+def test_commentator_is_named_from_its_ref(ref, cid):
+    from chavruta.corpus.refs import commentator_from_ref
+    assert commentator_from_ref(ref) == cid
+
+
+def test_commentary_refs_reach_the_named_commentator_on_a_verse():
+    """The inverse: exact refs to fetch, since neither commentator_id nor anchor_ref can be filtered."""
+    from chavruta.corpus.refs import commentary_refs
+
+    out = commentary_refs(["Genesis.1.1", "Genesis 1.1"], ["rashi"], max_comments=3)
+    assert out == ["Rashi_on_Genesis.1.1.1", "Rashi_on_Genesis.1.1.2", "Rashi_on_Genesis.1.1.3"]
+    # The space form carries no commentaries — generating refs from it would be pure waste.
+    assert not any(" " in r for r in out)
+    # Capitalisation follows Sefaria, not naive title-case.
+    assert commentary_refs(["Genesis.1.1"], ["or_hachaim"], max_comments=1) == \
+        ["Or_HaChaim_on_Genesis.1.1.1"]
+    # Onkelos has no '_on_' join and no comment index.
+    assert commentary_refs(["Exodus.20.2"], ["onkelos"]) == ["Onkelos_Exodus.20.2"]
+    assert commentary_refs(["Genesis.1.1"], []) == []
 
 
 def test_amud_to_corpus_ignores_volume_numbered_works():
@@ -334,7 +378,7 @@ def test_anchoring_resolves_dotted_named_ref_against_space_form_corpus():
                         payload={"chunk_id": "c1", "ref": "Rashi on Genesis 1.3", "text": "פירוש",
                                  "commentator_id": "rashi", "unit_type": "commentary"})]
 
-        def fetch_by_refs(self, name, refs, filters=None):     # base verse stored SPACE-form only
+        def fetch_by_refs(self, name, refs, filters=None, *, limit=None):  # base verse stored SPACE-form only
             if "Genesis 1.3" in refs:
                 return [Hit(chunk_id="g13", score=1.0,
                             payload={"chunk_id": "g13", "ref": "Genesis 1.3", "text": "ויאמר אלהים יהי אור",
@@ -350,6 +394,63 @@ def test_anchoring_resolves_dotted_named_ref_against_space_form_corpus():
     res = HybridRetriever(_Emb(), _Store(), prof).retrieve(q, top_k=8)
     anchored = [h for h in res.hits if h.ref == "Genesis 1.3"]
     assert anchored and anchored[0].score >= 1.0               # the base pasuk anchored despite dot↔space
+
+
+# ── Tier1 (2026-07-26): a named commentator on a corpus whose `commentator_id` payload is EMPTY ──
+# chavruta_commercial was indexed without the field on any of its 2.4M points, so the server-side
+# filter matched nothing and "what does Rashi say on this verse" anchored to zero sources — the model
+# was told there is no Rashi here while Rashi_on_Genesis.1.3.1 sat in the index. The name is
+# recoverable from the ref, so it is derived on READ and the anchor is scoped by work instead.
+def test_named_commentator_resolves_when_the_payload_field_is_empty():
+    from chavruta.retrieval.hybrid import HybridRetriever
+
+    class _Emb:
+        def embed_query(self, text):
+            return SimpleNamespace(dense=[0.1, 0.2], sparse={1: 0.5})
+
+    class _Store:
+        def __init__(self):
+            self.anchor_filters = []
+            self.asked = []
+
+        def search(self, name, q, top_k, filters=None):
+            return []                                   # a commentator-scoped search finds nothing
+
+        def fetch_by_refs(self, name, refs, filters=None, *, limit=None):
+            self.anchor_filters.append(filters)
+            self.asked.append(list(refs))
+            # As the corpus really stores it: `anchor_ref` is empty, so a lookup of the BASE ref
+            # returns the verse alone. A commentary is reachable only under its own exact ref.
+            out = []
+            for r in refs:
+                if r == "Rashi_on_Genesis.1.3.1":
+                    out.append(Hit(chunk_id="r13", score=1.0,
+                                   payload={"chunk_id": "r13", "ref": r,
+                                            "text": "יהי אור — נעשה אור", "work_id": "tanakh"}))
+                elif r == "Ibn_Ezra_on_Genesis.1.3.1":
+                    out.append(Hit(chunk_id="i13", score=1.0,
+                                   payload={"chunk_id": "i13", "ref": r,
+                                            "text": "פירוש אחר", "work_id": "tanakh"}))
+            return out
+
+        def dense_scores(self, name, dense, filters=None, top_k=30):
+            return {}
+
+    store = _Store()
+    prof = SimpleNamespace(hybrid=True, collection="c", relevance_threshold=0.5, rerank=False)
+    q = Query(text="מה אומר רש\"י?", commentator_ids=["rashi"])
+    q.named_refs = ["Genesis.1.3"]
+    res = HybridRetriever(_Emb(), store, prof).retrieve(q, top_k=8)
+
+    by_ref = {h.ref: h for h in res.hits}
+    assert "Rashi_on_Genesis.1.3.1" in by_ref, "the named commentator never anchored"
+    assert by_ref["Rashi_on_Genesis.1.3.1"].commentator_id == "rashi"     # derived, not stored
+    assert not res.is_empty
+    # It was reached by its OWN ref — asking for the base ref alone returns the verse and nothing else.
+    assert "Rashi_on_Genesis.1.3.1" in store.asked[0]
+    assert "Ibn_Ezra_on_Genesis.1.3.1" not in store.asked[0]   # only what was actually asked about
+    # And never scoped by a field the corpus does not carry.
+    assert all(not (f or {}).get("commentator_id") for f in store.anchor_filters)
 
 
 # ── Tier1 (2026-07): the api _run_query graceful-error wrapper (degrade, not 500; keep real 4xx) ──
@@ -373,7 +474,7 @@ def test_base_sources_for_refs_canonicalises_dedups_and_scores(monkeypatch):
     calls = []
 
     class _Store:
-        def fetch_by_refs(self, name, refs, filters=None):
+        def fetch_by_refs(self, name, refs, filters=None, *, limit=None):
             calls.append((refs, filters))
             # emulate the corpus: the base verse exists under the SPACE form only
             if refs == ["Genesis 1.1"]:
@@ -407,7 +508,7 @@ def _selffetch_pipeline(llm):
 
 
 def test_qa_empty_retrieval_selffetches_grounded():
-    from chavruta.corpus.schema import Query, Intent
+    from chavruta.corpus.schema import Intent, Query
     from chavruta.llm.base import SourceBlock
     src = SourceBlock(marker="", ref="Yoma 8.1", commentator_id=None, text="יום הכיפורים אסור באכילה")
 
@@ -415,7 +516,7 @@ def test_qa_empty_retrieval_selffetches_grounded():
         profile = "cloud"; model_id = "fake"
         source_fetcher = staticmethod(lambda qs: [src])
 
-        def request(self, body_md, *, lang="he"):
+        def request(self, body_md, *, lang="he", token_budget=None):
             assert "===NEED_SOURCES===" in body_md            # the job invited a self-fetch
             return ("איסור אכילה ביום כיפור נלמד מעינוי [S1]", [src])
 
@@ -428,13 +529,13 @@ def test_qa_empty_retrieval_selffetches_grounded():
 
 
 def test_qa_empty_retrieval_selffetch_fails_is_honest():
-    from chavruta.corpus.schema import Query, Intent
+    from chavruta.corpus.schema import Intent, Query
 
     class _LLM:
         profile = "cloud"; model_id = "fake"
         source_fetcher = staticmethod(lambda qs: [])
 
-        def request(self, body_md, *, lang="he"):
+        def request(self, body_md, *, lang="he", token_budget=None):
             # the loop's no-fetch degrade sentinel — nothing relevant could be pulled
             return ("לא הצלחתי להשיג מקורות מתאימים דרך הראג. נסה לנסח מחדש או לציין מקור מדויק.", [])
 
@@ -499,7 +600,7 @@ def test_wrong_scope_falls_back_to_unscoped_semantic():
         def dense_scores(self, name, dense, filters=None, top_k=30):
             return {"s1": 0.72}
 
-        def fetch_by_refs(self, name, refs, filters=None):
+        def fetch_by_refs(self, name, refs, filters=None, *, limit=None):
             return []
 
         def top_dense_score(self, name, dense, filters=None):
@@ -516,7 +617,7 @@ def test_wrong_scope_falls_back_to_unscoped_semantic():
 # ── Tier0 (2026-07 audit): the agentic ===NEED_SOURCES=== loop is now backend-agnostic ───────────
 # It was a private method on BridgeLLM only; hoisted to chavruta.llm.agentic so cloud/local get it too.
 
-from chavruta.llm.agentic import run_agentic_loop, parse_need_sources  # noqa: E402
+from chavruta.llm.agentic import parse_need_sources, run_agentic_loop  # noqa: E402
 from chavruta.llm.base import SourceBlock  # noqa: E402
 
 
@@ -566,7 +667,7 @@ def test_agentic_loop_forces_answer_on_final_round():
 
 
 def test_is_degrade_message_detects_sentinels_and_empty():
-    from chavruta.llm.agentic import is_degrade_message, DEGRADE_MESSAGES
+    from chavruta.llm.agentic import DEGRADE_MESSAGES, is_degrade_message
     assert is_degrade_message("")                                   # empty ⇒ not a real answer
     assert is_degrade_message("   ")
     for m in DEGRADE_MESSAGES:
@@ -654,9 +755,9 @@ def test_session_query_locks_mode_to_first_turn(monkeypatch):
     from app.api import QueryRequest
     captured = {}
 
-    monkeypatch.setattr(api.db, "get_messages", lambda sid: [{"role": "user", "text": "q1"}])
+    monkeypatch.setattr(api.db, "get_messages", lambda sid, owner="local": [{"role": "user", "text": "q1"}])
     monkeypatch.setattr(api.db, "save_message", lambda *a, **k: 1)
-    monkeypatch.setattr(api.db, "get_session_mode", lambda sid: "chavruta")   # locked on turn 1
+    monkeypatch.setattr(api.db, "get_session_mode", lambda sid, owner="local": "chavruta")  # locked turn 1
 
     def _fake_run_query(question, lang, intent, history, **kw):
         captured["intent"] = intent
@@ -664,21 +765,192 @@ def test_session_query_locks_mode_to_first_turn(monkeypatch):
 
     monkeypatch.setattr(api, "_run_query", _fake_run_query)
     # client tries to switch to 'lesson' mid-chat — must be ignored in favour of the locked 'chavruta'
-    api.session_query("sid-1", QueryRequest(question="follow-up", lang="he", intent="lesson"))
+    api.session_query("sid-1", QueryRequest(question="follow-up", lang="he", intent="lesson"), owner="local")
     assert captured["intent"] == "chavruta"
 
 
 def test_session_query_legacy_session_falls_back_to_request_intent(monkeypatch):
     from app.api import QueryRequest
     captured = {}
-    monkeypatch.setattr(api.db, "get_messages", lambda sid: [{"role": "user", "text": "q1"}])
+    monkeypatch.setattr(api.db, "get_messages", lambda sid, owner="local": [{"role": "user", "text": "q1"}])
     monkeypatch.setattr(api.db, "save_message", lambda *a, **k: 1)
-    monkeypatch.setattr(api.db, "get_session_mode", lambda sid: None)         # legacy: no locked mode
+    monkeypatch.setattr(api.db, "get_session_mode", lambda sid, owner="local": None)  # legacy: no locked mode
 
     def _fake_run_query(question, lang, intent, history, **kw):
         captured["intent"] = intent
         return api.QueryResponse(answer="ok", citations=[], grounded=True, intent=intent, files=[])
 
     monkeypatch.setattr(api, "_run_query", _fake_run_query)
-    api.session_query("sid-legacy", QueryRequest(question="q", lang="he", intent="qa"))
+    api.session_query("sid-legacy", QueryRequest(question="q", lang="he", intent="qa"), owner="local")
     assert captured["intent"] == "qa"
+
+# ── Tier0 (2026-07 audit): the agentic loop must enforce a CUMULATIVE output-token budget ──
+# Bug: _INTENT_MAX_TOKENS defined careful per-intent budgets (LESSON: 30000) but the lesson path went
+# through agentic_request, which HARDCODED max_tokens=8000 and never consulted the profile or the
+# intent map. So the one number an operator would reach for to control spend had no effect on the
+# most expensive path — and per-round caps multiply by the round count instead of bounding a request.
+
+def test_agentic_loop_enforces_cumulative_token_budget():
+    from chavruta.llm.agentic import agentic_request, is_degrade_message
+    from chavruta.llm.base import LLMResult
+
+    calls = []
+
+    class _LLM:
+        source_fetcher = staticmethod(lambda qs: [])          # never satisfies the ask → loop continues
+        profile = "cloud"; model_id = "fake"
+
+        def generate(self, prompt, *, lang, max_tokens, temperature):
+            calls.append(max_tokens)
+            # Always ask for more sources, so the loop would run every round if unbounded.
+            return LLMResult(text="===NEED_SOURCES===\nמשהו", completion_tokens=400, prompt_tokens=100)
+
+    answer, _ = agentic_request(_LLM(), "## JOB", lang="he", max_tokens=8000, token_budget=1000)
+
+    # Rounds must be clamped to what remains of the budget, never the full per-round cap.
+    assert calls[0] == 1000, f"first round should be clamped to the budget, got {calls[0]}"
+    assert sum(c for c in calls) <= 8000, "per-round caps must not multiply past the budget"
+    # 400 out/round vs a 1000 budget ⇒ round 3 has 200 left, round 4 would have 0 ⇒ loop stops.
+    assert all(c > 0 for c in calls), "a zero-room round must not be sent"
+    assert len(calls) <= 3, f"loop must stop once the budget is spent, made {len(calls)} calls"
+    assert is_degrade_message(answer), "a budget stop with no answer must be an honest degrade"
+
+
+def test_agentic_loop_uncapped_when_no_budget():
+    """token_budget=None keeps the old behaviour — the bridge (which bills nothing) relies on it."""
+    from chavruta.llm.agentic import agentic_request
+    from chavruta.llm.base import LLMResult
+
+    calls = []
+
+    class _LLM:
+        source_fetcher = None
+        def generate(self, prompt, *, lang, max_tokens, temperature):
+            calls.append(max_tokens)
+            return LLMResult(text="תשובה [S1]", completion_tokens=999999)
+
+    agentic_request(_LLM(), "## JOB", lang="he", max_tokens=8000, token_budget=None)
+    assert calls == [8000], "with no budget the per-round cap is used as-is"
+
+
+# ── Tier3 (public hosting): the LLM circuit breaker fails fast when the provider is down ──
+# Bug (audit C4): with no breaker, every request during an outage waits out the full timeout and
+# pins a worker thread, so one provider outage backs up the whole API. The breaker opens after N
+# consecutive transient failures and fails fast for a cooldown.
+
+def test_llm_circuit_breaker_opens_and_recovers():
+    from chavruta.llm.cloud import LLMTransientError, _CircuitBreaker
+
+    b = _CircuitBreaker(fails=3, cooldown_s=10.0)
+    now = 100.0
+    b.before(now)                                   # closed: allowed
+    for _ in range(3):
+        b.on_failure(now)                           # 3 consecutive transient failures → open
+    import pytest as _pytest
+    with _pytest.raises(LLMTransientError):
+        b.before(now + 1)                           # open → fails fast, no network call
+    with _pytest.raises(LLMTransientError):
+        b.before(now + 9)                           # still within cooldown
+    b.before(now + 11)                              # cooldown elapsed → half-open trial allowed
+    b.on_success()
+    b.before(now + 12)                              # success closed it again
+
+
+def test_llm_circuit_breaker_success_resets_count():
+    from chavruta.llm.cloud import _CircuitBreaker
+
+    b = _CircuitBreaker(fails=2, cooldown_s=10.0)
+    b.on_failure(0.0)
+    b.on_success()          # a success in between must reset the consecutive counter
+    b.on_failure(1.0)
+    b.before(2.0)           # only 1 failure since the reset → still closed
+
+
+# ── Feature (2026-07-18): async job queue — long lessons must not trip a proxy 504. The async
+# endpoints return a job id immediately and run generation on a background pool; the client polls
+# GET /jobs/{id}. These pin the wiring: the work actually runs, the result is the same shape as the
+# sync endpoint, ownership is enforced synchronously, and polling is owner-scoped.
+
+def _await_job(owner, jid, timeout=5.0):
+    import time as _t
+    deadline = _t.time() + timeout
+    while _t.time() < deadline:
+        job = api.jobs.get(jid, owner)
+        assert job is not None
+        if job.status in ("done", "error"):
+            return job
+        _t.sleep(0.01)
+    raise AssertionError("async job did not finish in time")
+
+
+def test_create_session_async_runs_in_background(monkeypatch):
+    from app.api import QueryRequest
+    monkeypatch.setattr(api.db, "create_session", lambda q, mode=None, owner_id="local": "sid-async")
+    monkeypatch.setattr(api.db, "save_message", lambda *a, **k: 1)
+    monkeypatch.setattr(api.db, "list_sessions",
+                        lambda owner="local": [{"id": "sid-async", "first_q": "q", "created_at": "t"}])
+    monkeypatch.setattr(api, "_run_query",
+                        lambda *a, **k: api.QueryResponse(answer="lesson body", citations=[],
+                                                          grounded=True, intent="lesson", files=[]))
+
+    accepted = api.create_session_async(QueryRequest(question="בנה שיעור", lang="he", intent="lesson"),
+                                        owner="local")
+    assert accepted.session_id == "sid-async"
+    job = _await_job("local", accepted.job_id)
+    assert job.status == "done"
+    assert job.result["result"]["answer"] == "lesson body"
+    assert job.result["id"] == "sid-async"
+
+
+def test_session_query_async_rejects_unowned_synchronously(monkeypatch):
+    from fastapi import HTTPException
+
+    from app.api import QueryRequest
+    # Not owned → get_messages returns empty → a 404 must be raised NOW (before any job is submitted),
+    # so an unauthorized caller never enqueues work against someone else's chat.
+    monkeypatch.setattr(api.db, "get_messages", lambda sid, owner="local": [])
+    with pytest.raises(HTTPException) as e:
+        api.session_query_async("sid-x", QueryRequest(question="q", lang="he"), owner="local")
+    assert e.value.status_code == 404
+
+
+def test_get_job_is_owner_scoped(monkeypatch):
+    from fastapi import HTTPException
+
+    from app.api import QueryRequest
+    monkeypatch.setattr(api.db, "create_session", lambda q, mode=None, owner_id="local": "sid-o")
+    monkeypatch.setattr(api.db, "save_message", lambda *a, **k: 1)
+    monkeypatch.setattr(api.db, "list_sessions",
+                        lambda owner="local": [{"id": "sid-o", "first_q": "q", "created_at": "t"}])
+    monkeypatch.setattr(api, "_run_query",
+                        lambda *a, **k: api.QueryResponse(answer="a", citations=[], grounded=True,
+                                                          intent="qa", files=[]))
+    accepted = api.create_session_async(QueryRequest(question="q", lang="he"), owner="alice")
+    _await_job("alice", accepted.job_id)
+    # Bob polling Alice's job id must get a 404, not her lesson.
+    with pytest.raises(HTTPException) as e:
+        api.get_job(accepted.job_id, owner="bob")
+    assert e.value.status_code == 404
+    assert api.get_job(accepted.job_id, owner="alice").status == "done"
+
+
+# ── Fix (2026-07-18 adversarial review): a first-query job that FAILS must not leave a blank,
+# answer-less session stuck in the list. _first_query_work deletes the orphan on failure.
+def test_create_session_async_deletes_orphan_on_failure(monkeypatch):
+    from fastapi import HTTPException
+
+    from app.api import QueryRequest
+    deleted = {}
+    monkeypatch.setattr(api.db, "create_session", lambda q, mode=None, owner_id="local": "sid-fail")
+    monkeypatch.setattr(api.db, "save_message", lambda *a, **k: 1)
+    monkeypatch.setattr(api.db, "delete_session",
+                        lambda sid, owner="local": (deleted.__setitem__(sid, owner), True)[1])
+
+    def boom(*a, **k):
+        raise HTTPException(status_code=422, detail="unknown intent")
+
+    monkeypatch.setattr(api, "_run_query", boom)
+    accepted = api.create_session_async(QueryRequest(question="q", lang="he", intent="bad"), owner="local")
+    job = _await_job("local", accepted.job_id)
+    assert job.status == "error"
+    assert deleted.get("sid-fail") == "local"      # orphan session cleaned up, not left behind

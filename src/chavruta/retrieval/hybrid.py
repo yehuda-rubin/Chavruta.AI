@@ -9,28 +9,54 @@ no-source signal that protects Principle I).
 from __future__ import annotations
 
 import logging
+import time
+from contextlib import contextmanager
 from dataclasses import replace
 
-from chavruta.corpus.refs import with_ref_variants
-from chavruta.corpus.schema import Query, UnitType
+from chavruta.corpus.refs import commentary_refs, commentator_from_ref, with_ref_variants
+from chavruta.corpus.schema import Query
 from chavruta.retrieval.base import RankedHit, RetrievalResult
 from chavruta.store.base import Filter, HybridQuery
 
 logger = logging.getLogger(__name__)
 
 
+@contextmanager
+def _timed(acc: dict, key: str):
+    """Accumulate wall-clock into `acc[key]`. Retrieval is many store round-trips, and until it was
+    measured the assumption was that generation dominated a slow request — it does not."""
+    t0 = time.monotonic()
+    try:
+        yield
+    finally:
+        acc[key] = acc.get(key, 0.0) + (time.monotonic() - t0)
+
+
 def _to_hit(h) -> RankedHit:
     p = h.payload or {}
+    # Rights are per LANGUAGE, not per work: Peninei Halakhah is CC-BY-NC in Hebrew and CC0 in
+    # English. A chunk's `text` is in its own `lang`, so read the licence for THAT language.
+    # `license`/`version_title` (unsuffixed) are the shape written by a fresh ingest; the
+    # *_he/*_en pair is what the backfill stamps onto the already-indexed corpus. Accept both so a
+    # partly-backfilled collection still reports honestly instead of silently reading blank.
+    lang = (p.get("lang") or "he").lower()
+    suffix = "en" if lang.startswith("en") else "he"
     return RankedHit(
         chunk_id=h.chunk_id,
         ref=p.get("ref", ""),
         text=p.get("text", ""),
         score=h.score,
-        commentator_id=p.get("commentator_id"),
+        # The commercial corpus was indexed with `commentator_id` empty on all 2.4M points, and the
+        # name is fully recoverable from the ref ('Rashi_on_Genesis.1.1.1' → 'rashi'). Deriving it
+        # here costs a string split and needs no rewrite of an on-disk collection; the payload value
+        # still wins where a fresh ingest wrote one.
+        commentator_id=p.get("commentator_id") or commentator_from_ref(p.get("ref")),
         deep_link=p.get("deep_link", ""),
         work_id=p.get("work_id", ""),
         anchor_ref=p.get("anchor_ref"),
         period=p.get("period"),
+        license=p.get("license") or p.get(f"license_{suffix}") or "",
+        version_title=p.get("version_title") or p.get(f"version_{suffix}") or "",
     )
 
 
@@ -57,19 +83,29 @@ class HybridRetriever:
     def _work_filter(self, query: Query) -> Filter | None:
         """Work scope only — used for ref anchoring so the verse itself and ALL its
         commentaries are fetched, not just the named commentators (the named ones are
-        still boosted to score 1.0; this also brings the pasuk in for context)."""
+        still boosted above the rest; this also brings the pasuk in for context)."""
         return {"work_id": list(query.work_ids)} if query.work_ids else None
 
     def retrieve(self, query: Query, *, top_k: int) -> RetrievalResult:
-        emb = self.embedding.embed_query(query.search_text or query.text)
+        t_all = time.monotonic()
+        t: dict[str, float] = {}
+        with _timed(t, "embed"):
+            emb = self.embedding.embed_query(query.search_text or query.text)
         use_sparse = self.profile.hybrid and bool(emb.sparse)
         hquery = HybridQuery(dense=emb.dense, sparse=emb.sparse if use_sparse else None)
 
+        # Read the named commentators BEFORE the empty-scope fallback below can clear them: on a
+        # corpus where the `commentator_id` payload is empty the scoped search always comes back
+        # empty, and that is precisely the question ("what does Rashi say here") whose anchoring
+        # still has to know which commentator was asked for.
+        wanted = {c.lower() for c in (query.commentator_ids or ())}
+
         filters = self._filters(query)
         try:
-            raw = self.store.search(
-                self.profile.collection, hquery, top_k=top_k * 3, filters=filters
-            )
+            with _timed(t, "search"):
+                raw = self.store.search(
+                    self.profile.collection, hquery, top_k=top_k * 3, filters=filters
+                )
             if not raw and filters is not None:
                 # A SCOPED search (work_ids / commentator_ids) came back empty. That scope can be wrong
                 # — e.g. a hallucinated or mis-resolved named_ref pinned the query to the wrong tractate
@@ -77,7 +113,9 @@ class HybridRetriever:
                 # zero: fall back to an UNSCOPED semantic search so the topically-relevant sources still
                 # surface. (The floors below also key off query.work_ids, so clear the scope for them.)
                 logger.info("scoped retrieval empty; falling back to unscoped semantic search")
-                raw = self.store.search(self.profile.collection, hquery, top_k=top_k * 3, filters=None)
+                with _timed(t, "search"):
+                    raw = self.store.search(self.profile.collection, hquery, top_k=top_k * 3,
+                                            filters=None)
                 query = replace(query, work_ids=None, commentator_ids=None)
         except Exception as exc:
             # A backend failure (e.g. a Qdrant search timeout under load) must degrade to an honest
@@ -95,8 +133,9 @@ class HybridRetriever:
         dense_map: dict[str, float] = {}
         if use_sparse:
             try:
-                dense_map = self.store.dense_scores(
-                    self.profile.collection, emb.dense, self._filters(query), top_k=top_k * 3)
+                with _timed(t, "dense_probe"):
+                    dense_map = self.store.dense_scores(
+                        self.profile.collection, emb.dense, self._filters(query), top_k=top_k * 3)
                 thr = self.profile.relevance_threshold
                 pruned = [h for h in hits
                           if not (h.chunk_id in dense_map and dense_map[h.chunk_id] < thr)]
@@ -109,19 +148,31 @@ class HybridRetriever:
         # everything anchored on it (exact, score above the relevance threshold by design).
         anchored_ids: set[str] = set()   # true named-ref anchors — the honest is_empty signal below
         if query.named_refs:
-            # Named commentators → fetch them *specifically* on the ref (small, never
-            # truncated), guaranteeing e.g. Rashi AND Ramban on Genesis.1.1. No named
-            # commentator → fetch the verse + all its commentaries (work scope) for context.
             # The router emits dotted refs ('Genesis.1.1') but the corpus stores base texts with a
             # space ('Genesis 1.1'); pass BOTH forms so the anchor actually resolves (without this the
             # exact match silently returned 0 → the base pasuk/daf never anchored).
-            anchor_filter = self._filters(query) if query.commentator_ids else self._work_filter(query)
-            anchored = self.store.fetch_by_refs(
-                self.profile.collection, with_ref_variants(query.named_refs), filters=anchor_filter
-            )
+            # The scope here is by WORK, never by commentator. `commentator_id` is empty on every
+            # point of the commercial corpus, so a server-side filter on it matched nothing and the
+            # anchor came back empty — the bug that answered "there is no Rashi here" with Rashi
+            # sitting in the index.
+            # `anchor_ref` is empty there too, so a ref lookup returns the base segment ALONE and
+            # never its commentaries. A named commentator is therefore fetched by its own exact ref
+            # ('Rashi_on_Genesis.1.1.k'), derived from the base ref — the one construction that does
+            # not depend on either missing field. Refs that don't exist simply return nothing, so a
+            # commentator with no comment here stays honestly absent.
+            ref_variants = with_ref_variants(query.named_refs)
+            targets = ref_variants + commentary_refs(ref_variants, wanted)
+            with _timed(t, "anchor"):
+                anchored = self.store.fetch_by_refs(
+                    self.profile.collection, targets,
+                    filters=self._work_filter(query),
+                    limit=600 if wanted else None,
+                )
             for h in anchored:
                 rh = _to_hit(h)
-                rh.score = max(rh.score, 1.0)
+                # A named commentator outranks the rest of the verse's commentaries; without a name
+                # every anchor is equal, as before.
+                rh.score = max(rh.score, 1.1 if (rh.commentator_id or "") in wanted else 1.0)
                 anchored_ids.add(rh.chunk_id)          # explicit anchor set (see has_anchor below)
                 hits.append(rh)
 
@@ -134,9 +185,10 @@ class HybridRetriever:
         if not query.work_ids and not query.commentator_ids:
             try:
                 bfilt = {"work_id": list(_FOUNDATIONAL_WORKS), "unit_type": "source"}
-                base = self.store.search(self.profile.collection, hquery, top_k=3, filters=bfilt)
-                bmap = self.store.dense_scores(self.profile.collection, emb.dense, bfilt, top_k=3) \
-                    if use_sparse else {}
+                with _timed(t, "floors"):
+                    base = self.store.search(self.profile.collection, hquery, top_k=3, filters=bfilt)
+                    bmap = self.store.dense_scores(self.profile.collection, emb.dense, bfilt, top_k=3) \
+                        if use_sparse else {}
                 thr = self.profile.relevance_threshold
                 for h in base:
                     rh = _to_hit(h)
@@ -152,8 +204,9 @@ class HybridRetriever:
         # grounding source available. Skipped when the query is already scoped to a work/commentator.
         if not query.work_ids and not query.commentator_ids:
             try:
-                found = self.store.search(self.profile.collection, hquery, top_k=6,
-                                          filters={"work_id": list(_FOUNDATIONAL_WORKS)})
+                with _timed(t, "floors"):
+                    found = self.store.search(self.profile.collection, hquery, top_k=6,
+                                              filters={"work_id": list(_FOUNDATIONAL_WORKS)})
                 for h in found:
                     rh = _to_hit(h)
                     rh.score = min(rh.score + 0.05, 0.99)   # boost, but never reach the anchor sentinel
@@ -163,7 +216,8 @@ class HybridRetriever:
 
         # Optional reranking (heavy in cloud / optional local)
         if self.reranker is not None and self.profile.rerank and hits:
-            hits = self.reranker.rerank(query.text, hits)
+            with _timed(t, "rerank"):
+                hits = self.reranker.rerank(query.text, hits)
 
         # Optional link-based expansion (chain of transmission / supercommentary). This is an
         # ENRICHMENT step — if it fails (e.g. a Qdrant scroll timeout on the large collection) it
@@ -171,7 +225,8 @@ class HybridRetriever:
         anchor_refs = self._anchor_refs(hits)
         if query.expand_links and self.link_expander is not None and anchor_refs:
             try:
-                hits = hits + self.link_expander.expand(anchor_refs, query)
+                with _timed(t, "links"):
+                    hits = hits + self.link_expander.expand(anchor_refs, query)
             except Exception as exc:
                 logger.warning("link expansion failed (%s); serving base hits", exc)
 
@@ -203,6 +258,16 @@ class HybridRetriever:
             top_dense = self.store.top_dense_score(self.profile.collection, emb.dense,
                                                    self._filters(query))
             is_empty = top_dense < self.profile.relevance_threshold
+        total = time.monotonic() - t_all
+        # One line per retrieval. Generation was assumed to be what made a request slow; measuring
+        # showed retrieval is a comparable share of it, and this is the breakdown that says which
+        # store round-trip to attack.
+        logger.info(
+            "retrieval done total=%.1fs [%s] hits=%d empty=%s top_k=%d hybrid=%s",
+            total,
+            " ".join(f"{k}={v:.1f}s" for k, v in sorted(t.items(), key=lambda kv: -kv[1])),
+            len(hits), is_empty, top_k, use_sparse,
+        )
         return RetrievalResult(
             hits=[] if is_empty else hits,
             anchor_refs=self._anchor_refs(hits),

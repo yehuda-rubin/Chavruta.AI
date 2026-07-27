@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Example שו"ת question per template + verify each selects its intended template.
 
 Selection is checked twice: within the responsa set alone, and within the COMBINED set

@@ -10,7 +10,11 @@ generate_dataset_v4_test.py — Chavruta.AI Dataset Generator v4
     data/dataset/test_50_samples.jsonl
 """
 
-import json, random, re, sys, time, logging
+import json
+import random
+import re
+import time
+import logging
 from pathlib import Path
 from collections import defaultdict
 
@@ -214,8 +218,6 @@ reject_reasons = defaultdict(int)
 
 log.info(f"מתחיל ייצור {TARGET} רשומות עם {MODEL}...")
 log.info("ודא ש-Ollama רץ: ollama serve")
-
-out_file = open(OUT_FILE, "w", encoding="utf-8")
 
 with open(OUT_FILE, "w", encoding="utf-8") as out_file:
     while generated < TARGET:

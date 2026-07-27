@@ -8,21 +8,86 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # 3.11 is what the images ship (docker/Dockerfile.*); 3.13 is what dev runs. CI used to test
+      # ONLY 3.13 — i.e. never the version that actually deploys. Test both.
+      matrix:
+        python-version: ["3.11", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: ${{ matrix.python-version }}
           cache: pip
-      - name: Install deps (CPU torch; the fake-backed tests need torch+fastapi for app.api imports)
+      - name: Install deps (CPU torch — the default wheel drags in the CUDA runtime)
         run: |
           python -m pip install --upgrade pip
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
-          pip install fastapi uvicorn pydantic
+      # No `pip install fastapi uvicorn pydantic` here any more. It used to be needed because
+      # requirements.txt omitted the entire web surface; that is fixed, and if this step ever comes
+      # back the fix has regressed.
+      - name: Lint
+        run: ruff check .
       - name: Fake-backed test suite (no models / no Qdrant server needed)
         run: pytest tests/unit tests/contract tests/integration tests/eval -q
         env:
           CHAVRUTA_LLM_BACKEND: bridge
+
+  secrets:
+    # A live HF write token was found sitting in .claude/settings.json during the 2026-07 audit. It
+    # had never reached git (that file is ignored), but nothing was checking — the audit found it by
+    # hand. This makes the check automatic and permanent.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # gitleaks scans history, not just the tip
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  package:
+    # `pip install .` was never exercised, so an unbuildable package (no [build-system], no
+    # dependencies, a version that couldn't resolve) would have shipped unnoticed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Build the wheel and check it imports
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel
+          pip install dist/*.whl
+          python -c "import chavruta; print('chavruta', chavruta.__version__)"
+
+  docker:
+    # The endpoint image was never built in CI, which is how a HEALTHCHECK calling `curl` on an
+    # image with no curl survived: it can only fail at runtime, and only outside compose.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the endpoint image
+        run: docker build -f docker/Dockerfile.endpoint -t chavruta-endpoint:ci .
+      - name: The healthcheck command must actually exist in the image
+        run: |
+          docker run --rm --entrypoint python3 chavruta-endpoint:ci \
+            -c "import urllib.request; print('urllib present — healthcheck can run')"
+      - name: Refuse a CUDA build of torch in a CPU-only image
+        run: |
+          docker run --rm --entrypoint python3 chavruta-endpoint:ci -c "
+          import torch, sys
+          print('torch', torch.__version__)
+          sys.exit(1) if '+cu' in torch.__version__ else print('CPU wheel confirmed')
+          "
+      - name: The image must not run as root
+        run: |
+          test "$(docker run --rm --entrypoint id chavruta-endpoint:ci -u)" != "0" \
+            && echo "non-root confirmed"
+
   # The eval harness (scripts/run_eval.py) needs a live Qdrant + embedder and is run manually /
   # via workflow_dispatch on a self-hosted runner — not part of the push gate.

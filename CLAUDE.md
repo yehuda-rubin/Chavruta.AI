@@ -18,13 +18,28 @@ FastAPI backend (`app/api.py`) + SQLite chat history (`app/db.py`) + a **static 
 `app/frontend/src/` is deprecated). Hebrew RTL + English LTR i18n. Governed by
 `.specify/memory/constitution.md` (v1.1.0).
 
-Corpus: **15 tiers** in the live `chavruta` collection (2.93M points), incl. **`talmud_yerushalmi`**
-(added 2026-07-13 via `fetch_full_dynamic.py --domain yerushalmi` → Lightning embed → `bootstrap_rag.py
---append`). See [[loaded-collection-tiers]] / `docs/CORPUS.md §5`.
+Corpus: the live production collection is **`chavruta_commercial`** (**2,403,599 points**, **15 tiers**,
+**100% commercially-licensed** — PD/CC0/CC-BY/CC-BY-SA only, fail-closed `rights.allows_commercial_use`),
+served **on-disk** (`CHAVRUTA_MEM_TIER=ssd`: HNSW + dense + sparse + payload all memmapped, ~1–2 GB RAM).
+It **REPLACED** the old mixed-licence `chavruta` collection on **2026-07-20** — `serve.ps1` + `.env` now
+point at it. Built on a cloud H100 (merge 15 tiers → bge-m3 embed → index → snapshot) and restored
+locally from the snapshot on HF (`Yehuda-Rubin/chavruta-commercial-index`) via
+`scripts/restore_commercial_tonight.ps1` (local-file `snapshots/recover`, RAM-safe — the HTTP upload
+path OOMs a 16 GB machine). See [[commercial-corpus-on-hf]] / [[loaded-collection-tiers]] / `docs/CORPUS.md §5`.
+Verified end-to-end via the bridge (Claude in-session): explain/compare/halacha/lesson all grounded with
+correct citations, the agentic `===NEED_SOURCES===` loop fires on thin retrieval, and out-of-corpus
+questions return `no_source` (Principle I) — no invention. Known follow-up: per-chunk payload `license`
+field is EMPTY and its indexes use the wrong names (`license_he`/`license_en` vs the actual `license`) —
+harmless (the whole collection is already commercial) unless per-chunk CC-BY attribution is wanted later.
 
-Load-bearing facts (see `docs/CORPUS.md §7`): the corpus stores base refs SPACE-form (`Genesis 1.1`)
-and Talmud amud-linear (`Sanhedrin 45.1` = `N=2·daf∓1`) — the router emits DOTTED refs, so anchoring
-canonicalises via `corpus/refs.py::with_ref_variants` or it silently misses. After loading, run
+Load-bearing facts (see `docs/CORPUS.md §7`): the **commercial** corpus stores base refs in **Sefaria
+underscore-dot form** — `Genesis.1.1`, `Exodus.20.1`, `Bava_Metzia.3.1` (underscore for the book's
+spaces!), `Mishnah_Sukkah.3.5` — NOT the old `chavruta` space-form (`Genesis 1.1`, `Bava Metzia 3.1`);
+Talmud is amud-linear (`Bava Metzia 2a` → corpus `Bava_Metzia.3.1`, `N=2·daf∓1`). The router emits
+DOTTED refs, so anchoring MUST emit BOTH spellings via `corpus/refs.py::with_ref_variants` (`_to_sefaria_ref`
+adds the underscore-dot variant + chapter→opening-verse) or the base pasuk/daf silently never anchors
+(this was a real recall bug — retrieval@8 was ~50% until fixed 2026-07-24, now ~83%; see [[ref-format-anchoring]]).
+After loading, run
 `scripts/create_payload_indexes.py` (keyword index on ref/anchor_ref) or link expansion / fetch_by_refs
 time out. Use `CHAVRUTA_QUERY_PLANNER=heuristic` (the LLM planner hallucinates named_refs that scope
 retrieval to the wrong tractate → 0 sources); a wrong scope now falls back to unscoped semantic search

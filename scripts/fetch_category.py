@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 fetch_category.py — מוריד **כל קטגוריה עליונה** של ספריא לאותו פורמט צ'אנקים.
 ──────────────────────────────────────────────────────────────────────────────
@@ -107,7 +106,9 @@ def load_works(category: str) -> list[dict]:
         root = next(c for c in toc if c.get("category") == category)
     except StopIteration:
         avail = sorted(c.get("category", "") for c in toc if c.get("category"))
-        raise SystemExit(f"❌ קטגוריה '{category}' לא נמצאה. זמינות: {', '.join(avail)}")
+        # `from None`: the StopIteration is an implementation detail of the `next()` lookup — the
+        # user needs the category list, not a traceback through a generator.
+        raise SystemExit(f"❌ קטגוריה '{category}' לא נמצאה. זמינות: {', '.join(avail)}") from None
     default_period = slugify(category)
     works: list[dict] = []
 

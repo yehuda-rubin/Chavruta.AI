@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """ask.py — one-shot grounded Q&A CLI (task T027).
 
     python scripts/ask.py "What does Rashi say about the creation of light?"

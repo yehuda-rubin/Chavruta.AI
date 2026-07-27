@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """fix_daf_shift.py — correct the corpus-wide off-by-one Talmud daf labelling.
 
 Every Talmud ref is +1 daf: corpus `Bava Metzia.3a.1` holds real `Bava Metzia.2a.1`

@@ -234,7 +234,7 @@ def extract_json(text: str) -> dict | None:
 
 def generate(model: str, target: int) -> None:
     print(f"\n{'═'*60}")
-    print(f"  🧠  Chavruta.AI — Dataset Generator")
+    print("  🧠  Chavruta.AI — Dataset Generator")
     print(f"{'═'*60}")
     print(f"  מודל:   {model}")
     print(f"  יעד:    {target:,} דוגמאות")
@@ -339,7 +339,7 @@ def generate(model: str, target: int) -> None:
     save_dataset(dataset, model)
 
     print(f"\n{'═'*60}")
-    print(f"  ✅  הושלם!")
+    print("  ✅  הושלם!")
     print(f"  נוצרו:    {generated:,}")
     print(f"  שגיאות:   {errors:,}")
     print(f"  סה\"כ:     {len(dataset):,}")

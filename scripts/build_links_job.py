@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """build_links_job.py — ENRICH the link graph with Sefaria cross-references (resumable I/O job).
 
 The corpus-derived graph (scripts/build_corpus_links.py) already covers the commentary→base

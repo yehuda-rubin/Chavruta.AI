@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """fetch_full_dynamic.py — re-fetch Tanakh / Gemara / Mishnah from Sefaria with **every**
 commentary, discovered dynamically (not a hardcoded list), and replace the files on HF.
 
@@ -120,20 +119,39 @@ def _get(url, params=None, retries=4):
     return None
 
 
-def fetch_text(ref):
-    """GET /api/v3/texts/<ref> → (he_nested, en_nested) or None."""
+def fetch_text(ref, he_version: str | None = None, en_version: str | None = None):
+    """GET /api/v3/texts/<ref> → (he_nested, en_nested, rights) or None.
+
+    `rights` is {"he": {"license": ..., "version_title": ...}, "en": {...}} — read from the SAME
+    response, which has carried these fields all along. They used to be dropped on the floor, and
+    the corpus was then labelled "CC0 / Sefaria" wholesale, which is false: asking for
+    `version=hebrew` means "Sefaria's DEFAULT Hebrew edition", and for Talmud/Mishnah that default
+    is the William Davidson Edition — CC-BY-NC, not CC0. Rights vary per (title, language, edition),
+    so they must be captured per chunk. See src/chavruta/corpus/rights.py.
+
+    `he_version` / `en_version` name an EXACT edition (e.g. "Wikisource Talmud Bavli",
+    "Tanach with Nikkud") instead of accepting Sefaria's default. That is how a commercially
+    reproducible corpus is fetched — see docs/COMMERCIAL_CORPUS.md for which edition per tier.
+    A named edition that doesn't exist for a ref comes back empty rather than falling back to a
+    restricted one: silently substituting the default is exactly the bug this guards against.
+    """
+    versions = [f"hebrew|{he_version}" if he_version else "hebrew",
+                f"english|{en_version}" if en_version else "english"]
     r = _get(f"{BASE}/api/v3/texts/{ref}",
-             params={"version": ["hebrew", "english"], "return_format": "text_only"})
+             params={"version": versions, "return_format": "text_only"})
     if not r:
         return None
     he = en = None
+    rights = {"he": {"license": "", "version_title": ""},
+              "en": {"license": "", "version_title": ""}}
     for v in r.json().get("versions", []):
         fam = (v.get("languageFamilyName") or v.get("language") or "").lower()
+        meta = {"license": v.get("license") or "", "version_title": v.get("versionTitle") or ""}
         if fam.startswith("he") and he is None:
-            he = v.get("text")
+            he, rights["he"] = v.get("text"), meta
         elif fam.startswith("en") and en is None:
-            en = v.get("text")
-    return he, en
+            en, rights["en"] = v.get("text"), meta
+    return he, en, rights
 
 
 def _links_commentaries(ref, cats):
@@ -202,8 +220,18 @@ def flatten(he, en, path=()):
 _slug = lambda s: re.sub(r"[^A-Za-z0-9]+", "", s)
 
 
-def make_chunks(title, base_book, label_he, ctype, work_tag, he, en):
-    """One Sefaria leaf segment = one chunk, in the project schema."""
+def make_chunks(title, base_book, label_he, ctype, work_tag, he, en, rights=None):
+    """One Sefaria leaf segment = one chunk, in the project schema.
+
+    `rights` (from fetch_text) is carried onto every chunk. A chunk holds both languages, and the
+    two can be licensed differently — Peninei Halakhah is CC-BY-NC in Hebrew and CC0 in English —
+    so BOTH are recorded rather than collapsing to one value. Consumers must decide per language
+    which text they may reproduce.
+    """
+    rights = rights or {"he": {"license": "", "version_title": ""},
+                        "en": {"license": "", "version_title": ""}}
+    he_r = rights.get("he") or {}
+    en_r = rights.get("en") or {}
     out = []
     for path, he_s, en_s in flatten(he, en):
         addr = ".".join(str(i + 1) for i in path)
@@ -222,6 +250,12 @@ def make_chunks(title, base_book, label_he, ctype, work_tag, he, en):
                 "work": work_tag,
                 "text_he": he_s,
                 "text_en": en_s,
+                # Rights, per language — empty means UNKNOWN, which rights.py treats as
+                # all-rights-reserved, never as permission.
+                "license_he": he_r.get("license", ""),
+                "version_he": he_r.get("version_title", ""),
+                "license_en": en_r.get("license", ""),
+                "version_en": en_r.get("version_title", ""),
             },
         })
     return out
@@ -260,7 +294,8 @@ def build_domain(domain, include_quoting, do_upload, hf_token):
             he = res[0] if res else None
             if res and (res[0] or res[1]):
                 ctype = "pasuk" if domain == "tanakh" else ("mishnah" if domain == "mishnah" else "gemara")
-                chunks = make_chunks(title, base, base, ctype, work_tag, res[0], res[1])
+                chunks = make_chunks(title, base, base, ctype, work_tag, res[0], res[1],
+                                     rights=res[2] if len(res) > 2 else None)
                 for c in chunks:
                     c["metadata"]["commentator"] = ""      # base text isn't a commentator
                     fout.write(json.dumps(c, ensure_ascii=False) + "\n")
@@ -275,7 +310,8 @@ def build_domain(domain, include_quoting, do_upload, hf_token):
                 if not cres or not (cres[0] or cres[1]):
                     time.sleep(0.1); continue
                 chunks = make_chunks(cm["index_title"], base, cm["label_he"],
-                                     "commentary", work_tag, cres[0], cres[1])
+                                     "commentary", work_tag, cres[0], cres[1],
+                                     rights=cres[2] if len(cres) > 2 else None)
                 if chunks:
                     for c in chunks:
                         fout.write(json.dumps(c, ensure_ascii=False) + "\n")

@@ -13,6 +13,11 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parents[3]
 
+# The live production collection. Single source of truth: every script and compose file names this
+# collection, not a literal of its own — the old mixed-licence `chavruta` collection was DELETED on
+# 2026-07-20 and a stale literal points at nothing (a silently empty RAG, not an error).
+DEFAULT_COLLECTION = "chavruta_commercial"
+
 
 def _env(name: str, default: str) -> str:
     return os.environ.get(name, default)
@@ -40,9 +45,11 @@ class Profile:
     qdrant_path: str = str(BASE_DIR / "data" / "qdrant")   # embedded storage path
     qdrant_url: str = ""                      # server URL (cloud)
     qdrant_api_key: str = ""                  # Qdrant Cloud API key
-    collection: str = "chavruta"
-    qdrant_mem_tier: str = "16gb"             # "16gb" | "32gb" | "max" — RAM budget for the index
-                                              # (quantization + on-disk; see store.MEM_TIERS)
+    collection: str = DEFAULT_COLLECTION
+    qdrant_mem_tier: str = "ssd"              # "ssd" | "16gb" | "32gb" | "max" — RAM budget for the
+                                              # index. Default "ssd": HNSW + vectors + payload all
+                                              # memmapped from SSD (~1–2GB), so a small machine won't
+                                              # OOM. Applies at collection creation. See store.MEM_TIERS
 
     # ── Retrieval ──
     top_k: int = 8
@@ -60,6 +67,12 @@ class Profile:
     llm_api_key: str = ""                     # the API key (CHAVRUTA_LLM_API_KEY or NEBIUS_API_KEY)
     llm_temperature: float = 0.2
     llm_max_tokens: int = 512                 # bounds CPU generation latency; config-tunable
+    # Per-CALL ceiling. Left unset, the openai SDK defaults to 600s x 2 retries = 30 min for ONE
+    # call — and the agentic loop makes up to 4, so a single question could occupy a worker for
+    # ~2h while nginx already 504'd the user at 300s. Sync endpoints can't be cancelled on client
+    # disconnect, so that orphaned work keeps billing. Bound it explicitly.
+    llm_timeout_s: float = 180.0
+    llm_max_retries: int = 1
 
     # ── Query understanding (spec 002) ──
     query_planner: str = "none"               # "none" (heuristic only) | "llm" (LLM fallback)
@@ -67,7 +80,7 @@ class Profile:
     extra: dict = field(default_factory=dict)
 
     @classmethod
-    def from_env(cls) -> "Profile":
+    def from_env(cls) -> Profile:
         """Resolve the active profile from environment variables.
 
         CHAVRUTA_PROFILE selects the preset (local/cloud); individual CHAVRUTA_* vars
@@ -96,6 +109,8 @@ class Profile:
         p.llm_api_key = _env("CHAVRUTA_LLM_API_KEY", p.llm_api_key)
         p.llm_temperature = float(_env("CHAVRUTA_LLM_TEMPERATURE", str(p.llm_temperature)))
         p.llm_max_tokens = int(_env("CHAVRUTA_LLM_MAX_TOKENS", str(p.llm_max_tokens)))
+        p.llm_timeout_s = float(_env("CHAVRUTA_LLM_TIMEOUT_S", str(p.llm_timeout_s)))
+        p.llm_max_retries = int(_env("CHAVRUTA_LLM_MAX_RETRIES", str(p.llm_max_retries)))
         p.query_planner = _env("CHAVRUTA_QUERY_PLANNER", p.query_planner)
         return p
 

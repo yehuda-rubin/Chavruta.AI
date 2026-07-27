@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """upload_index_from_zips.py — publish pre-built RAG indexes (zips in ~/Downloads) to HF.
 
 Each zip holds the store-agnostic index files (corpus_vectors.npy [+ corpus_sparse.jsonl]

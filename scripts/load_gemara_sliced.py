@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """load_gemara_sliced.py — load the big gemara index into local Qdrant in small slices.
 
 gemara (711k×1024) loaded in one shot thrashes a 16GB box (Qdrant already holds ~2.2M points).
@@ -21,7 +20,9 @@ import time
 from pathlib import Path
 
 OUT = Path("out_load")
-COLLECTION = "chavruta"
+# The LEGACY mixed-licence collection, same as load_all_indexes.py — NOT the production
+# `chavruta_commercial`. The gemara index repo it loads holds CC-BY-NC editions.
+COLLECTION = "chavruta_mixed"
 URL = os.environ.get("CHAVRUTA_QDRANT_URL", "http://localhost:6333")
 SLICE = 40_000
 BATCH = 256

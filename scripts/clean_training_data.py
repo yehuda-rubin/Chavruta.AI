@@ -21,7 +21,7 @@ def clean_jsonl(input_path: str, output_path: str):
     cleaned = []
     skipped = 0
 
-    with open(input_path, "r", encoding="utf-8") as f:
+    with open(input_path, encoding="utf-8") as f:
         lines = f.readlines()
 
     for line in lines:

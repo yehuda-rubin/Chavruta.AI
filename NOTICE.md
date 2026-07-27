@@ -1,0 +1,53 @@
+# Third-party content — the texts are not covered by the code licence
+
+Chavruta.AI is MIT-licensed **software** (see [LICENSE](LICENSE)). It is not a licence to the
+Jewish texts it retrieves. Those come from [Sefaria](https://www.sefaria.org) and each one carries
+the licence of its own **edition** — Sefaria grants rights per `(title, language, versionTitle)`,
+not per work and not per author. Two Hebrew editions of the same tractate can differ.
+
+## What the shipped corpus contains
+
+The production collection (`chavruta_commercial`, ~2.4M chunks across 15 tiers) was built by asking
+Sefaria which editions exist for each source and keeping only those that positively grant
+commercial reproduction. Verified 2026-07-20:
+
+| licence | sources | obligation when the text is reproduced |
+|---|---|---|
+| Public Domain | 5,338 | none |
+| CC0 | 1,205 | none |
+| CC-BY | 464 | attribution |
+| CC-BY-SA | 87 | attribution **and** share-alike |
+| CC-BY-NC / copyrighted / unknown | **0** | — (excluded) |
+
+Editions with no commercially-usable version were skipped outright, not downgraded — among them the
+Steinsaltz commentary, most of the Zohar, and the William Davidson Talmud (CC-BY-NC). The rule is
+enforced in code and fails closed: `rights.allows_commercial_use()` returns True only for Public
+Domain, CC0, CC-BY and CC-BY-SA, and treats "unknown" as forbidden.
+
+> The older `chavruta` collection and the `Yehuda-Rubin/chavruta-index-*` datasets are the
+> **mixed-licence** research corpus. They contain CC-BY-NC and copyrighted editions and must not be
+> reproduced to users of a paid product. `scripts/load_all_indexes.py` builds that corpus, and
+> targets a separate collection for exactly this reason.
+
+## If you redistribute the texts
+
+Retrieving a source and showing it to a user is reproduction, so the obligations attach:
+
+- **Attribution (CC-BY, CC-BY-SA).** Credit in TASL shape — Title, Author, Source, Licence — not a
+  bare "from Sefaria". `rights.attribution_line()` produces it, and generated source sheets carry it.
+- **Share-alike (CC-BY-SA).** A derivative *of the text* must keep the same licence. Your own code
+  is not a derivative of the text; a source sheet that reproduces the text is.
+
+Sefaria's own terms and its API terms of service apply to how the texts are obtained.
+
+## Models and libraries
+
+Embeddings use [BAAI/bge-m3](https://huggingface.co/BAAI/bge-m3) (MIT). Generation calls an external
+API (Nebius Token Factory, serving Qwen3) under that provider's terms; the bridge backend calls no
+external LLM. Retrieval uses Qdrant (Apache-2.0). Each dependency keeps its own licence.
+
+---
+
+**Not legal advice.** There is no known precedent for a paid product over a Sefaria-derived corpus.
+Before charging money, have a lawyer review this. See `docs/COMMERCIAL_CORPUS.md` for how each
+edition was chosen and `src/chavruta/corpus/rights.py` for the enforcement.

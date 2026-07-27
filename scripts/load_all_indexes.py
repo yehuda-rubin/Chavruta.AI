@@ -1,5 +1,12 @@
-# -*- coding: utf-8 -*-
 """load_all_indexes.py — load all 15 prebuilt indexes from HF into the LOCAL Qdrant server.
+
+⚠️  THIS BUILDS THE LEGACY MIXED-LICENCE CORPUS, NOT THE PRODUCTION ONE. The `chavruta-index-<slug>`
+    repos it pulls contain CC-BY-NC and copyrighted editions (Davidson Talmud, Steinsaltz, …), so the
+    result may NOT be reproduced to users in a paid product. Production serves `chavruta_commercial`
+    (100% PD/CC0/CC-BY/CC-BY-SA), which is restored from a Qdrant snapshot — see
+    `scripts/restore_commercial_tonight.ps1` and `docs/COMMERCIAL_CORPUS.md`.
+    Do NOT point this script at CHAVRUTA_COLLECTION=chavruta_commercial: it would pour
+    non-commercial text into the collection whose entire value is being clean.
 
 Everything local (Qdrant on localhost:6333, bge-m3 on CPU); only the LLM is remote (Nebius).
 Targets the local server with memory tier applied (quantization + on-disk) so the full ~2.9M
@@ -25,7 +32,7 @@ SLUGS = ["second_temple", "reference", "musar", "tosefta", "liturgy", "kabbalah"
          "midrash", "chasidut", "jewish_thought", "shut", "yerushalmi", "mishnah",
          "tanakh", "halacha", "gemara"]
 NS = "Yehuda-Rubin"
-COLLECTION = "chavruta"
+COLLECTION = "chavruta_mixed"   # deliberately NOT config.DEFAULT_COLLECTION — see the warning above
 QDRANT_URL = os.environ.get("CHAVRUTA_QDRANT_URL", "http://localhost:6333")
 OUT = Path("out_load")
 DONE_FILE = Path("data/processed/local_load.done")
@@ -38,7 +45,10 @@ ENV.update({
     "CHAVRUTA_QDRANT_MODE": "server",
     "CHAVRUTA_QDRANT_URL": QDRANT_URL,
     "CHAVRUTA_QDRANT_API_KEY": "",
-    "CHAVRUTA_MEM_TIER": os.environ.get("CHAVRUTA_MEM_TIER", "16gb"),
+    # Default to the SSD-served tier: everything memmapped from disk, ~1–2GB RAM for the full
+    # corpus, so a 16GB machine doesn't OOM. Override with CHAVRUTA_MEM_TIER=16gb/32gb/max for speed
+    # on a bigger box. Applies when the collection is CREATED (first load).
+    "CHAVRUTA_MEM_TIER": os.environ.get("CHAVRUTA_MEM_TIER", "ssd"),
     "CHAVRUTA_COLLECTION": COLLECTION,
     "HF_HUB_DOWNLOAD_TIMEOUT": "30",   # a dead socket errors out instead of hanging the run
 })

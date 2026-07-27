@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Backfill a nikud/ktiv-normalised `search_he` payload field + full-text index.
 
 No re-embedding: we only add a searchable text field (corpus.normalize.normalize_he
@@ -17,11 +16,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from chavruta.config import DEFAULT_COLLECTION
 from chavruta.corpus.normalize import normalize_he
 from chavruta.store.qdrant_store import QdrantStore
 
 URL = os.environ.get("CHAVRUTA_QDRANT_URL", "http://localhost:6333")
-COLLECTION = os.environ.get("CHAVRUTA_COLLECTION", "chavruta")
+COLLECTION = os.environ.get("CHAVRUTA_COLLECTION", DEFAULT_COLLECTION)
 SMOKE = os.environ.get("SMOKE", "").strip()          # e.g. "mishnah" → only that work
 PAGE = int(os.environ.get("PAGE", "2000"))
 FLUSH = int(os.environ.get("FLUSH", "4000"))

@@ -10,11 +10,14 @@ call) share the exact same behaviour.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from collections.abc import Callable
 
 from chavruta.llm.base import GroundedPrompt, SourceBlock
+
+_log = logging.getLogger("chavruta.llm.agentic")
 
 MAX_RETRIEVAL_ROUNDS = int(os.environ.get("CHAVRUTA_BRIDGE_MAX_ROUNDS", "4"))
 
@@ -36,7 +39,19 @@ _TIMEOUT_MSG = {"he": "לא התקבלה תשובה מהמודל בזמן. נס�
 _NOFETCH_MSG = {"he": "לא הצלחתי להשיג מקורות מתאימים דרך הראג. נסה לנסח מחדש או לציין מקור מדויק.",
                 "en": "I couldn't retrieve suitable sources via the RAG. "
                       "Try rephrasing or naming a precise source."}
-DEGRADE_MESSAGES = frozenset(_TIMEOUT_MSG.values()) | frozenset(_NOFETCH_MSG.values())
+# A misconfigured backend (bad key, bad model id, no credit) is NOT a timeout: retrying can never
+# help. Telling the user "try again" hides an operator problem behind a user-facing lie, and it used
+# to be indistinguishable from a real timeout in both the UI and the (nonexistent) logs.
+_CONFIG_MSG = {"he": "שירות המודל אינו זמין עקב תקלת תצורה בצד השרת. פנייה חוזרת לא תעזור — יש לבדוק "
+                     "את הגדרות ה-API בשרת.",
+               "en": "The model service is unavailable due to a server-side configuration problem. "
+                     "Retrying will not help — the server's API settings need attention."}
+# The request hit its whole-request token ceiling before the model committed to an answer.
+_BUDGET_MSG = {"he": "התשובה חרגה מתקציב העיבוד המוקצה לבקשה. נסה לצמצם את השאלה או לבקש אורך קצר יותר.",
+               "en": "This request exceeded its processing budget. Try narrowing the question or "
+                     "asking for a shorter length."}
+DEGRADE_MESSAGES = (frozenset(_TIMEOUT_MSG.values()) | frozenset(_NOFETCH_MSG.values())
+                    | frozenset(_CONFIG_MSG.values()) | frozenset(_BUDGET_MSG.values()))
 
 # Appended to the job on the FINAL retrieval round to force a real answer out of a model that keeps
 # replying ===NEED_SOURCES=== (rather than dead-ending in a degrade when sources were actually found).
@@ -136,19 +151,60 @@ _REQUEST_SYSTEM = ("You are a grounded Torah study assistant. Follow the job bel
 
 
 def agentic_request(llm, body_md: str, *, lang: str = "he",
-                    max_tokens: int = 8000) -> tuple[str, list[SourceBlock]]:
+                    max_tokens: int = 8000,
+                    token_budget: int | None = None) -> tuple[str, list[SourceBlock]]:
     """Run the agentic loop for a completion backend (CloudLLM): each round sends the whole
     job markdown as one grounded prompt and returns the model's completion. Returns
-    (answer, fetched_sources) so the caller aligns citations without any shared per-call state."""
+    (answer, fetched_sources) so the caller aligns citations without any shared per-call state.
+
+    `max_tokens` bounds ONE round's output. `token_budget` bounds the request's TOTAL output across
+    every round — the thing that actually determines what a question costs, since the loop re-sends
+    the whole growing job up to MAX_RETRIEVAL_ROUNDS times. Without it, per-round caps multiply.
+
+    Token spend is not returned: every round's call meters itself in the backend (llm/metering.py),
+    so the whole loop is already counted by the time this returns.
+    """
+    # Imported here, not at module scope: cloud.py imports agentic_request, so a top-level import
+    # back into cloud would be circular.
+    from chavruta.llm.cloud import LLMConfigError
+
+    state: dict = {"out_tokens": 0, "prompt_tokens": 0}
+
     def _send(job_md: str) -> str | None:
+        # Never let a round overshoot what's left of the whole-request budget.
+        room = max_tokens
+        if token_budget is not None:
+            room = min(max_tokens, max(0, token_budget - state["out_tokens"]))
+            if room <= 0:
+                _log.warning("agentic: token budget %d exhausted (spent %d out); stopping",
+                             token_budget, state["out_tokens"])
+                state["budget_exhausted"] = True
+                return None
         prompt = GroundedPrompt(system=_REQUEST_SYSTEM, sources=[], question=job_md)
         try:
             # Unlike the bridge's file-poll transport (which returns None on timeout and never
-            # raises), a real completion backend raises on any API error / timeout / rate-limit /
-            # Ollama-not-running. Treat that like a timeout so the loop degrades gracefully instead
-            # of 500-ing the whole request.
-            return llm.generate(prompt, lang=lang, max_tokens=max_tokens, temperature=0.3).text or None
-        except Exception:
+            # raises), a real completion backend raises on any API error / timeout / rate-limit.
+            # Degrade gracefully rather than 500-ing the whole request — but never silently: a
+            # swallowed exception here meant a wrong API key looked exactly like a slow model, in
+            # the UI and in the logs, with nothing to alert on.
+            res = llm.generate(prompt, lang=lang, max_tokens=room, temperature=0.3)
+        except LLMConfigError as exc:
+            _log.error("agentic: unrecoverable LLM config error, aborting loop: %s", exc)
+            state["config_error"] = True
             return None
+        except Exception as exc:
+            _log.warning("agentic: transient LLM failure, degrading this round: %s", exc, exc_info=True)
+            return None
+        state["out_tokens"] += getattr(res, "completion_tokens", 0) or 0
+        state["prompt_tokens"] += getattr(res, "prompt_tokens", 0) or 0
+        return res.text or None
 
-    return run_agentic_loop(_send, body_md, getattr(llm, "source_fetcher", None), lang)
+    answer, fetched = run_agentic_loop(_send, body_md, getattr(llm, "source_fetcher", None), lang)
+    _log.info("agentic request done: rounds_out_tokens=%d rounds_prompt_tokens=%d budget=%s fetched=%d",
+              state["out_tokens"], state["prompt_tokens"], token_budget, len(fetched))
+    if state.get("config_error"):
+        return _CONFIG_MSG.get(lang, _CONFIG_MSG["en"]), fetched
+    # A budget stop mid-loop leaves no answer text; say so rather than returning the timeout lie.
+    if state.get("budget_exhausted") and not (answer or "").strip():
+        return _BUDGET_MSG.get(lang, _BUDGET_MSG["en"]), fetched
+    return answer, fetched

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """build_link_index.py — the on-disk connection table + link-coverage report (NO LLM API).
 
 Scrolls the 'chavruta' corpus once and writes an on-disk SQLite index mapping every chunk's
@@ -23,11 +22,12 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
+from chavruta.config import DEFAULT_COLLECTION
 from chavruta.corpus.refs import canonical_ref
 
 os.environ.setdefault("CHAVRUTA_QDRANT_URL", "http://localhost:6333")
 QURL = os.environ["CHAVRUTA_QDRANT_URL"]
-COLL = os.environ.get("CHAVRUTA_COLLECTION", "chavruta")
+COLL = os.environ.get("CHAVRUTA_COLLECTION", DEFAULT_COLLECTION)
 DB = REPO / "data" / "ref_index.db"
 LINKS = REPO / "data" / "links.jsonl"
 BATCH = 20000

@@ -1,9 +1,9 @@
-# Chavruta.AI — Nebius Serverless Endpoint (FastAPI RAG query service)
+# Chavruta.AI — Serverless Endpoint (FastAPI RAG query service)
 #
 # Serves grounded Q&A over the pre-indexed Jewish bookshelf via:
 #   - bge-m3 for query embedding (CPU)
-#   - Qdrant Cloud for hybrid retrieval
-#   - Nebius Token Factory (Qwen-72B) for generation
+#   - Qdrant (Cloud or server) for hybrid retrieval
+#   - an OpenAI-compatible Token Factory (Qwen3-235B-A22B-Instruct) for generation
 #
 # Build:
 #   docker build -f docker/Dockerfile.endpoint -t chavruta-endpoint:latest .
@@ -11,33 +11,50 @@
 # Run locally:
 #   docker run -p 8080:8080 --env-file .env.cloud chavruta-endpoint:latest
 #
-# Deploy to Nebius:
-#   See nebius/endpoint.yaml
+# Deploy: see nebius/endpoint.yaml (and populate the collection FIRST — an empty one makes
+# every answer come back with no sources; /ready reports that honestly).
 
 FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    CHAVRUTA_PROFILE=cloud
+    CHAVRUTA_PROFILE=cloud \
+    HF_HOME=/home/app/.cache/huggingface
 
 WORKDIR /app
 
+# Non-root. Created before the weights download so the ~2.3GB HF cache lands in the app user's
+# HOME and stays readable after USER — a cache written to /root would be unreadable and silently
+# re-downloaded on every cold start.
+RUN useradd --create-home --uid 10001 app
+
 COPY docker/requirements.endpoint.txt ./requirements.endpoint.txt
-RUN pip install --upgrade pip && pip install -r requirements.endpoint.txt
+# CPU-only torch. Plain `pip install torch` pulls the full CUDA runtime (~2.5GB of wheels) into an
+# image that sets CHAVRUTA_EMBEDDING_DEVICE=cpu and can never use it.
+RUN pip install --upgrade pip \
+    && pip install --index-url https://download.pytorch.org/whl/cpu torch \
+    && pip install -r requirements.endpoint.txt
 
 COPY src/ ./src/
 COPY app/ ./app/
 COPY pyproject.toml ./
 
-RUN pip install -e . --no-deps
+RUN pip install -e . --no-deps && chown -R app:app /app
 
-# Pre-download bge-m3 weights so the first request isn't slow
+USER app
+
+# Pre-download bge-m3 weights so the first request isn't slow (as `app`, into HF_HOME above).
 RUN python3 -c "from FlagEmbedding import BGEM3FlagModel; BGEM3FlagModel('BAAI/bge-m3', use_fp16=False)"
 
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
+# python, not curl: python:3.11-slim ships no curl, so the old `curl -f` check could never pass and
+# marked the container unhealthy forever on a standalone run. /ready (not /health) because readiness
+# is what says the corpus is actually loaded.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
+    CMD python3 -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/ready').status==200 else 1)" || exit 1
 
-CMD ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
+# --proxy-headers: this sits behind nginx, which sets X-Forwarded-*; without the flag they are
+# ignored and every client looks like the proxy.
+CMD ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1", "--proxy-headers"]

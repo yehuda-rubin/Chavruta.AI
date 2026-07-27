@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from chavruta.generation.grounded import build_prompt, enforce_citations, no_source_answer
 from chavruta.corpus.schema import Intent
+from chavruta.generation.grounded import build_prompt, enforce_citations, no_source_answer
 from chavruta.retrieval.base import RankedHit
 
 

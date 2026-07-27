@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 build_mixed_dataset.py
 ─────────────────────────────────────────────────────────────────────────
@@ -167,7 +166,6 @@ def build():
     rng = random.Random(SEED)
 
     he_pairs, en_pairs, bi_pairs = [], [], []
-    stats = defaultdict(int)
 
     for vid, ch in verses.items():
         rh, re_ = ref_he(vid), ref_en(vid)
@@ -298,13 +296,13 @@ def build():
     print(f"   🟦 Hebrew     : {len(he_pairs):,}")
     print(f"   🟥 English    : {len(en_pairs):,}")
     print(f"   🟪 Bilingual  : {len(bi_pairs):,}")
-    print(f"\n🌐 language balance (English side counts bilingual):")
+    print("\n🌐 language balance (English side counts bilingual):")
     print(f"   Hebrew : {n_he_final:,}  ({100-stats_obj['language_balance']['english_pct']:.1f}%)")
     print(f"   English: {n_en_final:,}  ({stats_obj['language_balance']['english_pct']:.1f}%)")
-    print(f"\n📂 split (group-aware by verse, no leakage):")
+    print("\n📂 split (group-aware by verse, no leakage):")
     print(f"   train: {len(train):,}")
     print(f"   val  : {len(val):,}   ({len(val_verses):,} held-out verses)")
-    print(f"\n💾 written:")
+    print("\n💾 written:")
     print(f"   {OUT_TRAIN}")
     print(f"   {OUT_VAL}")
     print(f"   {OUT_STATS}")

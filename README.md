@@ -122,8 +122,16 @@ Fetched from [Sefaria](https://www.sefaria.org) (free, open API + bulk export). 
   [`Yehuda-Rubin/chavruta-index-*`](https://huggingface.co/Yehuda-Rubin) · load with
   `scripts/bootstrap_rag.py --repo Yehuda-Rubin/chavruta-index-<tier> --append`
 
-See [docs/CORPUS.md](docs/CORPUS.md) and [docs/NEBIUS_HALACHA_JOB.md](docs/NEBIUS_HALACHA_JOB.md). The
-**live served hybrid index** now holds **~2.93M points across 15 tiers**: `talmud_bavli` (614k),
+See [docs/CORPUS.md](docs/CORPUS.md) and [docs/NEBIUS_HALACHA_JOB.md](docs/NEBIUS_HALACHA_JOB.md).
+
+> **Production update (2026-07-20):** the live collection is now **`chavruta_commercial`** —
+> **~2.4M points across 15 tiers, 100% commercially-licensed** (PD/CC0/CC-BY/CC-BY-SA), served on-disk
+> (ssd mem tier). It replaced the older mixed-licence `chavruta` collection. Built on a cloud GPU and
+> restored from a Qdrant snapshot on HF (`Yehuda-Rubin/chavruta-commercial-index`). See
+> [docs/COMMERCIAL_CORPUS.md](docs/COMMERCIAL_CORPUS.md). The tier breakdown below describes the full
+> corpus (both editions share the same 15 tiers).
+
+The hybrid index spans **15 tiers**: `talmud_bavli` (614k),
 `halacha` (594k), `tanakh` (268k), `mishnah` (196k), `midrash`, **`talmud_yerushalmi` (~188k — the
 Talmud Yerushalmi + all its meforshim, added 2026-07-13)**, `chasidut`, `jewish_thought`, `responsa`,
 `liturgy`, `kabbalah`, `tosefta`, `reference`, `musar`, `second_temple`. New tiers load incrementally
@@ -331,10 +339,19 @@ Hebrew/English UI. Halachic *rulings* remain advisory only, never a substitute f
 
 - [specs/001-chavruta-redesign/](specs/001-chavruta-redesign/) — spec · plan · research · data-model · contracts · quickstart
 - [docs/CORPUS.md](docs/CORPUS.md) — corpus scope & commentators
+- [docs/PLANS_AND_COUPONS.md](docs/PLANS_AND_COUPONS.md) — subscription tiers, token metering, credits, coupons
+- [docs/USER_DATA.md](docs/USER_DATA.md) — what the system stores about users, why, and for how long
 - [docs/NEBIUS_HALACHA_JOB.md](docs/NEBIUS_HALACHA_JOB.md) — Nebius embedding-job guide (no Docker) + screenshots
 - [.specify/memory/constitution.md](.specify/memory/constitution.md) — the project constitution (governing principles)
 
 ## Credits
 
 Texts from **[Sefaria](https://www.sefaria.org)** (open, free API). Embeddings: BAAI bge-m3.
-Inspired by Sefaria's [Virtual Havruta](https://github.com/Sefaria/AppliedAI). MIT-licensed code.
+Inspired by Sefaria's [Virtual Havruta](https://github.com/Sefaria/AppliedAI).
+
+## Licence
+
+The **code** is MIT — see [LICENSE](LICENSE). The **texts are not**: each edition carries its own
+licence, and the shipped corpus is restricted to Public Domain / CC0 / CC-BY / CC-BY-SA with
+attribution and share-alike obligations that attach when a source is reproduced. Read
+[NOTICE.md](NOTICE.md) before redistributing anything the system retrieves.

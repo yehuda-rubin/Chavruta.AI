@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Diagnose links-graph connectivity + link-expansion for the lesson sources."""
 import sys
 from pathlib import Path
@@ -9,7 +8,7 @@ from chavruta.corpus.schema import Intent, Query
 from chavruta.pipeline.pipeline import build_backends
 
 p = Profile(name="local", qdrant_mode="server", qdrant_url="http://localhost:6333",
-            collection="chavruta", hybrid=True, embedding_device="cpu", llm_backend="nebius")
+            hybrid=True, embedding_device="cpu", llm_backend="nebius")   # collection: Profile default
 emb, store, llm, retr = build_backends(p)
 le = getattr(retr, "link_expander", None)
 g = getattr(le, "link_graph", None) or getattr(le, "graph", None)
@@ -37,5 +36,5 @@ if le is not None:
             print(f"\nexpand([{src!r}]) -> {len(hits)} hits")
             for h in hits[:5]:
                 print(f"   {h.score:.3f} {h.ref}")
-        except Exception as ex:
+        except Exception:
             import traceback; traceback.print_exc()

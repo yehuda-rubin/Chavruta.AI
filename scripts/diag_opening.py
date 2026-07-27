@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Diagnose the lesson opening-source retrieval (unit_type=source) for a topic."""
 import sys
 from pathlib import Path
@@ -12,7 +11,7 @@ from chavruta.store.base import HybridQuery
 TOPIC = "שניים אוחזין בטלית"
 
 p = Profile(name="local", qdrant_mode="server", qdrant_url="http://localhost:6333",
-            collection="chavruta", hybrid=True, embedding_device="cpu", llm_backend="nebius")
+            hybrid=True, embedding_device="cpu", llm_backend="nebius")   # collection: Profile default
 emb, store, llm, retr = build_backends(p)
 e = emb.embed_query(TOPIC)
 print("sparse terms:", len(e.sparse or {}))

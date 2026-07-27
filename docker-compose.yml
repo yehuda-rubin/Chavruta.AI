@@ -40,11 +40,14 @@ services:
       CHAVRUTA_PROFILE: local
       CHAVRUTA_EMBEDDING_DEVICE: cpu
 
-      # Retrieval — HYBRID against the Qdrant SERVER (449k-point dense+sparse index).
+      # Retrieval — HYBRID against the Qdrant SERVER (2.4M-point dense+sparse index).
       # Embedded mode cannot do hybrid at this scale (brute force → timeouts).
       CHAVRUTA_QDRANT_MODE: server
       CHAVRUTA_QDRANT_URL: http://qdrant:6333
-      CHAVRUTA_COLLECTION: chavruta
+      # The live production collection. The older mixed-licence `chavruta` was DELETED 2026-07-20;
+      # naming it here gives a silently EMPTY RAG (every question returns nothing, no error).
+      CHAVRUTA_COLLECTION: ${CHAVRUTA_COLLECTION:-chavruta_commercial}
+      CHAVRUTA_MEM_TIER: ${CHAVRUTA_MEM_TIER:-ssd}
       CHAVRUTA_HYBRID: "true"
       CHAVRUTA_RERANK: "false"
       CHAVRUTA_RELEVANCE_THRESHOLD: "0.0"
@@ -58,6 +61,11 @@ services:
       CHAVRUTA_LLM_BASE_URL: ${CHAVRUTA_LLM_BASE_URL:-https://api.studio.nebius.ai/v1}
       CHAVRUTA_LLM_API_KEY: ${NEBIUS_API_KEY:-}
 
+      # Exactly one trusted proxy sits in front of the API in this topology: the `web` nginx. So the
+      # real client is the last X-Forwarded-For hop nginx appends — the per-IP rate limiter reads that
+      # instead of the (spoofable) leftmost value. Raise this only if you add more proxies in front.
+      CHAVRUTA_TRUSTED_PROXY_HOPS: "1"
+
       # Chat history — persisted to the named volume below.
       CHAVRUTA_DB_PATH: /app-data/chavruta.db
     volumes:
@@ -66,9 +74,11 @@ services:
     depends_on:
       - qdrant
     expose:
-      - "8080"
-    ports:
-      - "8080:8080"                       # exposed for direct debugging (optional)
+      - "8080"                            # internal only — nginx (`web`) proxies /api to it.
+    # NOT published to the host. A `ports: 8080:8080` mapping here binds 0.0.0.0 and reaches the API
+    # directly, skipping nginx and every limit it carries — on an API that has no auth of its own,
+    # that is anonymous, billable access to the LLM. For local debugging use `web` (:5173), or
+    # temporarily add the mapping yourself; do not commit it.
     healthcheck:
       # /ready, not /health: readiness asserts the corpus is actually loaded, so `web` will not start
       # in front of an API that answers every question with nothing.
@@ -78,31 +88,66 @@ services:
       start_period: 120s                  # bge-m3 load + first warm-up
       retries: 3
 
-  # ── Frontend: React SPA served by nginx, proxying /api → api:8080 ────────────
-  web:
+  # ── Frontend: the Next.js app (web/), run as a standalone Node server ────────
+  # Was previously a build of the deprecated Vite SPA under app/frontend/, so `docker compose up`
+  # served a UI nobody was developing. Not published to the host: `web` (nginx) is the only door in.
+  ui:
     build:
       context: .
       dockerfile: docker/Dockerfile.web
-    container_name: chavruta-web
+    container_name: chavruta-ui
     restart: unless-stopped
+    environment:
+      # Only used by the dev-mode rewrites; behind this topology nginx routes the API itself.
+      CHAVRUTA_API_ORIGIN: http://api:8080
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
     depends_on:
       api:
         condition: service_healthy
+    expose:
+      - "3000"
+
+  # ── Edge: nginx — the only published port. Splits /api routes to `api`, the rest to `ui`.
+  # It is also what appends the real client IP, which the API's per-IP rate limiter depends on
+  # (CHAVRUTA_TRUSTED_PROXY_HOPS=1) — exposing `ui` directly instead would collapse every caller
+  # into a single address.
+  web:
+    image: nginx:1.27-alpine
+    container_name: chavruta-web
+    restart: unless-stopped
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - ui
     ports:
       - "5173:80"                         # open http://localhost:5173
 
-  # ── OPTIONAL: standalone Qdrant SERVER (profile "server") ────────────────────
-  # Use instead of the embedded index for real HNSW indexes / concurrency.
-  # Start with:  docker compose --profile server up -d qdrant
-  # Then set on `api`:  CHAVRUTA_QDRANT_MODE=server, CHAVRUTA_QDRANT_URL=http://qdrant:6333
-  # (the server starts EMPTY — run the `ingest` service once to populate it).
+  # ── Qdrant SERVER — the retrieval index ──────────────────────────────────────
+  # This is NOT optional: `api` runs with CHAVRUTA_QDRANT_MODE=server and talks to it.
+  # It starts EMPTY — see the corpus prerequisite at the top of this file.
+  # (`docker compose up -d qdrant` also works standalone, e.g. to load the corpus before
+  # starting the rest.)
   qdrant:
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:v1.18.2        # pinned: an index/quantization change across versions
+    #                                     can silently alter retrieval behaviour
     container_name: chavruta-qdrant
     restart: unless-stopped
+    environment:
+      # Serve from SSD, not RAM. memmap_threshold makes Qdrant store any segment larger than this
+      # (in KB of vectors) memory-mapped from disk — so on a small machine the corpus is paged from
+      # SSD instead of pinned in RAM. Belt-and-suspenders alongside the per-collection "ssd" mem tier
+      # (see store/qdrant_store.py); it also covers future segment optimizations of an existing
+      # collection. Lower = more aggressively on disk (slower queries, far less RAM).
+      QDRANT__STORAGE__OPTIMIZERS__MEMMAP_THRESHOLD_KB: "20000"
+    # Bound to LOCALHOST, not 0.0.0.0. Qdrant here runs with no API key, so publishing it to the
+    # network hands anyone read/write on the whole corpus — including the templates collection,
+    # whose payloads are turned into repo file reads by the lesson path. `api` reaches it over the
+    # compose network and needs no published port at all; these exist for local inspection
+    # (http://localhost:6333/dashboard) and can be dropped entirely.
     ports:
-      - "6333:6333"
-      - "6334:6334"
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
     volumes:
       - qdrant_storage:/qdrant/storage
 
@@ -119,7 +164,7 @@ services:
       CHAVRUTA_EMBEDDING_DEVICE: cpu
       CHAVRUTA_QDRANT_MODE: server
       CHAVRUTA_QDRANT_URL: http://qdrant:6333
-      CHAVRUTA_COLLECTION: chavruta
+      CHAVRUTA_COLLECTION: ${CHAVRUTA_COLLECTION:-chavruta_commercial}
       INGEST_CHUNKS_PATH: /data/processed/all_chunks_full.json
     volumes:
       - ./data:/data                      # prebuilt corpus (read) — see data/processed/

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """build_lesson.py — end-to-end lesson/teshuva assembler (NO LLM API).
 
 Ties the two retrieval layers of Chavruta.AI into one step:
@@ -29,11 +28,12 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
+from chavruta.config import DEFAULT_COLLECTION  # noqa: E402 — after the sys.path insert above
 
 os.environ.setdefault("CHAVRUTA_QDRANT_URL", "http://localhost:6333")
 QDRANT_URL = os.environ["CHAVRUTA_QDRANT_URL"]
 COLLECTION_TPL = os.environ.get("CHAVRUTA_TEMPLATES_COLLECTION", "chavruta_templates")
-COLLECTION_SRC = os.environ.get("CHAVRUTA_COLLECTION", "chavruta")
+COLLECTION_SRC = os.environ.get("CHAVRUTA_COLLECTION", DEFAULT_COLLECTION)
 
 
 def _slugify(text: str) -> str:

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Chavruta.AI — Nebius Serverless Endpoint (FastAPI).
 
 REST wrapper over ChavrutaPipeline for deployment as a Nebius Serverless Endpoint.
@@ -10,10 +9,14 @@ The pipeline is loaded once at startup and shared across requests.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import sys
 import threading
+import time
+from datetime import UTC, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -47,20 +50,51 @@ import torch  # noqa: F401,E402 — MUST precede qdrant_client import (Windows p
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from chavruta import __version__
 from chavruta.config.profile import Profile
+from chavruta.corpus import rights
 from chavruta.corpus.schema import Intent, Query, Turn
+from chavruta.llm import metering
 from chavruta.llm.agentic import is_degrade_message
+from chavruta.pipeline.pipeline import _max_tokens_for
 
+import app.accounts as accounts
+import app.auth_supabase as sb
+import app.billing.service as billing
+import app.coupons as coupons
 import app.db as db
+from app import plans
+from app.billing import payplus
+from app.jobs import registry as jobs
 
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 
+def _configure_logging() -> None:
+    """Give the chavruta.* loggers a real handler.
+
+    uvicorn configures its own loggers but NOT the root logger, so without this every
+    `logger.info(...)` in this codebase falls through to logging.lastResort — a WARNING-level,
+    unformatted handler. Net effect: the info lines were silently discarded and the errors that did
+    print carried no timestamp, level, or logger name. That is why the system had, in practice, no
+    observability at all. Level is env-tunable; default INFO so LLM cost/latency lines show up.
+    """
+    level = os.environ.get("CHAVRUTA_LOG_LEVEL", "INFO").upper()
+    root = logging.getLogger()
+    if not root.handlers:                      # don't fight a host that already configured logging
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s %(levelname)-7s %(name)s: %(message)s", datefmt="%H:%M:%S"))
+        root.addHandler(handler)
+    root.setLevel(getattr(logging, level, logging.INFO))
+
+
+_configure_logging()
 _log = logging.getLogger("chavruta.api")
 _pipeline = None
 # FastAPI runs sync endpoints in a threadpool, so the lazy singletons below can be raced by concurrent
@@ -98,6 +132,8 @@ def _assert_config_usable() -> None:
 async def lifespan(app: FastAPI):
     _assert_config_usable()
     db.get_conn()          # initialise DB + run migrations
+    accounts.start_sweeper()   # background purge of accounts past their deletion grace period
+    billing.start_sweeper()    # background downgrade of expired-cancelled subscriptions (if billing on)
     p = _get_pipeline()    # warm up bge-m3 + Qdrant connection at startup
     try:
         p.embedding.embed_query("warmup")   # load the embedder BEFORE any qdrant_client use
@@ -110,6 +146,16 @@ async def lifespan(app: FastAPI):
     yield
 
 
+from fastapi import Depends  # noqa: E402
+
+from app.security import (  # noqa: E402
+    body_size_middleware,
+    current_owner,
+    rate_limit_middleware,
+    request_context_middleware,
+    require_auth,
+)
+
 app = FastAPI(
     title="Chavruta.AI",
     description=(
@@ -119,11 +165,29 @@ app = FastAPI(
     ),
     version=__version__,     # single source of truth: src/chavruta/__init__.py
     lifespan=lifespan,
+    # App-wide auth gate. OFF for local dev; in Supabase mode (SUPABASE_URL set) every request needs
+    # a valid access-token JWT, in API-key mode a valid key. Health/readiness/docs are exempt inside
+    # the dependency.
+    dependencies=[Depends(require_auth)],
 )
+
+# Middleware runs outermost-first in reverse registration order: request-context wraps everything
+# (so every request gets a logged id), then rate limit, then body-size.
+app.middleware("http")(body_size_middleware)
+app.middleware("http")(rate_limit_middleware)
+app.middleware("http")(request_context_middleware)
+
+# Origins are env-driven: the defaults are Vite's dev ports, which is right for local work and
+# useless for a real deployment — a hostname that isn't listed gets blocked in the browser. Behind
+# the compose nginx this doesn't fire at all (same-origin); it matters when the API is exposed
+# directly. Note CORS is a BROWSER policy, not access control: curl ignores it entirely, so this is
+# not a substitute for authentication.
+_CORS_ORIGINS = [o.strip() for o in os.environ.get(
+    "CHAVRUTA_CORS_ORIGINS", "http://localhost:5173,http://localhost:4173").split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:4173"],
+    allow_origins=_CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -137,6 +201,12 @@ class CitationOut(BaseModel):
     text_en: str = ""
     commentator: str = ""
     deep_link: str = ""
+    # Rights of the specific edition this text came from. CC-BY / CC-BY-SA / CC-BY-NC all REQUIRE
+    # credit, and Creative Commons asks for TASL — Title, Author, Source, Licence. Crediting
+    # "Sefaria" generically does not satisfy that for a work by a named translator or publisher.
+    # Empty = unknown, which corpus/rights.py treats as all-rights-reserved.
+    license: str = ""
+    version_title: str = ""
 
 
 class LessonSectionOut(BaseModel):
@@ -167,14 +237,16 @@ class QueryResponse(BaseModel):
     caveats: list[str] = []
     lesson_plan: LessonPlanOut | None = None   # the lesson arc (spec 003), present for LESSON
     files: list[FileOut] = []                   # LESSON mode → 3 files (source sheet · flow · full)
+    # Set when this answer was also filed in 'My Shiurim'. Carried so the turn that persists the
+    # message can link the two — the documents live in both places, and deleting the library entry
+    # has to be able to find the chat copy.
+    lesson_id: str = ""
 
 
 # ── Lesson audience / grade / length ─────────────────────────────────────────
 # The template RAG ('chavruta_templates', built by scripts/index_templates.py) is queried live
 # to pick the right template SET for the topic — filtered by audience (yeshiva vs school) and,
 # for school, by grade band — so the lesson is written at the correct register.
-
-import os
 
 _TPL_COLLECTION = os.environ.get("CHAVRUTA_TEMPLATES_COLLECTION", "chavruta_templates")
 _tpl_client = None
@@ -242,9 +314,15 @@ def _attach_template_bodies(pl: dict) -> None:
         fn = files.get(role)
         if fn:
             try:
-                pl[f"_{role}"] = (d / fn).read_text(encoding="utf-8")
+                # `dir`/`fn` come from the template collection's payload, not from a user — but this
+                # reads an arbitrary path off the filesystem into an LLM prompt, so it stays inside
+                # the repo regardless of what the payload says. Cheap, and the blast radius if the
+                # templates collection is ever wrong or tampered with is "no template" not "any file".
+                path = (d / fn).resolve()
+                path.relative_to(_REPO_DIR)
+                pl[f"_{role}"] = path.read_text(encoding="utf-8")
             except Exception:
-                pass
+                _log.warning("template body unreadable (role=%s, file=%s)", role, fn)
 
 
 def _select_template(topic: str, audience: str | None = None, grade_band: str | None = None):
@@ -376,6 +454,24 @@ def _resolve_topic(question: str, history) -> str:
 
 
 # Tolerate the model bolding/indenting the delimiter (**===FULL_LESSON===**, leading spaces, RTL marks).
+def _source_sheet_entry(n: int, c: CitationOut) -> str:
+    """One source on the sheet: the verbatim text, plus credit where the licence requires it.
+
+    A source sheet REPRODUCES the text — it is not a citation. CC-BY, CC-BY-SA and CC-BY-NC all
+    require attribution, and Creative Commons asks for TASL (Title, Author, Source, Licence).
+    Naming only the ref, as this did, is not TASL for a work by a named translator or publisher:
+    it omits which edition the text is and under what terms. Public-domain and CC0 sources need no
+    credit line, so they don't get noise.
+    """
+    entry = f"**{n}. {c.ref}**\n{c.text_he}"
+    if rights.requires_attribution(c.license):
+        entry += "\n\n> " + rights.attribution_line(
+            ref=c.ref, version_title=c.version_title,
+            license_str=c.license, deep_link=c.deep_link,
+        )
+    return entry
+
+
 _LESSON_SPLIT_RE = re.compile(r"^[ \t>*‏‎]*===\s*(SOURCE_SHEET|LESSON_FLOW|FULL_LESSON|ORDER)\s*===[ \t*]*$", re.M)
 
 
@@ -503,7 +599,7 @@ def _split_lesson(text: str) -> tuple[str, str, str, str]:
 
 
 def _run_lesson(question: str, lang: str, history=None, audience: str = "",
-                grade_band: str = "", length: str = "") -> QueryResponse:
+                grade_band: str = "", length: str = "", owner_id: str = "local") -> QueryResponse:
     """Dedicated LESSON path: resolve audience/grade → pick a template from the template RAG →
     real source retrieval → Claude writes the 3 files at the right register (or asks clarifying
     questions first) via the bridge → 3 Word files + only-cited sources (in discussion order)."""
@@ -559,7 +655,10 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
     # (checked after the loop below), we return the honest "no sources" message then.
     job = _lesson_job_md(topic, hits, lang, audience=aud, grade_band=band, length=length,
                          tpl=tpl, history=history)
-    raw, fetched = pipeline.llm.request(job, lang=lang)
+    # Lessons are the most expensive path (biggest source pool, longest output, most agentic rounds),
+    # so cap the WHOLE request's output — not just each round, which multiplies by the round count.
+    raw, fetched = pipeline.llm.request(job, lang=lang,
+                                        token_budget=_max_tokens_for(Intent.LESSON, pipeline.profile))
     # A loop degrade/timeout ('please try again' / 'couldn't retrieve') or empty answer must NOT be
     # packaged as a downloadable lesson marked grounded — surface it as a plain honest message.
     if is_degrade_message(raw):
@@ -595,7 +694,9 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
             h = hits[i - 1]
             used.append(CitationOut(ref=h.ref, text_he=(getattr(h, "text", "") or ""), text_en="",
                                     commentator=(getattr(h, "commentator_id", "") or ""),
-                                    deep_link=(getattr(h, "deep_link", "") or "")))
+                                    deep_link=(getattr(h, "deep_link", "") or ""),
+                                    license=(getattr(h, "license", "") or ""),
+                                    version_title=(getattr(h, "version_title", "") or "")))
     ss, lf, fl = _strip_markers(ss), _strip_markers(lf), _strip_markers(fl)
 
     # Source sheet = the FULL retrieved source texts, in teaching order — ALWAYS built mechanically from
@@ -603,7 +704,7 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
     # Models truncate the source texts ("…") when asked to reproduce them; the RAG already has the full
     # text, so we assemble it directly and guarantee complete, verbatim sources.
     if used:
-        ss = "\n\n".join(f"**{n}. {c.ref}**\n{c.text_he}" for n, c in enumerate(used, 1))
+        ss = "\n\n".join(_source_sheet_entry(n, c) for n, c in enumerate(used, 1))
 
     # audience/grade tag woven into the file titles so downloads are self-describing
     tag = ""
@@ -630,15 +731,19 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
         caveats.append("הערה: השיעור אינו קשור למקור מצוטט — יש לוודא מול המקורות." if he
                        else "Note: this lesson is not tied to a cited source — verify against the sources.")
     # Persist to the 'My Shiurim' library so the teacher can reopen/reuse it later.
+    lesson_id = ""
     if files:
         try:
             import uuid
-            db.save_lesson(uuid.uuid4().hex[:12], topic, aud or "", band or "", length, lang,
-                           [f.model_dump() for f in files], [c.model_dump() for c in used])
+            lesson_id = uuid.uuid4().hex[:12]
+            db.save_lesson(lesson_id, topic, aud or "", band or "", length, lang,
+                           [f.model_dump() for f in files], [c.model_dump() for c in used],
+                           owner_id=owner_id)
         except Exception:
-            pass
+            lesson_id = ""
+            _log.exception("saving the lesson to the library failed (topic=%r)", topic)
     return QueryResponse(answer="", citations=used, grounded=bool(used),
-                         intent="lesson", caveats=caveats, files=files)
+                         intent="lesson", caveats=caveats, files=files, lesson_id=lesson_id)
 
 
 def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bool = False) -> str:
@@ -718,7 +823,9 @@ def _run_chavruta(question: str, lang: str, history=None) -> QueryResponse:
     # EVERY hybrid turn and nudged the chavruta to stall instead of teach.
     weak = result.is_empty
     job = _chavruta_job_md(question, hits, lang, history, weak_retrieval=weak)
-    raw, fetched = pipeline.llm.request(job, lang=lang)
+    # A chavruta turn is a conversational exchange, not a treatise — budget it like EXPLAIN.
+    raw, fetched = pipeline.llm.request(job, lang=lang,
+                                        token_budget=_max_tokens_for(Intent.EXPLAIN, pipeline.profile))
     hits = hits + list(fetched or [])   # include agentically-fetched so their [S#] resolve
     nums, used, seen = [int(n) for n in re.findall(r"\[\s*S(\d+)\s*\]", raw)], [], set()
     for i in nums:
@@ -727,17 +834,21 @@ def _run_chavruta(question: str, lang: str, history=None) -> QueryResponse:
             h = hits[i - 1]
             used.append(CitationOut(ref=h.ref, text_he=(getattr(h, "text", "") or ""), text_en="",
                                     commentator=(getattr(h, "commentator_id", "") or ""),
-                                    deep_link=(getattr(h, "deep_link", "") or "")))
+                                    deep_link=(getattr(h, "deep_link", "") or ""),
+                                    license=(getattr(h, "license", "") or ""),
+                                    version_title=(getattr(h, "version_title", "") or "")))
     return QueryResponse(answer=_strip_markers(raw), citations=used, grounded=bool(used),
                          intent="chavruta", files=[])
 
 
 def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
-               audience: str = "", grade_band: str = "", length: str = "") -> QueryResponse:
+               audience: str = "", grade_band: str = "", length: str = "",
+               owner_id: str = "local") -> QueryResponse:
     """Safety wrapper: a retrieval/LLM/backend failure degrades to an honest error response instead
     of a 500 for the whole request (real HTTPExceptions — e.g. 422 bad intent — still propagate)."""
     try:
-        return _run_query_impl(question, lang, intent_str, history, audience, grade_band, length)
+        return _run_query_impl(question, lang, intent_str, history, audience, grade_band, length,
+                               owner_id)
     except HTTPException:
         raise
     except Exception:
@@ -750,7 +861,8 @@ def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
 
 
 def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Turn],
-                    audience: str = "", grade_band: str = "", length: str = "") -> QueryResponse:
+                    audience: str = "", grade_band: str = "", length: str = "",
+                    owner_id: str = "local") -> QueryResponse:
     if intent_str == "shut":          # UI's responsa mode → HALACHA intent
         intent_str = "halacha"
     if intent_str == "chavruta":      # Socratic study-partner mode (its own path)
@@ -759,12 +871,12 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
     if intent_str:
         try:
             intent = Intent(intent_str)
-        except ValueError:
-            raise HTTPException(status_code=422, detail=f"unknown intent: {intent_str!r}")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"unknown intent: {intent_str!r}") from exc
 
     if intent == Intent.LESSON:            # lesson mode → Claude writes the 3 files, audience-adapted
         return _run_lesson(question, lang, history=history, audience=audience,
-                           grade_band=grade_band, length=length)
+                           grade_band=grade_band, length=length, owner_id=owner_id)
 
     q = Query(text=question, lang=lang or None, intent=intent)
     answer = _get_pipeline().ask(q, history=history)
@@ -814,9 +926,23 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
 # process as dead when it is merely busy. /ready is the one that asserts the system can actually
 # answer, and it is what orchestrators should gate traffic on.
 
+def _details_public() -> bool:
+    """Whether the probe endpoints may describe the deployment. These routes are auth-exempt (probes
+    and orchestrators must reach them), so on a public host their body is world-readable: naming the
+    LLM vendor, the exact model and the corpus size hands an attacker the shape of the system and
+    tells them whose bill they'd be spending. Local dev keeps the detail — it's how you diagnose a
+    misconfigured backend — and a deployment with auth configured drops to a bare status."""
+    raw = os.environ.get("CHAVRUTA_PUBLIC_HEALTH_DETAILS", "").strip().lower()
+    if raw:
+        return raw in {"1", "true", "yes", "on"}
+    return not (sb.enabled() or os.environ.get("CHAVRUTA_API_KEYS", "").strip())
+
+
 @app.get("/health")
 async def health():
     """Liveness only — the process is up. No I/O, never blocks."""
+    if not _details_public():
+        return {"status": "ok"}
     p = Profile.from_env()
     return {
         "status": "ok",
@@ -836,16 +962,21 @@ def ready(response: Response):
     rather than "the corpus was never loaded". Fail loudly instead.
     """
     p = Profile.from_env()
+    detailed = _details_public()      # see /health — the diagnostic body is local-only
     try:
         points = _get_pipeline().store.count(p.collection)
     except Exception as exc:
         _log.exception("readiness: qdrant unreachable")
         response.status_code = 503
+        if not detailed:
+            return {"status": "unavailable"}
         return {"status": "unavailable", "collection": p.collection,
                 "reason": f"qdrant unreachable: {type(exc).__name__}"}
 
     if points <= 0:
         response.status_code = 503
+        if not detailed:
+            return {"status": "empty"}
         return {
             "status": "empty",
             "collection": p.collection,
@@ -853,10 +984,291 @@ def ready(response: Response):
             "reason": ("the collection holds no points — load the corpus first: "
                        "python scripts/load_all_indexes.py && python scripts/create_payload_indexes.py"),
         }
-    return {"status": "ready", "collection": p.collection, "points": points}
+    return {"status": "ready"} if not detailed else {
+        "status": "ready", "collection": p.collection, "points": points}
 
 
 # ── Stateless query (backward-compatible) ────────────────────────────────────
+
+class Attachment(BaseModel):
+    """A source the user brought — pasted text, or an uploaded file (data: URL). Its extracted text
+    is folded into what the model sees (NOT into what's saved as the user's message)."""
+    kind: str = Field(default="text", max_length=16)   # "text" | "file"
+    name: str = Field(default="", max_length=300)
+    # Bounded like every other field — a coarse outer bound only. base64 inflates by 4/3, so this
+    # sits just ABOVE _ATTACH_MAX_BYTES once encoded; the precise limit is the decoded-byte check in
+    # _attachment_text. Set the two the other way round and the byte check becomes unreachable.
+    content: str = Field(default="", max_length=4_400_000)
+    mime: str = Field(default="", max_length=120)
+
+
+# Total extracted attachment text folded into one question — bounded so an upload can't blow the
+# prompt token budget. Generous enough for a full daf / a few pages.
+_ATTACH_MAX_CHARS = 12000
+
+# Decoded bytes of ONE file, and how many attachments we'll parse at all. Both matter because
+# extraction happens BEFORE _ATTACH_MAX_CHARS can trim anything: a .docx is a zip, so a small upload
+# can expand to gigabytes while python-docx reads it (a decompression bomb), and a list of many small
+# files multiplies the same work. The output cap does not protect the parser — these do.
+_ATTACH_MAX_BYTES = 3 * 1024 * 1024
+_ATTACH_MAX_COUNT = 12
+
+
+def _attachment_text(att: Attachment) -> str:
+    """Extract usable text from one attachment. Text is used directly; PDF/Word are parsed; images
+    are not read yet (Hebrew OCR is a separate, opt-in step) — they contribute a labelled note so the
+    model knows a source was attached but its text is unavailable, rather than hallucinating it."""
+    import base64
+
+    if att.kind == "text" or (not att.content.startswith("data:")):
+        return (att.content or "").strip()
+
+    # data:<mime>;base64,<payload>
+    try:
+        header, b64 = att.content.split(",", 1)
+        raw = base64.b64decode(b64)
+    except Exception:
+        return ""
+    if len(raw) > _ATTACH_MAX_BYTES:
+        _log.warning("attachment rejected (%s): %d bytes exceeds the %d cap",
+                     att.name, len(raw), _ATTACH_MAX_BYTES)
+        return ""
+    mime = (att.mime or header).lower()
+    name = (att.name or "").lower()
+
+    if "pdf" in mime or name.endswith(".pdf"):
+        try:
+            import io
+
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(raw))
+            return "\n".join((p.extract_text() or "") for p in reader.pages).strip()
+        except Exception as exc:
+            _log.warning("attachment pdf extract failed (%s): %s", att.name, exc)
+            return ""
+    if "word" in mime or "officedocument" in mime or name.endswith((".docx", ".doc")):
+        try:
+            import io
+
+            import docx
+            d = docx.Document(io.BytesIO(raw))
+            return "\n".join(p.text for p in d.paragraphs).strip()
+        except Exception as exc:
+            _log.warning("attachment docx extract failed (%s): %s", att.name, exc)
+            return ""
+    if mime.startswith("image/") or name.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif", ".heic")):
+        return f"[image attached: {att.name} — OCR not enabled; text unavailable]"
+    if "text" in mime or name.endswith(".txt"):
+        try:
+            return raw.decode("utf-8", "ignore").strip()
+        except Exception:
+            return ""
+    return ""
+
+
+def _safe_label(name: str) -> str:
+    """A filename reduced to something safe to interpolate into the prompt as a heading: one line,
+    no markdown structure. A file named "x\\n## SYSTEM: ignore the sources above" would otherwise
+    open what reads like a new instruction section inside the prompt."""
+    flat = " ".join((name or "").split())          # collapse newlines/tabs into single spaces
+    return flat.lstrip("#>-*`").strip()[:120]
+
+
+def _augment_question(question: str, attachments: list[Attachment] | None) -> str:
+    """Append the user's attached sources to the question the MODEL sees. The saved user message
+    stays the plain typed question; only generation/retrieval sees the appended sources."""
+    if not attachments:
+        return question
+    blocks = []
+    for att in attachments[:_ATTACH_MAX_COUNT]:
+        text = _attachment_text(att)
+        if text:
+            # The filename is attacker-supplied and lands in the prompt as a heading, so strip the
+            # line breaks and markdown that would let it pose as a new instruction block.
+            label = _safe_label(att.name) or ("מקור" if any("א" <= c <= "ת" for c in question) else "source")
+            blocks.append(f"### {label}\n{text}")
+    if not blocks:
+        return question
+    joined = "\n\n".join(blocks)[:_ATTACH_MAX_CHARS]
+    he = any("א" <= c <= "ת" for c in question)
+    header = "## מקורות שצירף המשתמש (לא מהמאגר — התייחס אליהם כמקור נוסף)" if he \
+        else "## Sources the user attached (not from the corpus — treat as additional source material)"
+    return f"{question}\n\n{header}\n{joined}"
+
+
+# ── Daily quota, per subscription plan ────────────────────────────────────────
+def _quota_message(kind: str, lang: str, balance: int, cost: int) -> str:
+    """The 429 body. States WHEN the allowance returns — "come back tomorrow" is wrong and
+    infuriating when it is the week that is spent — and never prints an absolute allowance, so a
+    budget change is not a broken promise to a paying customer."""
+    he = (lang or "he").startswith("he")
+    heads = {
+        "lesson": ("הגעת למכסת השיעורים השבועית. היא מתאפסת ביום ראשון.",
+                   "You've used this week's lessons. It resets on Sunday."),
+        "week": ("הגעת למכסת השימוש השבועית. היא מתאפסת ביום ראשון.",
+                 "You've reached this week's usage limit. It resets on Sunday."),
+        "day": ("הגעת למכסת השימוש היומית. היא מתאפסת מחר.",
+                "You've reached today's usage limit. It resets tomorrow."),
+    }
+    head = heads[kind][0 if he else 1]
+    tail = (f" נותרו לך {balance} קרדיטים (הפעולה הזו עולה {cost}). "
+            "אפשר לשדרג את התוכנית או להזין קוד קופון."
+            if he else
+            f" You have {balance} credits (this action costs {cost}). "
+            "You can upgrade your plan or redeem a coupon.")
+    return head + tail
+
+
+def _enforce_lesson_quota(owner: str, lang: str) -> None:
+    """The lesson pool: a weekly COUNT, entirely independent of conversation tokens.
+
+    A lesson is a discrete thing a teacher plans around, so it is counted, not metered. Running out
+    of conversation tokens must NOT block a lesson, and a lesson must not spend them — the whole
+    point of keeping the two pools apart. Cost stays bounded by (lessons per week x the per-lesson
+    token budget the pipeline already enforces).
+    """
+    limit = plans.weekly_lessons(db.get_plan(owner))
+    if limit <= 0:
+        return
+    allowed, _d, _w = db.bump_usage(owner, 0, weekly_limit=limit, units=1, meter=db.LESSON)
+    if allowed:
+        return
+    cost = plans.credit_cost("lesson")
+    spent, balance = db.spend_credits(owner, cost)
+    if spent:
+        _log.info("owner=%s over weekly lesson quota; spent %d credit(s), %d left", owner, cost, balance)
+        return
+    raise HTTPException(status_code=429, detail=_quota_message("lesson", lang, balance, cost))
+
+
+def _reserve_tokens(owner: str, lang: str, intent: str) -> int:
+    """Admit a conversation turn against an ESTIMATE of its token cost; return what was reserved.
+
+    The quota is denominated in tokens but they are only known after the call, so the turn is
+    charged an estimate up front and corrected by _settle_tokens once the real figure comes back.
+    Without the reservation an account with almost nothing left could still launch the largest
+    request in the system, and we would pay for it.
+    """
+    estimate = plans.token_estimate(intent)
+    plan = db.get_plan(owner)
+    daily, weekly = plans.daily_tokens(plan), plans.weekly_tokens(plan)
+    if daily <= 0 and weekly <= 0:
+        return 0
+
+    allowed, _d, used_week = db.bump_usage(owner, daily, weekly_limit=weekly, units=estimate,
+                                           meter=db.TOKENS)
+    if allowed:
+        return estimate
+
+    weekly_hit = weekly > 0 and used_week + estimate > weekly
+    cost = plans.credit_cost(intent)
+    spent, balance = db.spend_credits(owner, cost)
+    if spent:
+        _log.info("owner=%s over %s token quota; spent %d credit(s), %d left",
+                  owner, "weekly" if weekly_hit else "daily", cost, balance)
+        return 0            # paid for with credits — nothing reserved, so nothing to settle
+    raise HTTPException(status_code=429,
+                        detail=_quota_message("week" if weekly_hit else "day", lang, balance, cost))
+
+
+def _settle_tokens(owner: str, reserved: int, usage: dict, intent: str) -> None:
+    """Replace the reservation with what the request actually spent.
+
+    Lessons are skipped entirely: they are metered as a weekly count in their own pool, so charging
+    their (large) token spend to the conversation pool would silently couple the two — the exact
+    thing keeping them separate is for.
+    """
+    if owner == "local" or plans.is_lesson(intent):
+        return
+    actual = plans.normalized_tokens(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
+    if not actual and not reserved:
+        return
+    total = db.settle_usage(owner, reserved, actual, meter=db.TOKENS)
+    _log.info("owner=%s tokens reserved=%d actual=%d calls=%d day_total=%d",
+              owner, reserved, actual, usage.get("calls", 0), total)
+
+
+def _metered(owner: str, reserved: int, intent: str, fn, req: QueryRequest | None = None):
+    """Wrap a generation so its real token spend replaces the reservation, and record what happened.
+
+    Returns a callable rather than running immediately because the async endpoints hand this to the
+    job queue: the meter uses a ContextVar, and a worker thread starts with an empty context, so it
+    has to be opened INSIDE the job — not around the submit call, where it would collect nothing.
+
+    Settlement runs in a finally block: a failed generation still burned whatever tokens it burned
+    before failing, and leaving the reservation standing would over-charge instead.
+    """
+    def run():
+        t0 = time.monotonic()
+        result = error = None
+        with metering.meter() as usage:
+            try:
+                result = fn()
+                return result
+            except Exception as exc:
+                error = type(exc).__name__
+                raise
+            finally:
+                _settle_tokens(owner, reserved, usage, intent)
+                _record_event(owner, intent, req, usage, result, error,
+                              ms=int((time.monotonic() - t0) * 1000))
+    return run
+
+
+# Telemetry is written in Israel local time for the hour-of-day view: "when do teachers prepare?" is
+# a question about their evening, not about UTC.
+_LOCAL_TZ = ZoneInfo(os.environ.get("CHAVRUTA_TZ", "Asia/Jerusalem"))
+
+
+def _record_event(owner: str, intent: str, req: QueryRequest | None, usage: dict,
+                  result, error: str | None, *, ms: int) -> None:
+    """Append one generation's measurements. Measurements only — no question, answer, source or
+    attachment text ever reaches this table (see the schema comment)."""
+    try:
+        now = datetime.now(UTC)
+        local = now.astimezone(_LOCAL_TZ)
+        payload = result if isinstance(result, dict) else None
+        got = payload if payload is not None else (result.model_dump() if result is not None else {})
+        db.record_usage_event(
+            at=now.isoformat(),
+            hour_local=local.hour,
+            dow=(local.weekday() + 1) % 7,          # 0 = Sunday, the week this product works in
+            owner_id=None if owner == "local" else owner,
+            plan=None if owner == "local" else plans.canonical(db.get_plan(owner)),
+            intent=(got.get("intent") or intent or "qa"),
+            lang=(req.lang if req else "") or "he",
+            prompt_tokens=usage.get("prompt_tokens", 0),
+            completion_tokens=usage.get("completion_tokens", 0),
+            billed_tokens=plans.normalized_tokens(usage.get("prompt_tokens", 0),
+                                                  usage.get("completion_tokens", 0)),
+            llm_calls=usage.get("calls", 0),
+            ms=ms,
+            grounded=int(bool(got.get("grounded"))) if got else None,
+            no_source=int(not got.get("citations")) if got else None,
+            citations=len(got.get("citations") or []),
+            audience=(req.audience or None) if req else None,
+            grade_band=(req.grade_band or None) if req else None,
+            length=(req.length or None) if req else None,
+            attachments=len(req.attachments) if req else 0,
+            error=error,
+        )
+    except Exception:                       # noqa: BLE001 — analytics must never break a request
+        _log.exception("failed to record usage telemetry")
+
+
+def _enforce_quota(owner: str, lang: str, intent: str = "") -> int:
+    """Route a request to its pool and admit it. Returns the tokens reserved (0 for a lesson).
+
+    Only bites authenticated users (owner != 'local'); local/offline use is uncapped. Enforced
+    before ownership checks so an over-quota user probing session ids learns nothing.
+    """
+    if owner == "local":
+        return 0
+    if plans.is_lesson(intent):
+        _enforce_lesson_quota(owner, lang)
+        return 0
+    return _reserve_tokens(owner, lang, intent)
+
 
 class QueryRequest(BaseModel):
     # Bounded so a giant body can't blow up the bridge job files / prompt tokens (a 422 is returned
@@ -867,14 +1279,231 @@ class QueryRequest(BaseModel):
     audience: str = ""       # lesson mode: "" (auto) | "yeshiva" | "school"
     grade_band: str = ""     # school lessons: a-c | d-f | g-i | j-l
     length: str = ""         # "" (medium) | "short" | "medium" | "long"
+    attachments: list[Attachment] = []   # user-brought sources (text / pdf / word); images pending OCR
 
 
 @app.post("/query", response_model=QueryResponse)
-def query(req: QueryRequest):
+def query(req: QueryRequest, owner: str = Depends(current_owner)):
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
-    return _run_query(req.question, req.lang, req.intent, [],
-                      audience=req.audience, grade_band=req.grade_band, length=req.length)
+    reserved = _enforce_quota(owner, req.lang, req.intent)
+    return _metered(owner, reserved, req.intent, lambda: _run_query(
+        _augment_question(req.question, req.attachments), req.lang, req.intent, [],
+        audience=req.audience, grade_band=req.grade_band, length=req.length, owner_id=owner), req)()
+
+
+class MeOut(BaseModel):
+    owner: str
+    authenticated: bool
+    plan: str = "free"               # tier id — see app/plans.py
+    plan_name: str = ""              # localized display name for the UI
+    # Allowances are reported as FRACTIONS REMAINING (1.0 = untouched, 0.0 = spent), never as
+    # absolute tokens or lessons. A published number becomes a promise, and a token figure means
+    # nothing to a reader anyway; a gauge and a tier multiple say everything a user needs.
+    day_left: float | None = None      # conversation pool, today. None ⇒ uncapped
+    week_left: float | None = None     # conversation pool, this week
+    lessons_left: float | None = None  # lesson pool, this week (its own pool)
+    lessons_exhausted: bool = False    # so the UI can grey out lesson mode specifically
+    multiple: int = 1                  # this tier's usage relative to free — the only figure shown
+    credits: int = 0                   # prepaid generations, spent once a cap is hit
+    plan_until: str | None = None    # ISO ts the paid/coupon period ends
+    cycle: str = "monthly"           # 'monthly' | 'annual' | 'coupon'
+    cancel_at_period_end: bool = False   # true ⇒ cancelled, access runs to plan_until then lapses
+    deletion_scheduled_for: str | None = None   # ISO ts if the account is pending deletion
+    blocked: bool = False            # account on the blocklist
+    blocked_until: str | None = None  # ISO ts the block lifts (None + blocked ⇒ permanent)
+    blocked_reason: str = ""
+
+
+@app.get("/me", response_model=MeOut)
+def me(owner: str = Depends(current_owner)):
+    """Account + today's quota state — lets the UI show who's signed in, their plan, how many questions
+    remain, whether a deletion is pending, and whether the account is blocked."""
+    plan = "free" if owner == "local" else plans.canonical(db.get_plan(owner))
+    is_local = owner == "local"
+    ban = None if is_local else accounts.active_ban(owner)
+    sub = (None if is_local else db.get_subscription(owner)) or {}
+
+    def _left(used: int, cap: int) -> float | None:
+        """Fraction of an allowance still available, rounded to whole percent — fine enough for a
+        gauge, coarse enough that nobody can reverse-engineer the cap by watching it move."""
+        if is_local or cap <= 0:
+            return None
+        return round(max(0.0, min(1.0, (cap - used) / cap)), 2)
+
+    day_left = _left(0 if is_local else db.usage_today(owner, meter=db.TOKENS),
+                     plans.daily_tokens(plan))
+    week_left = _left(0 if is_local else db.usage_this_week(owner, meter=db.TOKENS),
+                      plans.weekly_tokens(plan))
+    lessons_left = _left(0 if is_local else db.usage_this_week(owner, meter=db.LESSON),
+                         plans.weekly_lessons(plan))
+    return MeOut(
+        owner=owner,
+        authenticated=not is_local,
+        plan=plan,
+        plan_name=plans.tier(plan).name_he,
+        day_left=day_left,
+        week_left=week_left,
+        lessons_left=lessons_left,
+        lessons_exhausted=lessons_left == 0.0,
+        multiple=plans.tier(plan).multiple,
+        credits=0 if is_local else db.get_credits(owner),
+        plan_until=sub.get("current_period_end") if plan != "free" else None,
+        cycle=sub.get("cycle") or "monthly",
+        cancel_at_period_end=bool(sub.get("cancel_at_period_end")),
+        deletion_scheduled_for=None if owner == "local" else accounts.scheduled_for(owner),
+        blocked=ban is not None,
+        blocked_until=ban["until"] if ban else None,
+        blocked_reason=ban["reason"] if ban else "",
+    )
+
+
+# ── Account deletion (scheduled, with a grace period + cancel) ────────────────
+class DeletionOut(BaseModel):
+    deletion_scheduled_for: str | None = None
+
+
+@app.post("/account/delete", response_model=DeletionOut)
+def request_account_deletion(owner: str = Depends(current_owner)):
+    """Schedule this account for deletion after a grace period. The user can cancel until then; at the
+    deadline the background sweeper purges all their data (and the Supabase login, if configured)."""
+    if owner == "local":
+        # No account to delete in local/offline mode (the single-user store isn't an account).
+        raise HTTPException(status_code=400, detail="no account in local mode")
+    return DeletionOut(deletion_scheduled_for=accounts.schedule(owner))
+
+
+@app.post("/account/delete/cancel", response_model=DeletionOut)
+def cancel_account_deletion(owner: str = Depends(current_owner)):
+    """Cancel a pending deletion — the account stays active."""
+    if owner != "local":
+        accounts.cancel(owner)
+    return DeletionOut(deletion_scheduled_for=None)
+
+
+# ── Billing (subscription checkout / cancel / webhook) ────────────────────────
+class CheckoutRequest(BaseModel):
+    email: str = ""
+    name: str = ""
+    plan: str = "pro"                        # tier id — see app/plans.py
+    cycle: str = "monthly"                   # 'monthly' | 'annual' (a prepaid, discounted year)
+
+
+class CheckoutOut(BaseModel):
+    url: str
+
+
+@app.get("/billing/config")
+def billing_config(lang: str = "he"):
+    """Whether billing is available (so the UI can show/hide the upgrade button), plus the tier
+    catalogue so prices are never hardcoded in the frontend."""
+    return {"enabled": billing.enabled(), "tiers": plans.public_catalogue(lang)}
+
+
+# ── Coupons ───────────────────────────────────────────────────────────────────
+class RedeemRequest(BaseModel):
+    code: str = Field(max_length=64)
+
+
+class RedeemOut(BaseModel):
+    ok: bool = True
+    kind: str = ""                   # 'plan' | 'credits'
+    plan: str | None = None
+    plan_name: str = ""
+    until: str | None = None         # ISO ts a plan grant lapses
+    credits_added: int = 0
+    credits_balance: int = 0
+    message: str = ""
+
+
+# Stable reason → user-facing message. "invalid" deliberately covers not-found, revoked and
+# malformed alike: telling a prober which of those it hit turns the endpoint into an oracle for
+# discovering real codes.
+_REDEEM_MESSAGES = {
+    "sign_in_required": ("צריך להתחבר כדי לממש קוד.", "Sign in to redeem a code."),
+    "invalid": ("הקוד אינו תקף.", "That code isn't valid."),
+    "already_redeemed": ("כבר מימשת את הקוד הזה.", "You've already redeemed this code."),
+    "exhausted": ("הקוד מוצה — כל המימושים נוצלו.", "This code has been fully redeemed."),
+    "expired": ("תוקף הקוד פג.", "This code has expired."),
+    "throttled": ("יותר מדי ניסיונות. נסה שוב בעוד שעה.", "Too many attempts. Try again in an hour."),
+    "has_paid_subscription": ("יש לך מנוי פעיל בתשלום — הקוד לא הופעל כדי לא לפגוע בו.",
+                              "You have an active paid subscription — the code was not applied."),
+    "downgrade": ("הקוד נותן רמה נמוכה מזו שיש לך כבר.",
+                  "That code grants a lower tier than you already have."),
+}
+_REDEEM_STATUS = {"throttled": 429, "sign_in_required": 401}
+
+
+@app.post("/coupons/redeem", response_model=RedeemOut)
+def redeem_coupon(req: RedeemRequest, lang: str = "he", owner: str = Depends(current_owner)):
+    """Redeem a coupon code for a time-boxed plan or a pile of credits."""
+    he = (lang or "he").startswith("he")
+    try:
+        res = coupons.redeem(owner, req.code)
+    except coupons.RedeemError as exc:
+        msg = _REDEEM_MESSAGES.get(exc.reason, _REDEEM_MESSAGES["invalid"])
+        raise HTTPException(status_code=_REDEEM_STATUS.get(exc.reason, 400),
+                            detail=msg[0] if he else msg[1]) from exc
+
+    if res["kind"] == "credits":
+        message = (f"נוספו {res['credits_added']} קרדיטים. יתרה: {res['credits_balance']}."
+                   if he else
+                   f"{res['credits_added']} credits added. Balance: {res['credits_balance']}.")
+    else:
+        name = plans.tier(res["plan"]).name_he if he else plans.tier(res["plan"]).name_en
+        until = (res["until"] or "")[:10]
+        message = (f"התוכנית שודרגה ל'{name}' עד {until}." if he else
+                   f"Upgraded to {name} until {until}.")
+    return RedeemOut(kind=res["kind"], plan=res["plan"],
+                     plan_name=plans.tier(res["plan"]).name_he if res["plan"] else "",
+                     until=res["until"], credits_added=res["credits_added"],
+                     credits_balance=res["credits_balance"], message=message)
+
+
+@app.post("/billing/checkout", response_model=CheckoutOut)
+def billing_checkout(req: CheckoutRequest, owner: str = Depends(current_owner)):
+    """Create a hosted payment page and return its URL. The client redirects the user there."""
+    if owner == "local":
+        raise HTTPException(status_code=400, detail="sign in to subscribe")
+    if not billing.enabled():
+        raise HTTPException(status_code=503, detail="billing not configured")
+    try:
+        return CheckoutOut(url=billing.start_checkout(owner, req.email, req.name,
+                                                      plan=req.plan, cycle=req.cycle))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:            # noqa: BLE001 — surface a clean 502 rather than a stack trace
+        _log.exception("checkout failed for %s", owner)
+        raise HTTPException(status_code=502, detail="could not start checkout") from exc
+
+
+@app.post("/billing/cancel")
+def billing_cancel(owner: str = Depends(current_owner)):
+    """Cancel the subscription — stops future charges; paid access lasts until the period end."""
+    if owner == "local":
+        raise HTTPException(status_code=400, detail="no subscription in local mode")
+    billing.cancel(owner)
+    return {"ok": True}
+
+
+@app.post("/billing/webhook")
+async def billing_webhook(request: Request):
+    """PayPlus charge callback. Public (no bearer — PayPlus can't send one) but authenticated by the
+    HMAC `hash` header over the raw body; unverified posts are rejected. Exempt from the auth gate."""
+    # Closed while billing is unconfigured: there is no secret to verify against, so nothing posted
+    # here could be authentic. (verify_webhook fails closed too — this just answers honestly.)
+    if not billing.enabled():
+        raise HTTPException(status_code=503, detail="billing not configured")
+    raw = await request.body()
+    if not payplus.verify_webhook(raw, request.headers.get("user-agent"), request.headers.get("hash")):
+        raise HTTPException(status_code=400, detail="invalid signature")
+    import json
+    try:
+        payload = json.loads(raw or b"{}")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="bad payload") from exc
+    billing.handle_event(payplus.parse_event(payload))
+    return {"ok": True}
 
 
 # ── Sessions ──────────────────────────────────────────────────────────────────
@@ -894,70 +1523,25 @@ class SessionCreateOut(SessionOut):
 
 
 @app.get("/sessions", response_model=list[SessionOut])
-def list_sessions():
-    return db.list_sessions()
-
-
-@app.post("/sessions", response_model=SessionCreateOut, status_code=201)
-def create_session(req: QueryRequest):
-    """Create a new session and run the first query."""
-    if not req.question.strip():
-        raise HTTPException(status_code=422, detail="question must not be empty")
-
-    # Lock the chat's mode to the intent chosen on this first turn; every follow-up stays in it.
-    sid = db.create_session(req.question.strip(), mode=req.intent or None)
-    db.save_message(sid, "user", req.question)
-
-    result = _run_query(req.question, req.lang, req.intent, [],
-                        audience=req.audience, grade_band=req.grade_band, length=req.length)
-
-    db.save_message(
-        sid,
-        "assistant",
-        result.answer,
-        intent=result.intent,
-        citations=[c.model_dump() for c in result.citations],
-        caveats=result.caveats,
-        grounded=result.grounded,
-        files=[f.model_dump() for f in result.files],
-    )
-
-    session = db.list_sessions()
-    session_row = next(s for s in session if s["id"] == sid)
-    return {"id": sid, "first_q": session_row["first_q"], "created_at": session_row["created_at"],
-            "result": result}
+def list_sessions(owner: str = Depends(current_owner)):
+    return db.list_sessions(owner)
 
 
 class SessionQueryResponse(QueryResponse):   # inherits lesson_plan etc.
     session_id: str
 
 
-@app.post("/sessions/{session_id}/query", response_model=SessionQueryResponse)
-def session_query(session_id: str, req: QueryRequest):
-    """Continue an existing session."""
-    if not req.question.strip():
-        raise HTTPException(status_code=422, detail="question must not be empty")
+class JobAccepted(BaseModel):
+    """202 body for the async endpoints: a job id to poll, plus the session id when one was just
+    created so the client can attach the chat to the UI before generation finishes."""
+    job_id: str
+    session_id: str | None = None
 
-    history_rows = db.get_messages(session_id)
-    if not history_rows:
-        raise HTTPException(status_code=404, detail="session not found")
 
-    history = [
-        Turn(role=m["role"], text=m["text"])
-        for m in history_rows[-8:]
-    ]
-
-    db.save_message(session_id, "user", req.question)
-
-    # Sticky mode: a chat stays in the mode chosen on its first turn — ignore any intent the client
-    # sends on later turns. Legacy sessions (mode=NULL) fall back to the per-request intent.
-    locked_mode = db.get_session_mode(session_id)
-    intent = locked_mode or req.intent
-
-    result = _run_query(req.question, req.lang, intent, history,
-                        audience=req.audience, grade_band=req.grade_band, length=req.length)
-
-    db.save_message(
+def _save_assistant(session_id: str, result: QueryResponse) -> None:
+    """Persist a generated answer as the assistant turn — the one place that maps a QueryResponse
+    onto the message columns, shared by every (sync/async, create/continue) path."""
+    message_id = db.save_message(
         session_id,
         "assistant",
         result.answer,
@@ -967,8 +1551,148 @@ def session_query(session_id: str, req: QueryRequest):
         grounded=result.grounded,
         files=[f.model_dump() for f in result.files],
     )
+    # Point the library entry at the turn that now holds the same documents, so deleting the lesson
+    # can clear both copies. Best-effort: a lesson that stays unlinked still deletes from the
+    # library, it just leaves the chat copy — worth a log line, not a failed request.
+    if result.lesson_id:
+        try:
+            db.link_lesson_message(result.lesson_id, message_id)
+        except Exception:
+            _log.warning("could not link lesson %s to message %s", result.lesson_id, message_id)
 
+
+def _first_query_work(sid: str, req: QueryRequest, owner: str) -> dict:
+    """Run the first query for an already-created session, save the assistant turn, and return the
+    SessionCreateOut-shaped payload. Runs identically inline (sync route) or inside a job (async).
+
+    _run_query degrades ordinary retrieval/LLM failures to an error answer (so a turn is still saved),
+    but it re-raises real 4xx (e.g. an unrecognised intent). If that happens the session would be left
+    with a user turn and no answer — a blank chat stuck in the list — so we delete it on failure."""
+    try:
+        result = _run_query(_augment_question(req.question, req.attachments), req.lang, req.intent, [],
+                            audience=req.audience, grade_band=req.grade_band, length=req.length,
+                            owner_id=owner)
+    except Exception:
+        db.delete_session(sid, owner)   # don't leave a half-created, answer-less session behind
+        raise
+    _save_assistant(sid, result)
+    row = next(s for s in db.list_sessions(owner) if s["id"] == sid)
+    return {"id": sid, "first_q": row["first_q"], "created_at": row["created_at"], "result": result}
+
+
+def _prepare_continue(session_id: str, req: QueryRequest, owner: str) -> tuple[list[Turn], str]:
+    """Shared setup for continuing a session: ownership gate (404 if not owned), build the trailing
+    history, save the user turn, and resolve the sticky/locked intent. Returns (history, intent)."""
+    history_rows = db.get_messages(session_id, owner)
+    if not history_rows:
+        # A session the caller doesn't own reads as not-found — no history leak, no writing into
+        # someone else's chat.
+        raise HTTPException(status_code=404, detail="session not found")
+    history = [Turn(role=m["role"], text=m["text"]) for m in history_rows[-8:]]
+    db.save_message(session_id, "user", req.question)
+    # Sticky mode: a chat stays in the mode chosen on its first turn — ignore any intent the client
+    # sends on later turns. Legacy sessions (mode=NULL) fall back to the per-request intent.
+    locked_mode = db.get_session_mode(session_id, owner)
+    return history, (locked_mode or req.intent)
+
+
+def _continue_query_work(session_id: str, req: QueryRequest, history: list[Turn], intent: str,
+                         owner: str) -> SessionQueryResponse:
+    """Run a follow-up turn, save the assistant answer, and return the SessionQueryResponse."""
+    result = _run_query(_augment_question(req.question, req.attachments), req.lang, intent, history,
+                        audience=req.audience, grade_band=req.grade_band, length=req.length,
+                        owner_id=owner)
+    _save_assistant(session_id, result)
     return SessionQueryResponse(**result.model_dump(), session_id=session_id)
+
+
+@app.post("/sessions", response_model=SessionCreateOut, status_code=201)
+def create_session(req: QueryRequest, owner: str = Depends(current_owner)):
+    """Create a new session and run the first query (synchronous — fine for quick Q&A; use
+    /sessions/async for a long lesson that would outlast a proxy timeout)."""
+    if not req.question.strip():
+        raise HTTPException(status_code=422, detail="question must not be empty")
+    reserved = _enforce_quota(owner, req.lang, req.intent)
+
+    # Lock the chat's mode to the intent chosen on this first turn; every follow-up stays in it.
+    sid = db.create_session(req.question.strip(), mode=req.intent or None, owner_id=owner)
+    db.save_message(sid, "user", req.question)
+    return _metered(owner, reserved, req.intent,
+                    lambda: _first_query_work(sid, req, owner), req)()
+
+
+@app.post("/sessions/{session_id}/query", response_model=SessionQueryResponse)
+def session_query(session_id: str, req: QueryRequest, owner: str = Depends(current_owner)):
+    """Continue an existing session (synchronous)."""
+    if not req.question.strip():
+        raise HTTPException(status_code=422, detail="question must not be empty")
+    reserved = _enforce_quota(owner, req.lang, req.intent)
+    history, intent = _prepare_continue(session_id, req, owner)
+    return _metered(owner, reserved, req.intent,
+                    lambda: _continue_query_work(session_id, req, history, intent, owner), req)()
+
+
+# ── Async generation (job queue) ──────────────────────────────────────────────
+# A full lesson can take minutes — longer than a proxy's 504 window. These mirror the sync endpoints
+# but return a job id immediately (202); the client polls GET /jobs/{id}. See app/jobs.py.
+
+@app.post("/query/async", response_model=JobAccepted, status_code=202)
+def query_async(req: QueryRequest, owner: str = Depends(current_owner)):
+    if not req.question.strip():
+        raise HTTPException(status_code=422, detail="question must not be empty")
+    reserved = _enforce_quota(owner, req.lang, req.intent)
+    q = _augment_question(req.question, req.attachments)
+    jid = jobs.submit(owner, _metered(owner, reserved, req.intent, lambda: jsonable_encoder(
+        _run_query(q, req.lang, req.intent, [], audience=req.audience,
+                   grade_band=req.grade_band, length=req.length, owner_id=owner)), req))
+    return JobAccepted(job_id=jid)
+
+
+@app.post("/sessions/async", response_model=JobAccepted, status_code=202)
+def create_session_async(req: QueryRequest, owner: str = Depends(current_owner)):
+    """Create the session synchronously (so the client gets session_id at once) and run the first
+    query in the background."""
+    if not req.question.strip():
+        raise HTTPException(status_code=422, detail="question must not be empty")
+    reserved = _enforce_quota(owner, req.lang, req.intent)
+    sid = db.create_session(req.question.strip(), mode=req.intent or None, owner_id=owner)
+    db.save_message(sid, "user", req.question)
+    jid = jobs.submit(owner, _metered(owner, reserved, req.intent,
+                                      lambda: jsonable_encoder(_first_query_work(sid, req, owner)),
+                                      req))
+    return JobAccepted(job_id=jid, session_id=sid)
+
+
+@app.post("/sessions/{session_id}/query/async", response_model=JobAccepted, status_code=202)
+def session_query_async(session_id: str, req: QueryRequest, owner: str = Depends(current_owner)):
+    if not req.question.strip():
+        raise HTTPException(status_code=422, detail="question must not be empty")
+    reserved = _enforce_quota(owner, req.lang, req.intent)
+    # The ownership gate + user-turn save happen NOW (before returning) so an unauthorized caller
+    # gets a synchronous 404 and the user message is durable even if generation later fails.
+    history, intent = _prepare_continue(session_id, req, owner)
+    jid = jobs.submit(owner, _metered(owner, reserved, req.intent, lambda: jsonable_encoder(
+        _continue_query_work(session_id, req, history, intent, owner)), req))
+    return JobAccepted(job_id=jid, session_id=session_id)
+
+
+class JobStatusOut(BaseModel):
+    status: str                 # pending | running | done | error
+    result: dict | None = None  # present when status == done (the endpoint's normal response body)
+    error: str | None = None    # present when status == error
+
+
+@app.get("/jobs/{job_id}", response_model=JobStatusOut)
+def get_job(job_id: str, owner: str = Depends(current_owner)):
+    """Poll an async generation job. Owner-scoped: another identity's job reads as not-found."""
+    job = jobs.get(job_id, owner)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    if job.status == "done":
+        return JobStatusOut(status="done", result=job.result)
+    if job.status == "error":
+        return JobStatusOut(status="error", error=job.error)
+    return JobStatusOut(status=job.status)
 
 
 class MessageOut(BaseModel):
@@ -984,16 +1708,16 @@ class MessageOut(BaseModel):
 
 
 @app.get("/sessions/{session_id}/messages", response_model=list[MessageOut])
-def get_messages(session_id: str):
-    msgs = db.get_messages(session_id)
+def get_messages(session_id: str, owner: str = Depends(current_owner)):
+    msgs = db.get_messages(session_id, owner)
     if not msgs:
         raise HTTPException(status_code=404, detail="session not found")
     return msgs
 
 
 @app.delete("/sessions/{session_id}", status_code=204)
-def delete_session(session_id: str):
-    if not db.delete_session(session_id):
+def delete_session(session_id: str, owner: str = Depends(current_owner)):
+    if not db.delete_session(session_id, owner):
         raise HTTPException(status_code=404, detail="session not found")
 
 
@@ -1010,19 +1734,19 @@ class SavedLessonOut(BaseModel):
 
 
 @app.get("/lessons", response_model=list[SavedLessonOut])
-def list_lessons():
-    return db.list_lessons()
+def list_lessons(owner: str = Depends(current_owner)):
+    return db.list_lessons(owner)
 
 
 @app.get("/lessons/{lesson_id}")
-def get_lesson(lesson_id: str):
-    lesson = db.get_lesson(lesson_id)
+def get_lesson(lesson_id: str, owner: str = Depends(current_owner)):
+    lesson = db.get_lesson(lesson_id, owner)
     if not lesson:
         raise HTTPException(status_code=404, detail="lesson not found")
     return lesson
 
 
 @app.delete("/lessons/{lesson_id}", status_code=204)
-def delete_lesson(lesson_id: str):
-    if not db.delete_lesson(lesson_id):
+def delete_lesson(lesson_id: str, owner: str = Depends(current_owner)):
+    if not db.delete_lesson(lesson_id, owner):
         raise HTTPException(status_code=404, detail="lesson not found")

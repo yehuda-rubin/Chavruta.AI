@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
 
 
 class UnitType(str, Enum):
@@ -41,6 +40,11 @@ class Work:
     languages: tuple[str, ...] = ("he", "en")
     reference_scheme: str = "book/chapter/verse"
     source_adapter: str = "sefaria"
+    # DO NOT put a licence here. Rights are per (title, language, versionTitle) on Sefaria's side and
+    # do not follow work_id: Talmud Bavli's default edition is CC-BY-NC while its Aramaic base is
+    # public domain, and one work can differ by language. This field once hardcoded "CC0 / Sefaria"
+    # for every work, which was simply false. The real value lives per chunk (Chunk.license), read
+    # from the API at fetch time; classify it with corpus/rights.py.
     license: str = ""
     attribution: str = ""
     version: str = ""
@@ -73,9 +77,16 @@ class Chunk:
     # structural coordinates for ordering/anchoring (e.g. {"book": "Genesis", "chapter": 1, "verse": 3})
     position: dict = field(default_factory=dict)
     # commentary-only fields
-    anchor_ref: Optional[str] = None       # the ref this comments on (source OR another commentary)
-    anchor_kind: Optional[AnchorKind] = None
-    commentator_id: Optional[str] = None
+    anchor_ref: str | None = None       # the ref this comments on (source OR another commentary)
+    anchor_kind: AnchorKind | None = None
+    commentator_id: str | None = None
+    # ── Rights. Per-CHUNK, not per-work: Sefaria licenses per (title, language, versionTitle), and
+    # those boundaries do not follow work_id at all. The same work can be CC-BY-NC in Hebrew and CC0
+    # in English (Peninei Halakhah), and one author can span CC-BY-NC and full copyright (Steinsaltz).
+    # Empty means UNKNOWN — which must be treated as "all rights reserved", never as permissive.
+    license: str = ""                   # verbatim from Sefaria: "Public Domain" | "CC0" | "CC-BY" |
+                                        # "CC-BY-SA" | "CC-BY-NC" | "Copyright: <holder>" | "unknown"
+    version_title: str = ""             # the exact edition the text came from — the audit trail
 
     def to_payload(self) -> dict:
         """Metadata stored alongside the vector (and returned on search hits)."""
@@ -94,6 +105,10 @@ class Chunk:
             "anchor_ref": self.anchor_ref,
             "anchor_kind": self.anchor_kind.value if self.anchor_kind else None,
             "commentator_id": self.commentator_id,
+            # Indexed so retrieval can filter by rights (e.g. exclude NonCommercial for paid users)
+            # and so the source sheet can attribute the actual edition, not a generic "Sefaria".
+            "license": self.license,
+            "version_title": self.version_title,
         }
 
     def validate(self) -> None:
@@ -126,7 +141,7 @@ class Citation:
     ref: str
     deep_link: str
     quote: str = ""
-    commentator_id: Optional[str] = None
+    commentator_id: str | None = None
 
 
 @dataclass
@@ -140,10 +155,10 @@ class Query:
     text: str
     lang: str = "he"
     intent: Intent = Intent.QA
-    work_ids: Optional[list[str]] = None         # corpus scoping; None = all loaded
-    commentator_ids: Optional[list[str]] = None  # named-commentator bias/filter
-    named_refs: Optional[list[str]] = None       # explicit verse refs detected in the question
-    requested_works: Optional[list[str]] = None  # works the question explicitly asks about
+    work_ids: list[str] | None = None         # corpus scoping; None = all loaded
+    commentator_ids: list[str] | None = None  # named-commentator bias/filter
+    named_refs: list[str] | None = None       # explicit verse refs detected in the question
+    requested_works: list[str] | None = None  # works the question explicitly asks about
     expand_links: bool = False                   # follow Link edges + anchor chains
     expand_depth: int = 1
     search_text: str = ""                        # text used for retrieval (trigger phrases like
@@ -176,4 +191,4 @@ class Answer:
     no_source: bool = False
     caveats: list[str] = field(default_factory=list)
     intent: Intent = Intent.QA
-    lesson_plan: Optional[LessonPlan] = None
+    lesson_plan: LessonPlan | None = None

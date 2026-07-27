@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Diagnostic: what does the retriever actually return for the routed query (server mode)."""
 import sys
 from pathlib import Path
@@ -12,7 +11,7 @@ from chavruta.pipeline.pipeline import build_backends
 Q = "מה המחלוקת בין רשי לרמבן בפסוק הראשון בתורה?"
 
 p = Profile(name="local", qdrant_mode="server", qdrant_url="http://localhost:6333",
-            collection="chavruta", hybrid=True, rerank=False,
+            hybrid=True, rerank=False,   # collection: Profile default (config.DEFAULT_COLLECTION)
             relevance_threshold=0.0, top_k=16, embedding_device="cpu", llm_backend="nebius")
 emb, store, llm, retriever = build_backends(p)
 
