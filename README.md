@@ -71,16 +71,18 @@ Every knob is a `CHAVRUTA_*` env var (see `src/chavruta/config/profile.py`).
 
 ## Application
 
-The app is a **React + Vite SPA** talking to a **FastAPI** backend, with **SQLite** chat history.
+A **Next.js** front end talking to a **FastAPI** backend, with **SQLite** chat history.
 
 | layer        | what it is                                                                 |
 |--------------|----------------------------------------------------------------------------|
 | `app/api.py` | FastAPI service — sessions, messages, and the `/sessions/{id}/query` RAG endpoint (uvicorn, port 8080) |
 | `app/db.py`  | SQLite persistence — conversations survive restarts; deleting a chat cascades to its messages |
-| `app/frontend/` | React SPA — three-column "beit midrash" UI, clickable citations, full **Hebrew (RTL) / English (LTR)** i18n with a language toggle (port 5173) |
+| `web/`       | **the shipped UI** — Next.js (standalone output), Hebrew (RTL) / English (LTR) i18n, accounts, billing and settings. This is what `docker compose up` serves, behind the `web` nginx edge |
+| `app/frontend/public/ui/chavruta.html` | a **self-contained static UI** — local Tailwind, self-hosted fonts, no build step. The offline / no-Node path |
+| `app/frontend/src/` | ⚠️ **deprecated Vite SPA.** Kept for reference only; nothing builds or serves it. Do not add features here |
 
 Conversation history is stored in `chavruta.db` (path overridable via `CHAVRUTA_DB_PATH`; mounted to
-a volume in `docker-compose.yml` so it persists). See [app/frontend/README.md](app/frontend/README.md).
+a volume in `docker-compose.yml` so it persists).
 
 ### Modes (the `intent` field)
 

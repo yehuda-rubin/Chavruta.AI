@@ -1,8 +1,14 @@
 # Contract: LLMBackend
 
-Generates the natural-language answer from an already-built, source-grounded prompt. The
-dual-model strategy lives here: `LocalLLM` (DictaLM via Ollama/llama.cpp) and `CloudLLM`
-(Nebius, OpenAI-compatible) implement the same interface, chosen by config (Principle II).
+Generates the natural-language answer from an already-built, source-grounded prompt. Two
+implementations share the interface, chosen by config (Principle II): `CloudLLM` (Nebius,
+OpenAI-compatible — the default) and `BridgeLLM` (an agent answers file-based jobs in-session, no
+external API).
+
+> **Superseded 2026-07-13:** this contract originally specified a third implementation, `LocalLLM`
+> (DictaLM via Ollama/llama.cpp), as half of a "dual-model strategy". **That backend was removed.**
+> `BridgeLLM` took over its role as the no-external-API path. The interface below is unchanged — the
+> substitution is exactly the config-only swap the contract requires, which is the point.
 
 ## Interface
 
@@ -34,8 +40,7 @@ class LLMResult:
 - The backend MUST NOT fetch external knowledge or tools at generate time in the local
   profile (offline, FR-017).
 - MUST answer in `lang` (the question's language) (FR-010/IV).
-- `LocalLLM` MUST operate within the offline RAM/latency budget (DictaLM Q4 ~4.4GB).
-- Swapping `LocalLLM` ↔ `CloudLLM` MUST require config only — identical call site.
+- Swapping `BridgeLLM` ↔ `CloudLLM` MUST require config only — identical call site.
 - Streaming SHOULD be supported for responsive UX (Principle VII).
 
 ## Conformance tests (tests/contract)
