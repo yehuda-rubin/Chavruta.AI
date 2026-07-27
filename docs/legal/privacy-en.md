@@ -6,7 +6,14 @@
 
 # Privacy Policy — Chavruta AI
 
-**Version 1.1 · Effective 27 July 2026**
+**Version 1.2 · Effective 27 July 2026**
+
+Changes in version 1.2: a new section **The Database, Its Purposes, and the Applicable Law**
+(section 11) sets out the purposes of the database, refers to **Amendment 13** to the Protection of
+Privacy Law, and records our assessment on appointing a privacy officer; it is now stated explicitly
+that **there is no "no-training" path** (section 3) and that **we do not verify age** (section 7);
+and the Service is **scoped to an audience in Israel** (Terms of Use, section 13). The contact
+section is renumbered as section 12.
 
 Changes in version 1.1: this policy now states the 90-day conversation retention window, itemises the
 usage measurements recorded per request and the content that is deliberately not recorded, and states
@@ -48,6 +55,13 @@ improve and train its AI models**, subject to its terms. Therefore **do not ente
 confidential or personal information** you would not want processed, or used for model training, this
 way.
 
+**There is no "no-training" path on this Service — not on a paid plan and not on an institutional
+account.** We say so explicitly so that you do not conclude otherwise: there is no setting you can
+ask us to enable, and no tier that buys one. The rule in this section — what is not entered is not
+sent — is the only protection that exists here, which is why it is written as a rule and not as a
+recommendation. If we move to a provider that offers a non-training path, we will update this section
+and give notice.
+
 ## 4. Sharing
 We do not sell your data. We use sub-processors only to run the Service: the registration provider
 (Supabase), the AI model provider, and the hosting provider. **For paid subscribers — the payment
@@ -82,12 +96,22 @@ disclose information if required by law.
 ## 7. Minors and Schools
 The Service is also intended for study in schools. Use by minors should be under the responsibility and
 supervision of a parent, teacher or educational institution.
+
+**We do not verify age, and we cannot.** Registration is by email address, and we have no means of
+knowing how old the user on the other side of the screen is. We state this here rather than in a
+footnote because the consequence is practical: **supervision of who uses the Service and what they
+type is the parent's or the institution's, not any mechanism inside the Service.**
 - **Institutional accounts:** when access is via an educational institution, the institution is the
   consenting party and controller of the student data, and we act as its processor.
 - **Important — processing and training:** as described in section 3, questions and sources entered are
-  sent to the model provider and **may also be used to train its models**. Therefore **do not enter
+  sent to the model provider and **may also be used to train its models**, and **there is no path on
+  which this does not happen** — including on an institutional account. Therefore **do not enter
   identifying or personal information about minors** (full names, contact details, location, photos,
   etc.); it is the parent's/institution's responsibility to instruct and supervise accordingly.
+- **What that means in practice:** the Service needs no identifying detail in order to work. A
+  question in learning is a question about a source, not about a pupil. An institution considering
+  use should weigh that both facts hold at once — no age verification and no non-training path — and
+  decide in that light.
 - **Marketing:** we do not use minors' data for marketing.
 - **Parental consent:** consent given by a parent on a minor's behalf can be withdrawn at any time.
 - We do not knowingly collect personal information from minors beyond an email address used for sign-in.
@@ -110,6 +134,33 @@ the event of a serious security incident we will act to notify the Privacy Prote
 affected users as required by law. However, no method is 100% secure and we cannot guarantee absolute
 security.
 
-## 11. Changes and Contact
+## 11. The Database, Its Purposes, and the Applicable Law
+**Database owner and manager:** Yehuda Rubin, the operator of the Service. Contact details in section 12.
+
+**Purposes of the database** — the information itemised in section 1 is collected and used for these
+purposes only:
+1. operating the Service and producing answers and lessons;
+2. associating conversations, lessons and the subscription with your account;
+3. enforcing usage quotas and preventing abuse;
+4. billing, issuing invoices and meeting accounting obligations;
+5. securing the Service;
+6. understanding aggregate usage patterns in order to improve the Service.
+
+**We do not use the information for any other purpose and we do not sell it.** Use for a new purpose
+would require an update to this policy and advance notice.
+
+**Applicable law.** This policy is drawn up under the **Protection of Privacy Law, 5741-1981, as
+amended by Amendment 13** (in force August 2025), and the regulations under it — the Data Security
+Regulations (2017) and the Transfer of Data to Databases Abroad Regulations (2001), referred to in
+sections 9 and 10.
+
+**Privacy Protection Officer.** Amendment 13 requires appointing an officer in certain circumstances,
+including large-scale processing of sensitive data or systematic monitoring. **In our assessment the
+obligation does not apply at the current scale:** the Service holds no sensitive data as defined in
+the Law, performs no systematic monitoring, and records measurements rather than content (section 1).
+This is our assessment, it is revisited as the scale grows, and an appointment will be made if and
+when the obligation arises.
+
+## 12. Changes and Contact
 We may update this policy; the current version is always shown in the Service. For privacy questions:
 rubinyehuda8@gmail.com

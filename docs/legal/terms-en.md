@@ -6,14 +6,16 @@
 
 # Terms of Use — Chavruta AI
 
-**Version 1.2 · Effective 27 July 2026**
+**Version 1.3 · Effective 27 July 2026**
+
+Changes in version 1.3: it is now stated explicitly that **we do not verify age** and who carries the
+responsibility for that (section 5), and that **the Service is scoped to an audience in Israel**
+(section 13, retitled accordingly). **How and when a refund is made** is also set out (section 10).
 
 Changes in version 1.2: **the annual plan moved from a payment up front to twelve monthly
 instalments** at the same discounted rate and the same yearly total, and the **14-day cancellation
 right** on a distance sale was stated (section 10). Nothing is now paid in advance for a period that
-has not been used, so no prepayment is ever left waiting to be refunded. **How and when a refund is
-made** is now stated too — to the payment method used, within 14 days of the cancellation notice,
-with a credit note.
+has not been used, so no prepayment is ever left waiting to be refunded.
 
 Changes in version 1.1: added a minimum age for purchasing a subscription and a clause on
 institutional accounts (section 5), added a coupon clause (section 11), stated explicitly that listed
@@ -49,6 +51,13 @@ close an account that breaches these terms.
 You must be at least 18 years old to purchase a paid plan, or have the consent of a parent or
 guardian. For institutional accounts (schools, yeshivot, educational institutions), the subscription
 is contracted by the institution itself, not by individual pupils.
+
+**We do not verify age.** Registration requires only an email address and we have no means of
+checking how old a user is. The requirement above is a condition of use, not a mechanism, and
+**meeting it — and supervising a minor's use — is the responsibility of the parent or the
+institution**. See also Privacy Policy section 7, and in particular the rule against entering
+identifying details of minors: what is entered is sent to the model provider, and there is no path
+on which that does not happen.
 
 ## 6. Content You Upload
 When attaching sources (text, PDF or Word) you represent that you have the right to use them, and you
@@ -112,7 +121,14 @@ benefit is revoked.
 We may update these terms. Continued use after an update constitutes acceptance of the updated terms.
 The current version is always shown in the Service.
 
-## 13. Governing Law and Jurisdiction
+## 13. Intended Audience, Governing Law and Jurisdiction
+**The Service is offered to users in Israel.** It is not directed at residents of the European Union,
+the United Kingdom, or other territories with separate data-protection regimes, and we do not offer it
+there. **We do not technically block access by location** — and we do not claim to — but this scoping
+states who the Service is intended for and the law it was built against. A user connecting from
+outside Israel does so on their own initiative and responsibility, and that does not by consent make
+another body of law applicable to the Service.
+
 These terms are governed by the law of the State of Israel, and the exclusive jurisdiction shall be the
 competent courts of the State of Israel.
 

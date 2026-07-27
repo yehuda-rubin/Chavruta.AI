@@ -3,7 +3,7 @@
 // are placeholders to fill before going live.
 import type { Lang } from "./types";
 
-export const TERMS_VERSION = "1.2";
+export const TERMS_VERSION = "1.3";
 export const TERMS_EFFECTIVE = "2026-07-27";
 
 interface Section {
@@ -21,7 +21,7 @@ const HE: Section[] = [
   { heading: "חשבון והרשמה",
     body: "עליך למסור כתובת אימייל תקינה ולשמור על סודיות פרטי הכניסה. אתה אחראי לכל פעילות בחשבונך, ועליך להודיע לנו על כל שימוש בלתי מורשה." },
   { heading: "גיל וחשבונות מוסדיים",
-    body: "עליך להיות בן 18 לפחות כדי לרכוש מנוי בתשלום, או שתהיה הסכמת הורה/אפוטרופוס. לחשבונות מוסדיים (בתי ספר, ישיבות, מוסדות חינוך) — המנוי נרכש על ידי המוסד עצמו, ולא על ידי תלמידים בודדים." },
+    body: "עליך להיות בן 18 לפחות כדי לרכוש מנוי בתשלום, או שתהיה הסכמת הורה/אפוטרופוס. לחשבונות מוסדיים (בתי ספר, ישיבות, מוסדות חינוך) — המנוי נרכש על ידי המוסד עצמו, ולא על ידי תלמידים בודדים. איננו מאמתים גיל — ההרשמה נעשית בכתובת אימייל בלבד ואין בידינו אמצעי לבדוק את גיל המשתמש. הדרישה היא תנאי לשימוש ולא מנגנון, והאחריות לעמידה בה ולפיקוח על שימוש של קטין היא של ההורה או המוסד; ראה מדיניות הפרטיות, ובמיוחד הכלל שאין להזין פרטים מזהים של קטינים — מה שמוזן נשלח לספק המודל, ואין מסלול שבו זה אינו כך." },
   { heading: "תוכן שאתה מעלה",
     body: "בעת צירוף מקורות (טקסט, PDF או Word) אתה מצהיר שיש לך את הזכות להשתמש בהם, ומתיר לנו לעבד אותם לצורך הפקת התשובה. אין להעלות תוכן בלתי חוקי, פוגעני, או המפר זכויות יוצרים או פרטיות של אחר. שים לב: שיחות נמחקות אחרי 3 חודשים — שיחה ללא פעילות במשך 90 יום נמחקת אוטומטית עם הודעותיה, וכל פנייה חדשה מאפסת את הספירה. שיעורים שיצרת אינם נמחקים אוטומטית. אם תוכן חשוב לך לטווח ארוך — הורד ושמור אותו אצלך." },
   { heading: "שימוש הוגן",
@@ -36,8 +36,8 @@ const HE: Section[] = [
     body: "עשויים להיות מוצעים קופונים מעת לעת. קופון מקנה הטבה מסוימת (דרג תוכנית לתקופה מוגבלת או זיכויים). לקופון יש תאריך תפוגה והוא אינו ניתן להעברה. לקופון אין ערך כספי ואין אפשרות לפדות אותו במזומן. אם עסקה שנעשתה בקופון מבוטלת — ההטבה שניתנה בקופון נשללת." },
   { heading: "שינויים בתנאים",
     body: "אנו רשאים לעדכן תנאים אלה. המשך השימוש לאחר עדכון מהווה הסכמה לתנאים המעודכנים; הגרסה העדכנית תוצג תמיד בשירות." },
-  { heading: "דין וסמכות שיפוט",
-    body: "על תנאים אלה יחול דין מדינת ישראל, וסמכות השיפוט הבלעדית תהיה של בתי המשפט המוסמכים במדינת ישראל." },
+  { heading: "קהל היעד, דין וסמכות שיפוט",
+    body: "השירות מוצע למשתמשים בישראל. הוא אינו מכוון לתושבי האיחוד האירופי, הממלכה המאוחדת או שטחים אחרים שבהם חלים דיני הגנת מידע נפרדים, ואיננו מציעים אותו שם. איננו חוסמים גישה טכנית לפי מיקום — ואיננו מתיימרים לכך — אך תיחום זה קובע למי השירות מיועד ולפי איזה דין נבנה. על תנאים אלה יחול דין מדינת ישראל, וסמכות השיפוט הבלעדית תהיה של בתי המשפט המוסמכים במדינת ישראל." },
   { heading: "יצירת קשר",
     body: "השירות מופעל על ידי יהודה רובין. לשאלות בנוגע לתנאים אלה: rubinyehuda8@gmail.com" },
 ];
@@ -52,7 +52,7 @@ const EN: Section[] = [
   { heading: "Account and Registration",
     body: "You must provide a valid email address and keep your login credentials confidential. You are responsible for all activity under your account and must notify us of any unauthorized use." },
   { heading: "Age and Institutional Accounts",
-    body: "You must be at least 18 years old to purchase a paid plan, or have the consent of a parent or guardian. For institutional accounts (schools, yeshivot, educational institutions), the subscription is contracted by the institution itself, not by individual pupils." },
+    body: "You must be at least 18 years old to purchase a paid plan, or have the consent of a parent or guardian. For institutional accounts (schools, yeshivot, educational institutions), the subscription is contracted by the institution itself, not by individual pupils. We do not verify age — registration is by email address only and we have no means of checking how old a user is. The requirement is a condition of use, not a mechanism, and meeting it and supervising a minor's use is the responsibility of the parent or the institution; see the Privacy Policy, and in particular the rule against entering identifying details of minors — what is entered is sent to the model provider, and there is no path on which that does not happen." },
   { heading: "Content You Upload",
     body: "When attaching sources (text, PDF or Word) you represent that you have the right to use them, and you permit us to process them to generate your answer. Do not upload unlawful or offensive content, or content that infringes another's copyright or privacy. Note — conversations are deleted after 3 months: a conversation with no activity for 90 days is deleted automatically with its messages, and any new message in that conversation resets the clock. Lessons you create are not deleted automatically. If content is important to you for the long term — download and save it yourself. See also the Privacy Policy, section 5." },
   { heading: "Acceptable Use",
@@ -67,8 +67,8 @@ const EN: Section[] = [
     body: "Coupons may be offered from time to time. A coupon grants a specific benefit (a time-limited plan tier or credits). Coupons have an expiration date and are not transferable. A coupon has no cash value and cannot be redeemed for money. If a transaction that used a coupon is cancelled, the coupon-granted benefit is revoked." },
   { heading: "Changes to These Terms",
     body: "We may update these terms. Continued use after an update constitutes acceptance; the current version is always shown in the Service." },
-  { heading: "Governing Law and Jurisdiction",
-    body: "These terms are governed by the law of the State of Israel, and the exclusive jurisdiction shall be the competent courts of the State of Israel." },
+  { heading: "Intended Audience, Governing Law and Jurisdiction",
+    body: "The Service is offered to users in Israel. It is not directed at residents of the European Union, the United Kingdom, or other territories with separate data-protection regimes, and we do not offer it there. We do not technically block access by location — and we do not claim to — but this scoping states who the Service is intended for and the law it was built against. These terms are governed by the law of the State of Israel, and the exclusive jurisdiction shall be the competent courts of the State of Israel." },
   { heading: "Contact",
     body: "The Service is operated by Yehuda Rubin. Questions about these terms: rubinyehuda8@gmail.com" },
 ];
@@ -78,7 +78,7 @@ export function termsSections(lang: Lang): Section[] {
 }
 
 // ── Privacy Policy (mirrors docs/legal/privacy-{he,en}.md) ────────────────────
-export const PRIVACY_VERSION = "1.1";
+export const PRIVACY_VERSION = "1.2";
 export const PRIVACY_EFFECTIVE = "2026-07-27";
 
 const PRIVACY_HE: Section[] = [
@@ -87,7 +87,7 @@ const PRIVACY_HE: Section[] = [
   { heading: "כיצד אנו משתמשים במידע",
     body: "להפעלת השירות והפקת התשובות; לשיוך השיחות והשיעורים לחשבונך; לאכיפת מכסות; ולאבטחת השירות ומניעת שימוש לרעה. איננו משתמשים בתוכן שלך לפרסום." },
   { heading: "עיבוד ואימון על ידי ספק המודל",
-    body: "כדי לייצר תשובה, שאלתך (וכל מקור שצירפת) נשלחת לספק מודל הבינה המלאכותית שלנו. ייתכן שספק המודל ישתמש בנתונים שנשלחו אליו — שאלותיך והמקורות שצירפת — גם לצורך שיפור ואימון מודלי הבינה המלאכותית שלו, בכפוף לתנאיו. לפיכך אין להזין מידע רגיש, סודי או אישי שאינך מעוניין שיעובד או שישמש לאימון." },
+    body: "כדי לייצר תשובה, שאלתך (וכל מקור שצירפת) נשלחת לספק מודל הבינה המלאכותית שלנו. ייתכן שספק המודל ישתמש בנתונים שנשלחו אליו — שאלותיך והמקורות שצירפת — גם לצורך שיפור ואימון מודלי הבינה המלאכותית שלו, בכפוף לתנאיו. לפיכך אין להזין מידע רגיש, סודי או אישי שאינך מעוניין שיעובד או שישמש לאימון. אין בשירות מסלול 'ללא אימון', גם לא בתשלום ולא לחשבון מוסדי: אין הגדרה שאפשר לבקש מאיתנו להפעיל ואין דרג שקונה אותה. הכלל הזה — מה שלא הוזן, לא נשלח — הוא ההגנה היחידה הקיימת כאן." },
   { heading: "שיתוף מידע",
     body: "איננו מוכרים את המידע שלך. אנו נעזרים בספקי משנה להפעלת השירות בלבד: ספק ההרשמה (Supabase), ספק מודל הבינה המלאכותית, וספק האירוח; ולמנויים בתשלום — ספק הסליקה (PayPlus) וספק החשבוניות (חשבונית ירוקה). מקורות הלימוד נשלפים ממאגר מבוסס Sefaria. נחשוף מידע אם נידרש על פי דין." },
   { heading: "שמירת מידע",
@@ -95,13 +95,15 @@ const PRIVACY_HE: Section[] = [
   { heading: "הזכויות שלך",
     body: "באפשרותך לצפות ולמחוק את השיחות והשיעורים שלך בכל עת מתוך האפליקציה. באפשרותך לבקש מחיקת חשבון מתוך ההגדרות — המחיקה מתבצעת לאחר תקופת חסד (כ-30 יום) שבה ניתן לבטלה, ובתומה כל הנתונים נמחקים לצמיתות. באפשרותך לעדכן פרטים בהגדרות. נשיב לבקשת עיון תוך 30 יום (ניתן להאריך ב-15 יום לפי דין); לאחר מחיקה/תיקון נודיע גם לצדדים שקיבלו את המידע ב-3 השנים שקדמו, ככל שנדרש." },
   { heading: "קטינים ובתי ספר",
-    body: "השירות מיועד גם ללימוד בבתי ספר; שימוש על ידי קטינים ייעשה באחריות ובפיקוח הורה, מורה או מוסד חינוכי. כאשר הגישה נעשית דרך מוסד חינוכי — המוסד הוא הגורם המסכים והאחראי לנתוני התלמידים ואנחנו מעבד עבורו. חשוב: כמפורט בסעיף העיבוד, שאלות ומקורות שמוזנים נשלחים לספק המודל ועשויים לשמש גם לאימון מודליו — לפיכך אין להזין פרטים מזהים או מידע אישי של קטינים (שם, פרטי קשר, מיקום וכד'). איננו עושים שימוש בנתוני קטינים לשיווק; הסכמת הורה ניתנת לביטול בכל עת. איננו אוספים ביודעין מידע אישי מקטינים מעבר לאימייל לצורך התחברות." },
+    body: "השירות מיועד גם ללימוד בבתי ספר; שימוש על ידי קטינים ייעשה באחריות ובפיקוח הורה, מורה או מוסד חינוכי. כאשר הגישה נעשית דרך מוסד חינוכי — המוסד הוא הגורם המסכים והאחראי לנתוני התלמידים ואנחנו מעבד עבורו. חשוב: כמפורט בסעיף העיבוד, שאלות ומקורות שמוזנים נשלחים לספק המודל ועשויים לשמש גם לאימון מודליו — לפיכך אין להזין פרטים מזהים או מידע אישי של קטינים (שם, פרטי קשר, מיקום וכד'). איננו עושים שימוש בנתוני קטינים לשיווק; הסכמת הורה ניתנת לביטול בכל עת. איננו אוספים ביודעין מידע אישי מקטינים מעבר לאימייל לצורך התחברות. איננו מאמתים גיל ואיננו יכולים — ההרשמה נעשית בכתובת אימייל, ואין בידינו אמצעי לדעת בן כמה המשתמש. הפיקוח על מי שמשתמש ועל מה שהוא מקליד הוא של ההורה או המוסד, ולא של מנגנון בשירות. השירות אינו זקוק לשום פרט מזהה כדי לעבוד." },
   { heading: "עוגיות ואחסון מקומי",
     body: "אנו משתמשים באחסון מקומי בדפדפן לשמירת העדפות ולניהול ההתחברות (טוקן הפעלה). איננו משתמשים בעוגיות מעקב פרסומיות של צד שלישי." },
   { heading: "העברת מידע אל מחוץ לישראל",
     body: "חלק מספקי המשנה (למשל Supabase וספק המודל) מעבדים מידע מחוץ לישראל. ההעברה נעשית על בסיס הסכמתך ובכפוף להתחייבות חוזית של הספקים לשמור על רמת הגנה מקבילה לנדרש בדין הישראלי ולא להעביר את המידע הלאה ללא הרשאה, לפי תקנות הגנת הפרטיות (העברת מידע אל מאגרים מחוץ לגבולות המדינה)." },
   { heading: "אבטחה",
     body: "אנו נוקטים אמצעים סבירים — אימות, הגבלת קצב, והצפנה בתעבורה — בהתאם לתקנות הגנת הפרטיות (אבטחת מידע), התשע\"ז-2017. במקרה של אירוע אבטחה חמור נפעל ליידע את הרשות להגנת הפרטיות ואת המשתמשים כנדרש בדין. עם זאת אף שיטה אינה מאובטחת ב-100% ואיננו יכולים להבטיח אבטחה מוחלטת." },
+  { heading: "המאגר, מטרותיו והדין החל",
+    body: "בעל המאגר ומנהלו: יהודה רובין, מפעיל השירות. מטרות המאגר: הפעלת השירות והפקת התשובות והשיעורים; שיוך השיחות, השיעורים והמנוי לחשבונך; אכיפת מכסות ומניעת שימוש לרעה; חיוב, הוצאת חשבוניות וקיום חובות חשבונאיות; אבטחת השירות; והבנת דפוסי שימוש מצטברים לצורך שיפור. איננו משתמשים במידע למטרה אחרת ואיננו מוכרים אותו; שימוש למטרה חדשה יחייב עדכון של מדיניות זו והודעה מראש. מדיניות זו נערכה לפי חוק הגנת הפרטיות, התשמ\"א-1981, כנוסחו לאחר תיקון 13 (בתוקף מאוגוסט 2025), ולפי התקנות שמכוחו. תיקון 13 מחייב מינוי ממונה על הגנת הפרטיות בנסיבות מסוימות; להערכתנו בהיקף הפעילות הנוכחי החובה אינה חלה — אין כאן מידע רגיש כהגדרתו בחוק, אין ניטור שיטתי, ואנו רושמים מדדים ולא תוכן. ההערכה נבחנת מחדש עם גידול בהיקף." },
   { heading: "שינויים ויצירת קשר",
     body: "אנו רשאים לעדכן מדיניות זו; הגרסה העדכנית תוצג תמיד בשירות. לשאלות בנושא פרטיות: rubinyehuda8@gmail.com" },
 ];
@@ -112,7 +114,7 @@ const PRIVACY_EN: Section[] = [
   { heading: "How We Use It",
     body: "To operate the Service and generate answers; to associate your conversations and lessons with your account; to enforce quotas; and to secure the Service and prevent abuse. We do not use your content for advertising." },
   { heading: "Processing and Training by the Model Provider",
-    body: "To generate an answer, your question (and any source you attach) is sent to our AI model provider. The model provider may use the data sent to it — your questions and attached sources — also to improve and train its AI models, subject to its terms. Therefore do not enter sensitive, confidential or personal information you would not want processed, or used for model training, this way." },
+    body: "To generate an answer, your question (and any source you attach) is sent to our AI model provider. The model provider may use the data sent to it — your questions and attached sources — also to improve and train its AI models, subject to its terms. Therefore do not enter sensitive, confidential or personal information you would not want processed, or used for model training, this way. There is no 'no-training' path on this Service — not on a paid plan and not on an institutional account: there is no setting you can ask us to enable and no tier that buys one. This rule — what is not entered is not sent — is the only protection that exists here." },
   { heading: "Sharing",
     body: "We do not sell your data. We use sub-processors only to run the Service: the registration provider (Supabase), the AI model provider, and the hosting provider; and for paid subscribers, the payment provider (PayPlus) and the invoicing provider (Green Invoice). Study sources are retrieved from a Sefaria-based corpus. We will disclose information if required by law." },
   { heading: "Retention",
@@ -120,13 +122,15 @@ const PRIVACY_EN: Section[] = [
   { heading: "Your Rights",
     body: "You can view and delete your conversations and lessons at any time in the app. You can request account deletion from Settings — it is carried out after a grace period (about 30 days) during which you can cancel, after which all data is permanently erased. You can update details in settings. We will answer an access request within 30 days (extendable by 15 days as permitted by law); after a deletion/correction we will also notify parties who received the data in the preceding 3 years, where required." },
   { heading: "Minors and Schools",
-    body: "The Service is also intended for study in schools; use by minors should be under the responsibility and supervision of a parent, teacher or educational institution. When access is via an educational institution, the institution is the consenting party and controller of student data and we act as its processor. Important: as noted in the processing section, questions and sources entered are sent to the model provider and may also be used to train its models — so do not enter identifying or personal information about minors (name, contact details, location, etc.). We do not use minors' data for marketing; parental consent can be withdrawn at any time. We do not knowingly collect personal information from minors beyond an email used for sign-in." },
+    body: "The Service is also intended for study in schools; use by minors should be under the responsibility and supervision of a parent, teacher or educational institution. When access is via an educational institution, the institution is the consenting party and controller of student data and we act as its processor. Important: as noted in the processing section, questions and sources entered are sent to the model provider and may also be used to train its models — so do not enter identifying or personal information about minors (name, contact details, location, etc.). We do not use minors' data for marketing; parental consent can be withdrawn at any time. We do not knowingly collect personal information from minors beyond an email used for sign-in. We do not verify age and cannot — registration is by email address and we have no means of knowing how old the user is. Supervision of who uses the Service and what they type is the parent's or the institution's, not any mechanism inside the Service. The Service needs no identifying detail in order to work." },
   { heading: "Cookies and Local Storage",
     body: "We use browser local storage to keep your preferences and maintain your active session (session token). We do not use third-party advertising or tracking cookies." },
   { heading: "Transfer of Data Outside Israel",
     body: "Some sub-processors (e.g. Supabase and the model provider) process data outside Israel. The transfer is made on the basis of your consent and subject to a contractual undertaking by the providers to maintain protection equivalent to that required under Israeli law and not to transfer the data onward without authorization, under the Protection of Privacy Regulations (Transfer of Data to Databases Abroad), 2001." },
   { heading: "Security",
     body: "We take reasonable measures — authentication, rate limiting, and encryption in transit — in accordance with the Protection of Privacy (Data Security) Regulations, 2017. In the event of a serious security incident we will act to notify the Privacy Protection Authority and affected users as required by law. However, no method is 100% secure and we cannot guarantee absolute security." },
+  { heading: "The Database, Its Purposes, and the Applicable Law",
+    body: "Database owner and manager: Yehuda Rubin, the operator of the Service. Purposes of the database: operating the Service and producing answers and lessons; associating conversations, lessons and the subscription with your account; enforcing quotas and preventing abuse; billing, invoicing and meeting accounting obligations; securing the Service; and understanding aggregate usage patterns in order to improve it. We do not use the information for any other purpose and we do not sell it; use for a new purpose would require an update to this policy and advance notice. This policy is drawn up under the Protection of Privacy Law, 5741-1981, as amended by Amendment 13 (in force August 2025), and the regulations under it. Amendment 13 requires appointing a Privacy Protection Officer in certain circumstances; in our assessment the obligation does not apply at the current scale — there is no sensitive data as defined in the Law, no systematic monitoring, and we record measurements rather than content. The assessment is revisited as the scale grows." },
   { heading: "Changes and Contact",
     body: "We may update this policy; the current version is always shown in the Service. For privacy questions: rubinyehuda8@gmail.com" },
 ];
