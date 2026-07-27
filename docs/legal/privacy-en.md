@@ -6,7 +6,11 @@
 
 # Privacy Policy — Chavruta AI
 
-**Version 1.0 · Effective 18 July 2026**
+**Version 1.1 · Effective 27 July 2026**
+
+Changes in version 1.1: this policy now states the 90-day conversation retention window, itemises the
+usage measurements recorded per request and the content that is deliberately not recorded, and states
+that those measurements are detached from your identity when an account is deleted.
 
 This policy explains what information Chavruta AI (the "Service", operated by Yehuda Rubin)
 collects, how it is used, and your rights. Using the Service constitutes acceptance of this policy.
@@ -18,8 +22,15 @@ email address for sign-in); sources you attach are provided voluntarily, at your
   not see or store your password — it is stored and secured by the provider.
 - **Content you create:** your questions, conversation history, saved lessons, and sources you attach
   (text / PDF / Word).
-- **Usage data:** a daily question counter (to enforce quotas), and basic technical records (request
-  id, IP address) for security and rate limiting.
+- **Usage and measurement data:** to enforce quotas and improve the Service we record, for each
+  request, **metrics only** — timestamp (including local hour and weekday), action type (question /
+  explanation / comparison / halacha / chavruta / lesson building), language of request, tokens
+  consumed, number of model calls, processing duration, whether sources were found and how many,
+  number of files attached, and for a lesson — target audience, grade band and length. We use them to
+  understand what needs improvement, what costs more, and at which hours the Service is busy.
+  **We do not store in these records the content of the question, answer, sources or attached files**
+  — only measurements. In addition, basic technical records are kept (request id, IP address) for
+  security and rate limiting.
 - **Local preferences:** language, theme and display settings are stored in your browser (localStorage).
 - **Subscription & billing data:** if you purchase a subscription — your subscription status and period
   dates, and a reference (token) to the payment method held by the payment provider. **We do not see or
@@ -45,9 +56,18 @@ data. Study sources are retrieved from a Sefaria-based corpus subject to their l
 disclose information if required by law.
 
 ## 5. Retention
-Content you create is kept until you delete it (delete conversations/lessons in the app) or until the
-account is closed. Usage counters are kept per day. Technical records are retained for a limited period
-for security.
+- **Conversations: kept for up to 3 months.** A conversation with no activity for 90 days is deleted
+  automatically, with its messages. Any new message in the conversation resets the count — a
+  conversation you keep returning to will not be deleted.
+  **We recommend downloading and saving content that is important to you for the long term.**
+- **Lessons you create: not deleted automatically.** They are your work product and are kept until you
+  delete them or until the account is closed.
+- **Measurement data** (section 1) is kept for trend analysis. On account deletion it is **detached
+  from your identity** and remains as anonymous aggregate data only.
+- **Billing records:** we are required by law to keep accounting documentation of payments (about 7
+  years). This documentation is kept **without association to your identity** — amount, date and invoice
+  number only — and continues to exist even after account deletion.
+- Technical records are retained for a limited period for security.
 
 ## 6. Your Rights
 - **Access and deletion:** you can view and delete your conversations and lessons at any time in the app.

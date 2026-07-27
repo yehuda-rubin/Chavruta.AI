@@ -6,7 +6,12 @@
 
 # Terms of Use — Chavruta AI
 
-**Version 1.0 · Effective 18 July 2026**
+**Version 1.1 · Effective 27 July 2026**
+
+Changes in version 1.1: added a minimum age for purchasing a subscription and a clause on
+institutional accounts (section 5), added a coupon clause (section 11), stated explicitly that listed
+prices include VAT (section 10), and stated the 90-day conversation retention window (section 6).
+Sections from 5 onward were renumbered.
 
 Welcome to Chavruta AI (the "Service"). The Service is operated by Yehuda Rubin ("we"). Using the
 Service, including registering for it, constitutes acceptance of these terms. If you do not agree, do
@@ -33,42 +38,59 @@ You must provide a valid email address and keep your login credentials confident
 responsible for all activity under your account. Notify us of any unauthorized use. We may suspend or
 close an account that breaches these terms.
 
-## 5. Content You Upload
+## 5. Age and Institutional Accounts
+You must be at least 18 years old to purchase a paid plan, or have the consent of a parent or
+guardian. For institutional accounts (schools, yeshivot, educational institutions), the subscription
+is contracted by the institution itself, not by individual pupils.
+
+## 6. Content You Upload
 When attaching sources (text, PDF or Word) you represent that you have the right to use them, and you
 permit us to process them to generate your answer. Do not upload unlawful or offensive content, or
 content that infringes another's copyright or privacy.
 
-## 6. Acceptable Use
+**Note — conversations are deleted after 3 months.** A conversation with no activity for 90 days is
+deleted automatically with its messages; any new message in that conversation resets the clock.
+**Lessons you create are not deleted automatically.** If content is important to you for the long term
+— download and save it yourself. See also the Privacy Policy, section 5.
+
+## 7. Acceptable Use
 Do not misuse the Service, including attempting to bypass rate or quota limits, automated access
 beyond what is permitted, deliberate overload, reverse engineering, or attempts to harm the
 availability or security of the Service or its users.
 
-## 7. Intellectual Property and Sources
+## 8. Intellectual Property and Sources
 Corpus sources are subject to their own licenses (including Creative Commons licenses and the
 attribution requirements of Sefaria and the editions); the applicable attribution is shown beside each
 source. The Service's code, design and interface belong to the operator. Generated text may be used
 for your personal purposes subject to these terms.
 
-## 8. Privacy
+## 9. Privacy
 We store your email address (via the registration provider), your conversation and lesson history, and
 usage counters. We do not sell your data to third parties. Data is used only to run the Service and to
 associate your content with you.
 
-## 9. Quotas, Paid Plans and Cancellation
+## 10. Quotas, Paid Plans and Cancellation
 The Service may include a free plan with a daily quota, and paid plans. We may change quotas, prices
 and features from time to time, with reasonable notice.
+**Prices listed include VAT.**
 **Cancellation:** you may cancel a paid subscription at any time. On cancellation, **future billing
 stops immediately** (no further charges), and **paid access continues until the end of the period you
 already paid for** — so you are not charged for an unused period. **Cancelling a subscription (stopping
 billing) is not the same as deleting your account** (a separate mechanism — see the Privacy Policy).
 
-## 10. Changes to These Terms
+## 11. Coupons
+Coupons may be offered from time to time. A coupon grants a specific benefit (a time-limited plan tier
+or credits). Coupons have an expiration date and are not transferable. A coupon has no cash value and
+cannot be redeemed for money. If a transaction that used a coupon is cancelled, the coupon-granted
+benefit is revoked.
+
+## 12. Changes to These Terms
 We may update these terms. Continued use after an update constitutes acceptance of the updated terms.
 The current version is always shown in the Service.
 
-## 11. Governing Law and Jurisdiction
+## 13. Governing Law and Jurisdiction
 These terms are governed by the law of the State of Israel, and the exclusive jurisdiction shall be the
 competent courts of the State of Israel.
 
-## 12. Contact
+## 14. Contact
 Questions about these terms: rubinyehuda8@gmail.com

@@ -3,8 +3,8 @@
 // are placeholders to fill before going live.
 import type { Lang } from "./types";
 
-export const TERMS_VERSION = "1.0";
-export const TERMS_EFFECTIVE = "2026-07-18";
+export const TERMS_VERSION = "1.1";
+export const TERMS_EFFECTIVE = "2026-07-27";
 
 interface Section {
   heading: string;
@@ -20,6 +20,8 @@ const HE: Section[] = [
     body: "התוכן נוצר על ידי בינה מלאכותית ועלול להיות שגוי, חלקי או לא מדויק. השירות ניתן \"כמות שהוא\" וללא כל אחריות. במידה המרבית המותרת בדין, המפעיל לא יישא באחריות לכל נזק — ישיר או עקיף — הנובע מהשימוש בשירות או מההסתמכות על התשובות. השימוש על אחריות המשתמש בלבד." },
   { heading: "חשבון והרשמה",
     body: "עליך למסור כתובת אימייל תקינה ולשמור על סודיות פרטי הכניסה. אתה אחראי לכל פעילות בחשבונך, ועליך להודיע לנו על כל שימוש בלתי מורשה." },
+  { heading: "גיל וחשבונות מוסדיים",
+    body: "עליך להיות בן 18 לפחות כדי לרכוש מנוי בתשלום, או שתהיה הסכמת הורה/אפוטרופוס. לחשבונות מוסדיים (בתי ספר, ישיבות, מוסדות חינוך) — המנוי נרכש על ידי המוסד עצמו, ולא על ידי תלמידים בודדים." },
   { heading: "תוכן שאתה מעלה",
     body: "בעת צירוף מקורות (טקסט, PDF או Word) אתה מצהיר שיש לך את הזכות להשתמש בהם, ומתיר לנו לעבד אותם לצורך הפקת התשובה. אין להעלות תוכן בלתי חוקי, פוגעני, או המפר זכויות יוצרים או פרטיות של אחר. שים לב: שיחות נמחקות אחרי 3 חודשים — שיחה ללא פעילות במשך 90 יום נמחקת אוטומטית עם הודעותיה, וכל פנייה חדשה מאפסת את הספירה. שיעורים שיצרת אינם נמחקים אוטומטית. אם תוכן חשוב לך לטווח ארוך — הורד ושמור אותו אצלך." },
   { heading: "שימוש הוגן",
@@ -29,7 +31,9 @@ const HE: Section[] = [
   { heading: "פרטיות",
     body: "אנו שומרים את כתובת האימייל שלך (דרך ספק ההרשמה), את היסטוריית השיחות והשיעורים, ומוני שימוש. איננו מוכרים את המידע שלך. הוא משמש להפעלת השירות ולשיוך הנתונים אליך בלבד." },
   { heading: "מכסות, תוכניות בתשלום וביטול מנוי",
-    body: "השירות עשוי לכלול תוכנית חינמית עם מכסה יומית, ותוכניות בתשלום. אנו רשאים לשנות מכסות, מחירים ותכונות מעת לעת, בהודעה סבירה. ניתן לבטל מנוי בתשלום בכל עת; החיוב העתידי נפסק מיד (לא ייגבו חיובים נוספים), והגישה לתוכנית בתשלום נמשכת עד תום התקופה ששולמה — כך שאינך משלם עבור תקופה שלא נוצלה. ביטול מנוי (הפסקת חיוב) אינו זהה למחיקת חשבון." },
+    body: "השירות עשוי לכלול תוכנית חינמית עם מכסה יומית, ותוכניות בתשלום. אנו רשאים לשנות מכסות, מחירים ותכונות מעת לעת, בהודעה סבירה. המחירים המפורסמים כוללים מע\"מ. ניתן לבטל מנוי בתשלום בכל עת; החיוב העתידי נפסק מיד (לא ייגבו חיובים נוספים), והגישה לתוכנית בתשלום נמשכת עד תום התקופה ששולמה — כך שאינך משלם עבור תקופה שלא נוצלה. ביטול מנוי (הפסקת חיוב) אינו זהה למחיקת חשבון." },
+  { heading: "קופונים",
+    body: "עשויים להיות מוצעים קופונים מעת לעת. קופון מקנה הטבה מסוימת (דרג תוכנית לתקופה מוגבלת או זיכויים). לקופון יש תאריך תפוגה והוא אינו ניתן להעברה. לקופון אין ערך כספי ואין אפשרות לפדות אותו במזומן. אם עסקה שנעשתה בקופון מבוטלת — ההטבה שניתנה בקופון נשללת." },
   { heading: "שינויים בתנאים",
     body: "אנו רשאים לעדכן תנאים אלה. המשך השימוש לאחר עדכון מהווה הסכמה לתנאים המעודכנים; הגרסה העדכנית תוצג תמיד בשירות." },
   { heading: "דין וסמכות שיפוט",
@@ -47,8 +51,10 @@ const EN: Section[] = [
     body: "Content is AI-generated and may be wrong, partial or inaccurate. The Service is provided \"AS IS\" without any warranty. To the maximum extent permitted by law, the operator shall not be liable for any damage — direct or indirect — arising from use of the Service or reliance on the answers. Use is at your own risk." },
   { heading: "Account and Registration",
     body: "You must provide a valid email address and keep your login credentials confidential. You are responsible for all activity under your account and must notify us of any unauthorized use." },
+  { heading: "Age and Institutional Accounts",
+    body: "You must be at least 18 years old to purchase a paid plan, or have the consent of a parent or guardian. For institutional accounts (schools, yeshivot, educational institutions), the subscription is contracted by the institution itself, not by individual pupils." },
   { heading: "Content You Upload",
-    body: "When attaching sources (text, PDF or Word) you represent that you have the right to use them, and you permit us to process them to generate your answer. Do not upload unlawful or offensive content, or content that infringes another's copyright or privacy." },
+    body: "When attaching sources (text, PDF or Word) you represent that you have the right to use them, and you permit us to process them to generate your answer. Do not upload unlawful or offensive content, or content that infringes another's copyright or privacy. Note — conversations are deleted after 3 months: a conversation with no activity for 90 days is deleted automatically with its messages, and any new message in that conversation resets the clock. Lessons you create are not deleted automatically. If content is important to you for the long term — download and save it yourself. See also the Privacy Policy, section 5." },
   { heading: "Acceptable Use",
     body: "Do not misuse the Service, including bypassing rate or quota limits, automated access beyond what is permitted, deliberate overload, reverse engineering, or harming the availability or security of the Service or its users." },
   { heading: "Intellectual Property and Sources",
@@ -56,7 +62,9 @@ const EN: Section[] = [
   { heading: "Privacy",
     body: "We store your email address (via the registration provider), your conversation and lesson history, and usage counters. We do not sell your data. It is used only to run the Service and to associate your content with you." },
   { heading: "Quotas, Paid Plans and Cancellation",
-    body: "The Service may include a free plan with a daily quota, and paid plans. We may change quotas, prices and features from time to time, with reasonable notice. You may cancel a paid subscription at any time; on cancellation future billing stops immediately (no further charges) and paid access continues until the end of the period you already paid for — so you are not charged for an unused period. Cancelling a subscription (stopping billing) is not the same as deleting your account." },
+    body: "The Service may include a free plan with a daily quota, and paid plans. We may change quotas, prices and features from time to time, with reasonable notice. Prices listed include VAT. You may cancel a paid subscription at any time; on cancellation future billing stops immediately (no further charges) and paid access continues until the end of the period you already paid for — so you are not charged for an unused period. Cancelling a subscription (stopping billing) is not the same as deleting your account." },
+  { heading: "Coupons",
+    body: "Coupons may be offered from time to time. A coupon grants a specific benefit (a time-limited plan tier or credits). Coupons have an expiration date and are not transferable. A coupon has no cash value and cannot be redeemed for money. If a transaction that used a coupon is cancelled, the coupon-granted benefit is revoked." },
   { heading: "Changes to These Terms",
     body: "We may update these terms. Continued use after an update constitutes acceptance; the current version is always shown in the Service." },
   { heading: "Governing Law and Jurisdiction",
@@ -70,8 +78,8 @@ export function termsSections(lang: Lang): Section[] {
 }
 
 // ── Privacy Policy (mirrors docs/legal/privacy-{he,en}.md) ────────────────────
-export const PRIVACY_VERSION = "1.0";
-export const PRIVACY_EFFECTIVE = "2026-07-18";
+export const PRIVACY_VERSION = "1.1";
+export const PRIVACY_EFFECTIVE = "2026-07-27";
 
 const PRIVACY_HE: Section[] = [
   { heading: "איזה מידע אנו אוספים",
@@ -100,7 +108,7 @@ const PRIVACY_HE: Section[] = [
 
 const PRIVACY_EN: Section[] = [
   { heading: "What We Collect",
-    body: "Account details (your email, managed via the registration provider Supabase — we do not see or store your password); content you create (questions, conversation history, saved lessons, and sources you attach); usage data (a daily question counter for quotas, and basic technical records such as request id and IP for security); subscription & billing data if you purchase a plan (status, period, and a reference to the payment method at the payment provider — not the full card number); and local preferences (language and theme) stored in your browser." },
+    body: "Account details (your email, managed via the registration provider Supabase — we do not see or store your password); content you create (questions, conversation history, saved lessons, and sources you attach); usage and measurement data (for each request we record measurements only: timestamp including local hour and weekday, action type — question / explanation / comparison / halacha / chavruta / lesson building — language of request, tokens consumed, number of model calls, processing duration, whether sources were found and how many, number of files attached, and for a lesson its target audience, grade band and length; we do NOT record the content of the question, answer, sources or attached files); basic technical records (request id, IP address) for security and rate limiting; subscription & billing data if you purchase a plan (status, period, and a reference to the payment method at the payment provider — not the full card number); and local preferences (language and theme) stored in your browser. The measurements tell us what needs improvement, what costs more, and at which hours the Service is busy." },
   { heading: "How We Use It",
     body: "To operate the Service and generate answers; to associate your conversations and lessons with your account; to enforce quotas; and to secure the Service and prevent abuse. We do not use your content for advertising." },
   { heading: "Processing and Training by the Model Provider",
@@ -108,7 +116,7 @@ const PRIVACY_EN: Section[] = [
   { heading: "Sharing",
     body: "We do not sell your data. We use sub-processors only to run the Service: the registration provider (Supabase), the AI model provider, and the hosting provider; and for paid subscribers, the payment provider (PayPlus) and the invoicing provider (Green Invoice). Study sources are retrieved from a Sefaria-based corpus. We will disclose information if required by law." },
   { heading: "Retention",
-    body: "Content you create is kept until you delete it (delete conversations/lessons in the app) or until the account is closed. Usage counters are kept per day. Technical records are retained for a limited period for security." },
+    body: "Conversations are kept for up to 3 months: a conversation with no activity for 90 days is deleted automatically with its messages, and any new message in the conversation resets the count — a conversation you keep returning to will not be deleted. We recommend downloading and saving content that is important to you for the long term. Lessons you create are not deleted automatically and are kept until you delete them or until the account is closed. Measurement data (section 1) is kept for trend analysis, and on account deletion it is detached from your identity and remains as anonymous aggregate data only. Billing records — we are required by law to keep accounting documentation (about 7 years) without association to your identity: amount, date and invoice number only, even after account deletion. Technical records are retained for a limited period for security." },
   { heading: "Your Rights",
     body: "You can view and delete your conversations and lessons at any time in the app. You can request account deletion from Settings — it is carried out after a grace period (about 30 days) during which you can cancel, after which all data is permanently erased. You can update details in settings. We will answer an access request within 30 days (extendable by 15 days as permitted by law); after a deletion/correction we will also notify parties who received the data in the preceding 3 years, where required." },
   { heading: "Minors and Schools",
