@@ -56,6 +56,18 @@ PRESETS: dict[str, Preset] = {
         min_output_tokens=32_000,
         note="reasoning model: thinks at length before answering; needs a large output floor",
     ),
+    # Tencent Hunyuan Hy3 — 295B total / 21B active MoE, 256K context, 262K max output. The closest
+    # architectural match to the baseline we have found (235B/21-22B active), which is the reason to
+    # take it seriously: same compute class, so the eval has a fair chance of transferring. It is a
+    # reasoning model with selectable modes, hence the floor; if a mode that answers directly is
+    # available, set CHAVRUTA_LLM_MIN_OUTPUT_TOKENS=0 for it and the floor costs nothing.
+    "hy3": Preset(
+        "https://api.novita.ai/v3/openai",
+        "tencent/hy3",
+        min_output_tokens=8_000,
+        note="295B/21B active MoE — same class as the baseline; reasoning modes; cache read priced "
+             "at a quarter of input, which suits our large stable prompt prefix",
+    ),
     # Cloudflare Workers AI. Its ceiling is around the 70B class — smaller than the baseline.
     "cloudflare": Preset(
         "https://api.cloudflare.com/client/v4/accounts/ACCOUNT_ID/ai/v1",
