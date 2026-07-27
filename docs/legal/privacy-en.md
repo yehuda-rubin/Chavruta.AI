@@ -6,7 +6,12 @@
 
 # Privacy Policy — Chavruta AI
 
-**Version 1.2 · Effective 27 July 2026**
+**Version 1.3 · Effective 27 July 2026**
+
+Changes in version 1.3: section 7 rewritten — **the Service is not intended for minors**,
+registration requires an age confirmation, and we neither ask for nor need pupil data of any kind.
+The Service builds teaching material for pupils, but **the pupil is not a user of the Service** —
+the teacher is.
 
 Changes in version 1.2: a new section **The Database, Its Purposes, and the Applicable Law**
 (section 11) sets out the purposes of the database, refers to **Amendment 13** to the Protection of
@@ -26,7 +31,9 @@ email address for sign-in); sources you attach are provided voluntarily, at your
 
 ## 1. What We Collect
 - **Account details:** your email address, managed through the registration provider (Supabase). We do
-  not see or store your password — it is stored and secured by the provider.
+  not see or store your password — it is stored and secured by the provider. Also recorded with the account are **your
+  acceptance of the terms and your age confirmation (18+) given at registration, and their
+  timestamps** — the record that the declaration was made.
 - **Content you create:** your questions, conversation history, saved lessons, and sources you attach
   (text / PDF / Word).
 - **Usage and measurement data:** to enforce quotas and improve the Service we record, for each
@@ -93,28 +100,25 @@ disclose information if required by law.
   as permitted by law). Following a deletion or correction, we will also notify parties to whom the
   data was disclosed in the preceding 3 years, where required by law.
 
-## 7. Minors and Schools
-The Service is also intended for study in schools. Use by minors should be under the responsibility and
-supervision of a parent, teacher or educational institution.
+## 7. The Service is not intended for minors
+**The Service is for users aged 18 and over only** (Terms of Use, section 5). Registration requires an
+explicit age confirmation, which is recorded with the account. **We do not knowingly collect personal
+information from minors.** If we learn that an account was opened by a minor we will close it and
+delete the information. If you know of such a case, contact us (section 12) and we will act.
 
-**We do not verify age, and we cannot.** Registration is by email address, and we have no means of
-knowing how old the user on the other side of the screen is. We state this here rather than in a
-footnote because the consequence is practical: **supervision of who uses the Service and what they
-type is the parent's or the institution's, not any mechanism inside the Service.**
-- **Institutional accounts:** when access is via an educational institution, the institution is the
-  consenting party and controller of the student data, and we act as its processor.
-- **Important — processing and training:** as described in section 3, questions and sources entered are
-  sent to the model provider and **may also be used to train its models**, and **there is no path on
-  which this does not happen** — including on an institutional account. Therefore **do not enter
-  identifying or personal information about minors** (full names, contact details, location, photos,
-  etc.); it is the parent's/institution's responsibility to instruct and supervise accordingly.
-- **What that means in practice:** the Service needs no identifying detail in order to work. A
-  question in learning is a question about a source, not about a pupil. An institution considering
-  use should weigh that both facts hold at once — no age verification and no non-training path — and
-  decide in that light.
-- **Marketing:** we do not use minors' data for marketing.
-- **Parental consent:** consent given by a parent on a minor's behalf can be withdrawn at any time.
-- We do not knowingly collect personal information from minors beyond an email address used for sign-in.
+**This is a declaration, not verification**, and we say so explicitly: registration is by email
+address and we have no means of checking age. What exists is a clear scoping of the intended audience
+and a deliberate statement by the user.
+
+- **Schools and institutional accounts:** the Service builds teaching material **for** pupils — and
+  **the pupil is not a user of the Service.** The person who operates it, enters the question and
+  receives the lesson is the **teacher**, who is an adult. **We neither ask for nor need pupil data of
+  any kind**, and there are no pupil accounts.
+- **Hence the rule that remains:** as described in section 3, what is entered is sent to the model
+  provider. **Do not enter identifying details of any person — pupils included.** The Service needs no
+  identifying detail in order to work: a question in learning is a question about a source, not about
+  a pupil. **Preparing a lesson for a third-grade class does not require any child's name.**
+- **Marketing:** we do not direct marketing at minors and do not use their data.
 
 ## 8. Cookies and Local Storage
 We use browser local storage to keep your preferences and to maintain your active session (session

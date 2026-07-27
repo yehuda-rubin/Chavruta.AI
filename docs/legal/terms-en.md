@@ -6,7 +6,13 @@
 
 # Terms of Use — Chavruta AI
 
-**Version 1.3 · Effective 27 July 2026**
+**Version 1.4 · Effective 27 July 2026**
+
+Changes in version 1.4: **the Service is for users aged 18 and over and is not intended for
+minors** (section 5), and registration now requires an explicit age confirmation recorded with the
+account. Institutional accounts are for **adult teaching staff** — the Service builds teaching
+material for pupils, and the pupil is not a user of the Service. Privacy Policy section 7 updated
+accordingly.
 
 Changes in version 1.3: it is now stated explicitly that **we do not verify age** and who carries the
 responsibility for that (section 5), and that **the Service is scoped to an audience in Israel**
@@ -47,17 +53,22 @@ You must provide a valid email address and keep your login credentials confident
 responsible for all activity under your account. Notify us of any unauthorized use. We may suspend or
 close an account that breaches these terms.
 
-## 5. Age and Institutional Accounts
-You must be at least 18 years old to purchase a paid plan, or have the consent of a parent or
-guardian. For institutional accounts (schools, yeshivot, educational institutions), the subscription
-is contracted by the institution itself, not by individual pupils.
+## 5. Age — the Service is for users aged 18 and over
+**The Service is intended for users aged 18 and over, and is not intended for minors.** At
+registration you are asked to confirm this explicitly; the confirmation is a condition of
+registration and is recorded with the account. An account found to have been opened by a minor will
+be closed.
 
-**We do not verify age.** Registration requires only an email address and we have no means of
-checking how old a user is. The requirement above is a condition of use, not a mechanism, and
-**meeting it — and supervising a minor's use — is the responsibility of the parent or the
-institution**. See also Privacy Policy section 7, and in particular the rule against entering
-identifying details of minors: what is entered is sent to the model provider, and there is no path
-on which that does not happen.
+**This is a declaration, not verification.** Registration is by email address and we have no means of
+checking age. We say so explicitly so that you do not conclude otherwise: what exists here is a
+**clear scoping of the intended audience and a deliberate statement by the user**, not a technical
+mechanism. **Meeting the requirement is the user's responsibility**, and anyone who lets a minor use
+their account does so in breach of these terms.
+
+**Institutional accounts** (schools, yeshivot, educational institutions) are contracted by the
+institution and are intended for **adult teaching staff**. The Service builds teaching material *for*
+pupils — **but the pupil is not a user of the Service.** The person who operates it, enters the
+question and receives the lesson is the teacher.
 
 ## 6. Content You Upload
 When attaching sources (text, PDF or Word) you represent that you have the right to use them, and you
