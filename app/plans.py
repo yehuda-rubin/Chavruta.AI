@@ -274,6 +274,59 @@ def annual_saving_pct(plan: str | None) -> int:
     return max(0, round((1 - instalment / monthly) * 100))
 
 
+# ── Cancellation and refunds ─────────────────────────────────────────────────
+#
+# Terms §10 grants the statutory 14-day cancellation on a distance sale. The supplier may keep a
+# cancellation fee of 5% of the transaction or ₪100, WHICHEVER IS LOWER — and on the amounts here
+# (a ₪24–₪199 instalment) the percentage is always the lower of the two, so the ₪100 cap never
+# binds. It is written out anyway because the cap is the part of the rule people misremember, and
+# because the institution tier is one price rise away from the boundary.
+#
+# Nothing here is deducted automatically. These functions produce a QUOTE that scripts/refund.py
+# shows an operator before anything moves; the amount actually refunded is a human decision, and the
+# default that script offers is the most generous lawful one.
+CANCELLATION_FEE_PCT = 5.0
+CANCELLATION_FEE_CAP_ILS = 100.0
+
+
+def cancellation_fee_ils(amount: float) -> float:
+    """The most a supplier may keep as a cancellation fee on a ₪`amount` distance sale."""
+    return round(min(max(0.0, float(amount)) * CANCELLATION_FEE_PCT / 100.0,
+                     CANCELLATION_FEE_CAP_ILS), 2)
+
+
+def refund_quote(amount: float, *, days_used: int = 0, cycle: str | None = MONTHLY) -> dict:
+    """What may lawfully be withheld from a ₪`amount` charge, and what we would actually give back.
+
+    Three figures, because they answer different questions:
+
+      fee        the cancellation fee the law permits (5% or ₪100, the lower).
+      consumed   the pro-rata value of the days already used in the period paid for. A continuing
+                 transaction is cancelled going forward, so the days the customer actually had the
+                 service are theirs to pay for.
+      max_deduct fee + consumed — the floor the law puts under a refund, not a target.
+      refund     what we offer: the whole charge minus the fee, and NOT minus `consumed`.
+
+    `refund` is deliberately more generous than `amount - max_deduct`. On a single monthly instalment
+    the pro-rata share is a few shekels, and arguing over them with someone who has already decided
+    to leave costs more than it collects — in goodwill and in the operator time it takes to defend
+    the arithmetic. `consumed` is still computed and shown, so an operator can choose otherwise on a
+    large or abusive case and know the number is defensible.
+    """
+    amount = max(0.0, float(amount))
+    fee = cancellation_fee_ils(amount)
+    days = max(0, int(days_used))
+    total_days = max(1, period_days(cycle))
+    consumed = round(amount * min(days, total_days) / total_days, 2)
+    return {
+        "amount": round(amount, 2),
+        "fee": fee,
+        "consumed": consumed,
+        "max_deduct": round(min(amount, fee + consumed), 2),
+        "refund": round(max(0.0, amount - fee), 2),
+    }
+
+
 # ── Credits ──────────────────────────────────────────────────────────────────
 _DEFAULT_COSTS = {"lesson": 5, "halacha": 2, "shut": 2}
 _FALLBACK_COST = 1

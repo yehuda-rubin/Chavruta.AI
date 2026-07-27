@@ -63,7 +63,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -229,7 +229,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
             provider      TEXT,               -- e.g. 'payplus'
             provider_ref  TEXT,               -- the processor's subscription/charge handle
             invoice_ref   TEXT,               -- the accounting document's id at the invoicing service
-            note          TEXT
+            note          TEXT,
+            txn_uid       TEXT                -- the processor's handle for THIS payment (refunds
+                                              -- are issued against it, not against provider_ref)
         );
         CREATE INDEX IF NOT EXISTS idx_ledger_time ON billing_ledger(charged_at DESC);
 
@@ -363,6 +365,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
         lcols = {r[1] for r in conn.execute("PRAGMA table_info(saved_lessons)")}
         if "message_id" not in lcols:
             conn.execute("ALTER TABLE saved_lessons ADD COLUMN message_id INTEGER")
+
+    if version < 18:
+        # The ledger recorded the subscription handle but not the payment's own uid, and a refund is
+        # issued against the payment. Existing rows keep NULL: those charges can still be refunded,
+        # but only by looking the transaction up in the PayPlus dashboard first.
+        bcols = {r[1] for r in conn.execute("PRAGMA table_info(billing_ledger)")}
+        if "txn_uid" not in bcols:
+            conn.execute("ALTER TABLE billing_ledger ADD COLUMN txn_uid TEXT")
 
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
@@ -744,21 +754,48 @@ def count_sessions_older_than(cutoff_iso: str) -> int:
 def record_charge(*, charged_at: str, amount: float, currency: str = "ILS", plan: str | None = None,
                   cycle: str | None = None, provider: str | None = None,
                   provider_ref: str | None = None, invoice_ref: str | None = None,
-                  note: str = "") -> int:
+                  note: str = "", txn_uid: str | None = None) -> int:
     """Append a charge to the accounting ledger. Returns the row id.
 
     Append-only and deliberately anonymous — see the table comment. Called on every successful
     payment, INCLUDING renewals, so the ledger is a complete record of revenue rather than a list of
     subscriptions that happen to still exist.
+
+    A refund is appended the same way with a NEGATIVE amount and note='refund', never by editing or
+    deleting the charge it reverses: the books have to show that money came in and then went back
+    out, which is a different fact from the money never having arrived.
     """
     conn = get_conn()
     with _LOCK, _tx(conn):
         cur = conn.execute(
             "INSERT INTO billing_ledger (charged_at, amount, currency, plan, cycle, provider, "
-            "provider_ref, invoice_ref, note) VALUES (?,?,?,?,?,?,?,?,?)",
+            "provider_ref, invoice_ref, note, txn_uid) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (charged_at, float(amount), currency, plan, cycle, provider, provider_ref,
-             invoice_ref, note))
+             invoice_ref, note, txn_uid))
         return int(cur.lastrowid)
+
+
+def get_charge(charge_id: int) -> dict[str, Any] | None:
+    """One ledger row by id — what an operator names when issuing a refund."""
+    with _LOCK:
+        row = get_conn().execute("SELECT * FROM billing_ledger WHERE id = ?", (charge_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def refunded_total(txn_uid: str) -> float:
+    """How much of a payment has ALREADY been given back, as a positive number.
+
+    The guard against refunding the same charge twice. Refunds are appended as negative rows rather
+    than by marking the charge, so "has this been refunded" is a sum over the ledger and not a flag
+    that a second operator could miss.
+    """
+    if not txn_uid:
+        return 0.0
+    with _LOCK:
+        row = get_conn().execute(
+            "SELECT COALESCE(SUM(amount), 0) FROM billing_ledger WHERE txn_uid = ? AND amount < 0",
+            (txn_uid,)).fetchone()
+    return round(-float(row[0] or 0.0), 2)
 
 
 def list_charges(since: str | None = None, until: str | None = None) -> list[dict[str, Any]]:

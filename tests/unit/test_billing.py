@@ -65,10 +65,10 @@ def test_verify_webhook_tamper_changes_hash(monkeypatch):
 # ── parse + state machine ─────────────────────────────────────────────────────
 def test_parse_event_extracts_fields():
     ev = payplus.parse_event({"transaction": {
-        "more_info": "u-1", "status_code": "000", "amount": 49.9,
+        "uid": "txn_1", "more_info": "u-1", "status_code": "000", "amount": 49.9,
         "recurring_charge_information": {"recurring_uid": "rec_9"}}})
-    assert ev == {"owner_id": "u-1", "success": True, "recurring_uid": "rec_9",
-                  "is_renewal": True, "amount": 49.9}
+    assert ev == {"owner_id": "u-1", "success": True, "transaction_uid": "txn_1",
+                  "recurring_uid": "rec_9", "is_renewal": True, "amount": 49.9}
 
 
 def test_handle_event_activates_paid(fresh_db, monkeypatch):

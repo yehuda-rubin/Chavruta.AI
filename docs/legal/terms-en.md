@@ -11,7 +11,9 @@
 Changes in version 1.2: **the annual plan moved from a payment up front to twelve monthly
 instalments** at the same discounted rate and the same yearly total, and the **14-day cancellation
 right** on a distance sale was stated (section 10). Nothing is now paid in advance for a period that
-has not been used, so no prepayment is ever left waiting to be refunded.
+has not been used, so no prepayment is ever left waiting to be refunded. **How and when a refund is
+made** is now stated too — to the payment method used, within 14 days of the cancellation notice,
+with a credit note.
 
 Changes in version 1.1: added a minimum age for purchasing a subscription and a clause on
 institutional accounts (section 5), added a coupon clause (section 11), stated explicitly that listed
@@ -94,7 +96,8 @@ unused period nor deprived of one you paid for.
 **14-day cancellation right:** because the transaction is made at a distance, you may also cancel it
 within 14 days of the transaction and receive a refund, less the cancellation fee permitted by law
 (5% of the transaction or ₪100 — **whichever is lower**). To do so, contact us at the address in
-section 14.
+section 14. **The refund is made to the payment method used for the transaction, within 14 days of
+our receiving your cancellation notice**, and a credit note is issued to you accordingly.
 
 **Cancelling a subscription (stopping billing) is not the same as deleting your account** (a separate
 mechanism — see the Privacy Policy).

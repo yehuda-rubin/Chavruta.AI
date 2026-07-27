@@ -118,5 +118,6 @@ These variables override the default subscription tiers and credit costs defined
 ## Notes
 
 - The `NEBIUS_API_KEY` environment variable is accepted as a fallback for `CHAVRUTA_LLM_API_KEY` for convenience.
-- Several PayPlus-specific variables (`PAYPLUS_MODE`, `PAYPLUS_API_KEY`, `PAYPLUS_SECRET_KEY`, `PAYPLUS_PAYMENT_PAGE_UID`, `PAYPLUS_ANNUAL_RECURRING_TYPE`) are used by `app/billing/payplus.py` but are not prefixed with `CHAVRUTA_` because they are provider-specific.
+- Several PayPlus-specific variables (`PAYPLUS_MODE`, `PAYPLUS_API_KEY`, `PAYPLUS_SECRET_KEY`, `PAYPLUS_PAYMENT_PAGE_UID`, `PAYPLUS_ANNUAL_RECURRING_TYPE`, `PAYPLUS_REFUND_PATH`) are used by `app/billing/payplus.py` but are not prefixed with `CHAVRUTA_` because they are provider-specific.
+- `PAYPLUS_REFUND_PATH` (default `Transactions/RefundByTransactionUID`) and `CHAVRUTA_INVOICE_CREDIT_TYPE` (default `330`, חשבונית זיכוי) exist because neither call has been exercised against a live account. They are escape hatches for the first real refund, not knobs to tune — see `scripts/refund.py`.
 - Supabase-specific variables (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) are used by `app/auth_supabase.py` for authentication and are not prefixed with `CHAVRUTA_` because they are provider-specific.
