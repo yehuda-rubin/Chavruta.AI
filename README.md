@@ -65,7 +65,7 @@ Retrieval and embedding run **locally**; generation goes to the **Nebius API** (
 (`Qwen/Qwen3-235B-A22B-Instruct-2507`) — the **default even locally** (`CHAVRUTA_LLM_BACKEND=nebius`,
 key from `.env`; `CHAVRUTA_QUERY_PLANNER=heuristic`). The no-API path is
 [scripts/serve_bridge.ps1](scripts/serve_bridge.ps1). The local DictaLM/Ollama backend was **removed**.
-Every knob is a `CHAVRUTA_*` env var (see `src/chavruta/config/profile.py`).
+Every knob is a `CHAVRUTA_*` env var (see `src/chavruta/config/profile.py` and the full reference in `docs/CONFIGURATION.md`).
 
 ---
 
@@ -275,7 +275,9 @@ python scripts\bootstrap_rag.py --repo Yehuda-Rubin/chavruta-index-yerushalmi --
 ### The trust gate — run the evaluation harness (Principle V)
 
 ```powershell
-# corpus-aware gates for the full bookshelf (retrieval@K + honesty):
+# primary full-corpus gate (covers all 15 tiers, every intent):
+python scripts/run_eval.py --retrieval-only --dataset eval/corpus_v1.jsonl
+# legacy gates (kept for historical comparison):
 python scripts/run_eval.py --retrieval-only --dataset eval/halacha_v1.jsonl
 python scripts/run_eval.py --retrieval-only --dataset eval/lessons_v1.jsonl
 # eval/tanakh_v1.jsonl is the HISTORICAL Tanakh-only baseline (see its header) — not a full-corpus gate
@@ -317,10 +319,10 @@ app/
   db.py                  SQLite chat-history persistence (sessions + messages, cascade delete)
   frontend/              React + Vite SPA (HE/EN i18n, clickable citations)
 scripts/                 fetch_* · embed_corpus_gpu · load_to_store · ask · run_eval · serve.ps1
-eval/tanakh_v1.jsonl     versioned evaluation set (HE/EN)
+eval/                    corpus_v1.jsonl (full-corpus gate) · halacha_v1.jsonl · lessons_v1.jsonl · tanakh_v1.jsonl (historical)
 tests/                   contract · integration · unit (the trust guarantees)
 specs/001-chavruta-redesign/   spec · plan · research · data-model · contracts · quickstart
-docs/                    CORPUS.md · NEBIUS_HALACHA_JOB.md · screenshots/
+docs/                    CONFIGURATION.md · CORPUS.md · NEBIUS_HALACHA_JOB.md · screenshots/
 ```
 
 ---
