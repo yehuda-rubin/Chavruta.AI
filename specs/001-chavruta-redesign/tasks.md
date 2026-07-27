@@ -60,7 +60,7 @@ base pipeline.
 
 - [X] T010 Implement `BgeM3Embedding` (dense + learned sparse, CPU query / batch indexing) in `src/chavruta/embedding/bge_m3.py` (depends on T006)
 - [X] T011 Implement `QdrantStore` (embedded path / server URL by config, named dense+sparse vectors, payload filters, idempotent upsert by `chunk_id`, delete-by-filter) in `src/chavruta/store/qdrant_store.py` (depends on T007)
-- [X] T012 [P] Implement `LocalLLM` (Ollama serving DictaLM-2.0 Q4; model id from config; streaming) in `src/chavruta/llm/local.py` (depends on T008)
+- [X] T012 [P] Implement `LocalLLM` (Ollama serving DictaLM-2.0 Q4; model id from config; streaming) in `src/chavruta/llm/local.py` (depends on T008) — **⛔ SUPERSEDED 2026-07-13: built, then removed.** There is no `src/chavruta/llm/local.py`; `BridgeLLM` carries the no-external-API role. See `research.md` D1.
 - [X] T013 [P] Implement `CloudLLM` (Nebius OpenAI-compatible client; model id from config; streaming) in `src/chavruta/llm/cloud.py` (depends on T008)
 
 ### Corpus (dynamic, extensible)
@@ -103,7 +103,7 @@ resolve to real sources, bilingual parity holds, and out-of-corpus questions nev
 - [X] T025 [US1] Implement intent + language detection and named-ref/commentator extraction (default intent `qa`) in `src/chavruta/intents/router.py`
 - [X] T026 [US1] Wire the `qa` path end-to-end in `ChavrutaPipeline.ask` (grounded answer, `citations`, `grounded`/`no_source`) in `src/chavruta/pipeline/pipeline.py` (depends on T019, T025)
 - [X] T027 [P] [US1] Implement the one-shot CLI `scripts/ask.py` (`--intent`, `--profile`, prints answer + citations)
-- [X] T028 [US1] Implement the Streamlit chat `app/streamlit_app.py` (RTL/LTR rendering, clickable citations, in-session conversation context, streaming responses) (depends on T026)
+- [X] T028 [US1] Implement the Streamlit chat `app/streamlit_app.py` (RTL/LTR rendering, clickable citations, in-session conversation context, streaming responses) (depends on T026) — **⛔ SUPERSEDED: the Streamlit app no longer exists.** The UI went Streamlit → Vite SPA → static HTML → Next.js (`web/`), which is what ships.
 - [X] T029 [P] [US1] Implement the evaluation harness (retrieval@K + grounding scoring, reproducible/comparable report, runs per profile) in `src/chavruta/eval/harness.py` and `scripts/run_eval.py`
 - [X] T030 [P] [US1] Author the evaluation dataset `eval/tanakh_v1.jsonl` — 100+ Tanakh questions (HE/EN) with `expected_refs` and grounding checks, per data-model.md EvaluationItem (120 items: 110 answerable, 10 honesty probes)
 - [X] T031 [P] [US1] Integration tests for the qa path (grounded happy path, honest no-source, HE/EN parity, **and that the answer quotes the Hebrew source text per FR-012**) in `tests/integration/test_qa.py`
@@ -160,7 +160,7 @@ coherent structure whose every citation resolves.
 - [X] T040 [P] Unit tests for RRF fusion, dedup/anchoring, and the citation-enforcement gate in `tests/unit/`
 - [X] T041 [P] Migrate and remove the legacy flat modules (`src/rag_pipeline.py`, `src/vector_store.py`, `src/llm_backend.py`, `src/sefaria_client.py`) once superseded by `src/chavruta/` (also removed superseded `app.py`, `scripts/eval.py`, `scripts/test_intent.py`)
 - [X] T042 [P] Update docs to the new architecture (`README.md` referencing the redesign spec in `specs/001-chavruta-redesign/`)
-- [ ] T043 Run the full `quickstart.md` validation end-to-end on the offline profile and confirm all scenarios pass. **Partial:** corpus loaded (126,738), retrieval+honesty scenarios validated via the eval gate (73.6% / 100%); remaining: generation scenarios (1,2,4,5) + chat UI — require `ollama pull dictalm2.0-instruct:q4_k_m` on this machine
+- [ ] T043 Run the full `quickstart.md` validation end-to-end on the offline profile and confirm all scenarios pass. **Partial:** corpus loaded (126,738), retrieval+honesty scenarios validated via the eval gate (73.6% / 100%); remaining: generation scenarios (1,2,4,5) + chat UI — require `ollama pull dictalm2.0-instruct:q4_k_m` on this machine — **⚠️ PREMISE STALE 2026-07-13: the `ollama pull` blocker no longer applies** (that backend was removed; the default is the Nebius API, and `bridge` is the no-API path). Re-scope against the current quickstart before treating this as open work.
 
 ---
 
