@@ -86,3 +86,52 @@ def test_the_table_fills_in_when_the_payload_is_empty():
                                 payload={"ref": "Beitzah.27.4", "text": "t", "lang": "he"}))
     line = rights.attribution_line(ref=h.ref, version_title=h.version_title, license_str=h.license)
     assert "CC-BY-SA" in line and h.version_title in line
+
+
+# ── Share-alike on the generated document ─────────────────────────────────────
+# Attribution says who wrote a passage. Share-alike says what the person holding the FILE may do
+# with it — an obligation that lands on a teacher who edits a downloaded sheet and hands it on, and
+# that is invisible unless the document says so.
+
+def test_a_sheet_of_public_domain_sources_gets_no_footer():
+    """The common case. 6,543 of the corpus's 6,630 sources are PD or CC0 and ask for nothing;
+    a licence footer on every sheet would be noise that teaches people to ignore it."""
+    from chavruta.corpus import rights
+
+    assert rights.document_license_notice([("Genesis.1.1", "Public Domain"),
+                                           ("Rashi_on_Genesis.1.1.1", "CC0")]) == ""
+
+
+def test_share_alike_sources_are_named_not_just_counted():
+    """'Some of this is share-alike' tells a reader they have a problem without telling them where
+    it is. The refs are what make the obligation actionable."""
+    from chavruta.corpus import rights
+
+    out = rights.document_license_notice([("Genesis.1.1", "Public Domain"),
+                                          ("Beitzah.27.4", "CC-BY-SA")])
+    assert "Beitzah.27.4" in out and "CC BY-SA 4.0" in out
+    assert "creativecommons.org/licenses/by-sa/4.0" in out
+    assert "Genesis.1.1" not in out             # PD sources are not listed as obligations
+
+
+def test_attribution_only_sources_produce_a_footer_without_share_alike():
+    from chavruta.corpus import rights
+
+    out = rights.document_license_notice([("Some_Work.1.1", "CC-BY")])
+    assert out and "BY-SA" not in out
+
+
+def test_the_footer_follows_the_documents_language():
+    from chavruta.corpus import rights
+
+    he = rights.document_license_notice([("Beitzah.27.4", "CC-BY-SA")], "he")
+    en = rights.document_license_notice([("Beitzah.27.4", "CC-BY-SA")], "en")
+    assert "שיתוף זהה" in he and "share-alike" in en
+
+
+def test_share_alike_is_recognised_in_the_forms_the_corpus_actually_stores():
+    from chavruta.corpus import rights
+
+    assert all(rights.is_share_alike(v) for v in ("CC-BY-SA", "cc by-sa 4.0", "CC-BY-SA 4.0"))
+    assert not rights.is_share_alike("CC-BY")
+    assert not rights.is_share_alike("")

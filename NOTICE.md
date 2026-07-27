@@ -48,7 +48,25 @@ Retrieving a source and showing it to a user is reproduction, so the obligations
   holds 5,828 titles and covers the fifteen tiers that were built through that pipeline; anything
   added by another route must be added to it, or it will be reproduced uncredited.
 - **Share-alike (CC-BY-SA).** A derivative *of the text* must keep the same licence. Your own code
-  is not a derivative of the text; a source sheet that reproduces the text is.
+  is not a derivative of the text.
+
+  **What the generated documents do about it.** Attribution answers "who wrote this passage";
+  share-alike answers "what may the person holding this FILE do with it", and that second question
+  is the one a teacher downloading a source sheet actually faces. So a sheet containing CC-BY or
+  CC-BY-SA material now carries a licence footer (`rights.document_license_notice()`), and the
+  CC-BY-SA sources are **named** in it — "some of this is share-alike" tells a reader they have a
+  problem without telling them where. The full lesson gets the same footer when share-alike is in
+  play, because it is the file most likely to be edited and passed on. A sheet built only from
+  Public Domain and CC0 sources gets nothing, which is most of them.
+
+  **The reading this rests on, stated openly because it is the one point here a lawyer should
+  check.** A source sheet reproduces passages intact alongside our own material, which under CC 4.0
+  makes it a *Collection* rather than *Adapted Material*: share-alike attaches to those passages and
+  does not extend to the lesson written around them. Under the stricter reading — that the document
+  as a whole is a derivative — every lesson touching one of those 87 sources would have to ship
+  under CC-BY-SA, including the teacher's own work. The footer states the obligation on the parts,
+  which is true either way; it does not license the whole document away on the strength of the
+  stricter reading.
 
 Sefaria's own terms and its API terms of service apply to how the texts are obtained.
 
