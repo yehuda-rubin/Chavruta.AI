@@ -35,6 +35,18 @@ Retrieving a source and showing it to a user is reproduction, so the obligations
 
 - **Attribution (CC-BY, CC-BY-SA).** Credit in TASL shape — Title, Author, Source, Licence — not a
   bare "from Sefaria". `rights.attribution_line()` produces it, and generated source sheets carry it.
+
+  **How the licence is known.** The shipped collection carries `license` and `version_title` **empty
+  on every point**, so until 2026-07-27 that line rendered blank and this file promised more than the
+  code delivered. Licence belongs to the *edition*, not to a chunk, so it is now resolved per work at
+  read time from `src/chavruta/corpus/data/licenses.json` — built by `scripts/build_license_table.py`
+  from the per-tier records the corpus build itself produced, i.e. **which edition was actually
+  ingested**, not which editions Sefaria happens to offer today. A per-chunk backfill was measured at
+  ~5 points/sec against the on-disk collection and abandoned as pointless.
+
+  **The limit, stated plainly:** a work missing from that table gets **no credit line**. The table
+  holds 5,828 titles and covers the fifteen tiers that were built through that pipeline; anything
+  added by another route must be added to it, or it will be reproduced uncredited.
 - **Share-alike (CC-BY-SA).** A derivative *of the text* must keep the same licence. Your own code
   is not a derivative of the text; a source sheet that reproduces the text is.
 

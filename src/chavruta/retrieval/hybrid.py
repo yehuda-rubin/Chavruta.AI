@@ -13,7 +13,12 @@ import time
 from contextlib import contextmanager
 from dataclasses import replace
 
-from chavruta.corpus.refs import commentary_refs, commentator_from_ref, with_ref_variants
+from chavruta.corpus.refs import (
+    commentary_refs,
+    commentator_from_ref,
+    license_for_ref,
+    with_ref_variants,
+)
 from chavruta.corpus.schema import Query
 from chavruta.retrieval.base import RankedHit, RetrievalResult
 from chavruta.store.base import Filter, HybridQuery
@@ -55,8 +60,16 @@ def _to_hit(h) -> RankedHit:
         work_id=p.get("work_id", ""),
         anchor_ref=p.get("anchor_ref"),
         period=p.get("period"),
-        license=p.get("license") or p.get(f"license_{suffix}") or "",
-        version_title=p.get("version_title") or p.get(f"version_{suffix}") or "",
+        # …and if the payload carries neither (it carries neither on any point of the commercial
+        # corpus), fall back to the work-level table. Licence is a property of the EDITION, not of
+        # the chunk, so a per-work lookup is both correct and the only affordable option — see
+        # docs/legal/REVIEW-2026-07-27.md finding C. Without this, attribution_line() renders empty
+        # and the 464 CC-BY / 87 CC-BY-SA sources are reproduced with no credit, which is the
+        # condition their licence is granted on.
+        license=(p.get("license") or p.get(f"license_{suffix}")
+                 or license_for_ref(p.get("ref"), lang)[0]),
+        version_title=(p.get("version_title") or p.get(f"version_{suffix}")
+                       or license_for_ref(p.get("ref"), lang)[1]),
     )
 
 
