@@ -6,7 +6,12 @@
 
 # Terms of Use — Chavruta AI
 
-**Version 1.1 · Effective 27 July 2026**
+**Version 1.2 · Effective 27 July 2026**
+
+Changes in version 1.2: **the annual plan moved from a payment up front to twelve monthly
+instalments** at the same discounted rate and the same yearly total, and the **14-day cancellation
+right** on a distance sale was stated (section 10). Nothing is now paid in advance for a period that
+has not been used, so no prepayment is ever left waiting to be refunded.
 
 Changes in version 1.1: added a minimum age for purchasing a subscription and a clause on
 institutional accounts (section 5), added a coupon clause (section 11), stated explicitly that listed
@@ -73,10 +78,24 @@ associate your content with you.
 The Service may include a free plan with a daily quota, and paid plans. We may change quotas, prices
 and features from time to time, with reasonable notice.
 **Prices listed include VAT.**
-**Cancellation:** you may cancel a paid subscription at any time. On cancellation, **future billing
-stops immediately** (no further charges), and **paid access continues until the end of the period you
-already paid for** — so you are not charged for an unused period. **Cancelling a subscription (stopping
-billing) is not the same as deleting your account** (a separate mechanism — see the Privacy Policy).
+
+**All billing is monthly — including the "annual" plan.** The annual plan is a **discounted rate
+charged in twelve monthly instalments**, not a year taken up front. You never pay in advance for a
+period you have not used, so there is never a prepayment waiting to be refunded. The annual figure
+shown is the total of those twelve instalments.
+
+**Cancellation:** you may cancel a paid subscription **at any time, in one click** (Settings →
+Cancel subscription). On cancellation, **the next charge stops immediately** (no further charges) and
+**access continues to the end of the month you already paid for** — so you are neither charged for an
+unused period nor deprived of one you paid for.
+
+**14-day cancellation right:** because the transaction is made at a distance, you may also cancel it
+within 14 days of the transaction and receive a refund, less the cancellation fee permitted by law
+(5% of the transaction or ₪100 — **whichever is lower**). To do so, contact us at the address in
+section 14.
+
+**Cancelling a subscription (stopping billing) is not the same as deleting your account** (a separate
+mechanism — see the Privacy Policy).
 
 ## 11. Coupons
 Coupons may be offered from time to time. A coupon grants a specific benefit (a time-limited plan tier

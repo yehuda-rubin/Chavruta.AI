@@ -3,7 +3,7 @@
 // are placeholders to fill before going live.
 import type { Lang } from "./types";
 
-export const TERMS_VERSION = "1.1";
+export const TERMS_VERSION = "1.2";
 export const TERMS_EFFECTIVE = "2026-07-27";
 
 interface Section {
@@ -31,7 +31,7 @@ const HE: Section[] = [
   { heading: "פרטיות",
     body: "אנו שומרים את כתובת האימייל שלך (דרך ספק ההרשמה), את היסטוריית השיחות והשיעורים, ומוני שימוש. איננו מוכרים את המידע שלך. הוא משמש להפעלת השירות ולשיוך הנתונים אליך בלבד." },
   { heading: "מכסות, תוכניות בתשלום וביטול מנוי",
-    body: "השירות עשוי לכלול תוכנית חינמית עם מכסה יומית, ותוכניות בתשלום. אנו רשאים לשנות מכסות, מחירים ותכונות מעת לעת, בהודעה סבירה. המחירים המפורסמים כוללים מע\"מ. ניתן לבטל מנוי בתשלום בכל עת; החיוב העתידי נפסק מיד (לא ייגבו חיובים נוספים), והגישה לתוכנית בתשלום נמשכת עד תום התקופה ששולמה — כך שאינך משלם עבור תקופה שלא נוצלה. ביטול מנוי (הפסקת חיוב) אינו זהה למחיקת חשבון." },
+    body: "השירות עשוי לכלול תוכנית חינמית עם מכסה יומית, ותוכניות בתשלום. אנו רשאים לשנות מכסות, מחירים ותכונות מעת לעת, בהודעה סבירה. המחירים המפורסמים כוללים מע\"מ. כל החיובים חודשיים — גם התוכנית השנתית, שהיא תעריף מוזל הנגבה בשנים-עשר תשלומים חודשיים ולא תשלום שנתי מראש; הסכום השנתי המוצג הוא סך שנים-עשר התשלומים. ניתן לבטל מנוי בכל עת ובלחיצה אחת (הגדרות → ביטול מנוי): החיוב הבא נפסק מיד, והגישה נמשכת עד תום החודש ששולם. בנוסף, מכיוון שהעסקה נעשית מרחוק, ניתן לבטלה תוך 14 יום ולקבל החזר בניכוי דמי ביטול כמותר בדין (5% או 100 ₪ — הנמוך מביניהם). ביטול מנוי (הפסקת חיוב) אינו זהה למחיקת חשבון." },
   { heading: "קופונים",
     body: "עשויים להיות מוצעים קופונים מעת לעת. קופון מקנה הטבה מסוימת (דרג תוכנית לתקופה מוגבלת או זיכויים). לקופון יש תאריך תפוגה והוא אינו ניתן להעברה. לקופון אין ערך כספי ואין אפשרות לפדות אותו במזומן. אם עסקה שנעשתה בקופון מבוטלת — ההטבה שניתנה בקופון נשללת." },
   { heading: "שינויים בתנאים",
@@ -62,7 +62,7 @@ const EN: Section[] = [
   { heading: "Privacy",
     body: "We store your email address (via the registration provider), your conversation and lesson history, and usage counters. We do not sell your data. It is used only to run the Service and to associate your content with you." },
   { heading: "Quotas, Paid Plans and Cancellation",
-    body: "The Service may include a free plan with a daily quota, and paid plans. We may change quotas, prices and features from time to time, with reasonable notice. Prices listed include VAT. You may cancel a paid subscription at any time; on cancellation future billing stops immediately (no further charges) and paid access continues until the end of the period you already paid for — so you are not charged for an unused period. Cancelling a subscription (stopping billing) is not the same as deleting your account." },
+    body: "The Service may include a free plan with a daily quota, and paid plans. We may change quotas, prices and features from time to time, with reasonable notice. Prices listed include VAT. All billing is monthly — including the annual plan, which is a discounted rate charged in twelve monthly instalments rather than a year taken up front; the annual figure shown is the total of those twelve. You may cancel at any time in one click (Settings → Cancel subscription): the next charge stops immediately and access continues to the end of the month you already paid for. Because the transaction is made at a distance you may also cancel within 14 days for a refund, less the fee permitted by law (5% or ₪100, whichever is lower). Cancelling a subscription (stopping billing) is not the same as deleting your account." },
   { heading: "Coupons",
     body: "Coupons may be offered from time to time. A coupon grants a specific benefit (a time-limited plan tier or credits). Coupons have an expiration date and are not transferable. A coupon has no cash value and cannot be redeemed for money. If a transaction that used a coupon is cancelled, the coupon-granted benefit is revoked." },
   { heading: "Changes to These Terms",

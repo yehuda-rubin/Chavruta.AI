@@ -3,7 +3,8 @@
 Everything here is a DEFAULT overridable by environment, because pricing is a business decision that
 should not need a code change (Principle II). The shape is deliberate:
 
-  • Billing is MONTHLY (or a discounted year up front). Usage is metered in TWO INDEPENDENT POOLS:
+  • Billing is MONTHLY on both cycles — the annual plan is a discounted RATE billed monthly, not a
+    year taken up front (see ANNUAL_INSTALMENTS). Usage is metered in TWO INDEPENDENT POOLS:
 
       conversation  qa / explain / compare / chavruta / halacha   → TOKENS, daily + weekly
       lessons       lesson                                        → a COUNT, weekly
@@ -48,6 +49,7 @@ alias of the 'pro' tier so existing subscribers and the PayPlus webhook keep wor
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 
@@ -63,7 +65,9 @@ class Tier:
     weekly_lessons: int       # lesson pool per week — a COUNT, independent of tokens
     multiple: int             # how many times the free tier this is; what the UI states
     price_ils: float          # monthly, for display and checkout
-    annual_price_ils: float   # paid once up front — 10 months' price for 12 (~17% off)
+    annual_price_ils: float   # the YEAR's total — 10 months' price for 12 (~17% off).
+                              # Billed as 12 instalments of a twelfth, NOT taken up front; see
+                              # ANNUAL_INSTALMENTS and price_ils().
     name_he: str
     name_en: str
 
@@ -79,7 +83,8 @@ class Tier:
 # the ratio the UI prints stops being honest.
 #
 # A typical conversation turn is ~15k normalized tokens, so free ~23/week, pro ~230/week.
-# Annual is twelve months for the price of ten — the customer commits, you get the cash up front.
+# annual_price_ils is twelve months for the price of ten. It is the YEAR'S TOTAL, charged as twelve
+# monthly instalments — nothing is taken up front. See ANNUAL_INSTALMENTS for why.
 TIERS: tuple[Tier, ...] = (
     Tier("free",          120_000,    350_000,  1,  1,   0.0,    0.0, "חינם",   "Free"),
     Tier("basic",         360_000,  1_050_000,  3,  3,  29.0,  290.0, "בסיסי",  "Basic"),
@@ -193,22 +198,62 @@ def canonical_cycle(cycle: str | None) -> str:
     return ANNUAL if (cycle or "").strip().lower() in {"annual", "year", "yearly"} else MONTHLY
 
 
+# The annual plan is a discounted RATE billed monthly, not a year taken up front.
+#
+# Israeli consumer law gives the buyer of a continuing transaction two rights that a prepaid year
+# collides with: cancellation within 14 days of a distance sale (the supplier keeping at most 5% or
+# ₪100, whichever is lower — on a ₪1,990 year that is a ~₪1,890 refund), and cancellation at any time
+# thereafter, at which point holding eleven months of someone's money is the exposure. Charging a
+# twelfth each month removes the collision at its source: there is never a prepayment to refund, and
+# `cancel()` — which already stops future charges and leaves the paid period intact — is the whole
+# mechanism. The customer pays the same total for the same year at the same discount.
+#
+# The trade-off is real and was taken deliberately: this gives up the cash up front. It also means a
+# customer can take the annual rate and leave after a month, keeping the discount without the year.
+# That is accepted rather than clawed back — billing someone a penalty for exercising a statutory
+# cancellation right is exactly the problem this change exists to avoid.
+ANNUAL_INSTALMENTS = 12
+
+
 def period_days(cycle: str | None = MONTHLY) -> int:
-    """Days of access one payment buys. Override with CHAVRUTA_SUB_PERIOD_DAYS / _ANNUAL_PERIOD_DAYS."""
+    """Days of access one payment buys — a month on either cycle, since the annual plan is billed
+    monthly too. Override with CHAVRUTA_SUB_PERIOD_DAYS / _ANNUAL_PERIOD_DAYS."""
     if canonical_cycle(cycle) == ANNUAL:
-        return _env_int("CHAVRUTA_ANNUAL_PERIOD_DAYS") or 365
+        return _env_int("CHAVRUTA_ANNUAL_PERIOD_DAYS") or 30
     return _env_int("CHAVRUTA_SUB_PERIOD_DAYS") or 30
 
 
+def _annual_headline_ils(plan: str | None) -> float:
+    """The configured yearly figure — the input to the instalment, not something anyone is charged."""
+    t = tier(plan)
+    raw = os.environ.get(f"CHAVRUTA_ANNUAL_PRICE_{t.id.upper()}", "").strip()
+    try:
+        return float(raw) if raw else t.annual_price_ils
+    except ValueError:
+        return t.annual_price_ils
+
+
+def annual_total_ils(plan: str | None) -> float:
+    """What the year actually costs: twelve instalments, to the agora.
+
+    Derived from the instalment rather than configured directly, so the advertised year and the sum of
+    the charges cannot drift apart. They do drift if you divide naively — ₪290 / 12 rounds to ₪24.17,
+    and twelve of those is ₪290.04, four agorot MORE than the price on the page. The instalment is
+    therefore rounded DOWN, which makes the year cost at most its headline and never more.
+    """
+    return round(price_ils(plan, ANNUAL) * ANNUAL_INSTALMENTS, 2)
+
+
 def price_ils(plan: str | None, cycle: str | None = MONTHLY) -> float:
-    """What one billing period costs: the monthly price, or the whole year up front."""
+    """What ONE CHARGE costs: the monthly price, or a twelfth of the annual total.
+
+    This is the amount handed to the payment provider. It is deliberately not the yearly figure —
+    see ANNUAL_INSTALMENTS. For the year's total use annual_total_ils().
+    """
     t = tier(plan)
     if canonical_cycle(cycle) == ANNUAL:
-        raw = os.environ.get(f"CHAVRUTA_ANNUAL_PRICE_{t.id.upper()}", "").strip()
-        try:
-            return float(raw) if raw else t.annual_price_ils
-        except ValueError:
-            return t.annual_price_ils
+        # Floor, not round: twelve rounded-up instalments would exceed the advertised year.
+        return math.floor(_annual_headline_ils(t.id) / ANNUAL_INSTALMENTS * 100) / 100
     raw = os.environ.get(f"CHAVRUTA_PRICE_{t.id.upper()}", "").strip()
     if not raw and t.id == "pro":
         raw = os.environ.get("CHAVRUTA_SUB_PRICE_ILS", "").strip()   # the original single-price knob
@@ -219,11 +264,14 @@ def price_ils(plan: str | None, cycle: str | None = MONTHLY) -> float:
 
 
 def annual_saving_pct(plan: str | None) -> int:
-    """How much paying yearly saves, for the UI to state instead of hardcoding "17%"."""
-    monthly, annual = price_ils(plan, MONTHLY), price_ils(plan, ANNUAL)
-    if monthly <= 0 or annual <= 0:
+    """How much the annual rate saves, for the UI to state instead of hardcoding "17%".
+
+    Both figures are now per-month, so this compares like with like — the annual instalment against
+    the monthly price."""
+    monthly, instalment = price_ils(plan, MONTHLY), price_ils(plan, ANNUAL)
+    if monthly <= 0 or instalment <= 0:
         return 0
-    return max(0, round((1 - annual / (monthly * 12)) * 100))
+    return max(0, round((1 - instalment / monthly) * 100))
 
 
 # ── Credits ──────────────────────────────────────────────────────────────────
@@ -262,7 +310,8 @@ def public_catalogue(lang: str = "he") -> list[dict]:
         "id": t.id,
         "name": t.name_he if he else t.name_en,
         "price_ils": price_ils(t.id, MONTHLY),
-        "annual_price_ils": price_ils(t.id, ANNUAL),
+        "annual_price_ils": annual_total_ils(t.id),        # the year's total, for "₪1,990 a year"
+        "annual_monthly_ils": price_ils(t.id, ANNUAL),     # what is actually charged each month
         "annual_saving_pct": annual_saving_pct(t.id),
         "multiple": t.multiple,          # "3x the free tier" — the only allowance figure shown
     } for t in TIERS]
