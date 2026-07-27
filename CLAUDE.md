@@ -47,4 +47,11 @@ retrieval to the wrong tractate → 0 sources); a wrong scope now falls back to 
 and the FINAL round forces a written answer instead of degrading (`src/chavruta/llm/agentic.py`). The
 lesson source-sheet is assembled from the FULL retrieved texts (not the model's truncated echo); a
 Hebrew-only rule + `_strip_foreign` scrub the model's CJK/Cyrillic multilingual bleed (`app/api.py`).
+
+**External DEV models (Devin CLI, Novita) — read `docs/DEV_MODELS.local.md` before using any of them.**
+It holds the API keys, the exact model slugs, which model to hand which kind of task, and the traps
+already hit (Devin Free serves ONLY its default model; Macaron burns its whole budget on Chinese
+`reasoning_content` unless given a large `max_tokens`, and 503s under load). That file is **gitignored
+because it contains secrets** — it is not on GitHub and must never be committed. These are tooling for
+building the product; the product's own engine is still `CHAVRUTA_LLM_BACKEND` (`nebius` / `bridge`).
 <!-- SPECKIT END -->
