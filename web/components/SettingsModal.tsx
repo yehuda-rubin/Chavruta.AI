@@ -5,6 +5,63 @@ import { IntentId, tr, StringKey } from "@/lib/i18n";
 import { Modal } from "./Modal";
 import { useAuth } from "@/lib/auth";
 
+// Change-password field — kept self-contained (own busy/result state) so a failed attempt doesn't
+// disturb the rest of the settings panel, same pattern as CouponField below.
+function ChangePasswordField({ lang }: { lang: Lang }) {
+  const { updatePassword } = useAuth();
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  async function submit() {
+    if (!password || busy) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      await updatePassword(password);
+      setResult({ ok: true, msg: tr(lang, "passwordUpdated") });
+      setPassword("");
+    } catch (e) {
+      setResult({ ok: false, msg: e instanceof Error ? e.message : tr(lang, "authGenericError") });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 flex flex-col gap-2">
+      <span className="text-xs text-ink/60">{tr(lang, "changePassword")}</span>
+      <div className="flex gap-2">
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+          placeholder={tr(lang, "newPassword")}
+          autoComplete="new-password"
+          disabled={busy}
+          className="flex-1 min-w-0 px-3 py-2 rounded-2xl glass text-sm outline-none
+                     focus:ring-2 focus:ring-brand/40 disabled:opacity-50"
+        />
+        <button
+          onClick={submit}
+          disabled={busy || !password}
+          className="px-4 py-2 rounded-2xl grad text-white font-semibold text-sm shrink-0
+                     hover:opacity-95 transition disabled:opacity-40"
+        >
+          {tr(lang, "changePasswordBtn")}
+        </button>
+      </div>
+      {result && (
+        <p role="status" aria-live="polite"
+           className={"text-xs leading-relaxed " + (result.ok ? "text-emerald-600" : "text-red-500")}>
+          {result.msg}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export type Theme = "light" | "dark" | "auto";
 
 // Default-mode options match the static UI (lesson / explain / qa / shut).
@@ -253,6 +310,23 @@ export function SettingsModal({
               </button>
             </div>
 
+            <ChangePasswordField lang={lang} />
+
+            {/* Marketing consent — opt-in, changeable any time; mirrors the sign-up checkbox but
+                reflects (and updates) the value actually stored in user_metadata. */}
+            <label className="mt-2 flex items-center gap-2 text-xs text-ink/70 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={Boolean(auth.user.user_metadata?.marketing_consent)}
+                onChange={(e) => auth.updateMetadata({
+                  marketing_consent: e.target.checked,
+                  marketing_consent_at: new Date().toISOString(),
+                })}
+                className="accent-tekhelet"
+              />
+              <span>{tr(lang, "marketingConsentSetting")}</span>
+            </label>
+
             {/* Plan + billing — upgrade (free) or cancel subscription (paid). */}
             <div className="mt-2 flex items-center justify-between gap-2">
               <span className="text-xs text-ink/60">
@@ -335,6 +409,19 @@ export function SettingsModal({
         <div className="pt-3 border-t border-white/60">
           <p className="text-xs text-ink/55 leading-relaxed">{tr(lang, "aboutText")}</p>
           <p className="text-[11px] text-ink/40 mt-1">{tr(lang, "appVersion")}</p>
+          <p className="text-[11px] text-ink/40 mt-2 flex gap-1.5">
+            <a href="/terms" target="_blank" rel="noopener noreferrer" className="hover:text-tekhelet hover:underline">
+              {tr(lang, "termsLink")}
+            </a>
+            <span>·</span>
+            <a href="/privacy" target="_blank" rel="noopener noreferrer" className="hover:text-tekhelet hover:underline">
+              {tr(lang, "privacyLink")}
+            </a>
+            <span>·</span>
+            <a href="/accessibility" target="_blank" rel="noopener noreferrer" className="hover:text-tekhelet hover:underline">
+              {tr(lang, "accessibilityLink")}
+            </a>
+          </p>
         </div>
       </div>
     </Modal>

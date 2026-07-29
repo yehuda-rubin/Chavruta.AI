@@ -20,8 +20,10 @@ interface LimitsResponse {
   tiers: LimitTier[];
 }
 
-export const metadata = { title: "מכסות הנוכחיות · חברותא AI" };
-
+// No `metadata` export here: this is a Client Component (needs useState/useEffect for the live
+// lang toggle + limits fetch), and Next.js only resolves `metadata` on Server Components — exporting
+// it from a "use client" file fails the production build outright (found 2026-07-30 while building
+// after unrelated changes elsewhere).
 export default function Limits() {
   const [lang, setLang] = useState<Lang>("he");
   const [data, setData] = useState<LimitsResponse | null>(null);

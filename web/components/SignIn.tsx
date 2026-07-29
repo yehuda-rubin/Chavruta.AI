@@ -22,7 +22,8 @@ function authErrorKey(msg: string): StringKey {
 // (our own markup) precisely so the form is native Hebrew RTL — the reason we chose Supabase over a
 // prebuilt component library. Email + password, with a sign-up toggle.
 export function SignIn({ lang }: { lang: Lang }) {
-  const { signIn, signUp } = useAuth();
+  const { signIn, signUp, resetPassword } = useAuth();
+  const [resetBusy, setResetBusy] = useState(false);
   const [mode, setMode] = useState<"in" | "up">("in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -33,6 +34,10 @@ export function SignIn({ lang }: { lang: Lang }) {
   // Separate from the terms box on purpose. Bundling "I accept the terms" with "I am 18" produces one
   // tick that means neither: the age statement has to be its own deliberate act to be worth anything.
   const [confirmedAge, setConfirmedAge] = useState(false);
+  // Opt-IN, unchecked by default, and never required — this is what makes a later marketing email
+  // lawful under the anti-spam law (Communications Law §30A), which needs explicit prior consent
+  // separate from accepting the terms.
+  const [marketingConsent, setMarketingConsent] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,6 +63,9 @@ export function SignIn({ lang }: { lang: Lang }) {
           terms_accepted_at: new Date().toISOString(),
           age_confirmed_18: true,
           age_confirmed_at: new Date().toISOString(),
+          // Recorded either way (true or false) so "never asked" and "declined" stay distinguishable.
+          marketing_consent: marketingConsent,
+          marketing_consent_at: new Date().toISOString(),
         });
         if (needsConfirm) setNotice(tr(lang, "authCheckEmail"));
       } else {
@@ -69,6 +77,25 @@ export function SignIn({ lang }: { lang: Lang }) {
       setError(tr(lang, authErrorKey(raw)));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const requestReset = async () => {
+    setError("");
+    setNotice("");
+    if (!email.trim()) {
+      setError(tr(lang, "resetPasswordNeedsEmail"));
+      return;
+    }
+    setResetBusy(true);
+    try {
+      await resetPassword(email.trim());
+      setNotice(tr(lang, "resetPasswordSent"));
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : "";
+      setError(tr(lang, authErrorKey(raw)));
+    } finally {
+      setResetBusy(false);
     }
   };
 
@@ -143,6 +170,19 @@ export function SignIn({ lang }: { lang: Lang }) {
             </label>
           )}
 
+          {/* Marketing consent — optional and unchecked by default; never blocks submission. */}
+          {mode === "up" && (
+            <label className="flex items-start gap-2 text-xs text-ink/70 leading-relaxed cursor-pointer">
+              <input
+                type="checkbox"
+                checked={marketingConsent}
+                onChange={(e) => setMarketingConsent(e.target.checked)}
+                className="mt-0.5 accent-tekhelet"
+              />
+              <span>{tr(lang, "marketingConsentLabel")}</span>
+            </label>
+          )}
+
           {error && <p className="text-xs text-red-600 leading-relaxed">{error}</p>}
           {notice && <p className="text-xs text-green-700 leading-relaxed">{notice}</p>}
 
@@ -154,6 +194,16 @@ export function SignIn({ lang }: { lang: Lang }) {
             {busy ? tr(lang, "authWorking") : tr(lang, mode === "up" ? "signUpBtn" : "signInBtn")}
           </button>
         </form>
+
+        {mode === "in" && (
+          <button
+            onClick={requestReset}
+            disabled={resetBusy}
+            className="text-xs text-ink/50 hover:text-tekhelet -mt-2 disabled:opacity-60"
+          >
+            {tr(lang, "forgotPassword")}
+          </button>
+        )}
 
         <button
           onClick={() => {
@@ -167,6 +217,19 @@ export function SignIn({ lang }: { lang: Lang }) {
         </button>
 
         <p className="text-[11px] text-ink/40 text-center">{tr(lang, "footer")}</p>
+        <p className="text-[11px] text-ink/40 text-center flex justify-center gap-1.5">
+          <a href="/terms" target="_blank" rel="noopener noreferrer" className="hover:text-tekhelet hover:underline">
+            {tr(lang, "termsLink")}
+          </a>
+          <span>·</span>
+          <a href="/privacy" target="_blank" rel="noopener noreferrer" className="hover:text-tekhelet hover:underline">
+            {tr(lang, "privacyLink")}
+          </a>
+          <span>·</span>
+          <a href="/accessibility" target="_blank" rel="noopener noreferrer" className="hover:text-tekhelet hover:underline">
+            {tr(lang, "accessibilityLink")}
+          </a>
+        </p>
       </div>
 
     </div>

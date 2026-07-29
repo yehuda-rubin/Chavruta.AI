@@ -14,6 +14,13 @@ interface AuthState {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, meta?: Record<string, unknown>) => Promise<{ needsConfirm: boolean }>;
   signOut: () => Promise<void>;
+  // Sends a recovery-link email; the link lands on /reset-password, which exchanges it for a
+  // session (detectSessionInUrl) and calls updatePassword below.
+  resetPassword: (email: string) => Promise<void>;
+  // For a SIGNED-IN user (Settings → change password, or /reset-password after a recovery link).
+  updatePassword: (password: string) => Promise<void>;
+  // Merges into user_metadata (e.g. marketing consent) without touching auth credentials.
+  updateMetadata: (meta: Record<string, unknown>) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -69,9 +76,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await sb.auth.signOut();
   }, []);
 
+  const resetPassword = useCallback(async (email: string) => {
+    const sb = getSupabase();
+    if (!sb) return;
+    const { error } = await sb.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    if (error) throw error;
+  }, []);
+
+  const updatePassword = useCallback(async (password: string) => {
+    const sb = getSupabase();
+    if (!sb) return;
+    const { error } = await sb.auth.updateUser({ password });
+    if (error) throw error;
+  }, []);
+
+  const updateMetadata = useCallback(async (meta: Record<string, unknown>) => {
+    const sb = getSupabase();
+    if (!sb) return;
+    const { error } = await sb.auth.updateUser({ data: meta });
+    if (error) throw error;
+  }, []);
+
   const value = useMemo<AuthState>(
-    () => ({ enabled: supabaseEnabled, loading, user, signIn, signUp, signOut }),
-    [loading, user, signIn, signUp, signOut],
+    () => ({
+      enabled: supabaseEnabled, loading, user, signIn, signUp, signOut,
+      resetPassword, updatePassword, updateMetadata,
+    }),
+    [loading, user, signIn, signUp, signOut, resetPassword, updatePassword, updateMetadata],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
