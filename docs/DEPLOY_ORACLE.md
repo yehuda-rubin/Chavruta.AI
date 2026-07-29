@@ -58,7 +58,24 @@ cp .env.example .env
 ```
 
 Edit `.env`:
-- `NEBIUS_API_KEY=<your real key>` — **required**, generation fails fast at boot without it.
+- **Generation now runs on Google Gemini, not Nebius** — a per-founder decision to launch on
+  Google's free tier while the product itself is still free (see `docs/legal/REVIEW-2026-07-27.md`'s
+  2026-07-29 addendum: **no Terms/Privacy update was needed for this** — §3 of both already names
+  "our AI model provider" generically, never "Nebius" specifically, precisely so a provider switch
+  is a config change, not a legal one). Get a free API key from
+  [Google AI Studio](https://aistudio.google.com/apikey) (a personal action — I can't create one on
+  your behalf) and set:
+  ```
+  CHAVRUTA_LLM_BACKEND=nebius        # really just means "OpenAI-compatible transport" — see presets.py
+  CHAVRUTA_LLM_PRESET=gemini         # fills in Gemini's base URL + the free-tier-eligible Flash model
+  CHAVRUTA_LLM_API_KEY=<your Gemini API key>
+  ```
+  ⚠️ **Switch to Gemini's paid tier (enable billing on the Google Cloud project behind that key) the
+  moment you have a first paying customer, not before** — the free tier trains on input and is read
+  by human reviewers per Google's ToS; that's tolerable for a free product, not for a paying one.
+  This mirrors the PayPlus sandbox→production switch below: same config, no code change either way.
+  Also unmeasured against this product's eval yet (the baseline is Nebius/Qwen3-235B) — watch answer
+  quality once live, and keep `NEBIUS_API_KEY` in `.env` (commented) as a one-line rollback.
 - Leave every `PAYPLUS_*` / `GREENINVOICE_*` line commented out for a free-only launch — billing
   stays off. When you're ready to start charging, fill these in with `PAYPLUS_MODE=production` and
   real keys; nothing else in the code needs to change (see `.env.example` §Billing).

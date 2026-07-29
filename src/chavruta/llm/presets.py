@@ -74,10 +74,20 @@ PRESETS: dict[str, Preset] = {
         "@cf/qwen/qwen3-30b-a3b-fp8",
         note="cheapest of the candidates; replace ACCOUNT_ID; models top out near the 70B class",
     ),
+    # Google Gemini, via its OpenAI-compatible endpoint. Pro was REMOVED from the free tier entirely
+    # (verified 2026-07-29, ai.google.dev/gemini-api/docs/pricing) — Flash and Flash-Lite are what's
+    # actually free, at a tight quota (~10-15 RPM / a few hundred RPD, tightened further Dec 2025).
+    # Flash is a "thinking" model by default; the floor below is an untested-but-safe guess against
+    # the same empty-answer failure mode as macaron/hy3 above — tighten CHAVRUTA_LLM_MIN_OUTPUT_TOKENS
+    # down once measured live. Not yet run against the eval — treat as unvalidated vs. the baseline.
     "gemini": Preset(
         "https://generativelanguage.googleapis.com/v1beta/openai",
-        "gemini-2.5-pro",
-        note="unpaid tier trains on input AND is read by human reviewers — paid only in production",
+        "gemini-2.5-flash",
+        min_output_tokens=8_000,
+        note="free-tier model (Pro is NOT free); unpaid tier trains on input AND is read by human "
+             "reviewers per Google's ToS — enable billing on the Google Cloud project behind this "
+             "key (or swap in a key from a billing-enabled project) the moment there is a first "
+             "paying customer, not before",
     ),
 }
 
