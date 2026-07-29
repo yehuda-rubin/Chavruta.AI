@@ -18,6 +18,7 @@ import { SupportModal } from "@/components/SupportModal";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
 import { SignIn } from "@/components/SignIn";
 import { Blocked } from "@/components/Blocked";
+import { ConfirmConsent } from "@/components/ConfirmConsent";
 import { useAuth } from "@/lib/auth";
 
 export default function Home() {
@@ -316,6 +317,13 @@ export default function Home() {
   }
   if (auth.enabled && !auth.user) {
     return <SignIn lang={lang} />;
+  }
+  // An account with no recorded terms/age consent — e.g. created by calling Supabase's own signup
+  // API directly, bypassing SignIn.tsx's checkboxes entirely. The backend already 403s every route
+  // except /me and /account for it (app/security.py require_auth); this is the self-serve way out.
+  if (auth.enabled && auth.user &&
+      !(auth.user.user_metadata?.age_confirmed_18 && auth.user.user_metadata?.terms_version)) {
+    return <ConfirmConsent lang={lang} />;
   }
   // Blocklisted account — show the block notice instead of the app (the server 403s everything else).
   if (auth.enabled && auth.user && me?.blocked) {

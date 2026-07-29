@@ -40,6 +40,9 @@ def supabase_env(monkeypatch, es256_keypair):
     return priv, pub
 
 
+_CONSENTED = {"user_metadata": {"age_confirmed_18": True, "terms_version": "1.4"}}
+
+
 def _token(priv, *, sub="user-123", aud="authenticated", iss=_ISS, exp_delta=3600, extra=None):
     now = int(time.time())
     claims = {"sub": sub, "aud": aud, "iss": iss, "iat": now, "exp": now + exp_delta}
@@ -108,15 +111,50 @@ def test_require_auth_supabase_rejects_missing_token(supabase_env):
 def test_require_auth_supabase_accepts_and_sets_owner(supabase_env):
     priv, _ = supabase_env
     req = _req()
-    security.require_auth(req, f"Bearer {_token(priv, sub='u-9')}", None)
+    security.require_auth(req, f"Bearer {_token(priv, sub='u-9', extra=_CONSENTED)}", None)
     assert req.state.owner == "u-9"
 
 
 def test_current_owner_supabase_is_verified_sub(supabase_env):
     priv, _ = supabase_env
     req = _req()
-    security.require_auth(req, f"Bearer {_token(priv, sub='u-42')}", None)
+    security.require_auth(req, f"Bearer {_token(priv, sub='u-42', extra=_CONSENTED)}", None)
     assert security.current_owner(req, None, None) == "u-42"
+
+
+# ── Consent gate (2026-07-30 — see docs/legal/LAWSUIT-EXPOSURE-2026-07-30.md Finding A) ───────────
+def test_require_auth_rejects_missing_consent(supabase_env):
+    """A token with no user_metadata at all — e.g. an account created by calling Supabase's own
+    signup API directly, bypassing the app's terms/age checkboxes entirely — must not reach a
+    generation route."""
+    from fastapi import HTTPException
+
+    priv, _ = supabase_env
+    with pytest.raises(HTTPException) as e:
+        security.require_auth(_req("/query"), f"Bearer {_token(priv)}", None)
+    assert e.value.status_code == 403
+    assert e.value.detail["error"] == "consent_required"
+
+
+def test_require_auth_rejects_partial_consent(supabase_env):
+    """Age confirmed but no recorded terms version (or vice versa) still doesn't count."""
+    priv, _ = supabase_env
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as e:
+        security.require_auth(
+            _req("/query"),
+            f"Bearer {_token(priv, extra={'user_metadata': {'age_confirmed_18': True}})}", None)
+    assert e.value.status_code == 403
+
+
+def test_require_auth_allows_me_and_account_without_consent(supabase_env):
+    """/me and /account stay reachable without consent, same as for a banned account — so the
+    frontend can detect the situation and the user can confirm through the app instead of being
+    stuck with an opaque 403 on every route."""
+    priv, _ = supabase_env
+    security.require_auth(_req("/me"), f"Bearer {_token(priv)}", None)
+    security.require_auth(_req("/account/delete"), f"Bearer {_token(priv)}", None)
 
 
 def test_current_owner_local_when_nothing_configured(monkeypatch):

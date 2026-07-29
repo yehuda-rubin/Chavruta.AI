@@ -80,9 +80,13 @@ def reset_cache() -> None:
     _jwk_client = None
 
 
-def verify_sub(token: str | None) -> str | None:
-    """Return the verified user id (`sub`) for a valid token, else None (missing / malformed /
-    bad-signature / expired / wrong issuer or audience). Never raises — the caller maps None to 401."""
+def verify(token: str | None) -> dict | None:
+    """Return the verified JWT payload for a valid token, else None (missing / malformed /
+    bad-signature / expired / wrong issuer or audience). Never raises — the caller maps None to 401.
+
+    Supabase embeds `user_metadata` directly in this same token — the consent-recording fields
+    written at signup (age_confirmed_18, terms_version) are already here, so checking them costs no
+    extra network round trip. See require_auth() in app/security.py."""
     if not token:
         return None
     try:
@@ -102,7 +106,13 @@ def verify_sub(token: str | None) -> str | None:
         else:
             signing_key = _client().get_signing_key_from_jwt(token)
             payload = jwt.decode(token, signing_key.key, algorithms=["ES256", "RS256"], **common)
-        return payload.get("sub")
+        return payload
     except Exception as exc:                # noqa: BLE001 — any failure is an auth rejection, not a 500
         _log.info("supabase token rejected: %s", exc.__class__.__name__)
         return None
+
+
+def verify_sub(token: str | None) -> str | None:
+    """Return the verified user id (`sub`) for a valid token, else None."""
+    payload = verify(token)
+    return payload.get("sub") if payload else None
