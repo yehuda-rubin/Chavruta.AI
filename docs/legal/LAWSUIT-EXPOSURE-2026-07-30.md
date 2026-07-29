@@ -24,7 +24,7 @@ CC BY-SA Collection-vs-Adapted-Material reading, 18+ age scoping, refund/cancell
 
 ---
 
-## Finding A — HIGH, fixable: terms/age consent is recorded but never enforced
+## Finding A — HIGH, fixable: terms/age consent is recorded but never enforced — ✅ FIXED 2026-07-30
 
 **What's true today:** `SignIn.tsx` sends `terms_version`, `terms_accepted_at`, `age_confirmed_18`,
 `age_confirmed_at` into Supabase `user_metadata` at signup. **`grep`-ing the entire backend
@@ -39,12 +39,12 @@ entirely, not just disabling JS. The Terms (§5) and Privacy Policy (§7) both s
 confirmation "is a condition of registration" — today, nothing server-side makes that true. It's a
 UI nicety, not a gate.
 
-**Recommended fix (not yet implemented — confirm before I build it, since it's a behavior change):**
-Add a check (e.g. in `current_owner` or a light dependency layered on it, Supabase-mode only — the
-`local` no-auth fallback is unrelated and shouldn't be touched) that treats an account missing
-`age_confirmed_18` as unconfirmed and blocks generation routes until confirmed, with a clear
-in-app prompt to accept. Needs a decision on existing accounts created before this fix ships
-(grandfather them silently, since they predate the check, vs. prompt everyone once).
+**Fix shipped:** `app/security.py::require_auth` now rejects a Supabase-mode request whose account
+lacks both `age_confirmed_18` and a recorded `terms_version`, exempting `/me`/`/account` (same
+pattern as the blocklist) so a gated account can self-serve out via the new
+`web/components/ConfirmConsent.tsx` screen instead of hitting a dead-end 403 everywhere. No
+grandfathering needed — the product hadn't launched publicly yet when this shipped, so there was no
+pre-existing account population to reconcile.
 
 ---
 
