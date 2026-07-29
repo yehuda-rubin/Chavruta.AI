@@ -11,14 +11,16 @@ without announcing it. Treat "Always Free" as **currently** free, not permanentl
 it's cut or killed again, the fallback is re-provisioning elsewhere and restoring from the HF
 snapshot (see step 5); that path should stay tested, not just assumed.
 
-Launching **free** (no paying customers yet), but the checkout flow ships live in **sandbox** mode
-from day one — so the plans/billing UI actually works end-to-end (fake money) rather than being
-config'd off — see §3b. ⚠️ **Real charges need more than flipping `PAYPLUS_MODE=production`**:
-PayPlus and Green Invoice both require a registered Israeli business (at minimum "עוסק פטור") to
-open a real merchant account and legally issue a tax invoice/receipt — this is a legal prerequisite,
-not a gateway policy, and it's a personal action (Tax Authority + Bituach Leumi registration),
-not something the deploy can route around. Decided 2026-07-29: **stay sandbox-only until that
-registration happens** — do not attempt to go to production before then.
+**Decided 2026-07-30: launch fully free, billing untouched entirely.** No PayPlus/Green Invoice
+setup at all for now — not even sandbox. Real charges would need a registered Israeli business (at
+minimum "עוסק פטור") to open a merchant account and legally issue a tax invoice, which for the
+founder also means clearing it with his unit first (he's about to start IDF/hesder service — see
+the 2026-07-30 addendum in `docs/legal/REVIEW-2026-07-27.md` for what that involves). Rather than
+resolve that now, the call is to **launch free, watch real usage, and only deal with business
+registration once there are enough users that monetizing is actually worth the army-approval +
+registration process.** `PAYPLUS_*` / `GREENINVOICE_*` all stay unset in `.env` — billing is fully
+optional and simply off (see `.env.example`); the plans/billing UI can stay hidden or marked
+"coming soon" for this phase. Revisit this whole section when that day comes.
 
 ---
 
@@ -77,28 +79,13 @@ Edit `.env`:
   ⚠️ **Switch to Gemini's paid tier (enable billing on the Google Cloud project behind that key) the
   moment you have a first paying customer, not before** — the free tier trains on input and is read
   by human reviewers per Google's ToS; that's tolerable for a free product, not for a paying one.
-  This mirrors the PayPlus sandbox→production switch below: same config, no code change either way.
-  Also unmeasured against this product's eval yet (the baseline is Nebius/Qwen3-235B) — watch answer
+  Same shape as the future PayPlus switch below: a config change, no code change either way. Also
+  unmeasured against this product's eval yet (the baseline is Nebius/Qwen3-235B) — watch answer
   quality once live, and keep `NEBIUS_API_KEY` in `.env` (commented) as a one-line rollback.
-- **PayPlus + Green Invoice — sandbox, live.** Neither needs the business registration mentioned
-  above just to test the flow:
-  ```
-  PAYPLUS_MODE=sandbox
-  PAYPLUS_API_KEY=<sandbox key from restapidev.payplus.co.il / the PayPlus dashboard's test mode>
-  PAYPLUS_SECRET_KEY=<sandbox secret>
-  PAYPLUS_PAYMENT_PAGE_UID=<sandbox payment-page UID>
-  GREENINVOICE_MODE=sandbox
-  GREENINVOICE_CLIENT_ID=<sandbox api key id>
-  GREENINVOICE_CLIENT_SECRET=<sandbox api key secret>
-  ```
-  Signing up for PayPlus's sandbox is a personal action (their dashboard, no business docs needed
-  for test mode) — get the keys from there. `CHAVRUTA_PUBLIC_URL` (below) must be set and reachable
-  for PayPlus's webhook to reach the app, even in sandbox.
-  ⚠️ **Do not set `PAYPLUS_MODE=production` or `GREENINVOICE_MODE=production` until the עוסק פטור
-  registration is done** — production mode with real keys moves real money and issues real tax
-  documents, which needs the business identity to exist first.
+- **`PAYPLUS_*` / `GREENINVOICE_*` — leave every line commented out.** No signup, no keys, nothing
+  to do here for this launch (see the top-of-file decision). Billing is simply off.
 - `CHAVRUTA_PUBLIC_URL` — set once you have a domain (§4), or the instance's public IP as an interim
-  (`http://<public-ip>:5173`) — PayPlus's webhook needs a reachable URL even in sandbox mode.
+  (`http://<public-ip>:5173`).
 
 ---
 
