@@ -105,6 +105,37 @@ def handle_event(normalized: dict, *, now: datetime | None = None) -> None:
     except Exception:               # noqa: BLE001 — same reasoning; log loudly, don't fail the hook
         _log.exception("could not write the charge to the ledger (amount=%s)", amount)
 
+    try:
+        _apply_coupon_discount(owner, amount, normalized.get("transaction_uid"), tier, cycle, now)
+    except Exception:               # noqa: BLE001 — a failed rebate must not fail the whole webhook
+        _log.exception("coupon discount rebate failed for %s", owner)
+
+
+def _apply_coupon_discount(owner: str, amount: float, txn_uid: str | None, tier: str, cycle: str,
+                           now: datetime) -> None:
+    """Rebate a coupon-granted ILS discount off a real charge that just succeeded, via a partial
+    refund — PayPlus has no API to change an already-running recurring amount, so the charge goes
+    through in full and the discount comes back as money returned, same mechanism scripts/refund.py
+    already uses for operator-initiated refunds, minus the subscription cancellation."""
+    if not txn_uid:
+        return
+    balance = float((db.get_subscription(owner) or {}).get("coupon_discount_ils") or 0.0)
+    if balance <= 0:
+        return
+    rebate = round(min(balance, amount), 2)
+    if rebate <= 0:
+        return
+    payplus.refund(txn_uid, rebate, description="קופון — הנחה על החיוב")   # raises ⇒ nothing below runs
+    try:
+        db.record_charge(charged_at=now.isoformat(), amount=-rebate, plan=tier, cycle=cycle,
+                         provider="payplus", provider_ref=txn_uid,
+                         note="coupon discount rebate", txn_uid=txn_uid)
+    except Exception:               # noqa: BLE001 — the money already moved; never lose that fact
+        _log.exception("REBATE OF ₪%.2f ON %s IS NOT IN THE LEDGER — record it by hand", rebate, txn_uid)
+    db.set_coupon_discount(owner, round(balance - rebate, 2))
+    _log.info("coupon discount rebate for %s: ₪%.2f (balance now ₪%.2f)",
+              owner, rebate, round(balance - rebate, 2))
+
 
 def cancel(owner_id: str, *, now: datetime | None = None) -> None:
     """Stop future charges and mark the subscription cancelled. Paid access is retained until the
@@ -228,6 +259,18 @@ def sweep_downgrades(now: datetime | None = None) -> int:
     return len(due)
 
 
+def sweep_coupon_reverts(now: datetime | None = None) -> int:
+    """Revert accounts whose coupon-driven temporary plan boost has ended, back to the plan their
+    real PayPlus subscription actually pays for. Returns count."""
+    now = now or datetime.now(UTC)
+    due = db.due_coupon_reverts(now.isoformat())
+    for row in due:
+        db.set_plan(row["owner_id"], row["revert_plan"])
+        db.clear_coupon_revert(row["owner_id"], updated_at=now.isoformat())
+        _log.info("coupon boost ended for %s → reverted to %s", row["owner_id"], row["revert_plan"])
+    return len(due)
+
+
 # ── Background sweeper ────────────────────────────────────────────────────────
 _started = False
 _lock = threading.Lock()
@@ -258,6 +301,10 @@ def start_sweeper() -> None:
                 sweep_downgrades()
             except Exception:           # noqa: BLE001 — keep the sweeper alive
                 _log.exception("billing downgrade sweep failed")
+            try:
+                sweep_coupon_reverts()
+            except Exception:           # noqa: BLE001 — one sweep failing must not stop the other
+                _log.exception("billing coupon revert sweep failed")
 
     threading.Thread(target=_loop, name="billing-sweeper", daemon=True).start()
     _log.info("billing downgrade sweeper started (every %.0fs)", interval)

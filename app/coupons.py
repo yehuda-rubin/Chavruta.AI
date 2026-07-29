@@ -130,10 +130,14 @@ class RedeemError(Exception):
 
 
 def redeem(owner_id: str, code: str, *, now: datetime | None = None) -> dict:
-    """Apply a coupon to an account. Returns a summary of what was granted.
+    """Apply a coupon to an account. Returns a summary of what was granted, with a `mode` of
+    "grant" (time-boxed plan, no active paid subscription), "discount" (ILS credit rebated off the
+    next PayPlus charge(s), because the coupon's plan is at or below what's already being paid for),
+    or "boost" (temporary upgrade layered on top of an active PayPlus subscription, reverting to the
+    real paid plan when the coupon's days run out) — or "credits" for a credits coupon.
 
     Raises RedeemError with one of: throttled · invalid · already_redeemed · exhausted · expired ·
-    has_paid_subscription · downgrade.
+    downgrade.
     """
     if owner_id == "local":
         raise RedeemError("sign_in_required")
@@ -159,16 +163,21 @@ def redeem(owner_id: str, code: str, *, now: datetime | None = None) -> dict:
         target = plans.canonical(c["plan"])
         current = plans.canonical(db.get_plan(owner_id))
         sub = db.get_subscription(owner_id) or {}
-        # Never let a coupon interfere with money already changing hands: a live PayPlus subscription
-        # keeps its own period and provider_ref, and overwriting them here would silently detach the
-        # account from the recurring charge it is still paying.
+        days = int(c["days"] or 0)
+        # A live PayPlus subscription keeps its own period and provider_ref — overwriting them here
+        # would silently detach the account from the recurring charge it is still paying. So a coupon
+        # redeemed on top of one never touches plan/provider_ref/current_period_end directly; instead
+        # it becomes a discount (target at or below what's already paid for) or a temporary boost
+        # (target above it) — see _redeem_against_active_subscription.
         if sub.get("provider") == "payplus" and sub.get("status") == "active":
-            raise RedeemError("has_paid_subscription")
-        # A coupon may only add access. Redeeming a 'basic' code while on 'pro' would otherwise be a
+            return _redeem_against_active_subscription(
+                owner_id, stored, kind, target=target, current=current, days=days,
+                sub=sub, now=now)
+        # No active paid subscription (free account, or a coupon-granted plan only): a coupon may
+        # only add access. Redeeming a 'basic' code while on 'pro' would otherwise be a
         # self-inflicted downgrade — refuse instead of quietly taking access away.
         if plans.rank(target) < plans.rank(current):
             raise RedeemError("downgrade")
-        days = int(c["days"] or 0)
         # Extend from whatever paid period is still running, not from today, so redeeming two codes
         # stacks instead of the second one throwing away the remainder of the first.
         base = now
@@ -198,8 +207,68 @@ def redeem(owner_id: str, code: str, *, now: datetime | None = None) -> dict:
     _log.info("coupon %s redeemed by %s (%s)", stored, owner_id, granted)
     return {
         "kind": kind,
+        "mode": "grant",
         "plan": set_plan_to,
         "until": period_end,
         "credits_added": add_credits,
         "credits_balance": db.get_credits(owner_id),
+        "discount_added_ils": 0.0,
+    }
+
+
+def _redeem_against_active_subscription(owner_id: str, stored: str, kind: str, *, target: str,
+                                        current: str, days: int, sub: dict, now: datetime) -> dict:
+    """The two outcomes a plan coupon can have on an account that already has a live, billing
+    PayPlus subscription. Either way `plan`/`provider_ref`/`current_period_end` on the real
+    subscription are left untouched — only the discount/boost side-fields move."""
+    is_discount = plans.rank(target) <= plans.rank(current)
+    granted = (f"{target} discount for {days} days" if is_discount
+              else f"plan {target} boost for {days} days")
+    # set_plan_to is deliberately None here: db.redeem_coupon()'s existing plan-write path would
+    # write a `provider='coupon'` subscription row whenever set_plan_to is truthy, clobbering the
+    # real PayPlus row. Consuming the code (throttle/expiry/exhaustion/already-redeemed checks +
+    # the redemption row) and applying the discount/boost are therefore two separate calls — a
+    # crash between them could leave the code consumed without its effect applied, which is a
+    # known, accepted gap (same one a webhook failure after a charge would already produce).
+    status = db.redeem_coupon(stored, owner_id, now.isoformat(), granted,
+                              set_plan_to=None, period_end=None, add_credits_amount=0)
+    if status != "ok":
+        raise RedeemError({"not_found": "invalid", "inactive": "invalid"}.get(status, status))
+    _clear_throttle(owner_id)
+
+    if is_discount:
+        discount_ils = round(days * plans.price_ils(target) / plans.period_days(), 2)
+        db.add_coupon_discount(owner_id, discount_ils, updated_at=now.isoformat())
+        balance = (db.get_subscription(owner_id) or {}).get("coupon_discount_ils", discount_ils)
+        _log.info("coupon %s redeemed by %s (discount %.2f ILS, balance %.2f)",
+                  stored, owner_id, discount_ils, balance)
+        return {
+            "kind": kind, "mode": "discount", "plan": target, "until": None,
+            "credits_added": 0, "credits_balance": db.get_credits(owner_id),
+            "discount_added_ils": discount_ils, "discount_balance_ils": balance,
+        }
+
+    # Boost: if already mid-boost to this exact target, extend the existing revert point and keep
+    # the ORIGINAL revert_plan — not the currently-boosted one — so a chain of same-tier boost
+    # codes still lands back on the plan the account actually pays for.
+    existing_revert_at = sub.get("coupon_revert_at")
+    if existing_revert_at and current == target:
+        try:
+            parsed = datetime.fromisoformat(existing_revert_at)
+            revert_at = (parsed + timedelta(days=days)).isoformat()
+        except ValueError:
+            revert_at = (now + timedelta(days=days)).isoformat()
+        revert_plan = sub["coupon_revert_plan"]
+    else:
+        revert_plan = current
+        revert_at = (now + timedelta(days=days)).isoformat()
+    db.set_plan(owner_id, target)
+    db.set_coupon_boost(owner_id, revert_plan=revert_plan, revert_at=revert_at,
+                        updated_at=now.isoformat())
+    _log.info("coupon %s redeemed by %s (boost to %s until %s, reverts to %s)",
+              stored, owner_id, target, revert_at, revert_plan)
+    return {
+        "kind": kind, "mode": "boost", "plan": target, "until": revert_at,
+        "credits_added": 0, "credits_balance": db.get_credits(owner_id),
+        "discount_added_ils": 0.0,
     }

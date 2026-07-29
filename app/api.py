@@ -1437,10 +1437,11 @@ class RedeemOut(BaseModel):
     kind: str = ""                   # 'plan' | 'credits'
     plan: str | None = None
     plan_name: str = ""
-    until: str | None = None         # ISO ts a plan grant lapses
+    until: str | None = None         # ISO ts a plan grant/boost lapses
     credits_added: int = 0
     credits_balance: int = 0
     message: str = ""
+    discount_added_ils: float = 0    # >0 only for mode="discount" (coupon rebated off future charges)
 
 
 # Stable reason → user-facing message. "invalid" deliberately covers not-found, revoked and
@@ -1453,8 +1454,6 @@ _REDEEM_MESSAGES = {
     "exhausted": ("הקוד מוצה — כל המימושים נוצלו.", "This code has been fully redeemed."),
     "expired": ("תוקף הקוד פג.", "This code has expired."),
     "throttled": ("יותר מדי ניסיונות. נסה שוב בעוד שעה.", "Too many attempts. Try again in an hour."),
-    "has_paid_subscription": ("יש לך מנוי פעיל בתשלום — הקוד לא הופעל כדי לא לפגוע בו.",
-                              "You have an active paid subscription — the code was not applied."),
     "downgrade": ("הקוד נותן רמה נמוכה מזו שיש לך כבר.",
                   "That code grants a lower tier than you already have."),
 }
@@ -1479,12 +1478,22 @@ def redeem_coupon(req: RedeemRequest, lang: str = "he", owner: str = Depends(cur
     else:
         name = plans.tier(res["plan"]).name_he if he else plans.tier(res["plan"]).name_en
         until = (res["until"] or "")[:10]
-        message = (f"התוכנית שודרגה ל'{name}' עד {until}." if he else
-                   f"Upgraded to {name} until {until}.")
+        mode = res.get("mode", "grant")
+        if mode == "discount":
+            discount = res.get("discount_added_ils", 0)
+            message = (f"קיבלת הנחה של ₪{discount:.2f} על החיובים הבאים." if he else
+                       f"You got a ₪{discount:.2f} discount on upcoming charges.")
+        elif mode == "boost":
+            message = (f"שודרגת זמנית ל'{name}' עד {until}." if he else
+                       f"Temporarily upgraded to {name} until {until}.")
+        else:
+            message = (f"התוכנית שודרגה ל'{name}' עד {until}." if he else
+                       f"Upgraded to {name} until {until}.")
     return RedeemOut(kind=res["kind"], plan=res["plan"],
                      plan_name=plans.tier(res["plan"]).name_he if res["plan"] else "",
                      until=res["until"], credits_added=res["credits_added"],
-                     credits_balance=res["credits_balance"], message=message)
+                     credits_balance=res["credits_balance"], message=message,
+                     discount_added_ils=res.get("discount_added_ils", 0))
 
 
 @app.post("/billing/checkout", response_model=CheckoutOut)

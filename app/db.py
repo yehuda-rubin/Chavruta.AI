@@ -63,7 +63,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -271,7 +271,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
             -- charge and for whom, not which tier or period it was for. Without these an annual
             -- purchase would come back and be granted a single month.
             plan                 TEXT,                           -- tier id (app/plans.py)
-            cycle                TEXT NOT NULL DEFAULT 'monthly' -- monthly | annual
+            cycle                TEXT NOT NULL DEFAULT 'monthly', -- monthly | annual
+            -- A coupon redeemed while a real PayPlus subscription is active never touches the
+            -- fields above (that would detach the account from its recurring charge) — instead it
+            -- lands here: either an ILS credit to rebate off the next charge(s), or a time-boxed
+            -- upgrade that must revert to the plan the account actually pays for.
+            coupon_discount_ils  REAL NOT NULL DEFAULT 0,  -- ILS credit balance rebated off the next PayPlus charge
+            coupon_revert_plan   TEXT,                     -- plan to revert to when a coupon boost expires
+            coupon_revert_at     TEXT                      -- UTC ISO timestamp when the boost must be reverted
         );
     """)
 
@@ -373,6 +380,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
         bcols = {r[1] for r in conn.execute("PRAGMA table_info(billing_ledger)")}
         if "txn_uid" not in bcols:
             conn.execute("ALTER TABLE billing_ledger ADD COLUMN txn_uid TEXT")
+
+    if version < 19:
+        # Coupon discount balance and temporary boost tracking for accounts with an active PayPlus
+        # subscription — see the subscriptions table comment above.
+        scols = {r[1] for r in conn.execute("PRAGMA table_info(subscriptions)")}
+        for col, ddl in (("coupon_discount_ils", "REAL NOT NULL DEFAULT 0"),
+                        ("coupon_revert_plan", "TEXT"),
+                        ("coupon_revert_at", "TEXT")):
+            if col not in scols:
+                conn.execute(f"ALTER TABLE subscriptions ADD COLUMN {col} {ddl}")
 
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
@@ -1243,9 +1260,63 @@ def get_subscription(owner_id: str) -> dict[str, Any] | None:
     with _LOCK:
         row = conn.execute(
             "SELECT owner_id, provider, provider_ref, status, current_period_end, "
-            "cancel_at_period_end, updated_at, plan, cycle "
+            "cancel_at_period_end, updated_at, plan, cycle, "
+            "coupon_discount_ils, coupon_revert_plan, coupon_revert_at "
             "FROM subscriptions WHERE owner_id=?", (owner_id,)).fetchone()
     return dict(row) if row else None
+
+
+def add_coupon_discount(owner_id: str, amount_ils: float, *, updated_at: str) -> None:
+    """Add to the account's rebate balance (existing balance stacks, same spirit as same-tier plan
+    coupons stacking elsewhere). Creates the subscriptions row if the account had none."""
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        conn.execute(
+            "INSERT INTO subscriptions (owner_id, coupon_discount_ils, updated_at) VALUES (?,?,?) "
+            "ON CONFLICT(owner_id) DO UPDATE SET "
+            "coupon_discount_ils = coupon_discount_ils + excluded.coupon_discount_ils, "
+            "updated_at = excluded.updated_at",
+            (owner_id, amount_ils, updated_at))
+
+
+def set_coupon_discount(owner_id: str, amount_ils: float) -> None:
+    """Overwrite the rebate balance to an explicit value (used to shrink it after a rebate)."""
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        conn.execute("UPDATE subscriptions SET coupon_discount_ils=? WHERE owner_id=?",
+                     (amount_ils, owner_id))
+
+
+def set_coupon_boost(owner_id: str, *, revert_plan: str, revert_at: str, updated_at: str) -> None:
+    """Record what a coupon-boosted account should revert to and when. Does not itself change
+    `plan` — the caller flips the account's plan separately via set_plan()."""
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        conn.execute(
+            "INSERT INTO subscriptions (owner_id, coupon_revert_plan, coupon_revert_at, updated_at) "
+            "VALUES (?,?,?,?) ON CONFLICT(owner_id) DO UPDATE SET "
+            "coupon_revert_plan = excluded.coupon_revert_plan, "
+            "coupon_revert_at = excluded.coupon_revert_at, updated_at = excluded.updated_at",
+            (owner_id, revert_plan, revert_at, updated_at))
+
+
+def due_coupon_reverts(now_iso: str) -> list[dict[str, Any]]:
+    """Accounts whose coupon-driven plan boost has ended — the billing sweep flips their plan back
+    to what they actually pay for."""
+    conn = get_conn()
+    with _LOCK:
+        rows = conn.execute(
+            "SELECT owner_id, coupon_revert_plan AS revert_plan FROM subscriptions "
+            "WHERE coupon_revert_at IS NOT NULL AND coupon_revert_at <= ?", (now_iso,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def clear_coupon_revert(owner_id: str, *, updated_at: str) -> None:
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        conn.execute(
+            "UPDATE subscriptions SET coupon_revert_plan=NULL, coupon_revert_at=NULL, "
+            "updated_at=? WHERE owner_id=?", (updated_at, owner_id))
 
 
 def due_downgrades(now_iso: str) -> list[str]:
