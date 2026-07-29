@@ -11,10 +11,14 @@ without announcing it. Treat "Always Free" as **currently** free, not permanentl
 it's cut or killed again, the fallback is re-provisioning elsewhere and restoring from the HF
 snapshot (see step 5); that path should stay tested, not just assumed.
 
-Launching **free** (no paying customers yet): PayPlus/Green Invoice stay unconfigured or in
-`sandbox` mode the whole time (billing is fully optional — unset env vars mean it's simply off).
-Flip `PAYPLUS_MODE=production` and swap in real keys only once you're ready to actually charge —
-no code change needed for that switch, see `.env.example`.
+Launching **free** (no paying customers yet), but the checkout flow ships live in **sandbox** mode
+from day one — so the plans/billing UI actually works end-to-end (fake money) rather than being
+config'd off — see §3b. ⚠️ **Real charges need more than flipping `PAYPLUS_MODE=production`**:
+PayPlus and Green Invoice both require a registered Israeli business (at minimum "עוסק פטור") to
+open a real merchant account and legally issue a tax invoice/receipt — this is a legal prerequisite,
+not a gateway policy, and it's a personal action (Tax Authority + Bituach Leumi registration),
+not something the deploy can route around. Decided 2026-07-29: **stay sandbox-only until that
+registration happens** — do not attempt to go to production before then.
 
 ---
 
@@ -76,11 +80,25 @@ Edit `.env`:
   This mirrors the PayPlus sandbox→production switch below: same config, no code change either way.
   Also unmeasured against this product's eval yet (the baseline is Nebius/Qwen3-235B) — watch answer
   quality once live, and keep `NEBIUS_API_KEY` in `.env` (commented) as a one-line rollback.
-- Leave every `PAYPLUS_*` / `GREENINVOICE_*` line commented out for a free-only launch — billing
-  stays off. When you're ready to start charging, fill these in with `PAYPLUS_MODE=production` and
-  real keys; nothing else in the code needs to change (see `.env.example` §Billing).
-- `CHAVRUTA_PUBLIC_URL` — set once you have a domain (§4). PayPlus's callback needs this to be a
-  real reachable URL, so it's fine to leave unset until billing is actually turned on.
+- **PayPlus + Green Invoice — sandbox, live.** Neither needs the business registration mentioned
+  above just to test the flow:
+  ```
+  PAYPLUS_MODE=sandbox
+  PAYPLUS_API_KEY=<sandbox key from restapidev.payplus.co.il / the PayPlus dashboard's test mode>
+  PAYPLUS_SECRET_KEY=<sandbox secret>
+  PAYPLUS_PAYMENT_PAGE_UID=<sandbox payment-page UID>
+  GREENINVOICE_MODE=sandbox
+  GREENINVOICE_CLIENT_ID=<sandbox api key id>
+  GREENINVOICE_CLIENT_SECRET=<sandbox api key secret>
+  ```
+  Signing up for PayPlus's sandbox is a personal action (their dashboard, no business docs needed
+  for test mode) — get the keys from there. `CHAVRUTA_PUBLIC_URL` (below) must be set and reachable
+  for PayPlus's webhook to reach the app, even in sandbox.
+  ⚠️ **Do not set `PAYPLUS_MODE=production` or `GREENINVOICE_MODE=production` until the עוסק פטור
+  registration is done** — production mode with real keys moves real money and issues real tax
+  documents, which needs the business identity to exist first.
+- `CHAVRUTA_PUBLIC_URL` — set once you have a domain (§4), or the instance's public IP as an interim
+  (`http://<public-ip>:5173`) — PayPlus's webhook needs a reachable URL even in sandbox mode.
 
 ---
 
