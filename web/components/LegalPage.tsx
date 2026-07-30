@@ -4,20 +4,25 @@ import Link from "next/link";
 import type { Lang } from "@/lib/types";
 import { tr } from "@/lib/i18n";
 import {
-  termsSections, privacySections,
+  termsSections, privacySections, accessibilitySections,
   TERMS_VERSION, TERMS_EFFECTIVE, PRIVACY_VERSION, PRIVACY_EFFECTIVE,
+  ACCESSIBILITY_VERSION, ACCESSIBILITY_EFFECTIVE,
 } from "@/lib/legal";
 import { Icon } from "./Icon";
 
-// Full-page renderer for a legal document (its own route: /terms, /privacy). Long legal text reads
-// far better as a real, linkable page than a modal-in-modal. Hebrew-first with an he/en toggle.
-export function LegalPage({ doc }: { doc: "terms" | "privacy" }) {
+// Full-page renderer for a legal document (its own route: /terms, /privacy, /accessibility). Long
+// legal text reads far better as a real, linkable page than a modal-in-modal. Hebrew-first with an
+// he/en toggle.
+export function LegalPage({ doc }: { doc: "terms" | "privacy" | "accessibility" }) {
   const [lang, setLang] = useState<Lang>("he");
-  const isTerms = doc === "terms";
-  const sections = isTerms ? termsSections(lang) : privacySections(lang);
-  const version = isTerms ? TERMS_VERSION : PRIVACY_VERSION;
-  const effective = isTerms ? TERMS_EFFECTIVE : PRIVACY_EFFECTIVE;
-  const title = tr(lang, isTerms ? "termsTitle" : "privacyTitle");
+  const sections = doc === "terms" ? termsSections(lang)
+    : doc === "privacy" ? privacySections(lang) : accessibilitySections(lang);
+  const version = doc === "terms" ? TERMS_VERSION
+    : doc === "privacy" ? PRIVACY_VERSION : ACCESSIBILITY_VERSION;
+  const effective = doc === "terms" ? TERMS_EFFECTIVE
+    : doc === "privacy" ? PRIVACY_EFFECTIVE : ACCESSIBILITY_EFFECTIVE;
+  const title = tr(lang, doc === "terms" ? "termsTitle"
+    : doc === "privacy" ? "privacyTitle" : "accessibilityTitle");
 
   return (
     <div dir={lang === "he" ? "rtl" : "ltr"} className="h-screen overflow-y-auto py-10 px-4">

@@ -51,6 +51,13 @@ data/
 # Keep the template configs (small, essential — they are code, not bulk data)
 !data/lesson_templates.yaml
 !data/shut_templates.yaml
+# PACKAGE data under src/ ships with the code and must never be caught by the bare `data/` above,
+# which matches a directory of that name at ANY depth. It already silently excluded
+# corpus/data/licenses.json — the table attribution is resolved from — so the code would have worked
+# locally and rendered no credit line at all in Docker or CI, which is the exact bug it fixes.
+# (Git will not descend into an ignored directory, so the directory itself has to be un-ignored too.)
+!src/chavruta/*/data/
+!src/chavruta/*/data/*.json
 *.csv
 *.tsv
 *.parquet
@@ -139,6 +146,10 @@ sample_lessons/
 
 # ---- Vendored third-party tooling (cc10x plugin: local dev aid, not part of the product) ----
 .claude/cc10x/
+
+# ---- External dev-tool models and their API keys — CONTAINS SECRETS, never commit ----
+docs/DEV_MODELS.local.md
+*.local.md
 
 # ---- Poster: brand-licensed Nebius assets/fonts + heavy PDF/PNG exports — keep the WHOLE folder out of git ----
 design/brand/

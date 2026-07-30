@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import Link from "next/link";
 import type { Tier } from "@/lib/api";
 import { tr } from "@/lib/i18n";
 import type { Lang } from "@/lib/types";
@@ -64,7 +65,8 @@ export function PlansModal({
         <div className="grid gap-3 sm:grid-cols-3">
           {paid.map((t) => {
             const isCurrent = t.id === currentPlan;
-            const price = cycle === "annual" ? t.annual_price_ils : t.price_ils;
+            const price = cycle === "annual" ? t.annual_monthly_ils : t.price_ils;
+            const annualTotal = t.annual_price_ils;
             return (
               <div
                 key={t.id}
@@ -78,9 +80,14 @@ export function PlansModal({
                   ₪{price}
                   <span className="text-xs font-normal text-ink/50">
                     {" "}
-                    / {tr(lang, cycle === "annual" ? "perYear" : "perMonth")}
+                    / {tr(lang, "perMonth")}
                   </span>
                 </p>
+                {cycle === "annual" && (
+                  <p className="text-xs text-ink/50">
+                    ₪{annualTotal} {tr(lang, "perYear")}
+                  </p>
+                )}
                 {/* A ratio, never a token or lesson count. See app/plans.py public_catalogue. */}
                 <ul className="text-xs text-ink/70 flex flex-col gap-1 mt-1">
                   <li>{tr(lang, "timesUsage").replace("{n}", String(t.multiple))}</li>
@@ -104,6 +111,13 @@ export function PlansModal({
         )}
 
         <p className="text-xs text-ink/50 leading-relaxed">{tr(lang, "quotaExplainer")}</p>
+
+        <Link
+          href="/limits"
+          className="text-xs text-tekhelet/80 hover:text-tekhelet text-center block"
+        >
+          {tr(lang, "limitsLink")}
+        </Link>
       </div>
     </Modal>
   );

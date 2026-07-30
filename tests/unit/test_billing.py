@@ -65,10 +65,10 @@ def test_verify_webhook_tamper_changes_hash(monkeypatch):
 # ── parse + state machine ─────────────────────────────────────────────────────
 def test_parse_event_extracts_fields():
     ev = payplus.parse_event({"transaction": {
-        "more_info": "u-1", "status_code": "000", "amount": 49.9,
+        "uid": "txn_1", "more_info": "u-1", "status_code": "000", "amount": 49.9,
         "recurring_charge_information": {"recurring_uid": "rec_9"}}})
-    assert ev == {"owner_id": "u-1", "success": True, "recurring_uid": "rec_9",
-                  "is_renewal": True, "amount": 49.9}
+    assert ev == {"owner_id": "u-1", "success": True, "transaction_uid": "txn_1",
+                  "recurring_uid": "rec_9", "is_renewal": True, "amount": 49.9}
 
 
 def test_handle_event_activates_paid(fresh_db, monkeypatch):
@@ -92,13 +92,19 @@ def test_handle_event_ignores_failure(fresh_db, monkeypatch):
 
 def test_cancel_keeps_paid_until_period_end_then_sweep_downgrades(fresh_db, monkeypatch):
     monkeypatch.setattr(service.greeninvoice, "issue_receipt", lambda **k: None)
-    monkeypatch.setattr(service.payplus, "cancel_recurring", lambda *a, **k: None)   # no network
+    stopped = {}
+    monkeypatch.setattr(service.payplus, "cancel_recurring",
+                        lambda ref, *a, **k: stopped.update(ref=ref))   # no network
     # Activate, then cancel.
     service.handle_event({"owner_id": "u-3", "success": True, "recurring_uid": "rec_3"},
                          now=datetime(2026, 7, 19, tzinfo=UTC))
     service.cancel("u-3", now=datetime(2026, 7, 20, tzinfo=UTC))
     sub = fresh_db.get_subscription("u-3")
     assert sub["status"] == "canceled" and sub["cancel_at_period_end"] == 1
+    # The terms promise the NEXT CHARGE STOPS IMMEDIATELY, so the provider must actually be told.
+    # Marking the row cancelled locally while the recurring charge keeps running would go on taking
+    # money from someone who cancelled — and the local state would look correct throughout.
+    assert stopped["ref"] == "rec_3"
     assert fresh_db.get_plan("u-3") == "pro"         # still paid — keeps what they paid for
     # Before period end → no downgrade; after → downgraded to free.
     assert service.sweep_downgrades(now=datetime(2026, 8, 1, tzinfo=UTC)) == 0
@@ -107,7 +113,11 @@ def test_cancel_keeps_paid_until_period_end_then_sweep_downgrades(fresh_db, monk
     assert fresh_db.get_plan("u-3") == "free"
 
 
-# ── Annual (prepaid year) ─────────────────────────────────────────────────────
+# ── Annual (a discounted rate, billed monthly) ────────────────────────────────
+# The annual plan was a prepaid year until 2026-07-27. It is now twelve monthly instalments at the
+# discounted rate: same total, same discount, no money held up front. The change exists so that the
+# statutory cancellation rights (14 days on a distance sale, and at any time on a continuing
+# transaction) have nothing to collide with — there is never a prepayment to refund.
 def test_checkout_records_tier_and_cycle_before_redirecting(fresh_db, monkeypatch):
     """The callback reports a charge, not a basket — so what was bought is stored at checkout.
     Without this an annual purchase comes back and is granted a single month."""
@@ -124,12 +134,13 @@ def test_checkout_records_tier_and_cycle_before_redirecting(fresh_db, monkeypatc
     service.start_checkout("u-a", "a@b.c", "A", plan="pro", cycle="annual")
 
     assert seen["cycle"] == "annual"
-    assert seen["amount"] == 499.0            # the year up front, not 49.90
+    assert seen["amount"] == 41.58            # one instalment, not the year up front
+    assert seen["amount"] * 12 <= 499.0       # and twelve of them never exceed the headline
     sub = fresh_db.get_subscription("u-a")
     assert sub["plan"] == "pro" and sub["cycle"] == "annual" and sub["status"] == "pending"
 
 
-def test_annual_charge_grants_a_year(fresh_db, monkeypatch):
+def test_annual_charge_grants_a_month_not_a_year(fresh_db, monkeypatch):
     monkeypatch.setenv("PAYPLUS_API_KEY", "k")
     monkeypatch.setenv("PAYPLUS_SECRET_KEY", "s")
     monkeypatch.setenv("PAYPLUS_PAYMENT_PAGE_UID", "uid")
@@ -144,39 +155,66 @@ def test_annual_charge_grants_a_year(fresh_db, monkeypatch):
     sub = fresh_db.get_subscription("u-b")
     assert fresh_db.get_plan("u-b") == "pro"
     assert sub["cycle"] == "annual"
-    assert sub["current_period_end"][:4] == "2027"      # a year out, not a month
+    # A month out, not a year: each instalment buys a month, so an unpaid renewal lapses in
+    # weeks rather than leaving eleven months of granted access nobody paid for.
+    assert sub["current_period_end"][:7] == "2026-08"
 
 
-def test_cancelling_a_prepaid_year_keeps_access_to_the_end_of_it(fresh_db, monkeypatch):
-    """The promise made when selling the annual plan: cancelling stops the renewal, it does not
-    refund-by-lockout. Every remaining day of the paid year stays."""
+def test_cancelling_an_annual_plan_stops_the_instalments(fresh_db, monkeypatch):
+    """What replaced the prepaid year: cancelling stops future charges, and the month already paid
+    for is kept. Nothing is held that would have to be refunded."""
     monkeypatch.setenv("PAYPLUS_API_KEY", "k")
     monkeypatch.setenv("PAYPLUS_SECRET_KEY", "s")
     monkeypatch.setenv("PAYPLUS_PAYMENT_PAGE_UID", "uid")
     monkeypatch.setattr(service.greeninvoice, "issue_receipt", lambda **k: None)
     monkeypatch.setattr(service.payplus, "create_payment_page", lambda *a, **k: {"link": "x"})
-    monkeypatch.setattr(service.payplus, "cancel_recurring", lambda *a, **k: None)
+    cancelled = {}
+    monkeypatch.setattr(service.payplus, "cancel_recurring",
+                        lambda ref, *a, **k: cancelled.update(ref=ref))
 
     service.start_checkout("u-c", "c@d.e", "C", plan="pro", cycle="annual")
     service.handle_event({"owner_id": "u-c", "success": True, "recurring_uid": "rec_c"},
                          now=datetime(2026, 7, 19, tzinfo=UTC))
-    service.cancel("u-c", now=datetime(2026, 8, 1, tzinfo=UTC))     # cancels a month in
+    service.cancel("u-c", now=datetime(2026, 8, 1, tzinfo=UTC))
 
+    assert cancelled["ref"] == "rec_c"                       # the recurring charge really stops
     assert fresh_db.get_subscription("u-c")["cancel_at_period_end"] == 1
-    # Ten months later: still paid for, so still pro.
-    assert service.sweep_downgrades(now=datetime(2027, 5, 1, tzinfo=UTC)) == 0
+    # The month that was paid for is kept…
+    assert service.sweep_downgrades(now=datetime(2026, 8, 10, tzinfo=UTC)) == 0
     assert fresh_db.get_plan("u-c") == "pro"
-    # Past the year: it lapses, and does not renew.
-    assert service.sweep_downgrades(now=datetime(2027, 8, 1, tzinfo=UTC)) == 1
+    # …and then it lapses. No eleven months of unpaid access, and no eleven months of held money.
+    assert service.sweep_downgrades(now=datetime(2026, 9, 1, tzinfo=UTC)) == 1
     assert fresh_db.get_plan("u-c") == "free"
 
 
-def test_annual_is_cheaper_than_twelve_months():
+def test_the_annual_rate_is_a_real_discount_on_the_monthly_one():
     from app import plans
 
-    for t in ("basic", "pro", "institution"):
-        assert plans.price_ils(t, "annual") < plans.price_ils(t, "monthly") * 12
-        assert plans.annual_saving_pct(t) >= 15
+    for tid in ("basic", "pro", "institution"):
+        # Both figures are per-month now, so they compare directly.
+        assert plans.price_ils(tid, "annual") < plans.price_ils(tid, "monthly")
+        assert plans.annual_saving_pct(tid) >= 15
+
+
+def test_twelve_instalments_never_exceed_the_advertised_year():
+    """Dividing naively overcharges: 290/12 rounds to 24.17 and twelve of those is 290.04. The
+    instalment is floored so a year costs at most its headline, never a single agora more."""
+    from app import plans
+
+    for tier in plans.TIERS:
+        if tier.price_ils == 0:
+            continue
+        charged = round(plans.price_ils(tier.id, "annual") * plans.ANNUAL_INSTALMENTS, 2)
+        assert charged <= tier.annual_price_ils, f"{tier.id} overcharges the year"
+        assert tier.annual_price_ils - charged < 0.15, f"{tier.id} drifts too far below the headline"
+        assert plans.annual_total_ils(tier.id) == charged      # what we display is what we charge
+
+
+def test_an_annual_period_is_a_month():
+    """The cycle names a price, not a horizon: one charge buys one month on either plan."""
+    from app import plans
+
+    assert plans.period_days("annual") == plans.period_days("monthly") == 30
 
 
 def test_unknown_cycle_bills_monthly():

@@ -174,21 +174,52 @@ def test_local_user_cannot_redeem():
 
 
 # ── Rules that protect existing state ─────────────────────────────────────────
-def test_coupon_will_not_clobber_a_live_paid_subscription():
-    """A PayPlus subscription owns its provider_ref; overwriting it would detach the account from a
-    recurring charge the user is still paying."""
+def test_same_tier_coupon_on_active_subscription_becomes_a_discount():
+    """A PayPlus subscription owns its provider_ref; a coupon may never overwrite it — a code
+    redeemed at or below the paid tier becomes an ILS rebate off future charges instead."""
     import app.coupons as coupons
     import app.db as db
+    from app import plans
 
     db.upsert_subscription("ivan", provider="payplus", provider_ref="rec-123",
                            status="active", updated_at=datetime.now(UTC).isoformat())
     db.set_plan("ivan", "paid")
     code = coupons.issue_plan_coupon(plan="pro", days=30)
 
-    with pytest.raises(coupons.RedeemError) as e:
-        coupons.redeem("ivan", code)
-    assert e.value.reason == "has_paid_subscription"
-    assert db.get_subscription("ivan")["provider_ref"] == "rec-123"
+    res = coupons.redeem("ivan", code)
+    assert res["mode"] == "discount"
+    expected = round(30 * plans.price_ils("pro") / plans.period_days(), 2)
+    assert res["discount_added_ils"] == expected
+
+    sub = db.get_subscription("ivan")
+    assert sub["provider_ref"] == "rec-123"          # untouched — still the real recurring charge
+    assert sub["status"] == "active"
+    assert db.get_plan("ivan") == "paid"             # unchanged: this coupon never grants a plan
+    assert sub["coupon_discount_ils"] == expected
+
+
+def test_higher_tier_coupon_on_active_subscription_boosts_then_reverts():
+    """A coupon for a pricier plan than an active subscription temporarily raises the account's
+    plan without touching the real PayPlus row, then reverts once the boost's days elapse."""
+    import app.billing.service as billing
+    import app.coupons as coupons
+    import app.db as db
+
+    db.upsert_subscription("nadia", provider="payplus", provider_ref="rec-456",
+                           status="active", updated_at=datetime.now(UTC).isoformat())
+    db.set_plan("nadia", "basic")
+    code = coupons.issue_plan_coupon(plan="institution", days=1)
+
+    res = coupons.redeem("nadia", code, now=datetime.now(UTC) - timedelta(days=2))
+    assert res["mode"] == "boost"
+    assert db.get_plan("nadia") == "institution"
+    sub = db.get_subscription("nadia")
+    assert sub["provider_ref"] == "rec-456"           # untouched
+    assert sub["coupon_revert_plan"] == "basic"
+
+    assert billing.sweep_coupon_reverts() == 1
+    assert db.get_plan("nadia") == "basic"
+    assert db.get_subscription("nadia")["coupon_revert_at"] is None
 
 
 def test_coupon_cannot_downgrade_an_existing_tier():

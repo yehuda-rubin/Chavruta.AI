@@ -62,7 +62,8 @@ def handle_event(normalized: dict, *, now: datetime | None = None) -> None:
         return
     now = now or datetime.now(UTC)
     # What was bought was decided at checkout, not here — the callback carries a charge, not a
-    # basket. A renewal reads the same stored row, so an annual plan renews for another year.
+    # basket. A renewal reads the same stored row — and on either cycle that grants another MONTH,
+    # since an annual plan is twelve monthly instalments rather than one yearly charge.
     sub = db.get_subscription(owner) or {}
     tier = plans.canonical(sub.get("plan") or "pro")
     cycle = plans.canonical_cycle(sub.get("cycle"))
@@ -96,18 +97,58 @@ def handle_event(normalized: dict, *, now: datetime | None = None) -> None:
         db.record_charge(charged_at=now.isoformat(), amount=amount, plan=tier, cycle=cycle,
                          provider="payplus", provider_ref=normalized.get("recurring_uid"),
                          invoice_ref=invoice_ref,
-                         note="renewal" if normalized.get("is_renewal") else "new")
+                         note="renewal" if normalized.get("is_renewal") else "new",
+                         # The payment's own uid, which is what a refund is issued against. A charge
+                         # recorded without it can still be refunded, but only after looking the
+                         # transaction up by hand in the PayPlus dashboard.
+                         txn_uid=normalized.get("transaction_uid"))
     except Exception:               # noqa: BLE001 — same reasoning; log loudly, don't fail the hook
         _log.exception("could not write the charge to the ledger (amount=%s)", amount)
+
+    try:
+        _apply_coupon_discount(owner, amount, normalized.get("transaction_uid"), tier, cycle, now)
+    except Exception:               # noqa: BLE001 — a failed rebate must not fail the whole webhook
+        _log.exception("coupon discount rebate failed for %s", owner)
+
+
+def _apply_coupon_discount(owner: str, amount: float, txn_uid: str | None, tier: str, cycle: str,
+                           now: datetime) -> None:
+    """Rebate a coupon-granted ILS discount off a real charge that just succeeded, via a partial
+    refund — PayPlus has no API to change an already-running recurring amount, so the charge goes
+    through in full and the discount comes back as money returned, same mechanism scripts/refund.py
+    already uses for operator-initiated refunds, minus the subscription cancellation."""
+    if not txn_uid:
+        return
+    balance = float((db.get_subscription(owner) or {}).get("coupon_discount_ils") or 0.0)
+    if balance <= 0:
+        return
+    rebate = round(min(balance, amount), 2)
+    if rebate <= 0:
+        return
+    payplus.refund(txn_uid, rebate, description="קופון — הנחה על החיוב")   # raises ⇒ nothing below runs
+    try:
+        db.record_charge(charged_at=now.isoformat(), amount=-rebate, plan=tier, cycle=cycle,
+                         provider="payplus", provider_ref=txn_uid,
+                         note="coupon discount rebate", txn_uid=txn_uid)
+    except Exception:               # noqa: BLE001 — the money already moved; never lose that fact
+        _log.exception("REBATE OF ₪%.2f ON %s IS NOT IN THE LEDGER — record it by hand", rebate, txn_uid)
+    db.set_coupon_discount(owner, round(balance - rebate, 2))
+    _log.info("coupon discount rebate for %s: ₪%.2f (balance now ₪%.2f)",
+              owner, rebate, round(balance - rebate, 2))
 
 
 def cancel(owner_id: str, *, now: datetime | None = None) -> None:
     """Stop future charges and mark the subscription cancelled. Paid access is retained until the
     current period ends (Consumer Protection: billing stops, but the user keeps what they paid for).
 
-    This is what makes the annual plan safe to sell: cancelling a prepaid year stops the renewal at
-    the twelve-month mark and leaves every remaining day of the year already paid for intact. The
-    mechanism is the same for both cycles — only current_period_end differs."""
+    Identical on both cycles, because there is no prepaid year to unwind: since 2026-07-27 the annual
+    plan is a discounted rate billed in twelve monthly instalments, so cancelling stops the next
+    instalment and leaves the month already paid for intact. Nothing is held that would have to be
+    refunded — which is the whole reason the plan was restructured (see app/plans.py
+    ANNUAL_INSTALMENTS).
+
+    NOT a refund — cancelling stops the next charge and gives nothing back. Money is returned by
+    refund() below, which an operator runs deliberately through scripts/refund.py."""
     now = now or datetime.now(UTC)
     sub = db.get_subscription(owner_id)
     # Only a real provider subscription has anything to cancel upstream. A coupon-granted plan stores
@@ -122,6 +163,91 @@ def cancel(owner_id: str, *, now: datetime | None = None) -> None:
     _log.info("subscription cancelled for %s (paid access until period end)", owner_id)
 
 
+def refund(charge_id: int, *, amount: float | None = None, email: str = "", name: str = "",
+           reason: str = "", owner_id: str | None = None, cancel_subscription: bool = True,
+           now: datetime | None = None) -> dict:
+    """Give money back for one recorded charge, and leave the books able to prove it.
+
+    Terms §10 promises a refund on cancellation within 14 days of a distance sale. Until now there
+    was no code path that could produce one — the promise rested entirely on someone remembering to
+    log into PayPlus. This is that path. It is still OPERATOR-INITIATED, not a route a user can call:
+    a refund moves real money irreversibly and there is no undo, so it is run from
+    scripts/refund.py, which prints the charge and the lawful quote and asks before proceeding.
+
+    Order matters and is not arbitrary:
+
+      1. refuse if this payment was already refunded (in full, or beyond the remainder),
+      2. move the money at the provider — the only step that can fail in a way that must abort,
+      3. append a NEGATIVE ledger row, whatever happens next,
+      4. issue a credit note, best-effort,
+      5. cancel the subscription so the next instalment does not immediately re-charge them.
+
+    Step 3 comes before 4 and 5 because at that point the money is gone from our account: a ledger
+    that omits it is wrong in the direction that overstates our income. Step 5 is the one people
+    forget by hand — refunding the last charge while leaving the subscription live gives the customer
+    their money back and then takes it again in a month.
+
+    `amount` defaults to the whole charge. Pass a smaller figure to keep the lawful cancellation fee
+    (plans.refund_quote gives it) or to refund part of a period.
+    """
+    now = now or datetime.now(UTC)
+    row = db.get_charge(charge_id)
+    if not row:
+        raise ValueError(f"no such charge: {charge_id}")
+    if float(row["amount"]) <= 0:
+        raise ValueError(f"charge {charge_id} is itself a refund (amount {row['amount']})")
+    txn_uid = row.get("txn_uid") or ""
+    if not txn_uid:
+        # Not a failure of ours to record it — pre-2026-07-27 rows predate the column. The operator
+        # can still refund it, by finding the transaction in the PayPlus dashboard and passing it.
+        raise ValueError(
+            f"charge {charge_id} has no transaction uid; look it up in the PayPlus dashboard and "
+            f"pass it explicitly (charged_at={row['charged_at']} amount={row['amount']})")
+
+    charged = round(float(row["amount"]), 2)
+    already = db.refunded_total(txn_uid)
+    remaining = round(charged - already, 2)
+    if remaining <= 0:
+        raise ValueError(f"charge {charge_id} was already refunded in full (₪{already:.2f})")
+    give = remaining if amount is None else round(float(amount), 2)
+    if give <= 0 or give > remaining:
+        raise ValueError(f"refund of ₪{give:.2f} is outside the ₪{remaining:.2f} still refundable")
+
+    description = reason.strip() or f"החזר — {_description(row.get('cycle') or plans.MONTHLY)}"
+    resp = payplus.refund(txn_uid, give, description=description)   # raises ⇒ nothing below runs
+
+    invoice_ref = ""
+    ledger_id = 0
+    try:
+        ledger_id = db.record_charge(
+            charged_at=now.isoformat(), amount=-give, plan=row.get("plan"), cycle=row.get("cycle"),
+            provider=row.get("provider") or "payplus", provider_ref=row.get("provider_ref"),
+            note=f"refund of #{charge_id}" + (f" — {reason.strip()}" if reason.strip() else ""),
+            txn_uid=txn_uid)
+    except Exception:               # noqa: BLE001 — the money is already back; never lose that fact
+        _log.exception("REFUND OF ₪%.2f ON %s IS NOT IN THE LEDGER — record it by hand", give, txn_uid)
+
+    try:
+        doc = greeninvoice.issue_credit_note(email=email, name=name, amount=give,
+                                             description=description, now=now.timestamp())
+        if doc:
+            invoice_ref = str(doc.get("number") or doc.get("id") or "")
+    except Exception:               # noqa: BLE001 — issue_credit_note already swallows; belt and braces
+        _log.exception("credit note failed for refund of ₪%.2f", give)
+
+    if cancel_subscription and owner_id:
+        try:
+            cancel(owner_id, now=now)
+        except Exception:           # noqa: BLE001 — refund stands even if the cancel call fails
+            _log.exception("refunded %s but could not cancel their subscription", owner_id)
+
+    _log.info("refunded ₪%.2f of charge #%s (txn %s, ledger #%s, credit note %s)",
+              give, charge_id, txn_uid, ledger_id, invoice_ref or "—")
+    return {"charge_id": charge_id, "txn_uid": txn_uid, "refunded": give,
+            "remaining": round(remaining - give, 2), "ledger_id": ledger_id,
+            "invoice_ref": invoice_ref, "provider_response": resp}
+
+
 def sweep_downgrades(now: datetime | None = None) -> int:
     """Downgrade cancelled subscriptions whose paid period has lapsed to the free plan. Returns count."""
     now = now or datetime.now(UTC)
@@ -130,6 +256,18 @@ def sweep_downgrades(now: datetime | None = None) -> int:
         db.set_plan(owner, "free")
         db.upsert_subscription(owner, status="expired", updated_at=now.isoformat())
         _log.info("subscription expired → free plan for %s", owner)
+    return len(due)
+
+
+def sweep_coupon_reverts(now: datetime | None = None) -> int:
+    """Revert accounts whose coupon-driven temporary plan boost has ended, back to the plan their
+    real PayPlus subscription actually pays for. Returns count."""
+    now = now or datetime.now(UTC)
+    due = db.due_coupon_reverts(now.isoformat())
+    for row in due:
+        db.set_plan(row["owner_id"], row["revert_plan"])
+        db.clear_coupon_revert(row["owner_id"], updated_at=now.isoformat())
+        _log.info("coupon boost ended for %s → reverted to %s", row["owner_id"], row["revert_plan"])
     return len(due)
 
 
@@ -163,6 +301,10 @@ def start_sweeper() -> None:
                 sweep_downgrades()
             except Exception:           # noqa: BLE001 — keep the sweeper alive
                 _log.exception("billing downgrade sweep failed")
+            try:
+                sweep_coupon_reverts()
+            except Exception:           # noqa: BLE001 — one sweep failing must not stop the other
+                _log.exception("billing coupon revert sweep failed")
 
     threading.Thread(target=_loop, name="billing-sweeper", daemon=True).start()
     _log.info("billing downgrade sweeper started (every %.0fs)", interval)

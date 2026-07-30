@@ -30,6 +30,10 @@ def _detect_lang(text: str) -> str:
 # Per-intent generation budgets (user decision 2026-06-18): lessons need room for a full
 # scaffold, comparisons are medium, regular Q&A / explanations stay tight. Falls back to
 # the profile's llm_max_tokens for any other intent.
+# Backend names that mean "an OpenAI-compatible HTTP API". 'nebius' is the historical name and is
+# kept working; 'api' and 'openai' say what it actually is.
+_API_BACKENDS = frozenset({"api", "openai", "nebius"})
+
 _INTENT_MAX_TOKENS = {
     Intent.QA: 3000,
     Intent.EXPLAIN: 3000,
@@ -81,22 +85,31 @@ def build_backends(profile: Profile):
     store = QdrantStore(mode=profile.qdrant_mode, path=profile.qdrant_path,
                         url=profile.qdrant_url, api_key=profile.qdrant_api_key)
 
-    # Two backends only: 'nebius' (the API — DEFAULT) and 'bridge' (Claude answers in-session, no
-    # external API). The local DictaLM/Ollama backend was removed by product decision.
-    if profile.llm_backend == "nebius":
+    # Two backends: 'api' — any OpenAI-compatible provider (DEFAULT) — and 'bridge' (Claude answers
+    # in-session, no external API). The local DictaLM/Ollama backend was removed by product decision.
+    #
+    # The backend names a TRANSPORT, not a vendor. 'nebius' is kept as an alias because it is what
+    # every script, compose file and .env in this repo already says, but it was always a misnomer:
+    # CloudLLM is a plain OpenAI-compatible client and the provider is just a base URL. Naming the
+    # backend after one vendor made switching look like a code change when it is an env change, so
+    # the capability name is now the real one and the vendor name follows it.
+    if profile.llm_backend in _API_BACKENDS:
         from chavruta.llm.cloud import CloudLLM
 
         llm = CloudLLM(profile.llm_model, profile.llm_base_url, profile.llm_api_key,
-                       timeout_s=profile.llm_timeout_s, max_retries=profile.llm_max_retries)
+                       timeout_s=profile.llm_timeout_s, max_retries=profile.llm_max_retries,
+                       min_output_tokens=getattr(profile, "llm_min_output_tokens", 0))
     elif profile.llm_backend == "bridge":
         from chavruta.llm.bridge import BridgeLLM
 
         llm = BridgeLLM()
     else:
         raise ValueError(
-            f"unknown CHAVRUTA_LLM_BACKEND={profile.llm_backend!r}. Supported: 'nebius' (the API — "
-            f"default) or 'bridge' (Claude in-session, no external API). The local DictaLM/Ollama "
-            f"backend has been removed."
+            f"unknown CHAVRUTA_LLM_BACKEND={profile.llm_backend!r}. Supported: "
+            f"{', '.join(sorted(_API_BACKENDS))} (any OpenAI-compatible provider — default) or "
+            f"'bridge' (Claude in-session, no external API). Point it at a provider with "
+            f"CHAVRUTA_LLM_PRESET, or with CHAVRUTA_LLM_BASE_URL + CHAVRUTA_LLM_MODEL. The local "
+            f"DictaLM/Ollama backend has been removed."
         )
 
     reranker = None
@@ -167,13 +180,11 @@ class ChavrutaPipeline:
         self._wire_bridge_source_fetcher()
         return self
 
-    def _wire_bridge_source_fetcher(self) -> None:
-        """Give the bridge LLM a way to pull more sources on its own: when the model replies with a
-        ===NEED_SOURCES=== block, these follow-up queries are retrieved and appended to the job. Only
-        applies to a backend that exposes `source_fetcher` (BridgeLLM); a no-op otherwise."""
-        llm = getattr(self, "llm", None)
-        if llm is None or not hasattr(llm, "source_fetcher"):
-            return
+    def _build_source_fetcher(self):
+        """The ===NEED_SOURCES=== self-fetch closure shared by every LLM backend this pipeline
+        drives — the pipeline's own `self.llm` (wired at construction) and any per-request backend
+        (e.g. a caller's BYOK client — see wire_source_fetcher) alike, since both need the same
+        retrieval capability, just aimed at a different outbound LLM call."""
         from chavruta.llm.base import SourceBlock
 
         def fetch(queries: list[str]) -> list[SourceBlock]:
@@ -198,7 +209,24 @@ class ChavrutaPipeline:
                     break
             return out[:24]
 
-        llm.source_fetcher = fetch
+        return fetch
+
+    def _wire_bridge_source_fetcher(self) -> None:
+        """Give the pipeline's own shared LLM a way to pull more sources on its own: when the model
+        replies with a ===NEED_SOURCES=== block, these follow-up queries are retrieved and appended
+        to the job. Only applies to a backend that exposes `source_fetcher` (BridgeLLM, CloudLLM);
+        a no-op otherwise."""
+        llm = getattr(self, "llm", None)
+        if llm is None or not hasattr(llm, "source_fetcher"):
+            return
+        llm.source_fetcher = self._build_source_fetcher()
+
+    def wire_source_fetcher(self, llm) -> None:
+        """Public counterpart of _wire_bridge_source_fetcher, for a per-request LLM backend built
+        OUTSIDE the pipeline (a caller's BYOK client — app/api.py::_byok_llm) — gives it the exact
+        same self-fetch capability as the pipeline's own shared llm."""
+        if hasattr(llm, "source_fetcher"):
+            llm.source_fetcher = self._build_source_fetcher()
 
     def _resolve_query(self, request: Query) -> Query:
         if request.lang is None or request.lang == "":
@@ -207,12 +235,12 @@ class ChavrutaPipeline:
             return self.router.route(request)
         return request
 
-    def _agentic_selffetch(self, query: Query, history) -> Answer | None:
+    def _agentic_selffetch(self, query: Query, history, llm) -> Answer | None:
         """When retrieval returned NOTHING, give the model one chance to pull its own sources via the
         agentic ===NEED_SOURCES=== loop (the same mechanism the lesson/chavruta paths use). Returns a
         grounded Answer if it fetched sources and cited them; None otherwise (the caller then falls
-        back to the honest no-source answer, so Principle I is never violated)."""
-        llm = self.llm
+        back to the honest no-source answer, so Principle I is never violated). `llm` is the backend
+        to drive — the pipeline's own shared one by default, or a caller-supplied override (BYOK)."""
         if not getattr(llm, "source_fetcher", None) or not hasattr(llm, "request"):
             return None                                   # backend has no self-fetch capability
         from chavruta.llm.agentic import SOURCE_REQUEST_INSTRUCTION, is_degrade_message
@@ -241,11 +269,13 @@ class ChavrutaPipeline:
         return Answer(text=text, citations=citations, grounded=True, no_source=False,
                       intent=query.intent)
 
-    def _agentic_generate(self, prompt, lang: str, intent=None) -> tuple[str, list]:
+    def _agentic_generate(self, prompt, lang: str, intent=None, llm=None) -> tuple[str, list]:
         """Run a Q&A / explain / compare turn through the agentic ===NEED_SOURCES=== loop (so the model
         can pull MORE sources when the retrieved set is THIN, not only when empty), by formatting the
         grounded prompt as a job. Sources are emitted as `### [S#]` headers — the loop's marker
-        convention — so agentically-fetched sources continue the numbering. Returns (text, fetched)."""
+        convention — so agentically-fetched sources continue the numbering. Returns (text, fetched).
+        `llm` defaults to the pipeline's own shared backend; a caller may override it (BYOK)."""
+        llm = llm or self.llm
         from chavruta.llm.agentic import SOURCE_REQUEST_INSTRUCTION
 
         he = (lang or "he") != "en"
@@ -268,10 +298,14 @@ class ChavrutaPipeline:
                   ["Answer ONLY from the SOURCES; cite every claim by [S#]; write in clear, full English "
                    "with no foreign-language words; if the sources lack the answer, say so and do not invent."])
         lines += [SOURCE_REQUEST_INSTRUCTION]
-        return self.llm.request("\n".join(lines), lang=lang or "he",
-                                token_budget=_max_tokens_for(intent, self.profile))
+        return llm.request("\n".join(lines), lang=lang or "he",
+                           token_budget=_max_tokens_for(intent, self.profile))
 
-    def ask(self, request: Query, *, history: list[Turn] | None = None) -> Answer:
+    def ask(self, request: Query, *, history: list[Turn] | None = None, llm=None) -> Answer:
+        """`llm` defaults to the pipeline's own shared backend; a caller may pass a per-request
+        override (BYOK — app/api.py::_byok_llm) so a single turn is billed to the caller's own
+        provider key instead, without touching the pipeline's shared state."""
+        llm = llm or self.llm
         query = self._resolve_query(request)
 
         # Out-of-corpus work honesty (spec edge case): the question explicitly asks about
@@ -290,7 +324,7 @@ class ChavrutaPipeline:
             # ONE chance to pull its own sources via the agentic ===NEED_SOURCES=== loop before we
             # honestly give up (Principle I is preserved: a self-fetch that still comes back empty
             # falls through to the honest answer below).
-            selffetched = self._agentic_selffetch(query, history)
+            selffetched = self._agentic_selffetch(query, history, llm)
             if selffetched is not None:
                 return selffetched
             if query.intent in (Intent.EXPLAIN, Intent.COMPARE) and query.commentator_ids:
@@ -315,7 +349,7 @@ class ChavrutaPipeline:
         # that follows its arc and keeps only the sources it actually uses. Both run the same
         # machine; HALACHA just selects the separate responsa template set (shared corpus).
         if query.intent in (Intent.LESSON, Intent.HALACHA):
-            return self._lesson_answer(query, result)
+            return self._lesson_answer(query, result, llm)
 
         prompt, marker_map = grounded.build_prompt(
             query.text, result.hits, intent=query.intent, history=history, lang=query.lang
@@ -324,10 +358,10 @@ class ChavrutaPipeline:
         # retrieved set is THIN (it answers in a single round if the sources already suffice). On a
         # degrade (the model over-asked and the fetch failed) fall back to one grounded call from the
         # sources we already retrieved, so a thin-but-usable set still yields an answer.
-        raw, fetched = self._agentic_generate(prompt, query.lang, query.intent)
+        raw, fetched = self._agentic_generate(prompt, query.lang, query.intent, llm)
         from chavruta.llm.agentic import is_degrade_message
         if is_degrade_message(raw):
-            llm_out = self.llm.generate(
+            llm_out = llm.generate(
                 prompt, lang=query.lang,
                 max_tokens=_max_tokens_for(query.intent, self.profile),
                 temperature=self.profile.llm_temperature,
@@ -358,10 +392,12 @@ class ChavrutaPipeline:
                                   ("Note: quote(s) not found in the retrieved sources: «" + "», «".join(bad_q[:2]) + "» — verify."))
         return grounded.maybe_halacha_caveat(answer, query.lang)
 
-    def _lesson_answer(self, query, result):
+    def _lesson_answer(self, query, result, llm=None):
         """Generate the lesson — or responsa (שו"ת) — as a flowing walkthrough that follows
         the arc (opening → branches → convergence), then keep in each section only the sources
-        the walkthrough actually cited. HALACHA uses the responsa template set + voice."""
+        the walkthrough actually cited. HALACHA uses the responsa template set + voice. `llm`
+        defaults to the pipeline's own shared backend; a caller may override it (BYOK)."""
+        llm = llm or self.llm
         is_shut = query.intent is Intent.HALACHA
         plan = self._build_lesson(query, result)
         if plan.sections:
@@ -370,7 +406,7 @@ class ChavrutaPipeline:
         else:
             prompt, marker_map = grounded.build_prompt(
                 query.text, result.hits, intent=query.intent, lang=query.lang)
-        llm_out = self.llm.generate(
+        llm_out = llm.generate(
             prompt, lang=query.lang,
             max_tokens=_max_tokens_for(query.intent, self.profile),
             temperature=self.profile.llm_temperature,

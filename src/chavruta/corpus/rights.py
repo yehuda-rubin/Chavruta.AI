@@ -90,6 +90,79 @@ def attribution_line(*, ref: str, version_title: str, license_str: str, deep_lin
     return line
 
 
+def is_share_alike(license_str: str | None) -> bool:
+    """CC-BY-SA — the one licence here that constrains what may be done with a document CONTAINING
+    the text, not just with the text. 87 sources in the shipped corpus."""
+    return normalize(license_str).startswith(("cc-by-sa", "cc by-sa"))
+
+
+_BY_DEED = "https://creativecommons.org/licenses/by/4.0/"
+_BY_SA_DEED = "https://creativecommons.org/licenses/by-sa/4.0/"
+
+
+def document_license_notice(sources: list[tuple[str, str]], lang: str = "he") -> str:
+    """The licence footer for a document that REPRODUCES corpus text — a source sheet, a lesson.
+
+    `sources` is (ref, licence) per reproduced source. Returns "" when nothing in the document
+    carries an obligation, which is the common case: Public Domain and CC0 are 6,543 of the 6,630
+    sources in the corpus and neither asks for anything, so most sheets get no footer at all.
+
+    Why a footer at all, when every CC-BY source already carries its own credit line: attribution
+    answers "who wrote this passage", and share-alike answers "what may the person holding this FILE
+    do with it". A teacher who downloads a source sheet, edits it and hands it on has taken on an
+    obligation that is nowhere on the page unless it is written there. Naming the CC-BY-SA refs
+    explicitly is the part that makes it actionable — "some of this is share-alike" tells a reader
+    they have a problem without telling them where it is.
+
+    A deliberate line is drawn here, and it is the one point in this file a lawyer should look at.
+    A source sheet that reproduces passages intact alongside our own material is a COLLECTION under
+    CC 4.0, not Adapted Material, so share-alike attaches to the passages and does not swallow the
+    lesson written around them. Had we taken the other reading, every lesson touching one of those 87
+    sources would have to ship under CC-BY-SA — including the teacher's own work. The notice states
+    the obligation on the parts, which is true under either reading; what it does not do is license
+    the whole document away on the strength of the stricter one.
+    """
+    he = (lang or "he").startswith("he")
+    sa = [ref for ref, lic in sources if ref and is_share_alike(lic)]
+    by = [ref for ref, lic in sources
+          if ref and requires_attribution(lic) and not is_share_alike(lic)]
+    if not sa and not by:
+        return ""
+
+    lines = ["---", "**רישוי המסמך**" if he else "**Licensing of this document**", ""]
+    if by:
+        # Hebrew does not take a bare numeral before a plural the way English does — "משעתק 1
+        # מקורות" reads as a bug in the document, which is not the impression a licence notice
+        # should make.
+        how_many = "מקור אחד" if len(by) == 1 else f"{len(by)} מקורות"
+        lines.append(
+            f"מסמך זה משעתק {how_many} ברישיון CC BY 4.0. ההעתקה וההפצה מותרות — "
+            f"בתנאי ששורת הייחוס שלצד כל מקור נשמרת. שורת הייחוס היא תנאי הרישיון, לא נימוס; "
+            f"הסרתה מפקיעה את ההיתר. {_BY_DEED}" if he else
+            f"This document reproduces {len(by)} source(s) under CC BY 4.0. You may copy and "
+            f"redistribute them provided the credit line beside each is kept. That credit is a "
+            f"condition of the licence, not a courtesy: removing it ends the permission. {_BY_DEED}")
+        lines.append("")
+    if sa:
+        named = ", ".join(sa[:10])
+        extra = len(sa) - 10
+        more = "" if extra <= 0 else (f" (ועוד {extra})" if he else f" (and {extra} more)")
+        lines.append(
+            f"המקורות הבאים הם ברישיון **CC BY-SA 4.0**: {named}{more}. מלבד הייחוס, רישיון זה "
+            f"דורש **שיתוף זהה**: כל עיבוד שלהם — תרגום, קיצור, ניסוח מחדש — חייב להיות מופץ תחת "
+            f"אותו רישיון. שעתוק הקטעים כפי שהם, כפי שנעשה כאן, אינו מחייב את שאר המסמך. "
+            f"{_BY_SA_DEED}" if he else
+            f"The following sources are under **CC BY-SA 4.0**: {named}{more}. Beyond attribution "
+            f"this licence requires **share-alike**: any adaptation of them — translation, "
+            f"abridgement, rewording — must be distributed under the same licence. Reproducing the "
+            f"passages unchanged, as here, does not bind the rest of the document. {_BY_SA_DEED}")
+        lines.append("")
+    lines.append("מקורות שאינם מופיעים כאן הם נחלת הכלל או CC0 ואינם מחייבים דבר."
+                 if he else
+                 "Sources not listed here are Public Domain or CC0 and carry no obligation.")
+    return "\n".join(lines)
+
+
 def commercial_filter_values(available: list[str]) -> list[str]:
     """The subset of licence values present in the corpus that a PAID tier may reproduce.
 

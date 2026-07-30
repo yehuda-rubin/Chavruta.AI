@@ -4,6 +4,204 @@ import type { Lang } from "@/lib/types";
 import { IntentId, tr, StringKey } from "@/lib/i18n";
 import { Modal } from "./Modal";
 import { useAuth } from "@/lib/auth";
+import {
+  api, getUserLLMKey, setUserLLMKey,
+  getUserLLMBaseUrl, setUserLLMBaseUrl, getUserLLMModel, setUserLLMModel,
+} from "@/lib/api";
+
+// Change-password field — kept self-contained (own busy/result state) so a failed attempt doesn't
+// disturb the rest of the settings panel, same pattern as CouponField below.
+function ChangePasswordField({ lang }: { lang: Lang }) {
+  const { updatePassword } = useAuth();
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  async function submit() {
+    if (!password || busy) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      await updatePassword(password);
+      setResult({ ok: true, msg: tr(lang, "passwordUpdated") });
+      setPassword("");
+    } catch (e) {
+      setResult({ ok: false, msg: e instanceof Error ? e.message : tr(lang, "authGenericError") });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 flex flex-col gap-2">
+      <span className="text-xs text-ink/60">{tr(lang, "changePassword")}</span>
+      <div className="flex gap-2">
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+          placeholder={tr(lang, "newPassword")}
+          autoComplete="new-password"
+          disabled={busy}
+          className="flex-1 min-w-0 px-3 py-2 rounded-2xl glass text-sm outline-none
+                     focus:ring-2 focus:ring-brand/40 disabled:opacity-50"
+        />
+        <button
+          onClick={submit}
+          disabled={busy || !password}
+          className="px-4 py-2 rounded-2xl grad text-white font-semibold text-sm shrink-0
+                     hover:opacity-95 transition disabled:opacity-40"
+        >
+          {tr(lang, "changePasswordBtn")}
+        </button>
+      </div>
+      {result && (
+        <p role="status" aria-live="polite"
+           className={"text-xs leading-relaxed " + (result.ok ? "text-emerald-600" : "text-red-500")}>
+          {result.msg}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// BYOK (bring-your-own-key) field — self-contained like ChangePasswordField/CouponField. Key/base
+// URL/model live in localStorage via lib/api.ts, never sent to our own DB. Base URL and model are
+// both optional: blank base URL means "this deployment's own provider", in which case the deployment's
+// own model is used automatically and no server round-trip is needed to save. Naming a custom base
+// URL (a different provider) or a specific model always validates first via /byok/check — guessing a
+// model name on an unfamiliar provider isn't safe, so a mismatch hands back that provider's own model
+// list to pick from instead.
+function ByokKeyField({ lang }: { lang: Lang }) {
+  const [key, setKey] = useState(() => getUserLLMKey() || "");
+  const [baseUrl, setBaseUrl] = useState(() => getUserLLMBaseUrl() || "");
+  const [model, setModel] = useState(() => getUserLLMModel() || "");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [modelOptions, setModelOptions] = useState<string[]>([]);
+
+  const persist = () => {
+    setUserLLMKey(key);
+    setUserLLMBaseUrl(baseUrl);
+    setUserLLMModel(model);
+  };
+
+  const checkAndSave = async () => {
+    if (!key.trim() || busy) return;
+    setBusy(true);
+    setResult(null);
+    setModelOptions([]);
+    try {
+      // Safe default: no custom provider and no custom model named — this deployment's own
+      // provider/model, already known to work. No need to call the provider to validate that.
+      if (!baseUrl.trim() && !model.trim()) {
+        persist();
+        setResult({ ok: true, msg: tr(lang, "byokSaved") });
+        return;
+      }
+      const r = await api.byokCheck(key.trim(), model.trim(), baseUrl.trim(), lang);
+      if (r.ok) {
+        persist();
+        setResult({ ok: true, msg: tr(lang, "byokSaved") });
+      } else {
+        setResult({ ok: false, msg: r.message });
+        setModelOptions(r.models || []);
+      }
+    } catch (e) {
+      setResult({ ok: false, msg: e instanceof Error ? e.message : tr(lang, "authGenericError") });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clear = () => {
+    setKey("");
+    setBaseUrl("");
+    setModel("");
+    setUserLLMKey(null);
+    setUserLLMBaseUrl(null);
+    setUserLLMModel(null);
+    setResult(null);
+    setModelOptions([]);
+  };
+
+  return (
+    <div className="mt-2 flex flex-col gap-2">
+      <span className="text-xs text-ink/60">{tr(lang, "byokLabel")}</span>
+      <p className="text-[11px] text-ink/45 leading-relaxed">{tr(lang, "byokHelp")}</p>
+      <input
+        type="password"
+        value={key}
+        onChange={(e) => setKey(e.target.value)}
+        placeholder={tr(lang, "byokPlaceholder")}
+        spellCheck={false}
+        autoComplete="off"
+        className="px-3 py-2 rounded-2xl glass text-sm outline-none focus:ring-2 focus:ring-brand/40"
+      />
+      <input
+        value={baseUrl}
+        onChange={(e) => setBaseUrl(e.target.value)}
+        placeholder={tr(lang, "byokBaseUrlPlaceholder")}
+        spellCheck={false}
+        autoComplete="off"
+        dir="ltr"
+        className="px-3 py-2 rounded-2xl glass text-sm outline-none focus:ring-2 focus:ring-brand/40"
+      />
+      <input
+        value={model}
+        onChange={(e) => setModel(e.target.value)}
+        placeholder={tr(lang, "byokModelPlaceholder")}
+        spellCheck={false}
+        autoComplete="off"
+        dir="ltr"
+        className="px-3 py-2 rounded-2xl glass text-sm outline-none focus:ring-2 focus:ring-brand/40"
+      />
+      <div className="flex gap-2">
+        <button
+          onClick={checkAndSave}
+          disabled={busy || !key.trim()}
+          className="flex-1 px-4 py-2 rounded-2xl grad text-white font-semibold text-sm
+                     hover:opacity-95 transition disabled:opacity-40"
+        >
+          {busy ? tr(lang, "byokChecking") : tr(lang, "byokSave")}
+        </button>
+        {key && (
+          <button
+            onClick={clear}
+            className="px-3 py-2 rounded-2xl glass text-red-500 font-semibold text-sm shrink-0
+                       hover:bg-red-500/10 transition"
+          >
+            {tr(lang, "byokClear")}
+          </button>
+        )}
+      </div>
+      {result && (
+        <p role="status" aria-live="polite"
+           className={"text-xs leading-relaxed " + (result.ok ? "text-emerald-600" : "text-red-500")}>
+          {result.msg}
+        </p>
+      )}
+      {modelOptions.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <span className="text-[11px] text-ink/45">{tr(lang, "byokPickModel")}</span>
+          <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
+            {modelOptions.map((m) => (
+              <button
+                key={m}
+                onClick={() => { setModel(m); setModelOptions([]); setResult(null); }}
+                dir="ltr"
+                className="text-[11px] px-2.5 py-1 rounded-full bg-tekhelet/8 text-tekhelet hover:bg-tekhelet/15 transition"
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export type Theme = "light" | "dark" | "auto";
 
@@ -153,6 +351,7 @@ export function SettingsModal({
   onUpgrade,
   onCancelSubscription,
   onRedeemCoupon,
+  byokSupported,
 }: {
   open: boolean;
   lang: Lang;
@@ -180,6 +379,7 @@ export function SettingsModal({
   onUpgrade?: () => void;
   onCancelSubscription?: () => void;
   onRedeemCoupon?: (code: string) => Promise<string>;   // resolves with a message to show
+  byokSupported?: boolean;   // /me: whether this deployment's backend accepts a provider key at all
 }) {
   const auth = useAuth();
   const fmtDate = (iso: string) =>
@@ -253,6 +453,23 @@ export function SettingsModal({
               </button>
             </div>
 
+            <ChangePasswordField lang={lang} />
+
+            {/* Marketing consent — opt-in, changeable any time; mirrors the sign-up checkbox but
+                reflects (and updates) the value actually stored in user_metadata. */}
+            <label className="mt-2 flex items-center gap-2 text-xs text-ink/70 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={Boolean(auth.user.user_metadata?.marketing_consent)}
+                onChange={(e) => auth.updateMetadata({
+                  marketing_consent: e.target.checked,
+                  marketing_consent_at: new Date().toISOString(),
+                })}
+                className="accent-tekhelet"
+              />
+              <span>{tr(lang, "marketingConsentSetting")}</span>
+            </label>
+
             {/* Plan + billing — upgrade (free) or cancel subscription (paid). */}
             <div className="mt-2 flex items-center justify-between gap-2">
               <span className="text-xs text-ink/60">
@@ -306,6 +523,9 @@ export function SettingsModal({
                 access on a deployment with no payment provider configured. */}
             {onRedeemCoupon && <CouponField lang={lang} onRedeem={onRedeemCoupon} />}
 
+            {/* BYOK — only offered when the backend has a provider-key concept at all (not 'bridge'). */}
+            {byokSupported && <ByokKeyField lang={lang} />}
+
             {/* Account deletion — scheduled with a grace period, cancellable until the deadline. */}
             {deletionScheduledFor ? (
               <div className="mt-2 p-3 rounded-2xl bg-red-500/5 ring-1 ring-red-500/15 flex flex-col gap-2">
@@ -335,6 +555,19 @@ export function SettingsModal({
         <div className="pt-3 border-t border-white/60">
           <p className="text-xs text-ink/55 leading-relaxed">{tr(lang, "aboutText")}</p>
           <p className="text-[11px] text-ink/40 mt-1">{tr(lang, "appVersion")}</p>
+          <p className="text-[11px] text-ink/40 mt-2 flex gap-1.5">
+            <a href="/terms" target="_blank" rel="noopener noreferrer" className="hover:text-tekhelet hover:underline">
+              {tr(lang, "termsLink")}
+            </a>
+            <span>·</span>
+            <a href="/privacy" target="_blank" rel="noopener noreferrer" className="hover:text-tekhelet hover:underline">
+              {tr(lang, "privacyLink")}
+            </a>
+            <span>·</span>
+            <a href="/accessibility" target="_blank" rel="noopener noreferrer" className="hover:text-tekhelet hover:underline">
+              {tr(lang, "accessibilityLink")}
+            </a>
+          </p>
         </div>
       </div>
     </Modal>

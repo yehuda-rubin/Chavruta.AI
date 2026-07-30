@@ -8,7 +8,7 @@
 > **אפס** NC/copyright/unknown). המאגרים על HF: טקסט ב-`Yehuda-Rubin/chavruta-commercial-<slug>` (15),
 > וה-index+snapshot ב-`Yehuda-Rubin/chavruta-commercial-index`. בנייה על H100 בענן; שחזור מקומי דרך
 > `scripts/restore_commercial_tonight.ps1`. אימות bridge מלא עבר (explain/compare/halacha/lesson +
-> כנות). ראה `Chavruta_Production_Audit/14-SESSION-2026-07-20-commercial-rag-live.md` ו-[[commercial-corpus-on-hf]].
+> כנות). ראה [[commercial-corpus-on-hf]].
 > **פתוח (לא חוסם):** שדה `license` per-chunk ריק ב-payload (backfill עתידי ל-attribution של CC-BY).
 
 מסמך זה עונה על שאלה אחת: **אם המוצר גובה כסף, איזו מהדורה של כל טקסט מותר לשכפל למשתמש?**
@@ -78,7 +78,12 @@ Sefaria מרשה **per (title, language, versionTitle)** — לא per יצירה
    ואז אתה **יודע בדיוק** אילו chunks נגועים.
    *למה זה קודם:* `talmud_bavli` = 612,481 chunks, אבל **רובם פירושים שהם PD**. בלי הבקפיל
    תריץ GPU על 612K כשאולי צריך ~40K.
-2. **`scripts/create_payload_indexes.py`** — מאנדקס `license_he`/`license_en` לסינון מהיר.
+2. **`scripts/create_payload_indexes.py`** — מאנדקס `ref`/`anchor_ref` (חיוניים), ובנוסף
+   `license_he`/`license_en`.
+   > ⚠️ **שני שמות השדות האחרונים שגויים ומאנדקסים כלום.** שדה המטען בפועל נקרא `license`
+   > (ו-`version_title`), ובקורפוס המסחרי **שניהם ריקים בכל 2,403,599 הנקודות** — כך ששורת
+   > הייחוס של CC-BY אינה ניתנת להפקה כלל. ראה ממצא C ב-`docs/legal/REVIEW-2026-07-27.md`.
+   > אינדקס על שדה ריק הוא זול, ולכן זה לא מזיק — אבל אל תסיק מקיומו שהייחוס עובד.
 3. **לשלוף מחדש רק את הנגוע**, עם `version=` מפורש לפי הטבלה למעלה.
 4. **לאמבד מחדש רק את זה** (H100 — ראה `nebius/job.yaml`).
 5. **להריץ eval לפני/אחרי** — לוודא שהאחזור לא נסוג בגלל הסרת הניקוד.

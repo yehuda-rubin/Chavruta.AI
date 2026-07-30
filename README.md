@@ -65,22 +65,24 @@ Retrieval and embedding run **locally**; generation goes to the **Nebius API** (
 (`Qwen/Qwen3-235B-A22B-Instruct-2507`) — the **default even locally** (`CHAVRUTA_LLM_BACKEND=nebius`,
 key from `.env`; `CHAVRUTA_QUERY_PLANNER=heuristic`). The no-API path is
 [scripts/serve_bridge.ps1](scripts/serve_bridge.ps1). The local DictaLM/Ollama backend was **removed**.
-Every knob is a `CHAVRUTA_*` env var (see `src/chavruta/config/profile.py`).
+Every knob is a `CHAVRUTA_*` env var (see `src/chavruta/config/profile.py` and the full reference in `docs/CONFIGURATION.md`).
 
 ---
 
 ## Application
 
-The app is a **React + Vite SPA** talking to a **FastAPI** backend, with **SQLite** chat history.
+A **Next.js** front end talking to a **FastAPI** backend, with **SQLite** chat history.
 
 | layer        | what it is                                                                 |
 |--------------|----------------------------------------------------------------------------|
 | `app/api.py` | FastAPI service — sessions, messages, and the `/sessions/{id}/query` RAG endpoint (uvicorn, port 8080) |
 | `app/db.py`  | SQLite persistence — conversations survive restarts; deleting a chat cascades to its messages |
-| `app/frontend/` | React SPA — three-column "beit midrash" UI, clickable citations, full **Hebrew (RTL) / English (LTR)** i18n with a language toggle (port 5173) |
+| `web/`       | **the shipped UI** — Next.js (standalone output), Hebrew (RTL) / English (LTR) i18n, accounts, billing and settings. This is what `docker compose up` serves, behind the `web` nginx edge |
+| `app/frontend/public/ui/chavruta.html` | a **self-contained static UI** — local Tailwind, self-hosted fonts, no build step. The offline / no-Node path |
+| `app/frontend/src/` | ⚠️ **deprecated Vite SPA.** Kept for reference only; nothing builds or serves it. Do not add features here |
 
 Conversation history is stored in `chavruta.db` (path overridable via `CHAVRUTA_DB_PATH`; mounted to
-a volume in `docker-compose.yml` so it persists). See [app/frontend/README.md](app/frontend/README.md).
+a volume in `docker-compose.yml` so it persists).
 
 ### Modes (the `intent` field)
 
@@ -191,7 +193,10 @@ them straight into a local Qdrant:
 ```powershell
 docker compose --profile server up -d qdrant          # local Qdrant first
 
-# ALL 15 tiers (~2.93M points) — resumable, skips already-loaded tiers, smallest→largest:
+# ⚠️ This builds the OLD MIXED-LICENCE `chavruta` corpus (~2.93M points), which contains CC-BY-NC and
+#    copyrighted editions and MUST NOT be served to users of a paid product (see NOTICE.md). The live
+#    collection is `chavruta_commercial` (~2.4M, 100% commercial) — restore it from its snapshot with
+#    scripts/restore_commercial_tonight.ps1 instead. This path is for research only:
 python scripts/load_all_indexes.py                     # add --fresh to drop + reload from scratch
 
 # …or just ONE tier (e.g. the Talmud Yerushalmi):
@@ -206,8 +211,8 @@ for the full tier→repo table.
 
 ### Run EVERYTHING (full stack)
 
-**Prerequisites:** the corpus/index is already embedded and loaded into the local Qdrant (15 tiers,
-~2.93M points — see "Load the RAG" above if not), and `.env` holds `NEBIUS_API_KEY` (write access not
+**Prerequisites:** the corpus/index is already embedded and loaded into the local Qdrant
+(`chavruta_commercial`, 15 tiers, ~2.4M points — see "Load the RAG" above if not), and `.env` holds `NEBIUS_API_KEY` (write access not
 needed for serving). If so, the whole system is just **three commands** — Qdrant → backend → frontend:
 
 ```powershell
@@ -270,7 +275,9 @@ python scripts\bootstrap_rag.py --repo Yehuda-Rubin/chavruta-index-yerushalmi --
 ### The trust gate — run the evaluation harness (Principle V)
 
 ```powershell
-# corpus-aware gates for the full bookshelf (retrieval@K + honesty):
+# primary full-corpus gate (covers all 15 tiers, every intent):
+python scripts/run_eval.py --retrieval-only --dataset eval/corpus_v1.jsonl
+# legacy gates (kept for historical comparison):
 python scripts/run_eval.py --retrieval-only --dataset eval/halacha_v1.jsonl
 python scripts/run_eval.py --retrieval-only --dataset eval/lessons_v1.jsonl
 # eval/tanakh_v1.jsonl is the HISTORICAL Tanakh-only baseline (see its header) — not a full-corpus gate
@@ -312,10 +319,10 @@ app/
   db.py                  SQLite chat-history persistence (sessions + messages, cascade delete)
   frontend/              React + Vite SPA (HE/EN i18n, clickable citations)
 scripts/                 fetch_* · embed_corpus_gpu · load_to_store · ask · run_eval · serve.ps1
-eval/tanakh_v1.jsonl     versioned evaluation set (HE/EN)
+eval/                    corpus_v1.jsonl (full-corpus gate) · halacha_v1.jsonl · lessons_v1.jsonl · tanakh_v1.jsonl (historical)
 tests/                   contract · integration · unit (the trust guarantees)
 specs/001-chavruta-redesign/   spec · plan · research · data-model · contracts · quickstart
-docs/                    CORPUS.md · NEBIUS_HALACHA_JOB.md · screenshots/
+docs/                    CONFIGURATION.md · CORPUS.md · NEBIUS_HALACHA_JOB.md · screenshots/
 ```
 
 ---
@@ -326,8 +333,8 @@ docs/                    CORPUS.md · NEBIUS_HALACHA_JOB.md · screenshots/
 The `src/chavruta/` core implements the MVP capabilities — grounded Q&A, explain/compare
 commentators (incl. supercommentary anchor chains), and structured lesson prep — behind
 config-swappable backends, with a test suite and a versioned evaluation harness. The corpus has
-grown from the validated Tanakh baseline (126k chunks) to the full Sefaria bookshelf — **~2.93M points
-across 15 tiers, incl. the Talmud Yerushalmi** — served from a hybrid Qdrant index with generation on
+grown from the validated Tanakh baseline (126k chunks) to the full Sefaria bookshelf — **~2.4M points
+across 15 tiers, incl. the Talmud Yerushalmi, all commercially licensed** — served from a hybrid Qdrant index with generation on
 the Nebius API (Qwen3-235B). The **static offline UI** ([app/frontend/public/ui/chavruta.html](app/frontend/public/ui/chavruta.html);
 the React SPA is deprecated) + FastAPI app ship with persistent SQLite chat history and full
 Hebrew/English UI. Halachic *rulings* remain advisory only, never a substitute for a competent rav

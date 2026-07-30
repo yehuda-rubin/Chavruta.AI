@@ -82,6 +82,18 @@ def _owner_from_key(authorization: str | None, x_api_key: str | None) -> str:
     return "u_" + hashlib.sha256(presented.encode()).hexdigest()[:16]
 
 
+def _has_consented(payload: dict) -> bool:
+    """Whether the account carries a real terms-acceptance + 18+ confirmation.
+
+    These are written into Supabase user_metadata at signup (SignIn.tsx) but were never checked
+    anywhere server-side — since the Supabase anon key is public by definition, anyone could create
+    a working account via Supabase's own signup API and skip both checkboxes entirely. This is that
+    check (found in the 2026-07-30 lawsuit-exposure audit, docs/legal/LAWSUIT-EXPOSURE-2026-07-30.md
+    Finding A)."""
+    meta = payload.get("user_metadata") or {}
+    return bool(meta.get("age_confirmed_18")) and bool(str(meta.get("terms_version") or "").strip())
+
+
 def require_auth(
     request: Request,
     authorization: str | None = Header(default=None),
@@ -89,14 +101,24 @@ def require_auth(
 ) -> None:
     """App-wide gate. Resolves the caller's identity (Supabase JWT `sub`, or a hashed API key, or
     'local'), stashes it on request.state for current_owner, and enforces the blocklist: a blocked
-    account is 403'd on every route except viewing/managing its own account."""
+    account is 403'd on every route except viewing/managing its own account. In Supabase mode, also
+    enforces that the account actually carries terms/age consent (see _has_consented) — again
+    exempting /me and /account so the frontend can detect the situation and let the user confirm."""
     path = request.url.path
     if path in _AUTH_EXEMPT:
         return
     if sb.enabled():
-        owner = sb.verify_sub(_bearer(authorization))
+        payload = sb.verify(_bearer(authorization))
+        if not payload:
+            raise HTTPException(status_code=401, detail="missing or invalid bearer token")
+        owner = payload.get("sub")
         if not owner:
             raise HTTPException(status_code=401, detail="missing or invalid bearer token")
+        if not _has_consented(payload) and not path.startswith(_BAN_EXEMPT_PREFIXES):
+            raise HTTPException(status_code=403, detail={
+                "error": "consent_required",
+                "message": "Terms of Use and age (18+) confirmation are required to use the service.",
+            })
     else:
         require_api_key(request, authorization, x_api_key)     # 401 on a bad/absent key
         owner = _owner_from_key(authorization, x_api_key)

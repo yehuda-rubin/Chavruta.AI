@@ -31,10 +31,12 @@ selected purely by configuration (Constitution Principle II):
   Sefaria's Links graph and `anchor_ref` chains (incl. supercommentary) to gather related
   material and traverse the chain of transmission across corpora (pasuk → Rishonim →
   Acharonim → Halacha).
-- **Generation (LLM)**: **dual-model by profile** — LOCAL uses a small Hebrew-capable model
-  that fits ~4–5GB RAM (`DictaLM-2.0-Instruct`, GGUF Q4, via Ollama/llama.cpp); CLOUD uses a
-  stronger serverless model (Nebius Token Factory, OpenAI-compatible). Same prompt + same
-  grounding/citation enforcement in both.
+- **Generation (LLM)**: **two backends selected by `CHAVRUTA_LLM_BACKEND`** — `nebius` (Nebius
+  Token Factory, OpenAI-compatible; the default even locally) and `bridge` (an agent answers
+  file-based jobs in-session, no external API). Same prompt + same grounding/citation enforcement
+  in both. *(Superseded 2026-07-13: this originally read "dual-model by profile", with a local
+  DictaLM GGUF served by Ollama as the offline half. That backend was removed and `bridge` took
+  over the no-external-API role.)*
 - **Corpus**: a **corpus registry** so adding a work/commentator (including supercommentaries
   and halachic works) is a data/config operation; ingestion also captures the **Links graph**
   and **anchor chains** (`anchor_kind=source|commentary`).
@@ -49,7 +51,7 @@ selected purely by configuration (Constitution Principle II):
 **Primary Dependencies**:
 - Embedding: `FlagEmbedding`/`sentence-transformers` running `BAAI/bge-m3` (dense + sparse).
 - Vector store: `qdrant-client` (embedded mode local; server mode cloud).
-- Local LLM: Ollama (or llama.cpp) serving `DictaLM-2.0-Instruct` GGUF Q4 (~4.4GB).
+- Bridge LLM: file-based job queue under `data/llm_bridge/`, answered in-session (no dependency).
 - Cloud LLM: OpenAI-compatible client pointed at Nebius Token Factory.
 - Optional reranker: `bge-reranker-v2-m3` (cloud profile / optional local).
 - UI: Streamlit. Orchestration: thin custom Python (no heavy LLM framework — Principle VI).
@@ -77,7 +79,7 @@ clean seam for a future web API).
 
 **Constraints**:
 - **Offline-capable**, no network at query time in the local profile.
-- Local LLM must fit **~4–5GB RAM** (DictaLM-2.0 Q4); total working set comfortably under
+- The local working set is retrieval-only (no local LLM since 2026-07-13); comfortably under
   16GB alongside bge-m3 + Qdrant.
 - **Deployment-agnostic**: local vs cloud differ by **configuration only**, no forked code.
 - **Grounding is mandatory**: answers built only from retrieved sources, every claim cited.
@@ -122,7 +124,7 @@ Endpoint deliverables.
 | I | Grounded, Never Invented (NON-NEGOTIABLE) | Generation prompt is built only from retrieved sources; a citation-enforcement step validates every claim maps to a retrieved source; explicit "no grounded source found" path; eval measures grounding. | ✅ Pass |
 | II | Deployment-Agnostic Core | All four backends (Embedding/VectorStore/LLM/Reranker) sit behind interfaces selected by a `Profile` config; no forked code paths; portable vector artifacts. | ✅ Pass |
 | III | Dynamic, Extensible Corpus | A `CorpusRegistry` + uniform chunk schema; adding a work/commentator is data/config; ingestion supports incremental add + re-index without full rebuild. | ✅ Pass |
-| IV | Bilingual by Design | bge-m3 (HE/EN) retrieval; Hebrew-capable LLM (DictaLM); answer-in-question-language prompt; RTL-aware UI; every chunk stores HE (+EN). | ✅ Pass |
+| IV | Bilingual by Design | bge-m3 (HE/EN) retrieval; Hebrew-capable generation; answer-in-question-language prompt; RTL-aware UI; every chunk stores HE (+EN). | ✅ Pass |
 | V | Measurable Trustworthiness | `eval/` harness over a 100+ item set; grounding/retrieval scores reproducible and comparable across runs; gate before accepting changes. | ✅ Pass |
 | VI | Simplicity First (YAGNI) | Thin custom orchestration instead of a heavy framework; reuse proven bge-m3 + Qdrant; reranking optional; one project. | ✅ Pass |
 | VII | User Experience | Streamlit chat with clickable citations, in-session follow-ups, honest empty/error states, RTL/LTR rendering, responsive feedback. | ✅ Pass |
@@ -166,7 +168,7 @@ src/chavruta/
 ├── store/             # VectorStore interface + QdrantStore impl (embedded/server)
 ├── retrieval/         # HybridRetriever (dense+sparse+RRF) + LinkExpander, optional Reranker,
 │                      #   ranking/dedup/anchoring
-├── llm/               # LLMBackend interface + LocalLLM (Ollama/DictaLM) + CloudLLM (Nebius)
+├── llm/               # LLMBackend interface + CloudLLM (Nebius) + BridgeLLM (in-session)
 ├── generation/        # grounded prompt builder + citation enforcement + "no source" path
 ├── pipeline/          # orchestration: query → retrieve → rank → generate → cite
 ├── intents/           # capability routing: qa | explain | lesson  (halacha reserved)

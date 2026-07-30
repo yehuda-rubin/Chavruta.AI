@@ -13,7 +13,9 @@ corpus indexer and the (external) link-graph builder MUST use this function.
 
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 
 _HEB = re.compile(r"[֐-׿]")    # any Hebrew letter → the ref carries a Hebrew label prefix
 _SEP = re.compile(r"[_.,:;]+")           # Sefaria depth/segment separators, treated as equivalent
@@ -125,7 +127,8 @@ def commentator_from_ref(ref: str | None) -> str | None:
     This exists because the commercial corpus was built without a `commentator_id` payload field,
     which the explain/compare intents filter on — so every "what does Rashi say here" question came
     back empty while Rashi sat in the index. The name is recoverable from the ref itself, so this is
-    metadata that can be backfilled without re-embedding anything (see scripts/backfill_structure.py).
+    metadata derived at READ time — there is no backfill script, and deliberately so: writing it
+    to 2.4M on-disk points measured at ~5 points/sec. See docs/CORPUS.md §7.2b.
     """
     if not ref:
         return None
@@ -193,6 +196,68 @@ def commentary_refs(base_refs, commentator_ids, *, max_comments: int = 8) -> lis
                     seen.add(c)
                     out.append(c)
     return out
+
+
+# ── Licence attribution: which WORK a stored ref belongs to ───────────────────────────────────────
+# Built once by scripts/build_license_table.py from the per-tier licenses.json the corpus build
+# produced — the record of which edition was actually ingested, which is not the same question as
+# which editions exist on Sefaria today.
+_LICENSES_PATH = Path(__file__).with_name("data") / "licenses.json"
+_licenses: dict[str, dict] | None = None
+_titles_by_len: list[str] = []
+
+
+def _load_licenses() -> dict[str, dict]:
+    """Load once. A missing or unreadable table degrades to empty — never breaks a query."""
+    global _licenses, _titles_by_len
+    if _licenses is None:
+        try:
+            _licenses = json.loads(_LICENSES_PATH.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            _licenses = {}
+        # Longest first, so 'Genesis Rabbah' is tested before 'Genesis'.
+        _titles_by_len = sorted(_licenses, key=len, reverse=True)
+    return _licenses
+
+
+def work_title_for_ref(ref: str | None) -> str | None:
+    """The Sefaria work title a stored ref belongs to, or None if the work is not in the table.
+
+    Matched against the KNOWN TITLES rather than parsed out of the ref, because no rule over the
+    string can do it. These two have the same shape and opposite answers:
+
+        Guide_for_the_Perplexed,_Part_1.1.1             -> 'Guide for the Perplexed'
+        Chafetz_Chaim_on_Sifra,_Behar,_Section_2.2.8    -> 'Chafetz Chaim on Sifra'
+
+    'Part 1' and 'Section 2' are indistinguishable as text; only the title set knows where each name
+    ends. It also handles names that end in a numeral ('Shoel uMeshiv Mahadura I') and names carrying
+    commas or apostrophes, all of which defeat a "strip the trailing numbers" rule.
+
+    The match must land on a segment boundary, or 'Genesis' would swallow 'Genesis Rabbah'.
+    """
+    if not ref:
+        return None
+    _load_licenses()
+    flat = ref.replace("_", " ")
+    for title in _titles_by_len:
+        if flat == title or flat.startswith(title + ".") or flat.startswith(title + ",") \
+                or flat.startswith(title + " "):
+            return title
+    return None
+
+
+def license_for_ref(ref: str | None, lang: str = "he") -> tuple[str, str]:
+    """(license, version_title) for a ref, per LANGUAGE — ('', '') when unknown.
+
+    Rights are per edition, and a work can be Public Domain in Hebrew while its English translation
+    is CC-BY, so the chunk's own language decides which side is read.
+    """
+    title = work_title_for_ref(ref)
+    if not title:
+        return "", ""
+    entry = _load_licenses().get(title) or {}
+    side = "en" if (lang or "he").lower().startswith("en") else "he"
+    return entry.get(f"{side}_license", "") or "", entry.get(f"{side}_version", "") or ""
 
 
 def canonical_ref(s: str | None) -> str:

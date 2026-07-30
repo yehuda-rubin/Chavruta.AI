@@ -39,7 +39,18 @@ Talmud is amud-linear (`Bava Metzia 2a` → corpus `Bava_Metzia.3.1`, `N=2·daf�
 DOTTED refs, so anchoring MUST emit BOTH spellings via `corpus/refs.py::with_ref_variants` (`_to_sefaria_ref`
 adds the underscore-dot variant + chapter→opening-verse) or the base pasuk/daf silently never anchors
 (this was a real recall bug — retrieval@8 was ~50% until fixed 2026-07-24, now ~83%; see [[ref-format-anchoring]]).
-After loading, run
+**`commentator_id` and `anchor_ref` are EMPTY on all 2.4M points too, and are NOT backfilled — they are
+derived at READ time** (fixed 2026-07-26/27; `docs/CORPUS.md §7.2b`). A server-side filter on
+`commentator_id` matched nothing, so "what does Rashi say here" answered *"there is no Rashi in the
+corpus"* with `Rashi_on_Genesis.1.1.1` in the index; and with `anchor_ref` empty a ref lookup returns the
+base segment ALONE, never its commentaries. Both are recovered from the ref string in
+`corpus/refs.py`: **`commentator_from_ref`** names the commentator on the way in
+(`Rashi_on_Genesis.1.1.1` → `rashi`) and **`commentary_refs`** builds the exact refs on the way out
+(`Genesis.1.1` + `rashi` → `Rashi_on_Genesis.1.1.{1..8}`), which the `ref` keyword index answers in
+milliseconds. **Do not "restore" the payload filter and do not write a backfill** — one was measured at
+~5 points/sec against the on-disk collection, i.e. days, to store what a string split already yields.
+Titles follow Sefaria's capitalisation (`or_hachaim` → `Or_HaChaim`), and Onkelos is filed as a bare
+prefix with no `_on_` (`Onkelos_Exodus.20.2`). After loading, run
 `scripts/create_payload_indexes.py` (keyword index on ref/anchor_ref) or link expansion / fetch_by_refs
 time out. Use `CHAVRUTA_QUERY_PLANNER=heuristic` (the LLM planner hallucinates named_refs that scope
 retrieval to the wrong tractate → 0 sources); a wrong scope now falls back to unscoped semantic search
@@ -47,4 +58,11 @@ retrieval to the wrong tractate → 0 sources); a wrong scope now falls back to 
 and the FINAL round forces a written answer instead of degrading (`src/chavruta/llm/agentic.py`). The
 lesson source-sheet is assembled from the FULL retrieved texts (not the model's truncated echo); a
 Hebrew-only rule + `_strip_foreign` scrub the model's CJK/Cyrillic multilingual bleed (`app/api.py`).
+
+**External DEV models (Devin CLI, Novita) — read `docs/DEV_MODELS.local.md` before using any of them.**
+It holds the API keys, the exact model slugs, which model to hand which kind of task, and the traps
+already hit (Devin Free serves ONLY its default model; Macaron burns its whole budget on Chinese
+`reasoning_content` unless given a large `max_tokens`, and 503s under load). That file is **gitignored
+because it contains secrets** — it is not on GitHub and must never be committed. These are tooling for
+building the product; the product's own engine is still `CHAVRUTA_LLM_BACKEND` (`nebius` / `bridge`).
 <!-- SPECKIT END -->

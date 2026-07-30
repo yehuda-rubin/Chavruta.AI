@@ -31,7 +31,7 @@ def client(monkeypatch, tmp_path):
 
     # Generation echoes the owner so any cross-owner leak is visible in the response body.
     def fake_run_query(question, lang, intent, history, *, audience="", grade_band="",
-                       length="", owner_id="local"):
+                       length="", owner_id="local", llm=None):
         return api.QueryResponse(answer=f"answer for {owner_id}", citations=[], grounded=True,
                                  intent=intent or "qa", files=[])
 
@@ -104,24 +104,68 @@ def test_auth_required_when_keys_set(client, monkeypatch):
 
 
 def test_free_quota_blocks_over_limit_and_me_reflects_it(client, monkeypatch):
+    """Quota is metered in TOKENS since the 2026-07-26 rework, not in messages.
+
+    This test used to set CHAVRUTA_FREE_DAILY_QUOTA and count requests. That variable is dead — no
+    code reads it — so the test passed no quota at all, sent three requests, got three 202s and
+    failed on the third. It was red for the right reason and testing nothing, which is worse than
+    absent: the integration surface that proves a free account can be cut off had no cover at all.
+    """
     monkeypatch.setenv("CHAVRUTA_API_KEYS", "k")
-    monkeypatch.setenv("CHAVRUTA_FREE_DAILY_QUOTA", "2")
+    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", "25000")
     h = {"Authorization": "Bearer k"}
+    owner = client.get("/me", headers=h).json()["owner"]
+
+    # One turn is admitted…
     assert client.post("/query/async", headers=h, json={"question": "a"}).status_code == 202
-    assert client.post("/query/async", headers=h, json={"question": "b"}).status_code == 202
-    third = client.post("/query/async", headers=h, json={"question": "c"})
-    assert third.status_code == 429
+
+    # …then spend the day's budget outright. Counting requests instead would race the worker: the
+    # turn is admitted against an ESTIMATE and _settle_tokens corrects it to the real cost once the
+    # job finishes, which under a stubbed LLM is nearly nothing — so the reservation is handed back
+    # before the next request arrives and nothing appears to be metered at all.
+    db.bump_usage(owner, 25_000, weekly_limit=0, units=25_000, meter=db.TOKENS)
+
+    blocked = client.post("/query/async", headers=h, json={"question": "b"})
+    assert blocked.status_code == 429, "a free account past its daily tokens must be refused"
     me = client.get("/me", headers=h).json()
-    assert me["authenticated"] and me["daily_quota"] == 2 and me["remaining"] == 0
+    # Reported as a FRACTION remaining, never an absolute token count — see MeOut.
+    assert me["authenticated"] and me["day_left"] == 0.0
+
+
+def test_byok_header_grants_a_second_allowance_over_http(client, monkeypatch):
+    """End-to-end: a caller-supplied X-User-LLM-Key admits a request over HTTP once the plan's own
+    token quota is spent, and is refused once the SAME-SIZED BYOK allowance is also spent — the key
+    is a second allowance, not an unlimited escape hatch. _byok_llm is stubbed (the fake pipeline
+    here has no real .profile/wire_source_fetcher — see the `client` fixture) since the point of
+    this test is the quota routing, not building a real provider client."""
+    from types import SimpleNamespace as _NS
+
+    monkeypatch.setattr(api, "_byok_supported", lambda: True)
+    monkeypatch.setattr(api, "_byok_llm", lambda key, base_url="", model="": _NS())
+    monkeypatch.setenv("CHAVRUTA_API_KEYS", "k")
+    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", "25000")
+    h = {"Authorization": "Bearer k"}
+    owner = client.get("/me", headers=h).json()["owner"]
+
+    db.bump_usage(owner, 25_000, weekly_limit=0, units=25_000, meter=db.TOKENS)
+    assert client.post("/query/async", headers=h, json={"question": "a"}).status_code == 429
+
+    hk = {**h, "X-User-LLM-Key": "user-owns-this-key"}
+    assert client.post("/query/async", headers=hk, json={"question": "a"}).status_code == 202
+
+    db.bump_usage(owner, 25_000, weekly_limit=0, units=25_000, meter=db.BYOK_TOKENS)
+    blocked = client.post("/query/async", headers=hk, json={"question": "b"})
+    assert blocked.status_code == 429, "a key is a second allowance, not unlimited"
 
 
 def test_local_user_never_quota_limited(client, monkeypatch):
-    # Quota set, but auth off ⇒ everyone is 'local' ⇒ unlimited (local/offline unchanged).
-    monkeypatch.setenv("CHAVRUTA_FREE_DAILY_QUOTA", "1")
+    """Quota set, but auth off ⇒ everyone is 'local' ⇒ uncapped. The offline path must not be
+    metered: there is no account to bill and no provider cost to contain."""
+    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", "1")
     for _ in range(3):
         assert client.post("/query/async", json={"question": "x"}).status_code == 202
     me = client.get("/me").json()
-    assert me["authenticated"] is False and me["daily_quota"] is None
+    assert me["authenticated"] is False and me["day_left"] is None
 
 
 def test_account_deletion_schedule_reflect_cancel(client, monkeypatch):
@@ -159,7 +203,11 @@ def test_blocked_account_403d_but_can_see_status(client, monkeypatch):
 
 
 def test_billing_config_disabled_by_default(client):
-    assert client.get("/billing/config").json() == {"enabled": False}
+    cfg = client.get("/billing/config").json()
+    assert cfg["enabled"] is False
+    # `tiers` rides along so the frontend never hardcodes a price. It carries no absolute
+    # allowance — that separation is the whole point of public_catalogue (legal review finding B).
+    assert not any(k for t in cfg["tiers"] for k in t if "token" in k or "lesson" in k)
 
 
 def test_billing_checkout_local_and_unconfigured(client, monkeypatch):
@@ -174,20 +222,31 @@ def test_billing_checkout_local_and_unconfigured(client, monkeypatch):
 def test_billing_webhook_rejects_unsigned(client):
     # No valid PayPlus HMAC/user-agent ⇒ 400 (a forged callback can't activate a plan).
     r = client.post("/billing/webhook", json={"transaction": {"status_code": "000", "more_info": "x"}})
-    assert r.status_code == 400
+    # 503, not 400: with no signing secret configured the webhook FAILS CLOSED and refuses to
+    # process at all, rather than parsing an unverifiable body. Tightened after a security review
+    # found the endpoint forgeable; this test predated that and still expected the softer answer.
+    assert r.status_code == 503
 
 
 def test_plan_based_quota_switch(client, monkeypatch):
+    """Upgrading the plan must widen the allowance — and NO tier is unlimited.
+
+    This asserted `daily_quota is None` on the paid plan, i.e. unlimited. That is no longer true and
+    must not become true again: on a product whose marginal cost is tokens, unlimited is an
+    open-ended liability (see app/plans.py). Every tier now carries a real number, so the check is
+    that the paid tier is strictly larger than free, not that it is boundless.
+    """
     monkeypatch.setenv("CHAVRUTA_API_KEYS", "k")
-    monkeypatch.setenv("CHAVRUTA_FREE_DAILY_QUOTA", "2")
-    monkeypatch.setenv("CHAVRUTA_PAID_DAILY_QUOTA", "0")   # paid = unlimited
     h = {"Authorization": "Bearer k"}
     me = client.get("/me", headers=h).json()
-    assert me["plan"] == "free" and me["daily_quota"] == 2
-    # A billing webhook would call db.set_plan; simulate it and re-check the quota tier.
+    assert me["plan"] == "free" and me["multiple"] == 1
+
+    # A billing webhook would call db.set_plan; simulate it and re-check the tier.
     db.set_plan(me["owner"], "paid")
     me2 = client.get("/me", headers=h).json()
-    assert me2["plan"] == "paid" and me2["daily_quota"] is None   # unlimited on the paid plan
+    assert me2["plan"] == "pro"     # 'paid' is the legacy alias; canonical() resolves it to the pro tier
+    assert me2["multiple"] > me["multiple"], "a paid plan must actually buy more"
+    assert me2["day_left"] is not None, "no tier is unlimited"
 
 
 if __name__ == "__main__":

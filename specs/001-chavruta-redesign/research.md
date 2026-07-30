@@ -19,6 +19,25 @@ simplicity) and the offline envelope (CPU-only 16GB laptop).
 
 ## D1 — Local LLM: DictaLM-2.0-Instruct (GGUF Q4), config-swappable
 
+> ### ⛔ REVERSED 2026-07-13 — there is no local LLM
+>
+> **D1 and the 2026-06-10 update above are both superseded and are kept only as the record of how
+> the decision was reached.** The local generation backend was removed outright: there is no
+> `src/chavruta/llm/local.py`, no Ollama client, and no Dicta model in the dependency set. Nothing
+> in the project requires Ollama installed.
+>
+> **What replaced it:** two backends chosen by `CHAVRUTA_LLM_BACKEND` — `nebius` (the API, and the
+> default *even when running locally*) and `bridge` (`src/chavruta/llm/bridge.py`, an agent
+> answering file-based jobs in-session), which now carries the no-external-API requirement that D1
+> was written to satisfy.
+>
+> **Why it held anyway:** the requirement D1 was serving — that the offline path need no external
+> API — is still met, and swapping the implementation cost config rather than code, which is what
+> Principle II was for. The premise that turned out to be wrong was that a *local model* was the
+> only way to satisfy it.
+>
+> Read the rest of this section as history.
+
 - **Decision**: Use `DictaLM-2.0-Instruct` (7B, Mistral-based, Hebrew-specialized by Dicta)
   quantized to GGUF **Q4_K_M (~4.4GB)** as the default LOCAL generation model, served via
   Ollama/llama.cpp. The model id is a **config value**, so it can be swapped (e.g. Q3 ~3.5GB

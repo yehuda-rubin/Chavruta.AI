@@ -2,11 +2,16 @@
 #
 # ⚠️ PREREQUISITE — the corpus is NOT included and NOT downloaded automatically.
 #    A fresh `docker compose up` gives you an EMPTY Qdrant. The API will start, but every question
-#    returns nothing. Load the corpus first (this takes a long time and a lot of disk — see
-#    docs/CORPUS.md), against the running qdrant service:
+#    returns nothing. Restore the PRODUCTION collection first, against the running qdrant service
+#    (see docs/COMMERCIAL_CORPUS.md):
 #
 #       docker compose up -d qdrant
-#       python scripts/load_all_indexes.py          # downloads the 15 index tiers from HuggingFace
+#       QDRANT_CONTAINER=chavruta-qdrant python scripts/restore_commercial_snapshot.py
+#           # ^ restores chavruta_commercial from the HF snapshot, RAM-safe (docker cp + local-file
+#           #   recover instead of an HTTP upload — matters on anything under ~2x the snapshot size,
+#           #   e.g. a small cloud VM). Do NOT use scripts/load_all_indexes.py here — it builds a
+#           #   DIFFERENT, non-commercial collection (chavruta_mixed) and must never be pointed at
+#           #   chavruta_commercial; that script exists only for local experimentation.
 #       python scripts/create_payload_indexes.py    # REQUIRED — without it, ref anchoring times out
 #
 #    `/ready` tells you the truth: it returns 503 with a reason until the collection has points.

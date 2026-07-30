@@ -23,6 +23,15 @@ def _env(name: str, default: str) -> str:
     return os.environ.get(name, default)
 
 
+def _llm_preset(name: str):
+    """A named provider preset, or None. Imported lazily so config stays free of llm imports."""
+    if not (name or "").strip():
+        return None
+    from chavruta.llm.presets import resolve
+
+    return resolve(name)
+
+
 def _env_bool(name: str, default: bool) -> bool:
     raw = os.environ.get(name)
     if raw is None:
@@ -73,6 +82,9 @@ class Profile:
     # disconnect, so that orphaned work keeps billing. Bound it explicitly.
     llm_timeout_s: float = 180.0
     llm_max_retries: int = 1
+    # A floor under every per-call output budget, for models that reason before they answer. 0 for a
+    # model that answers directly (the baseline). See chavruta/llm/presets.py.
+    llm_min_output_tokens: int = 0
 
     # ── Query understanding (spec 002) ──
     query_planner: str = "none"               # "none" (heuristic only) | "llm" (LLM fallback)
@@ -107,6 +119,19 @@ class Profile:
         p.llm_model = _env("CHAVRUTA_LLM_MODEL", p.llm_model)
         p.llm_base_url = _env("CHAVRUTA_LLM_BASE_URL", p.llm_base_url)
         p.llm_api_key = _env("CHAVRUTA_LLM_API_KEY", p.llm_api_key)
+        p.llm_min_output_tokens = int(_env("CHAVRUTA_LLM_MIN_OUTPUT_TOKENS",
+                                           str(p.llm_min_output_tokens)))
+        # A named preset (chavruta/llm/presets.py) fills in the base URL, model and output floor for
+        # a known provider. Applied AFTER the explicit variables and only where they were not set, so
+        # naming a preset never overrides something the operator stated outright — which is what lets
+        # "the preset, but this one model" work without a second preset.
+        if preset := _llm_preset(_env("CHAVRUTA_LLM_PRESET", "")):
+            if "CHAVRUTA_LLM_BASE_URL" not in os.environ:
+                p.llm_base_url = preset.base_url
+            if "CHAVRUTA_LLM_MODEL" not in os.environ:
+                p.llm_model = preset.model
+            if "CHAVRUTA_LLM_MIN_OUTPUT_TOKENS" not in os.environ:
+                p.llm_min_output_tokens = preset.min_output_tokens
         p.llm_temperature = float(_env("CHAVRUTA_LLM_TEMPERATURE", str(p.llm_temperature)))
         p.llm_max_tokens = int(_env("CHAVRUTA_LLM_MAX_TOKENS", str(p.llm_max_tokens)))
         p.llm_timeout_s = float(_env("CHAVRUTA_LLM_TIMEOUT_S", str(p.llm_timeout_s)))

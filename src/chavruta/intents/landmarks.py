@@ -105,16 +105,29 @@ _TORAH_FIRST_RE = re.compile(
     r"|(?:ב?תחילת|ריש)\s+(?:ה)?(?:תורה|חומש))"
 )
 
+# The words that may sit between "the first verse of" and the book itself. Hebrew stacks them freely
+# — "של ספר בראשית", "בספר שמות", "בבראשית" — and each layer is optional, so they are composed rather
+# than enumerated. Enumerating them is what went wrong before: the list held "של " and "ספר " and
+# "בספר " but not "של ספר ", so "הפסוק הראשון של ספר בראשית" resolved to nothing while
+# "הפסוק הראשון בבראשית" resolved fine. A question that names its verse in the more formal register
+# simply lost its anchor.
+_OF_THE_BOOK = r"(?:של\s+)?(?:ה?ספר\s+|ב(?:ה?ספר\s+)?)?"
+_OF_THE_TRACTATE = r"(?:של\s+)?(?:ה?מסכת\s+|ב(?:ה?מסכת\s+)?)?"
+
 # "הפסוק הראשון בבראשית" / "הפסוק הראשון בספר שמות" / "תחילת ספר ויקרא"
+# / "הפסוק הראשון של ספר בראשית"
 _FIRST_VERSE_RE = re.compile(
-    rf"(?:[הב]?פסוק\s+(?:ה)?ראשון|פסוק\s+ראשון|ב?תחילת|ריש|בתחילת)\s+"
-    rf"(?:ספר\s+|ב|של\s+|בספר\s+)?(?P<book>{_HE_BOOK_ALT})"
+    rf"(?:[הב]?פסוק\s+(?:ה)?ראשון|פסוק\s+ראשון|ב?תחילת|ריש)\s+"
+    rf"{_OF_THE_BOOK}(?P<book>{_HE_BOOK_ALT})"
 )
 
-# "הדף הראשון בבבא מציעא" → tractate opens at daf 2a
+# "הדף הראשון בבבא מציעא" / "תחילת מסכת ברכות" / "תחילת בבא מציעא" → tractate opens at daf 2a.
+# "מסכת" is optional: people say "תחילת בבא מציעא" far more often than they say the full form, and
+# requiring the word meant "מה מפרש רש\"י על תחילת בבא מציעא" produced no ref at all — so anchoring
+# never ran and retrieval answered with Rashi on some other daf entirely.
 _FIRST_DAF_RE = re.compile(
-    rf"(?:הדף\s+הראשון|דף\s+ראשון|תחילת\s+מסכת)\s+"
-    rf"(?:מסכת\s+|ב|של\s+)?(?P<tractate>{_HE_TRACTATE_ALT})"
+    rf"(?:ה?דף\s+(?:ה)?ראשון|ב?תחילת|ריש)\s+"
+    rf"{_OF_THE_TRACTATE}(?P<tractate>{_HE_TRACTATE_ALT})"
 )
 
 # "פרק שלישי בסנהדרין" / "פרק ג' בבבא מציעא" / "פרק 3 בגיטין" (prefix-tolerant: "הדף הראשון בפרק…").

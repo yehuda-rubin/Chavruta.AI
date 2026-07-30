@@ -6,8 +6,13 @@ and that the trust gate runs. Commands are Windows PowerShell (the project's she
 ## Prerequisites
 
 - Python 3.13 venv at `.venv` (exists).
-- Ollama installed, with the local model pulled (DictaLM-2.0 Q4, ~4.4GB):
-  `ollama pull hf.co/dicta-il/DictaLM-3.0-1.7B-Thinking-GGUF:Q8_0`  *(model id is config-driven; swap if RAM-tight)*
+- A generation backend selected via `CHAVRUTA_LLM_BACKEND`:
+  - `nebius` (**default**) — the hosted API; needs `CHAVRUTA_LLM_API_KEY` in `.env`.
+  - `bridge` — no external API; an agent answers file-based jobs in-session (`scripts/serve_bridge.ps1`).
+
+  > ⚠️ **The local DictaLM/Ollama backend was REMOVED (product decision 2026-07-13).** Earlier
+  > revisions of this file told you to `ollama pull` a Dicta model; there is no `src/chavruta/llm/local.py`
+  > and no Ollama client. Nothing here needs Ollama installed.
 - The Tanakh corpus already fetched (`data/processed/…`) and embedded vectors available.
 - Profile set to local (default): `$env:CHAVRUTA_PROFILE = "local"`.
 

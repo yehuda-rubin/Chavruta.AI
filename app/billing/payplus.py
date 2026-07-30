@@ -5,6 +5,7 @@ API contract per docs.payplus.co.il (verified 2026-07-19):
   auth     headers `api-key`, `secret-key`
   checkout POST /PaymentPages/generateLink  → { data: { payment_page_link, page_request_uid } }
   cancel   POST /RecurringPayments/{uid}/Valid  { valid: false }
+  refund   POST /Transactions/RefundByTransactionUID  { transaction_uid, amount }
   webhook  header `hash` = base64(HMAC-SHA256(raw body, secret-key)); user-agent == "PayPlus";
            payload transaction.status_code == "000" ⇒ success; more_info round-trips our owner id.
 """
@@ -120,6 +121,48 @@ def cancel_recurring(recurring_uid: str, terminal_uid: str | None = None) -> Non
     r.raise_for_status()
 
 
+def refund(transaction_uid: str, amount: float, *, description: str = "") -> dict:
+    """Refund a charge, in full or in part, and return the provider's parsed response.
+
+    Terms §10 promises cancellation within 14 days of a distance sale with a refund, and until now
+    nothing in this module could give money back — the promise was kept by hand or not at all. This
+    is the call behind it. It is deliberately NOT wired to a user-facing route: a refund is an
+    irreversible movement of real money and is issued by an operator through scripts/refund.py,
+    which shows the charge and asks before it runs.
+
+    `amount` may be less than the original charge — the statutory cancellation fee (the lower of 5%
+    or ₪100) is withheld by refunding the remainder, so the arithmetic lives in app/plans.py and
+    only the final number arrives here.
+
+    ⚠️ NOT exercised against a live PayPlus terminal — no refund has run here. Their reference
+    documents the endpoint and the two required fields (verified 2026-07-27), but the response shape
+    is not published, so success is taken from the HTTP status and the whole body is returned for
+    the operator to read and for the ledger note. Check the first real refund against the PayPlus
+    dashboard before trusting the reported result, and override the path with PAYPLUS_REFUND_PATH if
+    their API names it differently.
+    """
+    import requests
+
+    if not transaction_uid:
+        raise ValueError("refund needs the provider's transaction uid")
+    if amount <= 0:
+        raise ValueError(f"refund amount must be positive, got {amount}")
+    path = os.environ.get("PAYPLUS_REFUND_PATH", "Transactions/RefundByTransactionUID").strip("/")
+    body = {"transaction_uid": transaction_uid, "amount": round(float(amount), 2)}
+    if description:
+        # Their `more_info` becomes the product line on a partial-refund document.
+        body["more_info"] = description
+    r = requests.post(f"{_base()}/{path}", json=body, headers=_headers(), timeout=_TIMEOUT)
+    if not r.ok:
+        # Do not swallow this. A refund that silently failed while we wrote a refund row to the
+        # ledger is worse than no refund at all: the books would say the customer was paid back.
+        raise RuntimeError(f"payplus refund failed ({r.status_code}): {r.text[:300]}")
+    try:
+        return r.json() or {}
+    except ValueError:
+        return {"raw": r.text[:500]}
+
+
 def verify_webhook(raw_body: bytes, user_agent: str | None, hash_header: str | None) -> bool:
     """True iff the callback is authentically from PayPlus: user-agent 'PayPlus' and the `hash` header
     equals base64(HMAC-SHA256(raw body bytes, secret-key)). Hash the EXACT raw bytes, never re-serialized
@@ -141,12 +184,19 @@ def verify_webhook(raw_body: bytes, user_agent: str | None, hash_header: str | N
 
 
 def parse_event(payload: dict) -> dict:
-    """Normalise a callback into {owner_id, success, recurring_uid, is_renewal, amount}."""
+    """Normalise a callback into {owner_id, success, transaction_uid, recurring_uid, is_renewal, amount}.
+
+    `transaction_uid` identifies THIS charge, where `recurring_uid` identifies the subscription that
+    produced it. Refunds are issued against the former, so it has to be captured here and stored —
+    without it a customer asking for their money back leaves us with a subscription handle and no
+    way to name the payment.
+    """
     txn = payload.get("transaction") or {}
     rec = txn.get("recurring_charge_information") or {}
     return {
         "owner_id": txn.get("more_info") or payload.get("more_info"),
         "success": str(txn.get("status_code")) == "000",
+        "transaction_uid": txn.get("uid") or txn.get("transaction_uid"),
         "recurring_uid": rec.get("recurring_uid"),
         "is_renewal": bool(rec),                 # renewal callbacks carry recurring_charge_information
         "amount": txn.get("amount"),

@@ -4,9 +4,70 @@ import type { FileOut, Lang, Message } from "@/lib/types";
 import { EXAMPLES, INTENT_LABEL, IntentId, tr } from "@/lib/i18n";
 import { commentatorTag, isHe, renderText } from "@/lib/format";
 import { downloadDoc } from "@/lib/doc";
+import { api } from "@/lib/api";
 import { Icon } from "./Icon";
 import { IntentBar } from "./IntentBar";
 import { LessonOptions, LessonFields } from "./LessonOptions";
+
+// Flags a specific answer for operator review — the self-serve half of the defamation/quality
+// safety net noted in docs/legal/LAWSUIT-EXPOSURE-2026-07-30.md Finding C: grounding reduces but
+// does not eliminate the risk of a mischaracterizing answer, so a quick report path is how one
+// actually gets noticed. Self-contained state, same pattern as SettingsModal's ChangePasswordField.
+function ReportButton({ lang, messageId }: { lang: Lang; messageId: number }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  if (sent) {
+    return <span className="mt-3 text-xs text-ink/40 inline-flex items-center gap-1">
+      <Icon name="check" className="text-[15px]" />{tr(lang, "reportSent")}
+    </span>;
+  }
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="mt-3 text-xs text-ink/40 hover:text-tekhelet inline-flex items-center gap-1 transition"
+      >
+        <Icon name="flag" className="text-[15px]" />
+        {tr(lang, "reportAnswer")}
+      </button>
+    );
+  }
+
+  const submit = async () => {
+    setBusy(true);
+    try {
+      await api.reportMessage(messageId, reason);
+      setSent(true);
+    } catch {
+      setSent(true); // don't trap the user in a retry loop over a best-effort report
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 flex flex-col gap-1.5">
+      <input
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder={tr(lang, "reportPlaceholder")}
+        className="text-xs bg-white/70 rounded-lg px-2.5 py-1.5 ring-1 ring-line/60 outline-none"
+      />
+      <div className="flex gap-3">
+        <button onClick={submit} disabled={busy} className="text-xs text-tekhelet font-semibold hover:underline disabled:opacity-50">
+          {tr(lang, "reportSubmit")}
+        </button>
+        <button onClick={() => setOpen(false)} className="text-xs text-ink/40 hover:text-tekhelet">
+          {tr(lang, "reportCancel")}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function LessonFiles({ lang, files, onPreview }: { lang: Lang; files: FileOut[]; onPreview: (f: FileOut) => void }) {
   return (
@@ -97,19 +158,22 @@ function Bubble({ lang, m, onPreview }: { lang: Lang; m: Message; onPreview: (f:
           </div>
         )}
         {m.text && (
-          <button
-            onClick={() => {
-              navigator.clipboard?.writeText(m.text).then(() => {
-                setCopied(true);
-                setTimeout(() => setCopied(false), 1500);
-              }).catch(() => {});
-            }}
-            aria-label={tr(lang, "copy")}
-            className="mt-3 text-xs text-ink/40 hover:text-tekhelet inline-flex items-center gap-1 transition"
-          >
-            <Icon name={copied ? "check" : "content_copy"} className="text-[15px]" />
-            {tr(lang, copied ? "copied" : "copy")}
-          </button>
+          <div className="flex items-center gap-4 flex-wrap">
+            <button
+              onClick={() => {
+                navigator.clipboard?.writeText(m.text).then(() => {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                }).catch(() => {});
+              }}
+              aria-label={tr(lang, "copy")}
+              className="mt-3 text-xs text-ink/40 hover:text-tekhelet inline-flex items-center gap-1 transition"
+            >
+              <Icon name={copied ? "check" : "content_copy"} className="text-[15px]" />
+              {tr(lang, copied ? "copied" : "copy")}
+            </button>
+            {m.id != null && <ReportButton lang={lang} messageId={m.id} />}
+          </div>
         )}
       </div>
     </div>
