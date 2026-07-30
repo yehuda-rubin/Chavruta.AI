@@ -142,12 +142,26 @@ sudo docker run -d --name caddy --network host \
 with `/etc/caddy/Caddyfile`:
 
 ```
-your-domain.com {
+chavruta.duckdns.org {
     reverse_proxy localhost:5173
 }
 ```
 
-Once the domain resolves, set `CHAVRUTA_PUBLIC_URL=https://your-domain.com` in `.env` and
+**Registered 2026-07-30**: `chavruta.duckdns.org`, via [DuckDNS](https://www.duckdns.org) (free
+dynamic-DNS, chosen over `eu.org`/`is-a.dev` for instant approval — no manual review wait). TLS
+works identically to any other domain: Caddy's automatic Let's Encrypt issuance doesn't care who
+the DNS provider is, only that the A record resolves to this box.
+
+⚠️ **DuckDNS gotcha — it's *dynamic* DNS, so the A record only stays correct if something keeps it
+updated.** Two ways to handle that, pick one before relying on the domain:
+- **Preferred:** in the OCI console, promote the instance's ephemeral public IP to a **Reserved
+  Public IP** (Always Free includes one) — then it never changes on stop/reboot and DuckDNS never
+  needs to be told anything again.
+- **Fallback**, if staying on the ephemeral IP: add a cron job on the VM that pings DuckDNS's
+  update endpoint with your token every few minutes (see the token on your DuckDNS domains page) —
+  otherwise a reboot silently breaks the domain until someone notices.
+
+Once the domain resolves, set `CHAVRUTA_PUBLIC_URL=https://chavruta.duckdns.org` in `.env` and
 `docker compose up -d api` to pick it up (needed for PayPlus callbacks once billing turns on, and
 for `CORS_ORIGINS` if the UI and API ever end up on different hosts).
 
