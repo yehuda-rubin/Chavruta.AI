@@ -66,6 +66,18 @@ def test_deleting_a_session_takes_its_messages(d, alice_session):
     assert d.get_messages(alice_session, ALICE) == []
 
 
+def test_another_user_cannot_report_into_it(d, alice_session):
+    """report_message (docs/legal/LAWSUIT-EXPOSURE-2026-07-30.md Finding C) must not let one
+    account flag a message inside another's private conversation."""
+    msg_id = d.get_messages(alice_session, ALICE)[-1]["id"]
+    with pytest.raises(ValueError):
+        d.report_message(msg_id, BOB, "reason")
+    d.report_message(msg_id, ALICE, "mischaracterizes a named person")
+    row = d.get_conn().execute("SELECT * FROM message_reports WHERE message_id=?", (msg_id,)).fetchone()
+    assert row["owner_id"] == ALICE
+    assert row["reason"] == "mischaracterizes a named person"
+
+
 # ── Lessons ───────────────────────────────────────────────────────────────────
 @pytest.fixture
 def alice_lesson(d):

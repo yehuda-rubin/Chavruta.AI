@@ -31,7 +31,7 @@ def client(monkeypatch, tmp_path):
 
     # Generation echoes the owner so any cross-owner leak is visible in the response body.
     def fake_run_query(question, lang, intent, history, *, audience="", grade_band="",
-                       length="", owner_id="local"):
+                       length="", owner_id="local", llm=None):
         return api.QueryResponse(answer=f"answer for {owner_id}", citations=[], grounded=True,
                                  intent=intent or "qa", files=[])
 
@@ -130,6 +130,32 @@ def test_free_quota_blocks_over_limit_and_me_reflects_it(client, monkeypatch):
     me = client.get("/me", headers=h).json()
     # Reported as a FRACTION remaining, never an absolute token count — see MeOut.
     assert me["authenticated"] and me["day_left"] == 0.0
+
+
+def test_byok_header_grants_a_second_allowance_over_http(client, monkeypatch):
+    """End-to-end: a caller-supplied X-User-LLM-Key admits a request over HTTP once the plan's own
+    token quota is spent, and is refused once the SAME-SIZED BYOK allowance is also spent — the key
+    is a second allowance, not an unlimited escape hatch. _byok_llm is stubbed (the fake pipeline
+    here has no real .profile/wire_source_fetcher — see the `client` fixture) since the point of
+    this test is the quota routing, not building a real provider client."""
+    from types import SimpleNamespace as _NS
+
+    monkeypatch.setattr(api, "_byok_supported", lambda: True)
+    monkeypatch.setattr(api, "_byok_llm", lambda key, base_url="", model="": _NS())
+    monkeypatch.setenv("CHAVRUTA_API_KEYS", "k")
+    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", "25000")
+    h = {"Authorization": "Bearer k"}
+    owner = client.get("/me", headers=h).json()["owner"]
+
+    db.bump_usage(owner, 25_000, weekly_limit=0, units=25_000, meter=db.TOKENS)
+    assert client.post("/query/async", headers=h, json={"question": "a"}).status_code == 429
+
+    hk = {**h, "X-User-LLM-Key": "user-owns-this-key"}
+    assert client.post("/query/async", headers=hk, json={"question": "a"}).status_code == 202
+
+    db.bump_usage(owner, 25_000, weekly_limit=0, units=25_000, meter=db.BYOK_TOKENS)
+    blocked = client.post("/query/async", headers=hk, json={"question": "b"})
+    assert blocked.status_code == 429, "a key is a second allowance, not unlimited"
 
 
 def test_local_user_never_quota_limited(client, monkeypatch):

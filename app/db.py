@@ -63,7 +63,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -107,6 +107,18 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_messages_session
             ON messages(session_id, id);
+
+        -- User-flagged answers, for operator review — the self-serve half of the defamation/
+        -- quality safety net (docs/legal/LAWSUIT-EXPOSURE-2026-07-30.md Finding C): grounding
+        -- reduces but does not eliminate the risk of a mischaracterizing answer about a real named
+        -- person, and this is the fast path to notice and correct one.
+        CREATE TABLE IF NOT EXISTS message_reports (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            message_id  INTEGER NOT NULL,
+            owner_id    TEXT NOT NULL,
+            reason      TEXT,
+            created_at  TEXT NOT NULL
+        );
 
         -- 'My Shiurim' library: generated lessons persisted on their own (not just inside a chat),
         -- so teachers can browse, reopen and reuse them. CREATE IF NOT EXISTS is idempotent.
@@ -391,6 +403,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
             if col not in scols:
                 conn.execute(f"ALTER TABLE subscriptions ADD COLUMN {col} {ddl}")
 
+    # v20: message_reports is a brand-new table (see CREATE TABLE IF NOT EXISTS above) — no ALTER
+    # needed on an existing database, so there is nothing to do here beyond the version bump.
+
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
 
@@ -615,6 +630,25 @@ def get_messages(session_id: str, owner_id: str = "local") -> list[dict[str, Any
         d["files"] = json.loads(d["files"]) if d.get("files") else []
         out.append(d)
     return out
+
+
+def report_message(message_id: int, owner_id: str, reason: str) -> None:
+    """Record a user-flagged answer for operator review — see message_reports in _migrate() for why
+    this exists. Verifies the message belongs to a session the caller owns (same scoping as
+    get_messages), so one account can't flag into another's private conversation; raises ValueError
+    if it doesn't, which the route turns into a 404."""
+    with _tx(get_conn()) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM messages WHERE id=? "
+            "AND session_id IN (SELECT id FROM sessions WHERE owner_id=?)",
+            (message_id, owner_id),
+        ).fetchone()
+        if row is None:
+            raise ValueError("message not found")
+        conn.execute(
+            "INSERT INTO message_reports (message_id, owner_id, reason, created_at) VALUES (?,?,?,?)",
+            (message_id, owner_id, (reason or "").strip()[:500], datetime.now(UTC).isoformat()),
+        )
 
 
 # ── 'My Shiurim' saved-lesson library ────────────────────────────────────────
@@ -894,6 +928,11 @@ def week_days(day: str | None = None) -> list[str]:
 
 
 TOKENS, LESSON = "tokens", "lesson"
+# BYOK (bring-your-own-key): a second allowance of the SAME size as the plan's own, spent only when
+# the plan quota is exhausted AND the caller supplied their own provider API key for that request
+# (never persisted — see app/api.py::_byok_llm). Own meters so the two pools never mix: the plan
+# quota still resets/reports exactly as it did before this existed.
+BYOK_TOKENS, BYOK_LESSON = "byok_tokens", "byok_lesson"
 
 
 def _counts(conn, owner_id: str, day: str, meter: str) -> tuple[int, int]:

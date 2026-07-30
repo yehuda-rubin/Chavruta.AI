@@ -11,9 +11,62 @@ export function setAuthToken(token: string | null) {
   _authToken = token;
 }
 
+// BYOK (bring-your-own-key): the user's own provider API key, if they've entered one in Settings.
+// Lives ONLY in this tab's memory + the browser's localStorage — it is never sent anywhere except as
+// this one header on a generation call, and the backend never persists it (see app/api.py::_byok_llm).
+// Read from localStorage once at module load so it survives closing/reopening the browser on the
+// same device without the user re-typing it; a different device/browser starts with none, which is
+// the accepted tradeoff for not storing it server-side at all.
+const _BYOK_STORAGE_KEY = "chavruta.userLlmKey";
+// Optional: point the key at a DIFFERENT provider/model than this deployment's own. "" (the default)
+// means "use this deployment's own configured provider/model" — see app/api.py::_byok_llm.
+const _BYOK_BASE_URL_KEY = "chavruta.userLlmBaseUrl";
+const _BYOK_MODEL_KEY = "chavruta.userLlmModel";
+
+function _lsGet(k: string): string | null {
+  return typeof window !== "undefined" ? window.localStorage.getItem(k) : null;
+}
+function _lsSet(k: string, v: string | null) {
+  if (typeof window === "undefined") return;
+  if (v) window.localStorage.setItem(k, v);
+  else window.localStorage.removeItem(k);
+}
+
+let _userLLMKey: string | null = _lsGet(_BYOK_STORAGE_KEY);
+let _userLLMBaseUrl: string | null = _lsGet(_BYOK_BASE_URL_KEY);
+let _userLLMModel: string | null = _lsGet(_BYOK_MODEL_KEY);
+
+export function getUserLLMKey(): string | null {
+  return _userLLMKey;
+}
+export function getUserLLMBaseUrl(): string | null {
+  return _userLLMBaseUrl;
+}
+export function getUserLLMModel(): string | null {
+  return _userLLMModel;
+}
+
+export function setUserLLMKey(key: string | null) {
+  _userLLMKey = key && key.trim() ? key.trim() : null;
+  _lsSet(_BYOK_STORAGE_KEY, _userLLMKey);
+}
+export function setUserLLMBaseUrl(url: string | null) {
+  _userLLMBaseUrl = url && url.trim() ? url.trim() : null;
+  _lsSet(_BYOK_BASE_URL_KEY, _userLLMBaseUrl);
+}
+export function setUserLLMModel(model: string | null) {
+  _userLLMModel = model && model.trim() ? model.trim() : null;
+  _lsSet(_BYOK_MODEL_KEY, _userLLMModel);
+}
+
 async function req<T>(path: string, opts?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (_authToken) headers.Authorization = `Bearer ${_authToken}`;
+  if (_userLLMKey) {
+    headers["X-User-LLM-Key"] = _userLLMKey;
+    if (_userLLMBaseUrl) headers["X-User-LLM-Base-URL"] = _userLLMBaseUrl;
+    if (_userLLMModel) headers["X-User-LLM-Model"] = _userLLMModel;
+  }
   const res = await fetch(path, {
     ...opts,
     headers: { ...headers, ...(opts?.headers as Record<string, string> | undefined) },
@@ -153,6 +206,24 @@ export const api = {
       body: JSON.stringify({ email, name, plan, cycle }),
     }),
   cancelSubscription: () => req<{ ok: boolean }>("/billing/cancel", { method: "POST" }),
+
+  // Flag a specific answer for operator review — the self-serve half of the defamation/quality
+  // safety net (grounding reduces but doesn't eliminate the risk of a mischaracterizing answer).
+  reportMessage: (messageId: number, reason: string) =>
+    req<{ ok: boolean }>(`/messages/${messageId}/report`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }),
+
+  // BYOK: validate a candidate key/base-url/model BEFORE saving it (see setUserLLMKey et al.) — the
+  // candidate key is sent explicitly as a header (overriding whatever is already saved) so this
+  // checks what the user just typed, not necessarily what's persisted yet.
+  byokCheck: (candidateKey: string, model: string, baseUrl: string, lang: string) =>
+    req<{ ok: boolean; models: string[]; message: string }>(`/byok/check?lang=${lang}`, {
+      method: "POST",
+      headers: { "X-User-LLM-Key": candidateKey },
+      body: JSON.stringify({ model, base_url: baseUrl }),
+    }),
 };
 
 // Account + today's free-tier quota (GET /me). daily_quota / remaining are null when unlimited
@@ -170,6 +241,13 @@ export interface Me {
   lessons_exhausted: boolean;
   multiple: number;                         // usage relative to free: the only allowance figure shown
   credits: number;                          // prepaid generations, spent once a cap is hit
+  // BYOK (bring-your-own-key): whether this deployment's backend even accepts a provider key (false
+  // for the bridge backend), and — once the pools above are exhausted — a SECOND allowance the same
+  // size as the plan's own, spent only when the user has entered their own key in Settings.
+  byok_supported: boolean;
+  byok_day_left: number | null;
+  byok_week_left: number | null;
+  byok_lessons_left: number | null;
   plan_until: string | null;                // ISO ts the paid/coupon period ends
   cycle: string;                            // 'monthly' | 'annual' | 'coupon'
   cancel_at_period_end: boolean;            // cancelled: access runs to plan_until, then lapses

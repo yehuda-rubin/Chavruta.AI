@@ -61,6 +61,17 @@ review — a court can still narrow it in a specific dispute. This isn't fixable
 drafting judgment call a lawyer should look at specifically, given it's one of the clauses this
 product depends on most.
 
+**🔧 Drafting mitigated 2026-07-30 (still an inherent risk, not "closed"):** Terms §3 (v1.4→v1.5,
+`web/lib/legal.ts` + `docs/legal/terms-{he,en}.md`) now splits the blanket exemption into two
+separate clauses — (1) the accuracy/"AS IS" disclaimer, unchanged in substance, and (2) a
+**concrete liability cap** (the amount the user paid in the preceding 3 months, or ₪100 on the free
+plan), carved out for willful misconduct/gross negligence, subject to any overriding mandatory law.
+A stated cap is understood to survive Standard-Contracts-Law scrutiny better than a blanket "we owe
+you nothing" clause — courts and the Tribunal object most to the latter shape specifically. This
+does not make the clause immune to review (nothing can, short of removing limitation-of-liability
+language entirely, which isn't viable for this product) — it is a better-drafted version of the
+same inherent risk, not a resolution of it. A lawyer should still review the exact wording.
+
 Source: [Standard Contracts Law, 1982 (Nevo)](https://www.nevo.co.il/law_html/law00/70311.htm),
 [consumer-rights summary of prohibited clause categories](https://www.consumers.org.il/category/unfair-terms-in-standard-contract).
 
@@ -95,6 +106,38 @@ for platform-liability-for-AI-content case law returned nothing conclusive; this
 is not something to try to code around — it's worth a direct question to a lawyer, and worth
 keeping in mind as a real (if hard to quantify) tail risk as usage grows, especially if the product
 is ever asked about controversial or living figures at scale.
+
+**🔧 Additional mitigations shipped 2026-07-30 (severity unchanged — still HIGH, still not
+"closed"):**
+1. **Prompt guidance for named real people** (`src/chavruta/generation/grounded.py`, `SYSTEM_QA` /
+   `SYSTEM_BASE_HE` — inherited by every intent, since `SYSTEM_EXPLAIN`/`SYSTEM_LESSON`/the
+   walkthrough variants all build on these two): when a claim characterizes a specific real,
+   identifiable person, the model is now instructed to stay close to the source's own wording
+   rather than its own paraphrase, and not add evaluative/judgmental language the source itself
+   doesn't state. This narrows exactly the gap the citation-faithfulness guard doesn't cover
+   (paraphrase, not verbatim fabrication) — but it is a prompt instruction, not an architectural
+   block, so it reduces rather than eliminates the risk.
+2. **The forced final-round answer now has an explicit honest exit**
+   (`src/chavruta/llm/agentic.py::_FINAL_ANSWER_NOTE`): previously the last agentic-retrieval round
+   only instructed the model to "write the full answer now" from whatever sources it had. It now
+   explicitly authorizes the model to say the corpus doesn't support a reliable answer instead of
+   guessing — the model keeps the ability to decline even after exhausting every retrieval round,
+   not just on earlier rounds. This was a deliberate design requirement (the alternative — forcing
+   an answer no matter how thin the sources — is exactly the shape of thing that turns a hard
+   retrieval case into a defamation case) and is verified in code, not assumed.
+3. **A user-facing report path**: `POST /messages/{id}/report` (`app/api.py`) +
+   `db.report_message()` (new `message_reports` table, schema v20) let a user flag a specific
+   answer for operator review, with a "Report answer" control on every assistant message
+   (`web/components/ChatPane.tsx`). This doesn't prevent a bad answer from being generated, but it
+   shortens the window before one is noticed and corrected — relevant to a duty-of-care argument
+   even though it isn't a technical safeguard.
+
+**Deliberately NOT built:** a heuristic to catch strong/evaluative language paired with a named
+person and low source-overlap (the natural next step beyond the verbatim-quote guard) was
+considered and intentionally skipped as of 2026-07-30 — it risks false positives against genuinely
+sourced but strongly-worded halachic/historical disputes, and wasn't judged worth building yet at
+current usage scale. If usage grows, or the product is asked about controversial living figures at
+scale, revisit this.
 
 Sources: [Defamation Law overview — Wikipedia](https://he.wikipedia.org/wiki/%D7%97%D7%95%D7%A7_%D7%90%D7%99%D7%A1%D7%95%D7%A8_%D7%9C%D7%A9%D7%95%D7%9F_%D7%94%D7%A8%D7%A2), [statutory-damages summary](https://www.shlomiweinberg.co.il/blog/defamation-claim-without-proof-of-damage/).
 

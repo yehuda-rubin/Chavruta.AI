@@ -496,6 +496,7 @@ export default function Home() {
         onUpgrade={upgrade}
         onCancelSubscription={cancelSubscription}
         onRedeemCoupon={me?.authenticated ? redeemCoupon : undefined}
+        byokSupported={me?.byok_supported}
       />
       <SupportModal open={showSupport} lang={lang} onClose={() => setShowSupport(false)} />
       <FilePreviewModal file={previewFile} lang={lang} onClose={() => setPreviewFile(null)} />

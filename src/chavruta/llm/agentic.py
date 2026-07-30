@@ -57,13 +57,25 @@ _REASONING_MSG = _BUDGET_MSG
 DEGRADE_MESSAGES = (frozenset(_TIMEOUT_MSG.values()) | frozenset(_NOFETCH_MSG.values())
                     | frozenset(_CONFIG_MSG.values()) | frozenset(_BUDGET_MSG.values()))
 
-# Appended to the job on the FINAL retrieval round to force a real answer out of a model that keeps
+# Appended to the job on the FINAL retrieval round to force a DECISION out of a model that keeps
 # replying ===NEED_SOURCES=== (rather than dead-ending in a degrade when sources were actually found).
+# The decision is "answer now, from what you have" OR "say plainly it isn't enough" — never a third
+# option of asking again, and never silently guessing to fill a gap. Grounding is what keeps a made-up
+# or mischaracterizing answer about a real source (or a real named person) from being the easy way out
+# of a thin final round (docs/legal/LAWSUIT-EXPOSURE-2026-07-30.md Finding C) — so this must keep the
+# honest "not enough to answer" exit open even on the last round, not just on earlier ones.
 _FINAL_ANSWER_NOTE = {
-    "he": "\n\n## הוראה אחרונה — חובה\nלא ניתן למשוך מקורות נוספים. כתוב עכשיו את התשובה/השיעור המלא על "
-          "סמך המקורות שכבר ניתנו למעלה בלבד. אל תשיב שוב ב-===NEED_SOURCES===.",
-    "en": "\n\n## FINAL INSTRUCTION — REQUIRED\nNo more sources can be fetched. Write the full answer/lesson "
-          "NOW using ONLY the sources already provided above. Do NOT reply with ===NEED_SOURCES=== again.",
+    "he": "\n\n## הוראה אחרונה — חובה\nלא ניתן למשוך מקורות נוספים. אם המקורות שכבר ניתנו למעלה מספיקים — "
+          "כתוב עכשיו את התשובה/השיעור המלא על סמכם בלבד. אם גם לאחר כל הסבבים המקורות אינם מספיקים "
+          "לתשובה אמינה ומבוססת — אל תנחש ואל תמלא את הפער: אמור זאת בפירוש (למשל: \"אין בקורפוס די "
+          "מקור כדי לענות על כך באחריות\") במקום לכתוב תשובה לא מעוגנת. בכל מקרה אל תשיב שוב "
+          "ב-===NEED_SOURCES===.",
+    "en": "\n\n## FINAL INSTRUCTION — REQUIRED\nNo more sources can be fetched. If the sources already "
+          "provided above are enough, write the full answer/lesson NOW using ONLY them. If, even after "
+          "every round, the sources genuinely do not support a reliable answer, do not guess or fill the "
+          "gap — say so plainly (e.g. \"the corpus does not contain enough grounded material to answer "
+          "this responsibly\") instead of writing an ungrounded answer. Either way, do NOT reply with "
+          "===NEED_SOURCES=== again.",
 }
 
 

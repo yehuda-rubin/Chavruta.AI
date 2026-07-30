@@ -6,7 +6,16 @@
 
 # Privacy Policy — Chavruta AI
 
-**Version 1.3 · Effective 27 July 2026**
+**Version 1.5 · Effective 30 July 2026**
+
+Changes in version 1.5: clarified that if the user points their own API key (see the Terms of Use)
+at a provider and model other than the default, the custom base URL and model name are also not
+collected or stored by us — exactly like the key itself (section 1).
+
+Changes in version 1.4: added a reference to **Your Own API Key (Bring Your Own Key)** — see the
+Terms of Use: if the user chooses to enter their own key, it is not collected or stored by us at all
+(section 1), and in that case their questions are sent to the provider via their own account rather
+than through our arrangement with it — that provider's own terms govern that data (section 3).
 
 Changes in version 1.3: section 7 rewritten — **the Service is not intended for minors**,
 registration requires an age confirmation, and we neither ask for nor need pupil data of any kind.
@@ -46,6 +55,10 @@ email address for sign-in); sources you attach are provided voluntarily, at your
   — only measurements. In addition, basic technical records are kept (request id, IP address) for
   security and rate limiting.
 - **Local preferences:** language, theme and display settings are stored in your browser (localStorage).
+- **Your own API key (if you choose to use one — see the Terms of Use):** the API key, a custom
+  provider base URL and a custom model name are **not collected or stored by us at all** — they stay
+  only in your browser and are sent to our servers only at the moment of actual use, to relay your
+  request to the provider on your behalf.
 - **Subscription & billing data:** if you purchase a subscription — your subscription status and period
   dates, and a reference (token) to the payment method held by the payment provider. **We do not see or
   store your full card number** — it is handled by the payment provider.
@@ -68,6 +81,12 @@ ask us to enable, and no tier that buys one. The rule in this section — what i
 sent — is the only protection that exists here, which is why it is written as a rule and not as a
 recommendation. If we move to a provider that offers a non-training path, we will update this section
 and give notice.
+
+**If you choose to use your own API key** (see the Terms of Use, including the option to point it at
+a provider and model other than the Service's default), your questions and attached sources are sent
+to that provider using your own key and account — **not through our arrangement with it**. In that
+case, that provider's own terms and privacy practices, as you accepted them directly when creating
+the key, govern that data — not the arrangement described above.
 
 ## 4. Sharing
 We do not sell your data. We use sub-processors only to run the Service: the registration provider

@@ -138,6 +138,19 @@ def _classify(exc: Exception) -> Exception:
     return LLMTransientError(f"{name}: {exc}")
 
 
+def list_models(base_url: str, api_key: str, *, timeout_s: float = 15.0) -> list[str]:
+    """The model ids an OpenAI-compatible provider actually serves at `base_url` for this key — used
+    to validate a BYOK caller's requested model name (app/api.py::/byok/check) before ever wiring it
+    into a real generation call, and to offer a pick-list when the requested one isn't there. Pricing
+    is deliberately NOT attempted here: the OpenAI `models.list()` shape carries no cost field, and
+    providers differ too much for a generic guess to be honest — the caller states that plainly
+    rather than inventing a number."""
+    from openai import OpenAI  # lazy — see CloudLLM._client_
+
+    client = OpenAI(base_url=base_url, api_key=api_key, timeout=timeout_s, max_retries=0)
+    return sorted(m.id for m in client.models.list().data)
+
+
 class CloudLLM:
     profile = "cloud"
     source_fetcher = None       # injected by the pipeline for agentic retrieval
