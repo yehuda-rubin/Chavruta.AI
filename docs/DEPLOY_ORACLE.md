@@ -153,13 +153,25 @@ works identically to any other domain: Caddy's automatic Let's Encrypt issuance 
 the DNS provider is, only that the A record resolves to this box.
 
 ⚠️ **DuckDNS gotcha — it's *dynamic* DNS, so the A record only stays correct if something keeps it
-updated.** Two ways to handle that, pick one before relying on the domain:
-- **Preferred:** in the OCI console, promote the instance's ephemeral public IP to a **Reserved
-  Public IP** (Always Free includes one) — then it never changes on stop/reboot and DuckDNS never
-  needs to be told anything again.
-- **Fallback**, if staying on the ephemeral IP: add a cron job on the VM that pings DuckDNS's
-  update endpoint with your token every few minutes (see the token on your DuckDNS domains page) —
-  otherwise a reboot silently breaks the domain until someone notices.
+updated.** Both of the following are set up; do the first one (it needs your own OCI login, so it
+can't be scripted from here), and the second is already in the repo as a fallback / belt-and-suspenders:
+
+1. **Reserved Public IP — a console action only you can do:** OCI Console → **Networking → IP
+   Management → Reserved Public IPs** → create one → **Compute → Instances → (this instance) →
+   attached VNIC → edit the public IP → swap in the reserved one.** Always Free includes exactly
+   one, at no cost. Once attached, the IP never changes on stop/reboot and DuckDNS never needs to
+   be told anything again — do this even if you also set up the cron fallback below, since it
+   removes the failure mode entirely instead of just papering over it every 5 minutes.
+2. **Cron fallback (`scripts/duckdns_update.sh`)**, in case you skip step 1 or the reserved IP
+   isn't attached yet: reads a `DUCKDNS_TOKEN` from `.env` (gitignored — the token is never
+   committed) and re-points the domain at whatever the box's current IP is. Get the token from your
+   DuckDNS domains page, add `DUCKDNS_TOKEN=...` to `.env` (see `.env.example`), then:
+   ```bash
+   chmod +x scripts/duckdns_update.sh
+   crontab -e
+   # add:
+   */5 * * * * /path/to/chavruta/scripts/duckdns_update.sh >> /var/log/duckdns.log 2>&1
+   ```
 
 Once the domain resolves, set `CHAVRUTA_PUBLIC_URL=https://chavruta.duckdns.org` in `.env` and
 `docker compose up -d api` to pick it up (needed for PayPlus callbacks once billing turns on, and
