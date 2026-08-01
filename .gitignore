@@ -100,7 +100,7 @@ checkpoints/
 .ruff_cache/
 .ipynb_checkpoints/
 .hf_cache/
-huggingface/
+/huggingface/
 
 # ---- Testing / coverage ----
 .coverage

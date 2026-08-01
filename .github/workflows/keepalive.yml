@@ -1,0 +1,27 @@
+name: HF Space keep-alive
+
+# Free HF CPU Spaces sleep after 48h with no traffic, and sleeping wipes the ephemeral disk (see
+# docs/DEPLOY_HFSPACE.md §4) — the next wake needs a fresh multi-GB corpus restore before anyone's
+# first question works. A ping every 20 minutes keeps the Space well inside that 48h window, so it
+# never sleeps in the first place. Runs for free on a public repo.
+
+on:
+  schedule:
+    - cron: "*/20 * * * *"
+  workflow_dispatch:   # manual "run now" button in the Actions tab, for testing this workflow itself
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the Space
+        run: |
+          # TODO: replace with your actual Space URL once created (docs/DEPLOY_HFSPACE.md §1-3):
+          #   https://<your-username>-<space-name>.hf.space
+          SPACE_URL="https://REPLACE-ME.hf.space"
+          if [ "$SPACE_URL" = "https://REPLACE-ME.hf.space" ]; then
+            echo "::warning::SPACE_URL is still the placeholder — edit .github/workflows/keepalive.yml"
+            exit 0
+          fi
+          curl -fsS --max-time 30 "$SPACE_URL" > /dev/null && echo "pinged $SPACE_URL — OK" \
+            || echo "::warning::ping to $SPACE_URL failed (Space may be cold-starting or down)"
