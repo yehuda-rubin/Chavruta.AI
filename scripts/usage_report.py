@@ -14,6 +14,7 @@ Point it at the same DB the API uses via CHAVRUTA_DB_PATH (defaults to ./chavrut
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -50,15 +51,28 @@ def main() -> None:
         print(f"no usage recorded ({period}).")
         return
 
+    accounts = db.count_accounts()
+
     print(f"═══ Chavruta.AI — usage report · {period} ═══\n")
     print(f"  requests        {total:,}")
-    print(f"  users           {h.get('users') or 0:,}")
+    print(f"  users (active)  {h.get('users') or 0:,}  — distinct accounts with a request this period")
+    print(f"  accounts (all)  {accounts['total']:,}  — registered, whether or not they've asked anything")
+    for plan, n in sorted(accounts["by_plan"].items(), key=lambda kv: kv[1], reverse=True):
+        print(f"      {plan or '(none)':<12}{n:,}")
     print(f"  billed tokens   {h.get('tokens') or 0:,}")
     print(f"  grounded        {h.get('grounded') or 0:,}  ({_pct(h.get('grounded'), total)})")
     print(f"  no source       {h.get('no_source') or 0:,}  ({_pct(h.get('no_source'), total)})")
     print(f"  agentic reruns  {h.get('agentic') or 0:,}  ({_pct(h.get('agentic'), total)})")
     print(f"  errors          {h.get('errors') or 0:,}  ({_pct(h.get('errors'), total)})")
     print(f"  avg latency     {(h.get('avg_ms') or 0) / 1000:.1f}s")
+
+    conc = db.usage_concurrency(since)
+    if conc.get("peak") is not None:
+        # Read directly rather than importing app.api — that import pulls in torch/FlagEmbedding,
+        # heavy weight for what should be a fast, read-only reporting script.
+        allowed = os.environ.get("CHAVRUTA_MAX_CONCURRENT_GENERATIONS", "2")
+        print(f"  concurrency     peak {int(conc['peak'])}  ·  avg {conc['avg']:.2f}"
+              f"  (of {allowed} allowed at once)")
 
     print(f"\n── by mode {'─' * 46}")
     print(f"{'MODE':<12}{'REQ':>7}{'SHARE':>8}{'TOKENS':>12}{'AVG':>9}{'GROUNDED':>10}{'AVG s':>8}")
@@ -79,6 +93,13 @@ def main() -> None:
     for r in dows:
         name = _DOW[r["dow"]] if r["dow"] is not None and r["dow"] < 7 else "?"
         print(f"  {name:<8}{r['requests']:>5}  {_bar(r['requests'], peak)}")
+
+    weeks = db.usage_by_week(since)
+    if len(weeks) > 1:      # a single week is just the total again — only show this when it's a trend
+        print(f"\n── traction: users per week {'─' * 29}")
+        print(f"{'WEEK':<10}{'REQUESTS':>10}{'USERS':>8}")
+        for r in weeks:
+            print(f"{r['week']:<10}{r['requests']:>10,}{r['users']:>8,}")
 
     lessons = db.lesson_breakdown(since)
     if lessons:

@@ -499,6 +499,100 @@ def test_run_query_propagates_http_exception(monkeypatch):
         api._run_query("שאלה", "he", "nonsense-intent", [])
 
 
+# ── Global concurrency gate (2026-07-31): _run_query is the ONE choke point both the sync routes
+# (inline) and the async job workers pass through, so bounding it here caps total concurrent
+# generations system-wide — not per-route — which matters on a 2-vCPU free-tier box where letting
+# an unbounded number of simultaneous synchronous /query requests run would bypass the job registry's
+# own small worker pool entirely.
+def test_run_query_returns_busy_response_when_at_capacity(monkeypatch):
+    import threading
+    monkeypatch.setattr(api, "_GENERATION_QUEUE_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(api, "_generation_semaphore", threading.Semaphore(1))
+    api._generation_semaphore.acquire()   # simulate the one slot already being in use
+    monkeypatch.setattr(api, "_run_query_impl", lambda *a, **k: (_ for _ in ())
+                        .throw(AssertionError("must not run generation while at capacity")))
+    resp = api._run_query("שאלה", "he", "qa", [])
+    assert resp.grounded is False
+    assert "עמוסה" in resp.answer
+
+
+def test_run_query_returns_busy_response_in_english(monkeypatch):
+    import threading
+    monkeypatch.setattr(api, "_GENERATION_QUEUE_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(api, "_generation_semaphore", threading.Semaphore(1))
+    api._generation_semaphore.acquire()
+    resp = api._run_query("question", "en", "qa", [])
+    assert resp.grounded is False
+    assert "busy" in resp.answer.lower()
+
+
+def test_run_query_releases_the_semaphore_after_success(monkeypatch):
+    import threading
+    monkeypatch.setattr(api, "_generation_semaphore", threading.Semaphore(1))
+    monkeypatch.setattr(api, "_run_query_impl",
+                        lambda *a, **k: api.QueryResponse(answer="ok", citations=[], grounded=True,
+                                                          intent="qa", files=[]))
+    api._run_query("q1", "he", "qa", [])
+    # A single slot: this second call would hang until the timeout if the first call had leaked it.
+    resp = api._run_query("q2", "he", "qa", [])
+    assert resp.answer == "ok"
+
+
+def test_run_query_releases_the_semaphore_after_a_degraded_exception(monkeypatch):
+    import threading
+    monkeypatch.setattr(api, "_generation_semaphore", threading.Semaphore(1))
+    monkeypatch.setattr(api, "_run_query_impl",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    api._run_query("q1", "he", "qa", [])   # degrades to an error QueryResponse, must still release
+    monkeypatch.setattr(api, "_run_query_impl",
+                        lambda *a, **k: api.QueryResponse(answer="ok", citations=[], grounded=True,
+                                                          intent="qa", files=[]))
+    resp = api._run_query("q2", "he", "qa", [])
+    assert resp.answer == "ok"
+
+
+def test_run_query_records_how_many_generations_were_actually_concurrent(monkeypatch):
+    """concurrent_at_start (app/db.py) must reflect what really happened, not the configured
+    ceiling — start several _run_query calls at once (a semaphore roomy enough to admit them all)
+    and confirm the peak observed count matches how many were genuinely in flight together."""
+    import threading
+
+    monkeypatch.setattr(api, "_generation_semaphore", threading.Semaphore(5))
+    barrier = threading.Barrier(3)
+    seen = []
+
+    def _impl(*a, **k):
+        barrier.wait(timeout=2)   # all three must be inside _run_query at the same instant
+        seen.append(api._concurrency_at_start.get())
+        return api.QueryResponse(answer="ok", citations=[], grounded=True, intent="qa", files=[])
+
+    monkeypatch.setattr(api, "_run_query_impl", _impl)
+    threads = [threading.Thread(target=api._run_query, args=(f"q{i}", "he", "qa", []))
+               for i in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=3)
+
+    assert len(seen) == 3
+    assert max(seen) == 3            # all three really were in flight together
+    assert api._in_flight_count == 0  # and the counter is back to zero once every thread finished
+
+
+def test_record_event_writes_the_concurrency_context_var_into_the_usage_event(monkeypatch):
+    """_record_event must read the SAME ContextVar _run_query sets, not a stale/default value —
+    otherwise every usage_events row would silently record concurrency=0 regardless of reality."""
+    captured = {}
+    monkeypatch.setattr(api.db, "record_usage_event", lambda **kw: captured.update(kw))
+    monkeypatch.setattr(api.db, "get_plan", lambda owner_id: "free")
+    token = api._concurrency_at_start.set(4)
+    try:
+        api._record_event("local", "qa", None, {}, None, None, ms=10)
+    finally:
+        api._concurrency_at_start.reset(token)
+    assert captured["concurrent_at_start"] == 4
+
+
 def test_base_sources_for_refs_canonicalises_dedups_and_scores(monkeypatch):
     """base_sources_for_refs must look up the canonical ref, return RankedHits at score 1.0, and dedup."""
     calls = []
