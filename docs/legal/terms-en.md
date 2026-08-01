@@ -6,7 +6,12 @@
 
 # Terms of Use — Chavruta AI
 
-**Version 1.8 · Effective 30 July 2026**
+**Version 1.9 · Effective 2 August 2026**
+
+Changes in version 1.9: section 6 gained a disclosure of **automatic message scanning** (keyword-
+based, not AI) for unlawful, abusive, or potentially defamatory content — see the Privacy Policy,
+section 1, for the full mechanism. There are no registered users yet, so no individual prior notice
+was needed; the update takes effect from its publication date.
 
 Changes in version 1.8: the personal-key section (12, from version 1.7) was extended — you may now
 also point it at an entirely different provider and model than the Service's default, validated
@@ -119,6 +124,13 @@ question and receives the lesson is the teacher.
 When attaching sources (text, PDF or Word) you represent that you have the right to use them, and you
 permit us to process them to generate your answer. Do not upload unlawful or offensive content, or
 content that infringes another's copyright or privacy.
+
+**Automatic content scanning.** Messages in the Service (both questions and answers) go through an
+automatic, keyword-based scan (**not** AI, and not meaning-based analysis) for content that may be
+unlawful or abusive, or that may pose a defamation risk toward a real person. The scan **does not
+block, delete, or alter** any content automatically — a flagged message is only ever passed on for
+our own manual review. See the Privacy Policy, section 1, for the full mechanism and what is
+retained.
 
 **Note — conversations are deleted after 3 months.** A conversation with no activity for 90 days is
 deleted automatically with its messages; any new message in that conversation resets the clock.
