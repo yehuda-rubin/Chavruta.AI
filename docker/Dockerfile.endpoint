@@ -42,6 +42,12 @@ COPY pyproject.toml ./
 
 RUN pip install -e . --no-deps && chown -R app:app /app
 
+# /app-data is where the chavruta_db named volume mounts (docker-compose.yml). A named volume
+# with nothing to seed it from is created root:root by Docker, which the non-root `app` user below
+# can't write into ("unable to open database file" on every startup) — pre-creating it here with the
+# right owner means Docker copies that ownership onto the volume the first time it's created.
+RUN mkdir -p /app-data && chown app:app /app-data
+
 USER app
 
 # Pre-download bge-m3 weights so the first request isn't slow (as `app`, into HF_HOME above).
