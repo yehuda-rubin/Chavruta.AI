@@ -15,6 +15,7 @@ function authErrorKey(msg: string): StringKey {
   if (m.includes("not confirmed") || m.includes("confirm your email")) return "authErrUnconfirmed";
   if (m.includes("at least") && m.includes("password")) return "authErrWeakPassword";
   if (m.includes("email") && (m.includes("invalid") || m.includes("valid"))) return "authErrBadEmail";
+  if (m.includes("rate limit")) return "authErrRateLimited";
   return "authGenericError";
 }
 
