@@ -171,13 +171,19 @@ def test_school_audience_detected(text):
     assert api._detect_school(text)
 
 
-# ── Fix (2026-07-13): strip model multilingual bleed (CJK / Cyrillic / Vietnamese) from output,
-# keeping Hebrew glued to a foreign char; legit Hebrew + English are untouched.
+# ── Fix (2026-07-13, generalized 2026-08-02): strip model multilingual bleed from output, keeping
+# Hebrew glued to a foreign char; legit Hebrew + English + common typography are untouched. Arabic
+# turned up live on 2026-08-02 — rather than adding it to an ever-growing enumerated list of scripts
+# (CJK, Cyrillic, Vietnamese diacritics, now Arabic), _FOREIGN_CHAR_RE was flipped to an ALLOWLIST
+# (ASCII + Hebrew + a few "smart" punctuation marks), so any OTHER script is caught automatically.
 @pytest.mark.parametrize("raw,expected", [
     ("בזדון违反 שבת", "בזדון שבת"),                          # CJK glued to Hebrew → Hebrew kept
     ("לא требуется הסכמה", "לא הסכמה"),                       # whole Cyrillic word removed
+    ("הטקסט מכיל ערבית: هذا نص عربي באמצע", "הטקסט מכיל ערבית: באמצע"),   # Arabic — the live 2026-08-02 report
     ("נבראו השמים והארץ", "נבראו השמים והארץ"),              # clean Hebrew untouched
-    ("Rashi explains thus", "Rashi explains thus"),          # English untouched
+    ("Rashi explains thus", "Rashi explains thus"),          # English untouched (handled elsewhere)
+    ("משפט עם — מקף ארוך ו\"מרכאות חכמות\" ו… שלוש נקודות",   # "smart" typography (em dash, curly
+     "משפט עם — מקף ארוך ו\"מרכאות חכמות\" ו… שלוש נקודות"),  # quotes, ellipsis) must survive the allowlist
 ])
 def test_strip_foreign_removes_bleed(raw, expected):
     assert api._strip_foreign(raw) == expected

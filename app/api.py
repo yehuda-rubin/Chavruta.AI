@@ -26,11 +26,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 _MARKER_RE = re.compile(r"\s*[\[(（【]\s*S\d+(?:\s*,\s*S\d+)*\s*[\])）】]")
 
 
-# CJK / Japanese-kana / Cyrillic / Vietnamese-diacritic characters — model multilingual bleed (Qwen
-# occasionally injects '违反', 'требуется', 'giải' into Hebrew text). Torah Hebrew/English/punctuation
-# never use these ranges. Strip the CHARS (not whole tokens) so Hebrew glued to a foreign char — e.g.
-# 'בזדון违反' — keeps 'בזדון'. A fully-foreign word collapses to nothing; the double space is cleaned.
-_FOREIGN_CHAR_RE = re.compile(r"[Ѐ-ӿ぀-ヿ㐀-䶿一-鿿Ạ-ỿ]+")
+# Model multilingual bleed (Qwen occasionally injects '违反', 'требуется', 'giải', or — caught live,
+# 2026-08-02 — Arabic into Hebrew text). Rather than enumerating each script as it turns up (CJK,
+# Cyrillic, Vietnamese diacritics, now Arabic — an endless list), this ALLOWLISTS what legitimate
+# output actually uses: ASCII (Hebrew/English/digits/markdown all live there; English words get the
+# careful sentence-rewrite treatment below, not blind deletion, since they can be grammatically
+# load-bearing), the Hebrew Unicode block, and the "smart" typography this app's own prose uses
+# (em/en dash, curly quotes, ellipsis, bullet, middle dot, NBSP). Anything else — any OTHER script —
+# has no legitimate use here at all, so it's simply not on the list and gets stripped. Strips the
+# CHARS (not whole tokens) so Hebrew glued to a foreign char — e.g. 'בזדון违反' — keeps 'בזדון'. A
+# fully-foreign word collapses to nothing; the double space left behind is cleaned.
+_ALLOWED_EXTRA_PUNCT = "‐‑‒–—―‘’“”…•· "
+_FOREIGN_CHAR_RE = re.compile(rf"[^\x00-\x7F֐-׿{_ALLOWED_EXTRA_PUNCT}]+")
 
 
 def _strip_foreign(text: str) -> str:
