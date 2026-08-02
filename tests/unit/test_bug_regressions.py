@@ -183,6 +183,27 @@ def test_strip_foreign_removes_bleed(raw, expected):
     assert api._strip_foreign(raw) == expected
 
 
+# ── Fix (2026-08-02): a real user reported the model injecting a stray English aside into an
+# otherwise-Hebrew answer, e.g. '...שמתוארת במשנה (Bava Metzia 3:1), עוסקת...' — reproduced live
+# against production. Strip a parenthetical made up ENTIRELY of Latin letters/digits/punctuation
+# when the answer is Hebrew (he=True); leave it in English answers, leave numeric-only asides like
+# '(1)' alone (no Latin letter), and leave a mixed Hebrew+Latin aside alone.
+@pytest.mark.parametrize("raw,expected", [
+    ("הסוגיה (Bava Metzia 3:1) עוסקת בטלית", "הסוגיה עוסקת בטלית"),
+    ("ראה שיטה זו (Rashi) לעיל", "ראה שיטה זו לעיל"),
+    ("סעיף (1) קובע", "סעיף (1) קובע"),                       # numeric-only aside untouched
+    ("עיין (רש\"י) שם", "עיין (רש\"י) שם"),                    # Hebrew-only aside untouched
+    ("עיין (עיין Rashi) שם", "עיין (עיין Rashi) שם"),          # mixed aside untouched
+])
+def test_strip_markers_removes_english_aside_in_hebrew_answers(raw, expected):
+    assert api._strip_markers(raw, he=True) == expected
+
+
+def test_strip_markers_keeps_english_aside_in_english_answers():
+    raw = "The sugya (Bava Metzia 3:1) discusses a garment"
+    assert api._strip_markers(raw, he=False) == raw
+
+
 # ── Tier0 (2026-07 audit): chavruta weak-retrieval must use the dense-cosine gate, not the RRF score ──
 # Bug: `_run_chavruta` compared the raw hit .score (an RRF fusion value ~0.03 in hybrid mode) to a 0.6
 # cosine threshold, so "retrieval is weak" fired on EVERY hybrid turn and nudged the chavruta to stall.
@@ -359,6 +380,35 @@ def test_commentary_refs_reach_the_named_commentator_on_a_verse():
     # Onkelos has no '_on_' join and no comment index.
     assert commentary_refs(["Exodus.20.2"], ["onkelos"]) == ["Onkelos_Exodus.20.2"]
     assert commentary_refs(["Genesis.1.1"], []) == []
+
+
+# ── Fix (2026-08-02): a real user reported source names in the citation panel are "usually in
+# English" — true, the corpus stores every ref in Sefaria's English/transliterated spelling.
+# hebrew_display_ref gives a best-effort Hebrew rendering for the common cases (Tanakh, Mishnah,
+# Talmud Bavli base refs, and a curated set of classic commentators), verified against real refs
+# pulled live from production, and returns None for anything it can't render confidently (never a
+# half-translated guess).
+@pytest.mark.parametrize("ref,expected", [
+    ("Genesis.1.1", "בראשית 1:1"),
+    ("Exodus.20.1", "שמות 20:1"),
+    ("Mishnah_Sukkah.3.5", "משנה סוכה 3:5"),
+    ("Rashi_on_Genesis.1.1.1", 'רש"י על בראשית 1:1'),
+    ("Rashi_on_Genesis.1.1.2", 'רש"י על בראשית 1:1'),           # same verse, different comment index
+    ("Bava_Metzia.3.1", "בבא מציעא 2."),                        # amud-linear N=3 -> daf 2 amud a
+    ("Rashi_on_Bava_Metzia.3.1.1", 'רש"י על בבא מציעא 2.'),
+    ("Bartenura_on_Mishnah_Bava_Metzia.1.1.1", "ברטנורא על משנה בבא מציעא 1:1"),
+    ("Rambam_on_Mishnah_Bava_Metzia.1.1.1", 'רמב"ם על משנה בבא מציעא 1:1'),
+    # Commentaries whose base can't be told apart from a bare tractate name once stripped (Tosefta,
+    # Mishneh Torah, ...) must decline rather than guess wrong:
+    ("Maggid_Mishneh_on_Mishneh_Torah,_Plaintiff_and_Defendant.9.7.1", None),
+    ("Tosefta_Kifshutah_on_Bava_Metzia.1.1.1", None),
+    ("Tosefta_Bava_Metzia_(Lieberman).1.1", None),
+    (None, None),
+    ("", None),
+])
+def test_hebrew_display_ref(ref, expected):
+    from chavruta.corpus.refs import hebrew_display_ref
+    assert hebrew_display_ref(ref) == expected
 
 
 def test_amud_to_corpus_ignores_volume_numbered_works():

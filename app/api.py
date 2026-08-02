@@ -39,9 +39,28 @@ def _strip_foreign(text: str) -> str:
     return re.sub(r"[ \t]{2,}", " ", _FOREIGN_CHAR_RE.sub("", text))
 
 
-def _strip_markers(text: str) -> str:
+# A parenthetical aside made up ENTIRELY of Latin letters/digits/punctuation — e.g. the model
+# writing '(Bava Metzia 3:1)' in the middle of an otherwise-Hebrew answer despite being told to
+# answer only in the question's language (real citations already surface via [S#]/the sources panel,
+# so this is redundant bleed, not information). Requires a Latin LETTER so a legitimate numbered
+# aside like '(1)' is untouched, and requires NO Hebrew letter so a mixed aside is left alone.
+_HE_CHAR_RE = re.compile(r"[֐-׿]")
+_LATIN_LETTER_RE = re.compile(r"[A-Za-z]")
+_PAREN_RE = re.compile(r"[ \t]*[(（][^()（）]*[)）]")
+
+
+def _strip_foreign_parens(text: str) -> str:
+    def repl(m: re.Match) -> str:
+        inner = m.group(0)
+        return "" if _LATIN_LETTER_RE.search(inner) and not _HE_CHAR_RE.search(inner) else inner
+    return _PAREN_RE.sub(repl, text)
+
+
+def _strip_markers(text: str, he: bool = False) -> str:
     t = _MARKER_RE.sub("", text or "")
     t = _strip_foreign(t)                    # drop stray foreign-script tokens (model multilingual bleed)
+    if he:
+        t = _strip_foreign_parens(t)         # drop a stray English citation aside in a Hebrew answer
     t = re.sub(r"\*\*\s*\*\*", "", t)        # collapse empty **bold** left where a **[S#]** was stripped
     t = re.sub(r"(?<!\*)\*\s*\*(?!\*)", "", t)  # …and empty *italic*
     t = re.sub(r"[ \t]{2,}", " ", t)
@@ -59,6 +78,7 @@ from pydantic import BaseModel, Field
 from chavruta import __version__
 from chavruta.config.profile import Profile
 from chavruta.corpus import rights
+from chavruta.corpus.refs import hebrew_display_ref
 from chavruta.corpus.schema import Intent, Query, Turn
 from chavruta.llm import metering
 from chavruta.llm.agentic import is_degrade_message
@@ -198,6 +218,10 @@ app.add_middleware(
 
 class CitationOut(BaseModel):
     ref: str
+    # Best-effort Hebrew rendering of `ref` for display (corpus.refs.hebrew_display_ref) — empty when
+    # no Hebrew name is known for it. `ref` itself stays the English/transliterated corpus key: the
+    # frontend uses it to dedupe/group/key citations, so it must never change based on language.
+    ref_he: str = ""
     text_he: str = ""
     text_en: str = ""
     commentator: str = ""
@@ -679,7 +703,7 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
 
     # Clarify gate — the model decided it needs more info: surface the questions, no files yet.
     if "===CLARIFY===" in raw:
-        qs = _strip_markers(raw.split("===CLARIFY===", 1)[1]).strip()
+        qs = _strip_markers(raw.split("===CLARIFY===", 1)[1], he=he).strip()
         return QueryResponse(answer=qs, citations=[], grounded=False, intent="lesson", files=[])
 
     ss, lf, fl, order = _split_lesson(raw)
@@ -696,12 +720,13 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
         if 1 <= i <= len(hits) and i not in seen:
             seen.add(i)
             h = hits[i - 1]
-            used.append(CitationOut(ref=h.ref, text_he=(getattr(h, "text", "") or ""), text_en="",
+            used.append(CitationOut(ref=h.ref, ref_he=(hebrew_display_ref(h.ref) or "") if he else "",
+                                    text_he=(getattr(h, "text", "") or ""), text_en="",
                                     commentator=(getattr(h, "commentator_id", "") or ""),
                                     deep_link=(getattr(h, "deep_link", "") or ""),
                                     license=(getattr(h, "license", "") or ""),
                                     version_title=(getattr(h, "version_title", "") or "")))
-    ss, lf, fl = _strip_markers(ss), _strip_markers(lf), _strip_markers(fl)
+    ss, lf, fl = _strip_markers(ss, he=he), _strip_markers(lf, he=he), _strip_markers(fl, he=he)
 
     # Source sheet = the FULL retrieved source texts, in teaching order — ALWAYS built mechanically from
     # the cited sources (which carry the complete RAG text), NOT from the model's SOURCE_SHEET prose.
@@ -836,6 +861,7 @@ def _run_chavruta(question: str, lang: str, history=None, llm=None) -> QueryResp
     q = Query(text=anchor, lang=lang or None, intent=Intent.QA)
     rq = pipeline._resolve_query(q)
     lang = rq.lang or lang or "he"
+    he = lang != "en"
     result = pipeline.retriever.retrieve(rq, top_k=10)
     hits = list(result.hits)
     # weak = retrieval didn't clear the relevance bar. Use the retriever's own dense-cosine gate
@@ -853,12 +879,13 @@ def _run_chavruta(question: str, lang: str, history=None, llm=None) -> QueryResp
         if 1 <= i <= len(hits) and i not in seen:
             seen.add(i)
             h = hits[i - 1]
-            used.append(CitationOut(ref=h.ref, text_he=(getattr(h, "text", "") or ""), text_en="",
+            used.append(CitationOut(ref=h.ref, ref_he=(hebrew_display_ref(h.ref) or "") if he else "",
+                                    text_he=(getattr(h, "text", "") or ""), text_en="",
                                     commentator=(getattr(h, "commentator_id", "") or ""),
                                     deep_link=(getattr(h, "deep_link", "") or ""),
                                     license=(getattr(h, "license", "") or ""),
                                     version_title=(getattr(h, "version_title", "") or "")))
-    return QueryResponse(answer=_strip_markers(raw), citations=used, grounded=bool(used),
+    return QueryResponse(answer=_strip_markers(raw, he=he), citations=used, grounded=bool(used),
                          intent="chavruta", files=[])
 
 
@@ -920,6 +947,7 @@ def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
 def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Turn],
                     audience: str = "", grade_band: str = "", length: str = "",
                     owner_id: str = "local", llm=None) -> QueryResponse:
+    he = (lang or "") != "en"
     if intent_str == "shut":          # UI's responsa mode → HALACHA intent
         intent_str = "halacha"
     if intent_str == "chavruta":      # Socratic study-partner mode (its own path)
@@ -941,6 +969,7 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
     def _cite(c) -> CitationOut:
         return CitationOut(
             ref=c.ref,
+            ref_he=(hebrew_display_ref(c.ref) or "") if he else "",
             text_he=getattr(c, "text_he", "") or getattr(c, "quote", ""),
             text_en=getattr(c, "text_en", ""),
             commentator=getattr(c, "commentator_id", "") or "",
@@ -962,7 +991,7 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
         )
 
     citations_out = [_cite(c) for c in answer.citations]
-    clean = _strip_markers(answer.text)
+    clean = _strip_markers(answer.text, he=he)
 
     return QueryResponse(
         answer=clean,
