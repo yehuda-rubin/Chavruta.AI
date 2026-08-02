@@ -204,6 +204,68 @@ def test_strip_markers_keeps_english_aside_in_english_answers():
     assert api._strip_markers(raw, he=False) == raw
 
 
+# ── Fix (2026-08-02): a real user reported a SECOND bleed pattern in the same live test — a bare
+# English word mid-sentence with no parentheses at all ("שהוא אינו מ CLAIM על פחות מחצי"), which the
+# parenthetical strip above cannot catch (and mechanically deleting the word would leave broken
+# Hebrew grammar). _fix_bleeding_sentences asks the model to rewrite ONLY the offending sentence.
+from types import SimpleNamespace  # noqa: E402
+
+
+class _FakeLLM:
+    """Records every prompt it's asked to rewrite; replies with a scripted (or default) rewrite."""
+
+    def __init__(self, reply="תשובה נקייה", raises=False):
+        self.reply = reply
+        self.raises = raises
+        self.calls: list[str] = []
+
+    def generate(self, prompt, *, lang, max_tokens, temperature):
+        self.calls.append(prompt.question)
+        if self.raises:
+            raise RuntimeError("model unavailable")
+        return SimpleNamespace(text=self.reply)
+
+
+def test_fix_bleeding_sentences_rewrites_only_the_offending_sentence():
+    # The trailing '. ' is captured as a SEPARATOR by the splitter, not part of the sentence text —
+    # the scripted reply below (like a real rewrite) is just the sentence body, no trailing period.
+    llm = _FakeLLM(reply="הוא אינו טוען על פחות מחצי")
+    text = "משפט ראשון תקין. הוא אינו מ CLAIM על פחות מחצי. משפט שלישי תקין."
+    out = api._fix_bleeding_sentences(text, True, llm)
+    assert out == "משפט ראשון תקין. הוא אינו טוען על פחות מחצי. משפט שלישי תקין."
+    assert len(llm.calls) == 1
+    assert "CLAIM" in llm.calls[0]                # the fed sentence is exactly the bleeding one
+
+
+def test_fix_bleeding_sentences_noop_when_not_hebrew():
+    llm = _FakeLLM()
+    text = "The answer includes a CLAIM about the source."
+    assert api._fix_bleeding_sentences(text, False, llm) == text
+    assert llm.calls == []
+
+
+def test_fix_bleeding_sentences_noop_on_clean_hebrew():
+    llm = _FakeLLM()
+    text = "תשובה נקייה לגמרי בעברית, בלי שום מילה זרה."
+    assert api._fix_bleeding_sentences(text, True, llm) == text
+    assert llm.calls == []                        # never calls the model when there's nothing to fix
+
+
+def test_fix_bleeding_sentences_keeps_original_on_llm_failure():
+    llm = _FakeLLM(raises=True)
+    text = "משפט עם מילה CLAIM בעייתית."
+    assert api._fix_bleeding_sentences(text, True, llm) == text   # unchanged, not crashed
+
+
+def test_fix_bleeding_sentences_caps_the_number_of_fixes():
+    llm = _FakeLLM(reply="תוקן")
+    # 4 bleeding sentences, one more than _MAX_BLEED_FIXES (3)
+    text = " ".join(f"משפט {w} מספר {i}." for i, w in enumerate(["AA", "BB", "CC", "DD"], 1))
+    out = api._fix_bleeding_sentences(text, True, llm)
+    assert len(llm.calls) == api._MAX_BLEED_FIXES
+    assert "DD" in out                             # the 4th bleeding sentence was left untouched
+
+
 # ── Tier0 (2026-07 audit): chavruta weak-retrieval must use the dense-cosine gate, not the RRF score ──
 # Bug: `_run_chavruta` compared the raw hit .score (an RRF fusion value ~0.03 in hybrid mode) to a 0.6
 # cosine threshold, so "retrieval is weak" fired on EVERY hybrid turn and nudged the chavruta to stall.

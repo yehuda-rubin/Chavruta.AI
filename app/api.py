@@ -66,6 +66,49 @@ def _strip_markers(text: str, he: bool = False) -> str:
     t = re.sub(r"[ \t]{2,}", " ", t)
     return t.strip()
 
+
+# A run of 2+ Latin letters surviving mid-sentence in an otherwise-Hebrew answer is almost always
+# model multilingual bleed (Qwen occasionally writes a bare English word, e.g. "שהוא אינו מ CLAIM
+# על") — the parenthetical case above is cheap to strip outright, but a bare word is often
+# grammatically load-bearing, so deleting it would leave broken Hebrew ("שהוא אינו מ על"). Instead
+# _fix_bleeding_sentences asks the model to rewrite ONLY the offending sentence — cheap (one short
+# sentence, not the whole answer) and safe (every other sentence, and all citations, are untouched).
+_LATIN_WORD_RE = re.compile(r"(?<![A-Za-z])[A-Za-z]{2,}(?![A-Za-z])")
+_SENTENCE_SPLIT_RE = re.compile(r"([.!?]\s+|\n+)")   # captured so separators are preserved verbatim
+_MAX_BLEED_FIXES = 3    # bound worst-case latency/cost if something is very wrong with one answer
+
+_BLEED_FIX_SYSTEM = (
+    "Rewrite the given Hebrew sentence so it contains NO English or other non-Hebrew words at all, "
+    "preserving its meaning and any [S#] citation markers exactly. Reply with ONLY the rewritten "
+    "sentence and nothing else — no preamble, no quotes around it."
+)
+
+
+def _fix_bleeding_sentences(text: str, he: bool, llm) -> str:
+    """Best-effort: a failed or degenerate rewrite call keeps the ORIGINAL sentence rather than
+    raising or blanking it — a language-cleanup pass must never be the reason a real answer breaks."""
+    if not he or not text or llm is None or not _LATIN_WORD_RE.search(text):
+        return text
+    parts = _SENTENCE_SPLIT_RE.split(text)   # alternates: sentence, separator, sentence, separator, …
+    fixed = 0
+    for i in range(0, len(parts), 2):
+        if fixed >= _MAX_BLEED_FIXES:
+            break
+        sentence = parts[i]
+        if not _LATIN_WORD_RE.search(sentence):
+            continue
+        try:
+            prompt = GroundedPrompt(system=_BLEED_FIX_SYSTEM, sources=[], question=sentence)
+            res = llm.generate(prompt, lang="he", max_tokens=200, temperature=0.2)
+            rewritten = (res.text or "").strip()
+        except Exception:
+            _log.warning("bleed sentence-fix call failed; keeping the original sentence", exc_info=True)
+            continue
+        if rewritten:
+            parts[i] = rewritten
+            fixed += 1
+    return "".join(parts)
+
 import torch  # noqa: F401,E402 — MUST precede qdrant_client import (Windows pyarrow DLL order)
 
 from contextlib import asynccontextmanager
@@ -82,6 +125,7 @@ from chavruta.corpus.refs import hebrew_display_ref
 from chavruta.corpus.schema import Intent, Query, Turn
 from chavruta.llm import metering
 from chavruta.llm.agentic import is_degrade_message
+from chavruta.llm.base import GroundedPrompt
 from chavruta.pipeline.pipeline import _max_tokens_for
 
 import app.accounts as accounts
@@ -703,7 +747,8 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
 
     # Clarify gate — the model decided it needs more info: surface the questions, no files yet.
     if "===CLARIFY===" in raw:
-        qs = _strip_markers(raw.split("===CLARIFY===", 1)[1], he=he).strip()
+        qs = raw.split("===CLARIFY===", 1)[1]
+        qs = _strip_markers(_fix_bleeding_sentences(qs, he, llm), he=he).strip()
         return QueryResponse(answer=qs, citations=[], grounded=False, intent="lesson", files=[])
 
     ss, lf, fl, order = _split_lesson(raw)
@@ -726,7 +771,12 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
                                     deep_link=(getattr(h, "deep_link", "") or ""),
                                     license=(getattr(h, "license", "") or ""),
                                     version_title=(getattr(h, "version_title", "") or "")))
-    ss, lf, fl = _strip_markers(ss, he=he), _strip_markers(lf, he=he), _strip_markers(fl, he=he)
+    # ss isn't bleed-fixed here: it's about to be replaced by the mechanically-assembled sheet below
+    # whenever `used` is non-empty (the common case) — fixing bleed in text that's discarded a few
+    # lines later would just spend real LLM calls for nothing.
+    ss = _strip_markers(ss, he=he)
+    lf = _strip_markers(_fix_bleeding_sentences(lf, he, llm), he=he)
+    fl = _strip_markers(_fix_bleeding_sentences(fl, he, llm), he=he)
 
     # Source sheet = the FULL retrieved source texts, in teaching order — ALWAYS built mechanically from
     # the cited sources (which carry the complete RAG text), NOT from the model's SOURCE_SHEET prose.
@@ -885,7 +935,8 @@ def _run_chavruta(question: str, lang: str, history=None, llm=None) -> QueryResp
                                     deep_link=(getattr(h, "deep_link", "") or ""),
                                     license=(getattr(h, "license", "") or ""),
                                     version_title=(getattr(h, "version_title", "") or "")))
-    return QueryResponse(answer=_strip_markers(raw, he=he), citations=used, grounded=bool(used),
+    clean = _strip_markers(_fix_bleeding_sentences(raw, he, llm), he=he)
+    return QueryResponse(answer=clean, citations=used, grounded=bool(used),
                          intent="chavruta", files=[])
 
 
@@ -991,7 +1042,8 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
         )
 
     citations_out = [_cite(c) for c in answer.citations]
-    clean = _strip_markers(answer.text, he=he)
+    resolved_llm = llm or _get_pipeline().llm
+    clean = _strip_markers(_fix_bleeding_sentences(answer.text, he, resolved_llm), he=he)
 
     return QueryResponse(
         answer=clean,
