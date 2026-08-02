@@ -947,6 +947,53 @@ def test_session_query_legacy_session_falls_back_to_request_intent(monkeypatch):
     api.session_query("sid-legacy", QueryRequest(question="q", lang="he", intent="qa"), owner="local")
     assert captured["intent"] == "qa"
 
+
+# ── Bug (found live, 2026-08-02): every turn in a 'lesson'-mode conversation charged the scarce
+# weekly lesson-count pool — including preliminary turns (resolving audience/grade/length, or a
+# model ===CLARIFY===) that produce no lesson at all (see _run_lesson: these return files=[], no
+# lesson_id). A teacher could burn their whole weekly allowance on back-and-forth before ever getting
+# a real lesson. Fixed: _metered now settles a preliminary turn as an ordinary conversation-token
+# spend, and charges ONE unit of the lesson pool ONLY for the turn that actually produced a real
+# lesson (lesson_id set) — that turn's own token spend is suppressed instead (a lesson is paid for by
+# its own pool, not tokens — see _charge_lesson_unit / _settle_tokens).
+def test_metered_charges_lesson_pool_only_when_a_real_lesson_was_produced(monkeypatch):
+    from chavruta.llm import metering as metering_mod
+
+    lesson_charges = []
+    settle_calls = []
+    monkeypatch.setattr(api, "_charge_lesson_unit",
+                        lambda owner, used_byok: lesson_charges.append((owner, used_byok)))
+    monkeypatch.setattr(api, "_settle_tokens",
+                        lambda owner, reserved, usage, intent, meter=api.db.TOKENS:
+                            settle_calls.append(dict(usage)))
+    monkeypatch.setattr(api, "_record_event", lambda *a, **k: None)
+
+    # Preliminary turn: audience/grade/length still being resolved — no lesson yet. A real model call
+    # may still have happened (e.g. a ===CLARIFY=== round), so simulate real token spend.
+    def _prelim():
+        metering_mod.record(500, 120)
+        return api.QueryResponse(answer="למי מיועד השיעור?", citations=[], grounded=False,
+                                 intent="lesson", files=[])
+
+    api._metered("owner1", reserved=20_000, intent="lesson", fn=_prelim)()
+    assert lesson_charges == [], "a preliminary (no-lesson-yet) turn must not touch the lesson pool"
+    assert settle_calls[-1] == {"prompt_tokens": 500, "completion_tokens": 120, "calls": 1}, \
+        "a preliminary turn's real token spend must settle as an ordinary conversation-token charge"
+
+    # The turn that actually builds the lesson: lesson_id is set. Also spends real (large) tokens —
+    # which must NOT reach the conversation pool; the lesson pool pays for it instead.
+    def _real_lesson():
+        metering_mod.record(9000, 4000)
+        return api.QueryResponse(answer="", citations=[], grounded=True, intent="lesson",
+                                 files=[api.FileOut(name="x.doc", title="x", content="c")],
+                                 lesson_id="abc123")
+
+    api._metered("owner1", reserved=20_000, intent="lesson", fn=_real_lesson)()
+    assert lesson_charges == [("owner1", False)], "the real-lesson turn must charge exactly one lesson unit"
+    assert settle_calls[-1] == {}, \
+        "the real-lesson turn's token spend must be suppressed — paid for by the lesson pool instead"
+
+
 # ── Tier0 (2026-07 audit): the agentic loop must enforce a CUMULATIVE output-token budget ──
 # Bug: _INTENT_MAX_TOKENS defined careful per-intent budgets (LESSON: 30000) but the lesson path went
 # through agentic_request, which HARDCODED max_tokens=8000 and never consulted the profile or the
