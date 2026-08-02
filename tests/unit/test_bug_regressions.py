@@ -751,6 +751,45 @@ def test_parse_need_sources_variants():
     assert parse_need_sources("x\n=== NEED SOURCES ===\n- one\n- two\n===END===") == ["one", "two"]
 
 
+def test_agentic_loop_bare_marker_with_no_queries_is_not_returned_as_answer():
+    """Bug (2026-08-02, caught live on the Nebius deployment): Qwen3-235B replied with JUST the line
+    '===NEED_SOURCES===' and no query lines after it, on a 'chavruta' discussion-style job. Since
+    parse_need_sources() returns [] both for 'not a source request' AND for 'malformed source request
+    with no queries', the OLD code (`if not queries: return answer`) treated the bare marker as a real
+    written answer and showed the literal string '===NEED_SOURCES===' to the user. The fix checks
+    is_source_request() first, so a marker with no queries spends a retry round instead of leaking."""
+    replies = iter(["===NEED_SOURCES===", "עכשיו יש לי תשובה אמיתית [S1]"])
+    seen_jobs = []
+
+    def send(job_md):
+        seen_jobs.append(job_md)
+        return next(replies)
+
+    def fetcher_should_not_be_called(qs):
+        raise AssertionError("source_fetcher must not be called when there are no queries to fetch")
+
+    text, fetched = run_agentic_loop(
+        send, "## SOURCES\n### [S1] X\nbody", fetcher_should_not_be_called, "he")
+    assert text == "עכשיו יש לי תשובה אמיתית [S1]"
+    assert fetched == []
+    assert len(seen_jobs) == 2   # the bare marker consumed a round instead of ending the loop
+
+
+def test_agentic_loop_strips_bare_marker_if_final_round_still_relapses():
+    """Defensive backstop: even on the FORCED final round (which explicitly instructs the model never
+    to reply with the marker again), if a model still relapses into a bare '===NEED_SOURCES==='-only
+    reply, the raw marker must never reach the user — it degrades to the honest no-fetch message
+    instead of showing meaningless marker text."""
+    from chavruta.llm.agentic import MAX_RETRIEVAL_ROUNDS, _NOFETCH_MSG
+
+    def send(job_md):
+        return "===NEED_SOURCES==="   # relapses every round, including the forced final one
+
+    text, fetched = run_agentic_loop(send, "## SOURCES\n### [S1] X\nbody", lambda qs: [], "he")
+    assert text == _NOFETCH_MSG["he"]
+    assert "===NEED_SOURCES===" not in text
+
+
 def test_agentic_loop_fetches_then_answers():
     """The loop: model asks for sources → fetcher supplies them → model answers. Fetched sources are
     returned in order and the appended job carried them with continued [S#] markers."""

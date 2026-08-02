@@ -71,6 +71,12 @@ services:
       # instead of the (spoofable) leftmost value. Raise this only if you add more proxies in front.
       CHAVRUTA_TRUSTED_PROXY_HOPS: "1"
 
+      # Supabase Auth — unset (default) keeps the API in open/local mode, unchanged from before this
+      # existed. Set both in .env once a real Supabase project exists (see app/auth_supabase.py) to
+      # require a signed-in user's JWT on every request instead of treating every caller as 'local'.
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+
       # Chat history — persisted to the named volume below.
       CHAVRUTA_DB_PATH: /app-data/chavruta.db
     volumes:

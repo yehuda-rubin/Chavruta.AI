@@ -85,6 +85,15 @@ def is_degrade_message(text: str) -> bool:
     return not (text or "").strip() or (text or "").strip() in DEGRADE_MESSAGES
 
 
+def is_source_request(text: str) -> bool:
+    """True if `text` starts a ===NEED_SOURCES=== block at all — regardless of whether it also
+    included any usable query lines. Callers must check this BEFORE treating an empty
+    parse_need_sources() result as "the model wrote a real answer": a model that emits the marker
+    with no queries after it is still asking for sources, just malformed, and must not have its raw
+    marker text leak to the user as the final answer (see run_agentic_loop)."""
+    return bool(_NEED_RE.search(text or ""))
+
+
 def parse_need_sources(text: str) -> list[str]:
     """If the answer is a source-request, return its query lines (else [])."""
     m = _NEED_RE.search(text or "")
@@ -99,6 +108,15 @@ def parse_need_sources(text: str) -> list[str]:
             break
         queries.append(s)
     return queries[:5]
+
+
+def strip_source_request_marker(text: str) -> str:
+    """Defensive backstop: remove a bare ===NEED_SOURCES=== block from text that is about to be
+    shown to a user as a final answer (e.g. a forced last round that still degenerated into the
+    marker). Real answers never contain this marker, so this is a no-op on them."""
+    if not _NEED_RE.search(text or ""):
+        return text
+    return _NEED_RE.sub("", text).strip()
 
 
 def max_marker(job_md: str) -> int:
@@ -140,11 +158,22 @@ def run_agentic_loop(send: Callable[[str], str | None], job_md: str,
         answer = send(job_md + _FINAL_ANSWER_NOTE.get(lang, _FINAL_ANSWER_NOTE["en"]) if last_round else job_md)
         if answer is None:
             return _TIMEOUT_MSG.get(lang, _TIMEOUT_MSG["en"]), fetched
-        queries = parse_need_sources(answer)
-        if not queries:
+        if not is_source_request(answer):
             return answer, fetched              # the model wrote a real answer
         if last_round:
-            return answer, fetched              # forced final round — take what it wrote (marker stripped downstream)
+            # Forced final round: take what it wrote, minus a bare marker it may have relapsed into
+            # despite the instruction not to — never show the raw ===NEED_SOURCES=== line to a user.
+            return strip_source_request_marker(answer) or _NOFETCH_MSG.get(lang, _NOFETCH_MSG["en"]), fetched
+        queries = parse_need_sources(answer)
+        if not queries:
+            # The model started a source-request block but gave no usable query lines — nothing to
+            # fetch. Ask it to either supply real queries or answer now, and spend a round on that
+            # rather than returning its bare, meaningless marker as if it were the final answer.
+            job_md = job_md + (
+                "\n\n## NOTE\nYour previous reply started ===NEED_SOURCES=== but listed no search "
+                "queries after it. Either list 1-5 focused search queries (one per line) right after "
+                "that line, or answer now using the sources already given.")
+            continue
         if source_fetcher is None:              # asked, rounds remain, but there is no fetcher to call
             return _NOFETCH_MSG.get(lang, _NOFETCH_MSG["en"]), fetched
         try:
