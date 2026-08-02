@@ -84,6 +84,44 @@ def test_per_owner_totals(d):
     assert next(r for r in top if r["owner_id"] == "u-1")["tokens"] == 1500
 
 
+def test_usage_concurrency_reports_peak_and_average(d):
+    """concurrent_at_start is a measurement of what was OBSERVED, distinct from the configured
+    ceiling (CHAVRUTA_MAX_CONCURRENT_GENERATIONS) — this is what actually happened."""
+    _event(d, concurrent_at_start=1)
+    _event(d, concurrent_at_start=3)
+    _event(d, concurrent_at_start=2)
+    conc = d.usage_concurrency()
+    assert conc["peak"] == 3
+    assert conc["avg"] == pytest.approx(2.0)
+
+
+def test_usage_concurrency_ignores_rows_that_predate_the_column(d):
+    """Existing rows from before this column existed keep NULL — treated as unknown, not as 0."""
+    _event(d, concurrent_at_start=None)
+    conc = d.usage_concurrency()
+    assert conc.get("peak") is None
+
+
+def test_usage_by_week_is_a_trend_line_of_distinct_users(d):
+    _event(d, owner_id="u-1", at="2026-07-01T10:00:00+00:00")
+    _event(d, owner_id="u-2", at="2026-07-02T10:00:00+00:00")
+    _event(d, owner_id="u-1", at="2026-07-10T10:00:00+00:00")   # a later ISO week
+    weeks = d.usage_by_week()
+    assert len(weeks) == 2
+    assert weeks[0]["users"] == 2      # u-1 and u-2 both active the first week
+    assert weeks[1]["users"] == 1
+
+
+def test_count_accounts_totals_by_plan(d):
+    d.set_plan("u-1", "free")
+    d.set_plan("u-2", "pro")
+    d.set_plan("u-3", "pro")
+    counts = d.count_accounts()
+    assert counts["total"] == 3
+    assert counts["by_plan"]["pro"] == 2
+    assert counts["by_plan"]["free"] == 1
+
+
 def test_failures_are_visible(d):
     _event(d, error="LLMTransientError", grounded=0)
     assert d.usage_health()["errors"] == 1

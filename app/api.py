@@ -14,6 +14,7 @@ import re
 import sys
 import threading
 import time
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -861,12 +862,44 @@ def _run_chavruta(question: str, lang: str, history=None, llm=None) -> QueryResp
                          intent="chavruta", files=[])
 
 
+# Global concurrency gate — every generation reaches the LLM/embedder/Qdrant through this one
+# function (sync routes call it inline; async routes call it from inside a job worker), so gating
+# HERE bounds total concurrent generations across BOTH paths combined, not per-path. Sized small on
+# purpose: on a 2-vCPU free-tier box (Oracle Always Free, an HF Spaces free CPU Space) letting more
+# than a couple of generations (embedding + LLM call) run at once buys nothing and risks the whole
+# process getting OOM-killed or grinding every in-flight request to a crawl. Excess requests QUEUE
+# (block on the semaphore) rather than run — that's cheap; running unboundedly is not — up to a
+# timeout, past which we degrade to an honest "busy" answer instead of piling up forever.
+_MAX_CONCURRENT_GENERATIONS = int(os.environ.get("CHAVRUTA_MAX_CONCURRENT_GENERATIONS", "2"))
+_GENERATION_QUEUE_TIMEOUT_S = float(os.environ.get("CHAVRUTA_QUEUE_TIMEOUT_S", "45"))
+_generation_semaphore = threading.Semaphore(_MAX_CONCURRENT_GENERATIONS)
+
+# How many generations were actually running (this one included) the moment it started — a plain
+# counter next to the semaphore, not derived from it, so it keeps working under tests that swap in
+# their own Semaphore. Read by _record_event via the ContextVar so the number reaches the usage_events
+# row for the SAME request that observed it (concurrent requests must not read each other's count).
+_in_flight_lock = threading.Lock()
+_in_flight_count = 0
+_concurrency_at_start: ContextVar[int] = ContextVar("_concurrency_at_start", default=0)
+
+
 def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
                audience: str = "", grade_band: str = "", length: str = "",
                owner_id: str = "local", llm=None) -> QueryResponse:
     """Safety wrapper: a retrieval/LLM/backend failure degrades to an honest error response instead
     of a 500 for the whole request (real HTTPExceptions — e.g. 422 bad intent — still propagate).
     `llm` defaults to the pipeline's own shared backend; a caller may override it (BYOK)."""
+    he = (lang or "") != "en"
+    if not _generation_semaphore.acquire(timeout=_GENERATION_QUEUE_TIMEOUT_S):
+        _log.warning("generation queue timeout — system at capacity (intent=%r)", intent_str)
+        return QueryResponse(
+            answer=("המערכת עמוסה כרגע — נסו שוב בעוד רגע." if he
+                    else "The system is busy right now — please try again in a moment."),
+            citations=[], grounded=False, intent=(intent_str or "qa"), files=[])
+    global _in_flight_count
+    with _in_flight_lock:
+        _in_flight_count += 1
+        _concurrency_at_start.set(_in_flight_count)
     try:
         return _run_query_impl(question, lang, intent_str, history, audience, grade_band, length,
                                owner_id, llm)
@@ -874,11 +907,14 @@ def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
         raise
     except Exception:
         _log.exception("query processing failed (intent=%r)", intent_str)
-        he = (lang or "") != "en"
         return QueryResponse(
             answer=("אירעה שגיאה בעיבוד הבקשה — נסו שוב." if he
                     else "An error occurred processing the request — please try again."),
             citations=[], grounded=False, intent=(intent_str or "qa"), files=[])
+    finally:
+        with _in_flight_lock:
+            _in_flight_count -= 1
+        _generation_semaphore.release()
 
 
 def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Turn],
@@ -1377,6 +1413,7 @@ def _record_event(owner: str, intent: str, req: QueryRequest | None, usage: dict
                                                   usage.get("completion_tokens", 0)),
             llm_calls=usage.get("calls", 0),
             ms=ms,
+            concurrent_at_start=_concurrency_at_start.get(),
             grounded=int(bool(got.get("grounded"))) if got else None,
             no_source=int(not got.get("citations")) if got else None,
             citations=len(got.get("citations") or []),

@@ -1,0 +1,91 @@
+# Chavruta.AI — single-container image for Hugging Face Spaces (Docker SDK, free CPU tier).
+#
+# HF Spaces expose exactly ONE port and run ONE container — unlike docker-compose.yml's four
+# services (api/ui/web/qdrant), everything runs together here, supervised by
+# docker/entrypoint.hfspace.sh, behind an nginx that mirrors docker/nginx.conf's routing
+# (docker/nginx.hfspace.conf) on port 7860 (the Docker SDK default — see deploy/huggingface/README.md).
+#
+# Free-tier disk is EPHEMERAL — wiped whenever the Space restarts. The entrypoint restores the
+# corpus snapshot from HF on every cold start (RAM-safe: scripts/restore_commercial_snapshot.py with
+# QDRANT_SNAPSHOT_DIR — a normal file copy, not `docker cp`, since Qdrant is a plain subprocess
+# sharing this same filesystem, not a separate container). Keep the Space awake with the GitHub
+# Action keep-alive workflow (.github/workflows/keepalive.yml) so this is rare, not routine.
+#
+# Build happens on HF's own infrastructure when you push to the Space's git remote — see
+# deploy/huggingface/README.md for the account-side steps.
+
+# ── Stage 1: build the Next.js frontend (mirrors docker/Dockerfile.web) ──────────────────────
+FROM node:22-slim AS webbuild
+WORKDIR /web
+COPY web/package.json web/package-lock.json* ./
+RUN npm ci
+COPY web/ ./
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm run build
+
+# ── Stage 2: the runtime image ────────────────────────────────────────────────────────────────
+FROM python:3.11-slim
+
+# HF_HOME is a NORMAL image path (baked in at build time), not under /data — HF Spaces' own docs:
+# "/data volume is only available at runtime, i.e. you cannot use /data during the build step".
+# The bge-m3 weights are pre-downloaded below at build time, so they must not depend on /data.
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    CHAVRUTA_PROFILE=cloud \
+    HF_HOME=/home/app/.cache/huggingface \
+    NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1
+
+WORKDIR /app
+
+# Node.js (serves the built Next.js standalone app) + nginx (the edge) + curl (entrypoint health
+# waits). Qdrant's own binary is pulled straight from its official image — same Debian base family
+# as python:3.11-slim, so it links cleanly (an Alpine/musl source would not).
+RUN apt-get update && apt-get install -y --no-install-recommends curl gnupg ca-certificates \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs nginx \
+    && rm -rf /var/lib/apt/lists/* /etc/nginx/sites-enabled/default
+
+COPY --from=qdrant/qdrant:v1.18.2 /qdrant/qdrant /usr/local/bin/qdrant
+COPY --from=qdrant/qdrant:v1.18.2 /qdrant/config/config.yaml /qdrant/config/config.yaml
+
+# ── Python side: same package set as docker/Dockerfile.endpoint ─────────────────────────────
+COPY docker/requirements.endpoint.txt ./requirements.endpoint.txt
+RUN pip install --upgrade pip \
+    && pip install --index-url https://download.pytorch.org/whl/cpu torch \
+    && pip install -r requirements.endpoint.txt \
+    && pip install huggingface_hub requests
+
+COPY src/ ./src/
+COPY app/ ./app/
+COPY pyproject.toml ./
+COPY scripts/restore_commercial_snapshot.py scripts/create_payload_indexes.py ./scripts/
+RUN pip install -e . --no-deps
+
+# ── Node side: the prebuilt standalone Next.js server ────────────────────────────────────────
+COPY --from=webbuild /web/.next/standalone /web
+COPY --from=webbuild /web/.next/static /web/.next/static
+COPY --from=webbuild /web/public /web/public
+
+# ── nginx + entrypoint ───────────────────────────────────────────────────────────────────────
+COPY docker/nginx.hfspace.conf /etc/nginx/sites-enabled/chavruta.conf
+COPY docker/entrypoint.hfspace.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# HF Spaces (Docker SDK) default to port 7860 unless README.md's `app_port` frontmatter overrides it.
+EXPOSE 7860
+
+# HF Spaces run containers as a non-root user (uid 1000) by convention. /data itself is a runtime-
+# only mount (see the HF_HOME note above) — the entrypoint creates its own subdirectories there at
+# container start, as this same user, so no /data setup belongs here at build time. nginx's runtime
+# dirs DO live on the normal image filesystem, so they need chowning now.
+RUN useradd --create-home --uid 1000 app \
+    && chown -R app:app /app /web /var/lib/nginx /var/log/nginx /run
+USER app
+
+# Pre-download bge-m3 weights at build time (into HF_HOME as the runtime user) so a cold start only
+# has to restore the corpus, not also fetch the embedding model.
+RUN python3 -c "from FlagEmbedding import BGEM3FlagModel; BGEM3FlagModel('BAAI/bge-m3', use_fp16=False)"
+
+CMD ["/entrypoint.sh"]

@@ -6,7 +6,22 @@
 
 # Privacy Policy — Chavruta AI
 
-**Version 1.5 · Effective 30 July 2026**
+**Version 1.7 · Effective 2 August 2026**
+
+Changes in version 1.7: the AI model provider and the hosting provider are now **named — Nebius**
+(sections 3, 4, 9) instead of being described only generically — Nebius both runs the Service itself
+and generates the answers. It is now stated explicitly that its processing takes place in the
+European Union (section 9). There is no substantive change to how processing actually happens —
+this is a precision of who was already disclosed, not a new provider.
+
+Changes in version 1.6: section 1 gained a disclosure of an **automatic, keyword-based scan** that
+messages in the Service (questions and answers) go through, to catch unlawful, abusive, or
+potentially defamatory content — the scan is **not** AI and does not analyze meaning, and it never
+blocks/deletes/alters content automatically, only forwards a flagged message for our own manual
+review. **The same update documents, for the first time,** the pre-existing mechanism letting you
+flag an answer yourself — it had not previously been documented in this policy. A matching purpose
+was added to section 11. There are no registered users yet, so no individual prior notice was
+needed; the update takes effect from its publication date.
 
 Changes in version 1.5: clarified that if the user points their own API key (see the Terms of Use)
 at a provider and model other than the default, the custom base URL and model name are also not
@@ -45,6 +60,14 @@ email address for sign-in); sources you attach are provided voluntarily, at your
   timestamps** — the record that the declaration was made.
 - **Content you create:** your questions, conversation history, saved lessons, and sources you attach
   (text / PDF / Word).
+- **Flagging messages for review — automatic and by you:** you can flag a given answer for our
+  manual review (e.g. if you believe it mischaracterizes a real person). In addition, every message
+  in the Service (question or answer) also goes through an **automatic, keyword-based scan only** —
+  not AI, not meaning-based analysis — for content that may be unlawful or abusive (e.g. violence,
+  content involving minors, self-harm), or that may pose a defamation risk toward a real person. In
+  both cases, **the flag does not block, delete, or alter** content automatically; it only forwards
+  the message for our own manual review, by reference to the existing message id (not by copying the
+  content anywhere else).
 - **Usage and measurement data:** to enforce quotas and improve the Service we record, for each
   request, **metrics only** — timestamp (including local hour and weekday), action type (question /
   explanation / comparison / halacha / chavruta / lesson building), language of request, tokens
@@ -69,8 +92,8 @@ account; to enforce quotas; and to secure the Service and prevent abuse. We do n
 for advertising.
 
 ## 3. Processing and Training by the Model Provider
-To generate an answer, your question (and any source you attach) is sent to our AI model provider.
-**The model provider may use the data sent to it — your questions and attached sources — also to
+To generate an answer, your question (and any source you attach) is sent to our AI model provider —
+**Nebius**. **Nebius may use the data sent to it — your questions and attached sources — also to
 improve and train its AI models**, subject to its terms. Therefore **do not enter sensitive,
 confidential or personal information** you would not want processed, or used for model training, this
 way.
@@ -90,7 +113,8 @@ the key, govern that data — not the arrangement described above.
 
 ## 4. Sharing
 We do not sell your data. We use sub-processors only to run the Service: the registration provider
-(Supabase), the AI model provider, and the hosting provider. **For paid subscribers — the payment
+(Supabase), and the AI model provider **and** the hosting provider that runs the Service itself —
+**both Nebius**. **For paid subscribers — the payment
 provider (PayPlus) and the invoicing provider (Green Invoice)**, which process payment and billing
 data. Study sources are retrieved from a Sefaria-based corpus subject to their licenses. We will
 disclose information if required by law.
@@ -144,7 +168,8 @@ We use browser local storage to keep your preferences and to maintain your activ
 token). We do not use third-party advertising or tracking cookies.
 
 ## 9. Transfer of Data Outside Israel
-Some sub-processors (e.g. Supabase and the model provider) process data outside Israel. The transfer is
+Some sub-processors (Supabase, and Nebius — both as the AI model provider and as the hosting
+provider, processing within the European Union) process data outside Israel. The transfer is
 made on the basis of **your consent** and subject to a **contractual undertaking** by the providers to
 maintain a level of protection equivalent to that required under Israeli law and not to transfer the
 data onward without authorization, in accordance with the Protection of Privacy Regulations (Transfer
@@ -167,7 +192,8 @@ purposes only:
 3. enforcing usage quotas and preventing abuse;
 4. billing, issuing invoices and meeting accounting obligations;
 5. securing the Service;
-6. understanding aggregate usage patterns in order to improve the Service.
+6. detecting unlawful, abusive, or defamation-risk content, for our own manual review (section 1);
+7. understanding aggregate usage patterns in order to improve the Service.
 
 **We do not use the information for any other purpose and we do not sell it.** Use for a new purpose
 would require an update to this policy and advance notice.

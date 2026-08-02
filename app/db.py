@@ -13,6 +13,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from app import moderation
+
 # Location of the chat-history store. Configurable via CHAVRUTA_DB_PATH so the
 # container can point it at a mounted volume (persists all conversations across
 # restarts); defaults to the repo root for local dev.
@@ -63,7 +65,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 22
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -108,15 +110,22 @@ def _migrate(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_messages_session
             ON messages(session_id, id);
 
-        -- User-flagged answers, for operator review — the self-serve half of the defamation/
-        -- quality safety net (docs/legal/LAWSUIT-EXPOSURE-2026-07-30.md Finding C): grounding
-        -- reduces but does not eliminate the risk of a mischaracterizing answer about a real named
-        -- person, and this is the fast path to notice and correct one.
+        -- Flagged messages, for operator review — the defamation/quality safety net
+        -- (docs/legal/LAWSUIT-EXPOSURE-2026-07-30.md Finding C): grounding reduces but does not
+        -- eliminate the risk of a mischaracterizing answer about a real named person. Two sources:
+        -- source='user' — a user flagged their own conversation's message (the original mechanism).
+        -- source='auto' — app/moderation.py's keyword scan flagged it on save (see save_message);
+        --   `reason` holds the matched category (e.g. 'defamation_risk'), never the message text
+        --   itself — a reviewer looks up the real content via message_id, same as a user report.
+        -- reviewed_at is NULL until an operator marks it handled (scripts/moderation_report.py), so
+        -- the same backlog isn't re-reported forever.
         CREATE TABLE IF NOT EXISTS message_reports (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             message_id  INTEGER NOT NULL,
             owner_id    TEXT NOT NULL,
             reason      TEXT,
+            source      TEXT NOT NULL DEFAULT 'user',
+            reviewed_at TEXT,
             created_at  TEXT NOT NULL
         );
 
@@ -220,7 +229,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
             grade_band     TEXT,               -- lesson: a-c | d-f | g-i | j-l
             length         TEXT,               -- lesson: short | medium | long
             attachments    INTEGER NOT NULL DEFAULT 0,
-            error          TEXT                -- exception class when the request failed
+            error          TEXT,               -- exception class when the request failed
+            concurrent_at_start INTEGER         -- generations in flight (this one included) at start
         );
         CREATE INDEX IF NOT EXISTS idx_usage_events_at ON usage_events(at DESC);
         CREATE INDEX IF NOT EXISTS idx_usage_events_owner ON usage_events(owner_id);
@@ -405,6 +415,25 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
     # v20: message_reports is a brand-new table (see CREATE TABLE IF NOT EXISTS above) — no ALTER
     # needed on an existing database, so there is nothing to do here beyond the version bump.
+
+    if version < 21:
+        # How many generations were in flight (this one included) when this request started —
+        # a concurrency measurement, same "number, not content" rule as the rest of this table.
+        # Existing rows predate the counter and keep NULL (unknown, not zero).
+        ucols = {r[1] for r in conn.execute("PRAGMA table_info(usage_events)")}
+        if "concurrent_at_start" not in ucols:
+            conn.execute("ALTER TABLE usage_events ADD COLUMN concurrent_at_start INTEGER")
+
+    if version < 22:
+        # message_reports gains source (user vs the auto keyword scan) and reviewed_at (so the
+        # operator's backlog shrinks as things get handled). Existing rows predate both — they are
+        # all genuine user reports, so source defaults to 'user'; reviewed_at NULL means "not yet
+        # reviewed", true of every pre-existing row since there was no review workflow before this.
+        rcols = {r[1] for r in conn.execute("PRAGMA table_info(message_reports)")}
+        if "source" not in rcols:
+            conn.execute("ALTER TABLE message_reports ADD COLUMN source TEXT NOT NULL DEFAULT 'user'")
+        if "reviewed_at" not in rcols:
+            conn.execute("ALTER TABLE message_reports ADD COLUMN reviewed_at TEXT")
 
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
@@ -607,9 +636,31 @@ def save_message(
                 now,
             ),
         )
+        message_id = cur.lastrowid
         # Touch the parent session so it sorts to the top of the chat list.
         conn.execute("UPDATE sessions SET updated_at=? WHERE id=?", (now, session_id))
-    return cur.lastrowid
+        _auto_flag_if_problematic(conn, message_id, session_id, text, now)
+    return message_id
+
+
+def _auto_flag_if_problematic(conn: sqlite3.Connection, message_id: int, session_id: str,
+                              text: str, now: str) -> None:
+    """Heuristic keyword scan (app/moderation.py) on every saved message. Never raises and never
+    blocks the save — a scan failure or a hit is not a reason to lose the user's message."""
+    try:
+        categories = moderation.scan(text)
+        if not categories:
+            return
+        owner_row = conn.execute(
+            "SELECT owner_id FROM sessions WHERE id=?", (session_id,)).fetchone()
+        owner_id = owner_row["owner_id"] if owner_row else "local"
+        for category in categories:
+            conn.execute(
+                "INSERT INTO message_reports (message_id, owner_id, reason, source, created_at) "
+                "VALUES (?,?,?,'auto',?)",
+                (message_id, owner_id, category, now))
+    except Exception:                       # noqa: BLE001
+        _telemetry_log.exception("auto content scan failed for message %s", message_id)
 
 
 def get_messages(session_id: str, owner_id: str = "local") -> list[dict[str, Any]]:
@@ -649,6 +700,28 @@ def report_message(message_id: int, owner_id: str, reason: str) -> None:
             "INSERT INTO message_reports (message_id, owner_id, reason, created_at) VALUES (?,?,?,?)",
             (message_id, owner_id, (reason or "").strip()[:500], datetime.now(UTC).isoformat()),
         )
+
+
+def list_flagged_messages(reviewed: bool = False, limit: int = 100) -> list[dict[str, Any]]:
+    """Reports awaiting operator review by default (reviewed=False); pass True to see the ones
+    already handled. Joins in the actual message text — unlike usage_events, a report exists
+    precisely so a human can read what triggered it; there is no separate content-free path here."""
+    return _agg(
+        "SELECT r.id, r.message_id, r.owner_id, r.reason, r.source, r.created_at, "
+        "r.reviewed_at, m.role, m.text, m.session_id "
+        "FROM message_reports r JOIN messages m ON m.id = r.message_id "
+        "WHERE (r.reviewed_at IS NOT NULL) = ? "
+        "ORDER BY r.created_at DESC LIMIT ?",
+        (int(reviewed), limit))
+
+
+def mark_report_reviewed(report_id: int) -> bool:
+    """Mark one report as handled, so it drops off the default (unreviewed) backlog."""
+    with _tx(get_conn()) as conn:
+        cur = conn.execute(
+            "UPDATE message_reports SET reviewed_at=? WHERE id=? AND reviewed_at IS NULL",
+            (datetime.now(UTC).isoformat(), report_id))
+    return cur.rowcount > 0
 
 
 # ── 'My Shiurim' saved-lesson library ────────────────────────────────────────
@@ -695,7 +768,8 @@ def record_usage_event(**fields: Any) -> None:
     request that otherwise worked."""
     cols = ("at", "hour_local", "dow", "owner_id", "plan", "intent", "lang", "prompt_tokens",
             "completion_tokens", "billed_tokens", "llm_calls", "ms", "grounded", "no_source",
-            "citations", "audience", "grade_band", "length", "attachments", "error")
+            "citations", "audience", "grade_band", "length", "attachments", "error",
+            "concurrent_at_start")
     row = {k: fields.get(k) for k in cols}
     try:
         conn = get_conn()
@@ -774,6 +848,36 @@ def usage_health(since: str | None = None) -> dict[str, Any]:
         f"AVG(ms) AS avg_ms, COUNT(DISTINCT owner_id) AS users "
         f"FROM usage_events {where}", ((since,) if since else ()))
     return rows[0] if rows else {}
+
+
+def usage_concurrency(since: str | None = None) -> dict[str, Any]:
+    """Peak and average concurrent generations — how many requests were actually running (this one
+    included) at the moment each one started. Distinct from CHAVRUTA_MAX_CONCURRENT_GENERATIONS,
+    which is the CEILING we allow; this is what was ACTUALLY observed."""
+    where = "WHERE at >= ? AND concurrent_at_start IS NOT NULL" if since \
+        else "WHERE concurrent_at_start IS NOT NULL"
+    rows = _agg(
+        f"SELECT MAX(concurrent_at_start) AS peak, AVG(concurrent_at_start) AS avg "  # noqa: S608
+        f"FROM usage_events {where}", ((since,) if since else ()))
+    return rows[0] if rows else {}
+
+
+def usage_by_week(since: str | None = None) -> list[dict[str, Any]]:
+    """Distinct users per ISO week — the trend line behind the single-period 'users' figure in
+    usage_health(). One row per calendar week that had any activity."""
+    where = "WHERE at >= ?" if since else ""
+    return _agg(
+        f"SELECT strftime('%Y-W%W', at) AS week, COUNT(*) AS requests, "           # noqa: S608
+        f"COUNT(DISTINCT owner_id) AS users "
+        f"FROM usage_events {where} GROUP BY week ORDER BY week",
+        ((since,) if since else ()))
+
+
+def count_accounts() -> dict[str, Any]:
+    """How many accounts exist in total, and by plan — registered accounts, not just ones that have
+    generated anything (that's usage_health()'s 'users', a different, usage-based count)."""
+    rows = _agg("SELECT plan, COUNT(*) AS n FROM accounts GROUP BY plan")
+    return {"total": sum(r["n"] for r in rows), "by_plan": {r["plan"]: r["n"] for r in rows}}
 
 
 def delete_sessions_older_than(cutoff_iso: str) -> int:

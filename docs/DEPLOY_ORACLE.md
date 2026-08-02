@@ -37,6 +37,11 @@ These need your own identity/payment verification; skip to §2 once the VM exist
    - **Networking:** create/use a VCN with a public subnet, "Assign a public IPv4 address" checked.
    - **SSH keys:** let the console generate a key pair and download the private key (or paste your
      own public key) — you'll need it to log in.
+   - **Boot volume: set it to 200GB, not the 50GB default.** The corpus snapshot alone is 17.16GB
+     (see `commercial-corpus-on-hf.md`), and the restored live collection on disk is roughly that
+     same order of magnitude again — on top of the OS, Docker images, and the downloaded snapshot
+     file itself (which sits on disk ALONGSIDE the restored collection unless deleted after restore).
+     50GB leaves no real margin; 200GB is the Always Free ceiling and costs nothing extra to ask for.
 3. **Open firewall ports — this is the #1 Oracle gotcha.** Two independent firewalls exist and
    BOTH must allow 80/443, or the app is unreachable despite a "running" instance:
    - **OCI Security List / Network Security Group** (Console → your VCN → Security Lists): add
