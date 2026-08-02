@@ -77,6 +77,13 @@ services:
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
 
+      # Global concurrency cap on generations running at once (see .env.example for the full
+      # explanation). Default 2 assumes a 2-vCPU free-tier box; override in .env on a bigger machine —
+      # the bge-m3 embedding step is the actual CPU-bound part of each request, so this should stay
+      # comfortably under the host's vCPU count, not just "as high as possible".
+      CHAVRUTA_MAX_CONCURRENT_GENERATIONS: ${CHAVRUTA_MAX_CONCURRENT_GENERATIONS:-2}
+      CHAVRUTA_QUEUE_TIMEOUT_S: ${CHAVRUTA_QUEUE_TIMEOUT_S:-45}
+
       # Chat history — persisted to the named volume below.
       CHAVRUTA_DB_PATH: /app-data/chavruta.db
     volumes:
