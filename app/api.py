@@ -79,8 +79,10 @@ _MAX_BLEED_FIXES = 3    # bound worst-case latency/cost if something is very wro
 
 _BLEED_FIX_SYSTEM = (
     "Rewrite the given Hebrew sentence so it contains NO English or other non-Hebrew words at all, "
-    "preserving its meaning and any [S#] citation markers exactly. Reply with ONLY the rewritten "
-    "sentence and nothing else — no preamble, no quotes around it."
+    "preserving its meaning. If the sentence already contains a citation marker such as [S1] or [S2], "
+    "keep that EXACT marker in the same place — but do not add, remove, or invent any marker that "
+    "is not already there verbatim in the input. Reply with ONLY the rewritten sentence and nothing "
+    "else — no preamble, no quotes around it."
 )
 
 
