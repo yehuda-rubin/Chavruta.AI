@@ -40,11 +40,14 @@ jobs:
             echo "::warning::SUPABASE_URL/SUPABASE_ANON_KEY not set yet — add them as repo secrets (see this file's header)"
             exit 0
           fi
-          # A random query param defeats any accidental caching layer between here and Postgres —
-          # a cached response wouldn't actually touch the database and wouldn't reset the timer.
+          # No cache-busting query param here: PostgREST (Supabase's Data API) treats every query
+          # param as a column filter unless it's one of its own reserved words (select, limit, ...),
+          # so an arbitrary param like `_=<timestamp>` is parsed as a filter on a nonexistent column
+          # `_` and rejected with a 400 — not silently ignored. There's also no caching layer to
+          # defeat: this hits Postgres directly, not a CDN.
           curl -fsS --max-time 30 \
             -H "apikey: $SUPABASE_ANON_KEY" \
             -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
-            "$SUPABASE_URL/rest/v1/keep_alive?select=id&limit=1&_=$(date +%s)" \
+            "$SUPABASE_URL/rest/v1/keep_alive?select=id&limit=1" \
             > /dev/null && echo "pinged Supabase — OK" \
             || echo "::warning::Supabase keep-alive ping failed (project may already be paused, or the keep_alive table/policy isn't set up yet)"
