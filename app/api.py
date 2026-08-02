@@ -995,7 +995,7 @@ def _details_public() -> bool:
     return not (sb.enabled() or os.environ.get("CHAVRUTA_API_KEYS", "").strip())
 
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def health():
     """Liveness only — the process is up. No I/O, never blocks."""
     if not _details_public():
@@ -1010,7 +1010,7 @@ async def health():
     }
 
 
-@app.get("/ready")
+@app.api_route("/ready", methods=["GET", "HEAD"])
 def ready(response: Response):
     """Readiness — the corpus is actually loaded and queryable.
 
