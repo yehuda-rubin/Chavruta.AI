@@ -111,6 +111,28 @@ def _fix_bleeding_sentences(text: str, he: bool, llm) -> str:
             fixed += 1
     return "".join(parts)
 
+
+# Fix (2026-08-02, caught live): a genuinely-grounded answer still contained the bare sentence "אין
+# תשובה במקורות — אמור זאת ואל תמציא" in the middle of real Torah content — the model echoing a
+# fragment of its OWN grounding instruction (pipeline.py::_agentic_generate's "## INSTRUCTIONS"
+# block, sent as the last thing before it answers) back as if it were content. Unlike bleed, there's
+# no meaning to preserve in a leaked instruction fragment, so the sentence is dropped outright rather
+# than rewritten. Matches on either half of the phrase since the model paraphrased slightly (dropped
+# "אם"/"בפירוש") rather than echoing it byte-for-byte.
+_INSTRUCTION_ECHO_RE = re.compile(r"אין תשובה במקורות|ואל תמציא")
+
+
+def _strip_instruction_echo(text: str, he: bool) -> str:
+    if not he or not text or not _INSTRUCTION_ECHO_RE.search(text):
+        return text
+    parts = _SENTENCE_SPLIT_RE.split(text)   # alternates: sentence, separator, sentence, separator, …
+    for i in range(0, len(parts), 2):
+        if _INSTRUCTION_ECHO_RE.search(parts[i]):
+            parts[i] = ""
+            if i + 1 < len(parts):           # drop the sentence's OWN trailing separator too, so the
+                parts[i + 1] = ""            # sentence before it joins directly onto the one after
+    return re.sub(r"[ \t]{2,}", " ", "".join(parts)).strip()
+
 import torch  # noqa: F401,E402 — MUST precede qdrant_client import (Windows pyarrow DLL order)
 
 from contextlib import asynccontextmanager
@@ -750,6 +772,7 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
     # Clarify gate — the model decided it needs more info: surface the questions, no files yet.
     if "===CLARIFY===" in raw:
         qs = raw.split("===CLARIFY===", 1)[1]
+        qs = _strip_instruction_echo(qs, he)
         qs = _strip_markers(_fix_bleeding_sentences(qs, he, llm), he=he).strip()
         return QueryResponse(answer=qs, citations=[], grounded=False, intent="lesson", files=[])
 
@@ -777,6 +800,7 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
     # whenever `used` is non-empty (the common case) — fixing bleed in text that's discarded a few
     # lines later would just spend real LLM calls for nothing.
     ss = _strip_markers(ss, he=he)
+    lf, fl = _strip_instruction_echo(lf, he), _strip_instruction_echo(fl, he)
     lf = _strip_markers(_fix_bleeding_sentences(lf, he, llm), he=he)
     fl = _strip_markers(_fix_bleeding_sentences(fl, he, llm), he=he)
 
@@ -937,6 +961,7 @@ def _run_chavruta(question: str, lang: str, history=None, llm=None) -> QueryResp
                                     deep_link=(getattr(h, "deep_link", "") or ""),
                                     license=(getattr(h, "license", "") or ""),
                                     version_title=(getattr(h, "version_title", "") or "")))
+    raw = _strip_instruction_echo(raw, he)
     clean = _strip_markers(_fix_bleeding_sentences(raw, he, llm), he=he)
     return QueryResponse(answer=clean, citations=used, grounded=bool(used),
                          intent="chavruta", files=[])
@@ -1045,7 +1070,8 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
 
     citations_out = [_cite(c) for c in answer.citations]
     resolved_llm = llm or _get_pipeline().llm
-    clean = _strip_markers(_fix_bleeding_sentences(answer.text, he, resolved_llm), he=he)
+    text = _strip_instruction_echo(answer.text, he)
+    clean = _strip_markers(_fix_bleeding_sentences(text, he, resolved_llm), he=he)
 
     return QueryResponse(
         answer=clean,

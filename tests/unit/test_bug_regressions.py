@@ -266,6 +266,29 @@ def test_fix_bleeding_sentences_caps_the_number_of_fixes():
     assert "DD" in out                             # the 4th bleeding sentence was left untouched
 
 
+# ── Fix (2026-08-02, caught live): a genuinely-grounded 'explain' answer still contained the bare
+# sentence "אין תשובה במקורות — אמור זאת ואל תמציא" in the middle of real content — the model
+# echoing a fragment of its own grounding instruction (pipeline.py::_agentic_generate's
+# "## INSTRUCTIONS" block) as if it were an answer. Unlike bleed there's no meaning to preserve, so
+# the whole sentence is dropped, and its OWN trailing separator too, so the sentence before it joins
+# directly onto the sentence after it with no orphaned punctuation.
+@pytest.mark.parametrize("raw,expected", [
+    # the exact real leaked fragment (paraphrased, not byte-for-byte from the instruction text)
+    ("פתיחה תקינה. אין תשובה במקורות — אמור זאת ואל תמציא. סיום תקין.",
+     "פתיחה תקינה. סיום תקין."),
+    ("אין תשובה במקורות — אמור זאת ואל תמציא. סיום תקין.", "סיום תקין."),          # leaked sentence first
+    ("פתיחה תקינה. אין תשובה במקורות — אמור זאת ואל תמציא.", "פתיחה תקינה."),      # leaked sentence last
+    ("תשובה נקייה לגמרי בלי שום דבר חשוד.", "תשובה נקייה לגמרי בלי שום דבר חשוד."),  # no-op
+])
+def test_strip_instruction_echo(raw, expected):
+    assert api._strip_instruction_echo(raw, True) == expected
+
+
+def test_strip_instruction_echo_noop_in_english():
+    raw = "This is a fine English answer with no leaked instructions."
+    assert api._strip_instruction_echo(raw, False) == raw
+
+
 # ── Tier0 (2026-07 audit): chavruta weak-retrieval must use the dense-cosine gate, not the RRF score ──
 # Bug: `_run_chavruta` compared the raw hit .score (an RRF fusion value ~0.03 in hybrid mode) to a 0.6
 # cosine threshold, so "retrieval is weak" fired on EVERY hybrid turn and nudged the chavruta to stall.
