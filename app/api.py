@@ -1159,7 +1159,7 @@ def _augment_question(question: str, attachments: list[Attachment] | None) -> st
 # there (X-User-LLM-Model). None of the three are ever persisted anywhere server-side — not to the
 # DB, not even held in memory beyond the single request that used them — read fresh on every call.
 # When the account's own plan quota is exhausted, a supplied key buys a SECOND allowance of the same
-# size (see _reserve_tokens / _enforce_lesson_quota), tracked in its own meter so the two pools never
+# size (see _reserve_tokens / _charge_lesson_unit), tracked in its own meter so the two pools never
 # mix and the plan quota's own accounting is untouched.
 def _byok_supported() -> bool:
     """Whether the configured backend even has the concept of a provider API key. The bridge backend
@@ -1268,32 +1268,37 @@ def _quota_message(kind: str, lang: str, balance: int, cost: int) -> str:
     return head + tail
 
 
-def _enforce_lesson_quota(owner: str, lang: str, user_key: str = "") -> bool:
-    """The lesson pool: a weekly COUNT, entirely independent of conversation tokens. Returns whether
-    the turn was admitted via the BYOK fallback (see module docstring above) rather than the plan's
-    own quota — the caller uses this to decide which backend/meter the turn actually runs against.
+def _charge_lesson_unit(owner: str, used_byok: bool) -> None:
+    """The lesson pool: a weekly COUNT, entirely independent of conversation tokens — charged
+    post-hoc, from _metered, ONLY for the turn that actually produced a real lesson (files/lesson_id
+    non-empty — see _run_lesson). Preliminary turns in a lesson-mode conversation (resolving
+    audience/grade/length, or a model-initiated ===CLARIFY===) are NOT lessons yet: they are metered
+    as ordinary conversation tokens instead (see _metered / _settle_tokens), so a teacher's scarce
+    weekly lesson count is spent only on lessons they actually got, not on the back-and-forth that
+    got them there. Bug found live 2026-08-02: every turn in lesson mode was charging this pool.
 
-    A lesson is a discrete thing a teacher plans around, so it is counted, not metered. Running out
-    of conversation tokens must NOT block a lesson, and a lesson must not spend them — the whole
-    point of keeping the two pools apart. Cost stays bounded by (lessons per week x the per-lesson
-    token budget the pipeline already enforces).
+    Best-effort and never raises: by the time this runs the lesson has already been built and is
+    being returned to the caller regardless, so blocking here would only throw away completed work.
+    Falls back to credits exactly like the old pre-charge did; logs (rather than 429s) if the account
+    is over quota with nothing left to spend, so the imbalance is visible without punishing a request
+    that already completed.
     """
+    if owner == "local":
+        return
     limit = plans.weekly_lessons(db.get_plan(owner))
     if limit <= 0:
-        return False
-    allowed, _d, _w = db.bump_usage(owner, 0, weekly_limit=limit, units=1, meter=db.LESSON)
+        return
+    lesson_meter = db.BYOK_LESSON if used_byok else db.LESSON
+    allowed, _d, _w = db.bump_usage(owner, 0, weekly_limit=limit, units=1, meter=lesson_meter)
     if allowed:
-        return False
-    if user_key and _byok_supported():
-        b_allowed, _bd, _bw = db.bump_usage(owner, 0, weekly_limit=limit, units=1, meter=db.BYOK_LESSON)
-        if b_allowed:
-            return True
+        return
     cost = plans.credit_cost("lesson")
     spent, balance = db.spend_credits(owner, cost)
     if spent:
         _log.info("owner=%s over weekly lesson quota; spent %d credit(s), %d left", owner, cost, balance)
-        return False
-    raise HTTPException(status_code=429, detail=_quota_message("lesson", lang, balance, cost))
+        return
+    _log.warning("owner=%s produced a lesson beyond quota with no credits left (balance=%d)",
+                owner, balance)
 
 
 def _reserve_tokens(owner: str, lang: str, intent: str, user_key: str = "") -> tuple[int, bool]:
@@ -1341,11 +1346,13 @@ def _settle_tokens(owner: str, reserved: int, usage: dict, intent: str, meter: s
     """Replace the reservation with what the request actually spent, against whichever meter it was
     reserved from (the plan's own TOKENS, or BYOK_TOKENS when the turn ran on the caller's own key).
 
-    Lessons are skipped entirely: they are metered as a weekly count in their own pool, so charging
-    their (large) token spend to the conversation pool would silently couple the two — the exact
-    thing keeping them separate is for.
+    Called for every turn, lesson-intent included: a lesson-mode conversation's preliminary turns
+    (resolving audience/grade/length, a model ===CLARIFY===) are ordinary conversation tokens — only
+    the turn that actually produces a real lesson skips this (see _metered, which zeroes `usage`
+    before calling here for that one turn, so its reservation nets to zero spent instead of settling
+    a real charge — that turn is paid for from the lesson pool by _charge_lesson_unit instead).
     """
-    if owner == "local" or plans.is_lesson(intent):
+    if owner == "local":
         return
     actual = plans.normalized_tokens(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
     if not actual and not reserved:
@@ -1353,6 +1360,17 @@ def _settle_tokens(owner: str, reserved: int, usage: dict, intent: str, meter: s
     total = db.settle_usage(owner, reserved, actual, meter=meter)
     _log.info("owner=%s meter=%s tokens reserved=%d actual=%d calls=%d total=%d",
               owner, meter, reserved, actual, usage.get("calls", 0), total)
+
+
+def _lesson_id_of(result) -> str:
+    """The lesson_id off a result that may be a QueryResponse/SessionQueryResponse OR a plain dict
+    (the async job paths run this through jsonable_encoder before _metered ever sees it back) —
+    same dual-shape handling _record_event already uses. Non-empty ONLY on the turn that actually
+    built a real lesson (see _run_lesson); every preliminary turn returns files=[] / lesson_id=""."""
+    if result is None:
+        return ""
+    got = result if isinstance(result, dict) else result.model_dump()
+    return got.get("lesson_id") or ""
 
 
 def _metered(owner: str, reserved: int, intent: str, fn, req: QueryRequest | None = None,
@@ -1367,6 +1385,11 @@ def _metered(owner: str, reserved: int, intent: str, fn, req: QueryRequest | Non
     before failing, and leaving the reservation standing would over-charge instead. `meter` picks
     which pool the settlement lands in (see _settle_tokens) — TOKENS normally, BYOK_TOKENS when the
     turn was admitted on the caller's own key.
+
+    Lesson-intent turns reserve and settle against the SAME conversation-token pool as everything else
+    — EXCEPT the one turn that actually produces a real lesson (lesson_id set): that turn is charged
+    ONE unit of the lesson's own weekly pool instead (_charge_lesson_unit), and its token reservation
+    is settled at zero real usage so it nets out unspent — a real lesson must not ALSO cost tokens.
     """
     def run():
         t0 = time.monotonic()
@@ -1379,7 +1402,11 @@ def _metered(owner: str, reserved: int, intent: str, fn, req: QueryRequest | Non
                 error = type(exc).__name__
                 raise
             finally:
-                _settle_tokens(owner, reserved, usage, intent, meter=meter)
+                if intent == "lesson" and _lesson_id_of(result):
+                    _charge_lesson_unit(owner, used_byok=(meter == db.BYOK_TOKENS))
+                    _settle_tokens(owner, reserved, {}, intent, meter=meter)
+                else:
+                    _settle_tokens(owner, reserved, usage, intent, meter=meter)
                 _record_event(owner, intent, req, usage, result, error,
                               ms=int((time.monotonic() - t0) * 1000))
     return run
@@ -1428,7 +1455,9 @@ def _record_event(owner: str, intent: str, req: QueryRequest | None, usage: dict
 
 
 def _enforce_quota(owner: str, lang: str, intent: str = "", user_key: str = "") -> tuple[int, bool]:
-    """Route a request to its pool and admit it. Returns (tokens reserved (0 for a lesson), used_byok).
+    """Reserve against the conversation-token pool and admit the turn. Returns (tokens reserved,
+    used_byok). Every intent goes through here the same way, lesson included — see _charge_lesson_unit
+    for why a lesson's OWN weekly pool is charged separately, post-hoc, instead of gating entry here.
 
     Only bites authenticated users (owner != 'local'); local/offline use is uncapped. Enforced
     before ownership checks so an over-quota user probing session ids learns nothing. `user_key` is
@@ -1436,8 +1465,6 @@ def _enforce_quota(owner: str, lang: str, intent: str = "", user_key: str = "") 
     """
     if owner == "local":
         return 0, False
-    if plans.is_lesson(intent):
-        return 0, _enforce_lesson_quota(owner, lang, user_key)
     return _reserve_tokens(owner, lang, intent, user_key)
 
 

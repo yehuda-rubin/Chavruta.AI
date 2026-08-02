@@ -1,4 +1,4 @@
-"""BYOK (bring-your-own-key) quota fallback (app/api.py::_reserve_tokens / _enforce_lesson_quota /
+"""BYOK (bring-your-own-key) quota fallback (app/api.py::_reserve_tokens / _charge_lesson_unit /
 _byok_supported).
 
 The guarantee: once the plan's OWN allowance (db.TOKENS / db.LESSON) is exhausted, a caller-supplied
@@ -122,16 +122,46 @@ def test_key_ignored_when_backend_does_not_support_byok(fresh_db, monkeypatch):
     assert db.usage_today("u6", meter=db.BYOK_TOKENS) == 0
 
 
-# ── _enforce_lesson_quota (its own weekly-count pool) ─────────────────────────
-def test_lesson_quota_mirrors_the_same_byok_fallback(fresh_db, api_backend, monkeypatch):
+# ── _charge_lesson_unit (its own weekly-count pool, charged post-hoc for a REAL lesson only —
+# see _metered / test_bug_regressions.py for the fix that made "post-hoc" true) ───────────────
+def test_lesson_unit_goes_to_the_byok_pool_when_the_turn_ran_on_byok(fresh_db, api_backend, monkeypatch):
+    """used_byok is now an INPUT (decided once, at reservation time, by _resolve_llm_for_request) —
+    not re-derived here. A turn that ran on the caller's own key charges BYOK_LESSON directly,
+    leaving the plan's own LESSON pool untouched either way."""
     monkeypatch.setenv("CHAVRUTA_LESSONS_WEEK_FREE", "1")
-    db.bump_usage("u7", 0, weekly_limit=1, units=1, meter=db.LESSON)   # spend the week's one lesson
+    db.bump_usage("u7", 0, weekly_limit=1, units=1, meter=db.LESSON)   # the plan's own lesson already spent
 
-    monkeypatch.setattr(db, "spend_credits", lambda owner, cost: (False, 0))
-    used_byok = api._enforce_lesson_quota("u7", "he", user_key="sk-user")
-    assert used_byok is True
+    api._charge_lesson_unit("u7", used_byok=True)
     assert db.usage_this_week("u7", meter=db.BYOK_LESSON) == 1
     assert db.usage_this_week("u7", meter=db.LESSON) == 1    # unchanged
+
+
+def test_lesson_unit_goes_to_the_plan_pool_by_default(fresh_db, api_backend, monkeypatch):
+    monkeypatch.setenv("CHAVRUTA_LESSONS_WEEK_FREE", "3")
+    api._charge_lesson_unit("u7b", used_byok=False)
+    assert db.usage_this_week("u7b", meter=db.LESSON) == 1
+    assert db.usage_this_week("u7b", meter=db.BYOK_LESSON) == 0
+
+
+def test_lesson_unit_falls_back_to_credits_once_the_plan_pool_is_spent(fresh_db, api_backend, monkeypatch):
+    monkeypatch.setenv("CHAVRUTA_LESSONS_WEEK_FREE", "1")
+    db.bump_usage("u7c", 0, weekly_limit=1, units=1, meter=db.LESSON)
+    spent_calls = []
+    monkeypatch.setattr(db, "spend_credits",
+                        lambda owner, cost: (spent_calls.append((owner, cost)), (True, 3))[1])
+
+    api._charge_lesson_unit("u7c", used_byok=False)
+    assert spent_calls == [("u7c", api.plans.credit_cost("lesson"))]
+
+
+def test_lesson_unit_never_raises_even_fully_exhausted(fresh_db, api_backend, monkeypatch):
+    """Charged post-hoc, after the lesson is already built and being returned — must never 429 a
+    completed request. Falls through to a log line instead (see the function's own docstring)."""
+    monkeypatch.setenv("CHAVRUTA_LESSONS_WEEK_FREE", "1")
+    db.bump_usage("u7d", 0, weekly_limit=1, units=1, meter=db.LESSON)
+    monkeypatch.setattr(db, "spend_credits", lambda owner, cost: (False, 0))
+
+    api._charge_lesson_unit("u7d", used_byok=False)   # must not raise
 
 
 # ── _resolve_llm_for_request (route-level wiring) ─────────────────────────────

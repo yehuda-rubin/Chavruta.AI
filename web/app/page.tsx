@@ -28,7 +28,7 @@ export default function Home() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
-  const [intent, setIntent] = useState<IntentId>("lesson");
+  const [intent, setIntent] = useState<IntentId>("qa");
   const [lessonFields, setLessonFields] = useState<LessonFields>({ audience: "", gradeBand: "", length: "" });
   const [userSources, setUserSources] = useState<Attachment[]>([]);
   const [subtitle, setSubtitle] = useState("");
@@ -40,7 +40,7 @@ export default function Home() {
 
   // Preferences (persisted)
   const [theme, setTheme] = useState<Theme>("light");
-  const [defaultIntent, setDefaultIntent] = useState<IntentId>("lesson");
+  const [defaultIntent, setDefaultIntent] = useState<IntentId>("qa");
   const [srcDefaultOpen, setSrcDefaultOpen] = useState(false);
 
   // UI chrome
@@ -70,7 +70,7 @@ export default function Home() {
   useEffect(() => {
     const g = (k: string) => localStorage.getItem(k);
     setTheme((g("chavruta-theme") as Theme) || "light");
-    const di = (g("chavruta-default-intent") as IntentId) || "lesson";
+    const di = (g("chavruta-default-intent") as IntentId) || "qa";
     setDefaultIntent(di);
     setIntent(di);
     setSrcDefaultOpen(g("chavruta-src-open") === "1");

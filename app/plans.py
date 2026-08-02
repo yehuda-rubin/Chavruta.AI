@@ -138,14 +138,6 @@ def _env_int(*names: str | None) -> int | None:
     return None
 
 
-LESSON_INTENTS = frozenset({"lesson"})
-
-
-def is_lesson(intent: str | None) -> bool:
-    """Which pool a request draws on. Everything that isn't a lesson is conversation."""
-    return (intent or "").strip().lower() in LESSON_INTENTS
-
-
 def daily_tokens(plan: str | None) -> int:
     """Conversation tokens per UTC day. 0 ⇒ uncapped (no shipped tier uses it).
 
