@@ -144,14 +144,14 @@ export function privacySections(lang: Lang): Section[] {
 }
 
 // ── Accessibility Statement (mirrors docs/legal/accessibility-{he,en}.md) ─────
-export const ACCESSIBILITY_VERSION = "1.0";
-export const ACCESSIBILITY_EFFECTIVE = "2026-07-30";
+export const ACCESSIBILITY_VERSION = "1.1";
+export const ACCESSIBILITY_EFFECTIVE = "2026-08-02";
 
 const ACCESSIBILITY_HE: Section[] = [
   { heading: "מחויבותנו לנגישות",
     body: "חברותא AI פועלת להנגיש את השירות לאנשים עם מוגבלויות, ולאפשר שימוש נוח ושוויוני ככל הניתן. אנו עובדים לפי עקרונות תקן הנגישות לתכנים באינטרנט (WCAG) ברמה סבירה למוצר בשלב זה, ומשפרים את הנגישות באופן הדרגתי ומתמשך." },
   { heading: "מצב הנגישות הנוכחי",
-    body: "השירות תומך, בין היתר, בניווט מקלדת בסיסי, בתמיכה בטכנולוגיות מסייעות נפוצות, ובתצוגה בעברית (RTL) ובאנגלית (LTR). זהו מוצר חדש וקטן, ועדיין ייתכנו חלקים שאינם נגישים באופן מלא. אנו פועלים לאתר ולתקן פערים אלה ככל שהמוצר גדל." },
+    body: "השירות תומך, בין היתר, בניווט מקלדת בסיסי, בתמיכה בטכנולוגיות מסייעות נפוצות, ובתצוגה בעברית (RTL) ובאנגלית (LTR). בנוסף, כפתור הנגישות הצף (בפינת המסך) מאפשר להגדיל את גודל הטקסט, להפעיל ניגודיות גבוהה, להדגיש קישורים בקו תחתון ולעצור אנימציות — וההגדרות נשמרות באופן קבוע במכשיר. זהו מוצר חדש וקטן, ועדיין ייתכנו חלקים שאינם נגישים באופן מלא. אנו פועלים לאתר ולתקן פערים אלה ככל שהמוצר גדל." },
   { heading: "פנייה בנושאי נגישות",
     body: "נתקלת בבעיית נגישות בשימוש בשירות? נשמח שתפנה אלינו — רכז הנגישות: יהודה רובין, rubinyehuda8@gmail.com — ונשתדל להשיב ולטפל בפנייה בזמן סביר." },
   { heading: "שינויים בהצהרה",
@@ -162,7 +162,7 @@ const ACCESSIBILITY_EN: Section[] = [
   { heading: "Our Commitment to Accessibility",
     body: "Chavruta AI works to make the Service accessible to people with disabilities, and to enable comfortable and equal use as far as reasonably possible. We follow the principles of the Web Content Accessibility Guidelines (WCAG) at a reasonable level for a product at this stage, and we improve accessibility gradually and on an ongoing basis." },
   { heading: "Current Accessibility Status",
-    body: "The Service supports, among other things, basic keyboard navigation, support for common assistive technologies, and display in both Hebrew (RTL) and English (LTR). This is a new, small product, and some parts may not yet be fully accessible. We work to identify and fix such gaps as the product grows." },
+    body: "The Service supports, among other things, basic keyboard navigation, support for common assistive technologies, and display in both Hebrew (RTL) and English (LTR). In addition, the floating accessibility button (in the corner of the screen) lets you increase text size, turn on high contrast, underline links, and stop animations — these settings are saved persistently on your device. This is a new, small product, and some parts may not yet be fully accessible. We work to identify and fix such gaps as the product grows." },
   { heading: "Contact Us About Accessibility",
     body: "Encountered an accessibility issue while using the Service? We'd welcome you contacting us — Accessibility Coordinator: Yehuda Rubin, rubinyehuda8@gmail.com — and we will do our best to respond and address it within a reasonable time." },
   { heading: "Changes to This Statement",

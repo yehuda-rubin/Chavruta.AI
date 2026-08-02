@@ -6,7 +6,7 @@
 
 # Accessibility Statement — Chavruta AI
 
-**Version 1.0 · Effective July 30, 2026**
+**Version 1.1 · Effective August 2, 2026**
 
 ## Our Commitment to Accessibility
 Chavruta AI works to make the Service accessible to people with disabilities, and to enable
@@ -16,9 +16,11 @@ improve accessibility gradually and on an ongoing basis.
 
 ## Current Accessibility Status
 The Service supports, among other things, basic keyboard navigation, support for common assistive
-technologies, and display in both Hebrew (RTL) and English (LTR). This is a new, small product, and
-some parts may not yet be fully accessible. We work to identify and fix such gaps as the product
-grows.
+technologies, and display in both Hebrew (RTL) and English (LTR). In addition, the floating
+accessibility button (in the corner of the screen) lets you increase text size, turn on high
+contrast, underline links, and stop animations — these settings are saved persistently on your
+device. This is a new, small product, and some parts may not yet be fully accessible. We work to
+identify and fix such gaps as the product grows.
 
 ## Contact Us About Accessibility
 Encountered an accessibility issue while using the Service? We'd welcome you contacting us —
