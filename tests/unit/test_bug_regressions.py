@@ -1305,3 +1305,37 @@ def test_create_session_async_deletes_orphan_on_failure(monkeypatch):
     job = _await_job("local", accepted.job_id)
     assert job.status == "error"
     assert deleted.get("sid-fail") == "local"      # orphan session cleaned up, not left behind
+
+
+# ── Fix (2026-08-03, requested live): the daily/weekly quota bucket was keyed by the UTC date, not
+# Israel local — "resets at midnight" meant UTC midnight, which lands 2-3h into the Israeli morning
+# (winter/DST). A user near that window would see a NOT-YET-RESET quota well past their own local
+# midnight. today_il() uses Asia/Jerusalem instead of UTC for the bucket key.
+def test_today_il_uses_israel_local_date_not_utc():
+    import app.db as db
+
+    # 21:30 UTC on 2026-08-03 is already past midnight in Israel (00:30, +3h DST) — the daily bucket
+    # must reflect the LOCAL date (08-04), not the still-previous UTC date (08-03).
+    utc_after_israel_midnight = datetime(2026, 8, 3, 21, 30, tzinfo=UTC)
+
+    class _FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return utc_after_israel_midnight.astimezone(tz) if tz else utc_after_israel_midnight
+
+    with unittest.mock.patch("app.db.datetime", _FixedDatetime):
+        assert db.today_il() == "2026-08-04"
+
+
+def test_week_days_still_starts_sunday_with_israel_local_dates():
+    import app.db as db
+    # 2026-08-02 is a Sunday; the week should run through the following Saturday, unaffected by
+    # the switch from UTC to Israel-local dates (both use the same calendar-date string).
+    assert db.week_days("2026-08-02") == [
+        "2026-08-02", "2026-08-03", "2026-08-04", "2026-08-05",
+        "2026-08-06", "2026-08-07", "2026-08-08",
+    ]
+
+
+from datetime import UTC, datetime  # noqa: E402
+import unittest.mock  # noqa: E402
