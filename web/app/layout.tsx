@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
+import { AccessibilityWidget } from "@/components/AccessibilityWidget";
 
 export const metadata: Metadata = {
   title: "חברותא AI · בית מדרש",
@@ -28,6 +29,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="font-sans text-ink h-screen overflow-hidden">
         {/* Inert unless Supabase env is set — then it gates the app behind sign-in. */}
         <AuthProvider>{children}</AuthProvider>
+        <AccessibilityWidget />
       </body>
     </html>
   );

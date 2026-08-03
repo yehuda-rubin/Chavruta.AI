@@ -26,11 +26,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 _MARKER_RE = re.compile(r"\s*[\[(（【]\s*S\d+(?:\s*,\s*S\d+)*\s*[\])）】]")
 
 
-# CJK / Japanese-kana / Cyrillic / Vietnamese-diacritic characters — model multilingual bleed (Qwen
-# occasionally injects '违反', 'требуется', 'giải' into Hebrew text). Torah Hebrew/English/punctuation
-# never use these ranges. Strip the CHARS (not whole tokens) so Hebrew glued to a foreign char — e.g.
-# 'בזדון违反' — keeps 'בזדון'. A fully-foreign word collapses to nothing; the double space is cleaned.
-_FOREIGN_CHAR_RE = re.compile(r"[Ѐ-ӿ぀-ヿ㐀-䶿一-鿿Ạ-ỿ]+")
+# Model multilingual bleed (Qwen occasionally injects '违反', 'требуется', 'giải', or — caught live,
+# 2026-08-02 — Arabic into Hebrew text). Rather than enumerating each script as it turns up (CJK,
+# Cyrillic, Vietnamese diacritics, now Arabic — an endless list), this ALLOWLISTS what legitimate
+# output actually uses: ASCII (Hebrew/English/digits/markdown all live there; English words get the
+# careful sentence-rewrite treatment below, not blind deletion, since they can be grammatically
+# load-bearing), the Hebrew Unicode block, and the "smart" typography this app's own prose uses
+# (em/en dash, curly quotes, ellipsis, bullet, middle dot, NBSP). Anything else — any OTHER script —
+# has no legitimate use here at all, so it's simply not on the list and gets stripped. Strips the
+# CHARS (not whole tokens) so Hebrew glued to a foreign char — e.g. 'בזדון违反' — keeps 'בזדון'. A
+# fully-foreign word collapses to nothing; the double space left behind is cleaned.
+_ALLOWED_EXTRA_PUNCT = "‐‑‒–—―‘’“”…•· "
+_FOREIGN_CHAR_RE = re.compile(rf"[^\x00-\x7F֐-׿{_ALLOWED_EXTRA_PUNCT}]+")
 
 
 def _strip_foreign(text: str) -> str:
@@ -39,13 +46,99 @@ def _strip_foreign(text: str) -> str:
     return re.sub(r"[ \t]{2,}", " ", _FOREIGN_CHAR_RE.sub("", text))
 
 
-def _strip_markers(text: str) -> str:
+# A parenthetical aside made up ENTIRELY of Latin letters/digits/punctuation — e.g. the model
+# writing '(Bava Metzia 3:1)' in the middle of an otherwise-Hebrew answer despite being told to
+# answer only in the question's language (real citations already surface via [S#]/the sources panel,
+# so this is redundant bleed, not information). Requires a Latin LETTER so a legitimate numbered
+# aside like '(1)' is untouched, and requires NO Hebrew letter so a mixed aside is left alone.
+_HE_CHAR_RE = re.compile(r"[֐-׿]")
+_LATIN_LETTER_RE = re.compile(r"[A-Za-z]")
+_PAREN_RE = re.compile(r"[ \t]*[(（][^()（）]*[)）]")
+
+
+def _strip_foreign_parens(text: str) -> str:
+    def repl(m: re.Match) -> str:
+        inner = m.group(0)
+        return "" if _LATIN_LETTER_RE.search(inner) and not _HE_CHAR_RE.search(inner) else inner
+    return _PAREN_RE.sub(repl, text)
+
+
+def _strip_markers(text: str, he: bool = False) -> str:
     t = _MARKER_RE.sub("", text or "")
     t = _strip_foreign(t)                    # drop stray foreign-script tokens (model multilingual bleed)
+    if he:
+        t = _strip_foreign_parens(t)         # drop a stray English citation aside in a Hebrew answer
     t = re.sub(r"\*\*\s*\*\*", "", t)        # collapse empty **bold** left where a **[S#]** was stripped
     t = re.sub(r"(?<!\*)\*\s*\*(?!\*)", "", t)  # …and empty *italic*
     t = re.sub(r"[ \t]{2,}", " ", t)
     return t.strip()
+
+
+# A run of 2+ Latin letters surviving mid-sentence in an otherwise-Hebrew answer is almost always
+# model multilingual bleed (Qwen occasionally writes a bare English word, e.g. "שהוא אינו מ CLAIM
+# על") — the parenthetical case above is cheap to strip outright, but a bare word is often
+# grammatically load-bearing, so deleting it would leave broken Hebrew ("שהוא אינו מ על"). Instead
+# _fix_bleeding_sentences asks the model to rewrite ONLY the offending sentence — cheap (one short
+# sentence, not the whole answer) and safe (every other sentence, and all citations, are untouched).
+_LATIN_WORD_RE = re.compile(r"(?<![A-Za-z])[A-Za-z]{2,}(?![A-Za-z])")
+_SENTENCE_SPLIT_RE = re.compile(r"([.!?]\s+|\n+)")   # captured so separators are preserved verbatim
+_MAX_BLEED_FIXES = 3    # bound worst-case latency/cost if something is very wrong with one answer
+
+_BLEED_FIX_SYSTEM = (
+    "Rewrite the given Hebrew sentence so it contains NO English or other non-Hebrew words at all, "
+    "preserving its meaning. If the sentence already contains a citation marker such as [S1] or [S2], "
+    "keep that EXACT marker in the same place — but do not add, remove, or invent any marker that "
+    "is not already there verbatim in the input. Reply with ONLY the rewritten sentence and nothing "
+    "else — no preamble, no quotes around it."
+)
+
+
+def _fix_bleeding_sentences(text: str, he: bool, llm) -> str:
+    """Best-effort: a failed or degenerate rewrite call keeps the ORIGINAL sentence rather than
+    raising or blanking it — a language-cleanup pass must never be the reason a real answer breaks."""
+    if not he or not text or llm is None or not _LATIN_WORD_RE.search(text):
+        return text
+    parts = _SENTENCE_SPLIT_RE.split(text)   # alternates: sentence, separator, sentence, separator, …
+    fixed = 0
+    for i in range(0, len(parts), 2):
+        if fixed >= _MAX_BLEED_FIXES:
+            break
+        sentence = parts[i]
+        if not _LATIN_WORD_RE.search(sentence):
+            continue
+        try:
+            prompt = GroundedPrompt(system=_BLEED_FIX_SYSTEM, sources=[], question=sentence)
+            res = llm.generate(prompt, lang="he", max_tokens=200, temperature=0.2)
+            rewritten = (res.text or "").strip()
+        except Exception:
+            _log.warning("bleed sentence-fix call failed; keeping the original sentence", exc_info=True)
+            continue
+        if rewritten:
+            parts[i] = rewritten
+            fixed += 1
+    return "".join(parts)
+
+
+# Fix (2026-08-02, caught live): a genuinely-grounded answer still contained the bare sentence "אין
+# תשובה במקורות — אמור זאת ואל תמציא" in the middle of real Torah content — the model echoing a
+# fragment of its OWN grounding instruction (pipeline.py::_agentic_generate's "## INSTRUCTIONS"
+# block, sent as the last thing before it answers) back as if it were content. Unlike bleed, there's
+# no meaning to preserve in a leaked instruction fragment, so the sentence is dropped outright rather
+# than rewritten. Matches on either half of the phrase since the model paraphrased slightly (dropped
+# "אם"/"בפירוש") rather than echoing it byte-for-byte.
+_INSTRUCTION_ECHO_RE = re.compile(r"אין תשובה במקורות|ואל תמציא")
+
+
+def _strip_instruction_echo(text: str, he: bool) -> str:
+    if not he or not text or not _INSTRUCTION_ECHO_RE.search(text):
+        return text
+    parts = _SENTENCE_SPLIT_RE.split(text)   # alternates: sentence, separator, sentence, separator, …
+    for i in range(0, len(parts), 2):
+        if _INSTRUCTION_ECHO_RE.search(parts[i]):
+            parts[i] = ""
+            if i + 1 < len(parts):           # drop the sentence's OWN trailing separator too, so the
+                parts[i + 1] = ""            # sentence before it joins directly onto the one after
+    return re.sub(r"[ \t]{2,}", " ", "".join(parts)).strip()
 
 import torch  # noqa: F401,E402 — MUST precede qdrant_client import (Windows pyarrow DLL order)
 
@@ -59,9 +152,11 @@ from pydantic import BaseModel, Field
 from chavruta import __version__
 from chavruta.config.profile import Profile
 from chavruta.corpus import rights
+from chavruta.corpus.refs import hebrew_display_ref
 from chavruta.corpus.schema import Intent, Query, Turn
 from chavruta.llm import metering
 from chavruta.llm.agentic import is_degrade_message
+from chavruta.llm.base import GroundedPrompt
 from chavruta.pipeline.pipeline import _max_tokens_for
 
 import app.accounts as accounts
@@ -198,6 +293,10 @@ app.add_middleware(
 
 class CitationOut(BaseModel):
     ref: str
+    # Best-effort Hebrew rendering of `ref` for display (corpus.refs.hebrew_display_ref) — empty when
+    # no Hebrew name is known for it. `ref` itself stays the English/transliterated corpus key: the
+    # frontend uses it to dedupe/group/key citations, so it must never change based on language.
+    ref_he: str = ""
     text_he: str = ""
     text_en: str = ""
     commentator: str = ""
@@ -679,7 +778,9 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
 
     # Clarify gate — the model decided it needs more info: surface the questions, no files yet.
     if "===CLARIFY===" in raw:
-        qs = _strip_markers(raw.split("===CLARIFY===", 1)[1]).strip()
+        qs = raw.split("===CLARIFY===", 1)[1]
+        qs = _strip_instruction_echo(qs, he)
+        qs = _strip_markers(_fix_bleeding_sentences(qs, he, llm), he=he).strip()
         return QueryResponse(answer=qs, citations=[], grounded=False, intent="lesson", files=[])
 
     ss, lf, fl, order = _split_lesson(raw)
@@ -696,12 +797,19 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
         if 1 <= i <= len(hits) and i not in seen:
             seen.add(i)
             h = hits[i - 1]
-            used.append(CitationOut(ref=h.ref, text_he=(getattr(h, "text", "") or ""), text_en="",
+            used.append(CitationOut(ref=h.ref, ref_he=(hebrew_display_ref(h.ref) or "") if he else "",
+                                    text_he=(getattr(h, "text", "") or ""), text_en="",
                                     commentator=(getattr(h, "commentator_id", "") or ""),
                                     deep_link=(getattr(h, "deep_link", "") or ""),
                                     license=(getattr(h, "license", "") or ""),
                                     version_title=(getattr(h, "version_title", "") or "")))
-    ss, lf, fl = _strip_markers(ss), _strip_markers(lf), _strip_markers(fl)
+    # ss isn't bleed-fixed here: it's about to be replaced by the mechanically-assembled sheet below
+    # whenever `used` is non-empty (the common case) — fixing bleed in text that's discarded a few
+    # lines later would just spend real LLM calls for nothing.
+    ss = _strip_markers(ss, he=he)
+    lf, fl = _strip_instruction_echo(lf, he), _strip_instruction_echo(fl, he)
+    lf = _strip_markers(_fix_bleeding_sentences(lf, he, llm), he=he)
+    fl = _strip_markers(_fix_bleeding_sentences(fl, he, llm), he=he)
 
     # Source sheet = the FULL retrieved source texts, in teaching order — ALWAYS built mechanically from
     # the cited sources (which carry the complete RAG text), NOT from the model's SOURCE_SHEET prose.
@@ -836,6 +944,7 @@ def _run_chavruta(question: str, lang: str, history=None, llm=None) -> QueryResp
     q = Query(text=anchor, lang=lang or None, intent=Intent.QA)
     rq = pipeline._resolve_query(q)
     lang = rq.lang or lang or "he"
+    he = lang != "en"
     result = pipeline.retriever.retrieve(rq, top_k=10)
     hits = list(result.hits)
     # weak = retrieval didn't clear the relevance bar. Use the retriever's own dense-cosine gate
@@ -853,12 +962,15 @@ def _run_chavruta(question: str, lang: str, history=None, llm=None) -> QueryResp
         if 1 <= i <= len(hits) and i not in seen:
             seen.add(i)
             h = hits[i - 1]
-            used.append(CitationOut(ref=h.ref, text_he=(getattr(h, "text", "") or ""), text_en="",
+            used.append(CitationOut(ref=h.ref, ref_he=(hebrew_display_ref(h.ref) or "") if he else "",
+                                    text_he=(getattr(h, "text", "") or ""), text_en="",
                                     commentator=(getattr(h, "commentator_id", "") or ""),
                                     deep_link=(getattr(h, "deep_link", "") or ""),
                                     license=(getattr(h, "license", "") or ""),
                                     version_title=(getattr(h, "version_title", "") or "")))
-    return QueryResponse(answer=_strip_markers(raw), citations=used, grounded=bool(used),
+    raw = _strip_instruction_echo(raw, he)
+    clean = _strip_markers(_fix_bleeding_sentences(raw, he, llm), he=he)
+    return QueryResponse(answer=clean, citations=used, grounded=bool(used),
                          intent="chavruta", files=[])
 
 
@@ -920,6 +1032,7 @@ def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
 def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Turn],
                     audience: str = "", grade_band: str = "", length: str = "",
                     owner_id: str = "local", llm=None) -> QueryResponse:
+    he = (lang or "") != "en"
     if intent_str == "shut":          # UI's responsa mode → HALACHA intent
         intent_str = "halacha"
     if intent_str == "chavruta":      # Socratic study-partner mode (its own path)
@@ -941,6 +1054,7 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
     def _cite(c) -> CitationOut:
         return CitationOut(
             ref=c.ref,
+            ref_he=(hebrew_display_ref(c.ref) or "") if he else "",
             text_he=getattr(c, "text_he", "") or getattr(c, "quote", ""),
             text_en=getattr(c, "text_en", ""),
             commentator=getattr(c, "commentator_id", "") or "",
@@ -962,7 +1076,9 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
         )
 
     citations_out = [_cite(c) for c in answer.citations]
-    clean = _strip_markers(answer.text)
+    resolved_llm = llm or _get_pipeline().llm
+    text = _strip_instruction_echo(answer.text, he)
+    clean = _strip_markers(_fix_bleeding_sentences(text, he, resolved_llm), he=he)
 
     return QueryResponse(
         answer=clean,

@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from app import moderation
 
@@ -1013,9 +1014,16 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def today_utc() -> str:
-    """The current UTC date as YYYY-MM-DD — the bucket a daily quota counts against."""
-    return datetime.now(UTC).strftime("%Y-%m-%d")
+# The product is Israeli, and "resets at midnight" / "resets Sunday" means ISRAEL midnight/Sunday to
+# a user — not UTC's, which lags Israel by 2-3h (winter/DST). Using UTC dates for the daily/weekly
+# quota bucket meant the reset actually landed a few hours into the Israeli morning instead of at
+# local midnight (reported live, 2026-08-03).
+_IL_TZ = ZoneInfo("Asia/Jerusalem")
+
+
+def today_il() -> str:
+    """The current Israel-local date as YYYY-MM-DD — the bucket a daily quota counts against."""
+    return datetime.now(_IL_TZ).strftime("%Y-%m-%d")
 
 
 def week_days(day: str | None = None) -> list[str]:
@@ -1026,7 +1034,7 @@ def week_days(day: str | None = None) -> list[str]:
     predictable reset matters more here than closing the small boundary burst, which the daily cap
     bounds anyway.
     """
-    d = datetime.strptime(day or today_utc(), "%Y-%m-%d").replace(tzinfo=UTC)
+    d = datetime.strptime(day or today_il(), "%Y-%m-%d").replace(tzinfo=_IL_TZ)
     sunday = d - timedelta(days=(d.weekday() + 1) % 7)      # Python: Monday==0, so Sunday==6
     return [(sunday + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)]
 
@@ -1064,7 +1072,7 @@ def bump_usage(owner_id: str, limit: int, day: str | None = None, *, weekly_limi
     cannot each see room and both proceed. Week totals are summed from the daily rows rather than
     kept in a counter of their own: one source of truth, so the two can never disagree.
     """
-    day = day or today_utc()
+    day = day or today_il()
     units = max(0, int(units))
     conn = get_conn()
     with _LOCK, _tx(conn):
@@ -1090,7 +1098,7 @@ def settle_usage(owner_id: str, reserved: int, actual: int, day: str | None = No
     which is the normal case); the counter is floored at zero so a bad estimate can never mint
     allowance out of an earlier charge.
     """
-    day = day or today_utc()
+    day = day or today_il()
     delta = int(actual) - int(reserved)
     conn = get_conn()
     with _LOCK, _tx(conn):
@@ -1108,7 +1116,7 @@ def settle_usage(owner_id: str, reserved: int, actual: int, day: str | None = No
 
 def usage_today(owner_id: str, day: str | None = None, meter: str = TOKENS) -> int:
     """Today's total for one meter (0 if none) — for the /me readout."""
-    day = day or today_utc()
+    day = day or today_il()
     conn = get_conn()
     with _LOCK:
         return _counts(conn, owner_id, day, meter)[0]
@@ -1118,7 +1126,7 @@ def usage_this_week(owner_id: str, day: str | None = None, meter: str = TOKENS) 
     """This week's total for one meter (Sunday-start), summed from the daily rows."""
     conn = get_conn()
     with _LOCK:
-        return _counts(conn, owner_id, day or today_utc(), meter)[1]
+        return _counts(conn, owner_id, day or today_il(), meter)[1]
 
 
 # ── Account deletion (scheduled, with a grace period) ─────────────────────────

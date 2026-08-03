@@ -49,3 +49,28 @@ body.theme-dark [class*="bg-white"] { background-color: rgba(44, 50, 63, 0.5) !i
 body.theme-dark [class*="border-white"],
 body.theme-dark [class*="border-line"] { border-color: rgba(255, 255, 255, 0.1) !important; }
 body.theme-dark ::-webkit-scrollbar-thumb { background: #3a4150; }
+
+/* Accessibility widget (components/AccessibilityWidget.tsx) — persisted per-visitor overrides.
+   Text size itself is applied as an inline font-size on <html> so every rem-based size (Tailwind
+   included) scales with it; these classes cover the toggles that need real style rules. */
+body.a11y-contrast {
+  background: #000 !important;
+  color: #fff !important;
+}
+body.a11y-contrast .glass {
+  background: #000 !important;
+  border: 1px solid #fff !important;
+  box-shadow: none !important;
+}
+body.a11y-contrast a { color: #ffe14d !important; }
+
+body.a11y-underline a { text-decoration: underline !important; }
+
+body.a11y-reduce-motion *,
+body.a11y-reduce-motion *::before,
+body.a11y-reduce-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}

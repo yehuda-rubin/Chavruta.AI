@@ -171,16 +171,128 @@ def test_school_audience_detected(text):
     assert api._detect_school(text)
 
 
-# ── Fix (2026-07-13): strip model multilingual bleed (CJK / Cyrillic / Vietnamese) from output,
-# keeping Hebrew glued to a foreign char; legit Hebrew + English are untouched.
+# ── Fix (2026-07-13, generalized 2026-08-02): strip model multilingual bleed from output, keeping
+# Hebrew glued to a foreign char; legit Hebrew + English + common typography are untouched. Arabic
+# turned up live on 2026-08-02 — rather than adding it to an ever-growing enumerated list of scripts
+# (CJK, Cyrillic, Vietnamese diacritics, now Arabic), _FOREIGN_CHAR_RE was flipped to an ALLOWLIST
+# (ASCII + Hebrew + a few "smart" punctuation marks), so any OTHER script is caught automatically.
 @pytest.mark.parametrize("raw,expected", [
     ("בזדון违反 שבת", "בזדון שבת"),                          # CJK glued to Hebrew → Hebrew kept
     ("לא требуется הסכמה", "לא הסכמה"),                       # whole Cyrillic word removed
+    ("הטקסט מכיל ערבית: هذا نص عربي באמצע", "הטקסט מכיל ערבית: באמצע"),   # Arabic — the live 2026-08-02 report
     ("נבראו השמים והארץ", "נבראו השמים והארץ"),              # clean Hebrew untouched
-    ("Rashi explains thus", "Rashi explains thus"),          # English untouched
+    ("Rashi explains thus", "Rashi explains thus"),          # English untouched (handled elsewhere)
+    ("משפט עם — מקף ארוך ו\"מרכאות חכמות\" ו… שלוש נקודות",   # "smart" typography (em dash, curly
+     "משפט עם — מקף ארוך ו\"מרכאות חכמות\" ו… שלוש נקודות"),  # quotes, ellipsis) must survive the allowlist
 ])
 def test_strip_foreign_removes_bleed(raw, expected):
     assert api._strip_foreign(raw) == expected
+
+
+# ── Fix (2026-08-02): a real user reported the model injecting a stray English aside into an
+# otherwise-Hebrew answer, e.g. '...שמתוארת במשנה (Bava Metzia 3:1), עוסקת...' — reproduced live
+# against production. Strip a parenthetical made up ENTIRELY of Latin letters/digits/punctuation
+# when the answer is Hebrew (he=True); leave it in English answers, leave numeric-only asides like
+# '(1)' alone (no Latin letter), and leave a mixed Hebrew+Latin aside alone.
+@pytest.mark.parametrize("raw,expected", [
+    ("הסוגיה (Bava Metzia 3:1) עוסקת בטלית", "הסוגיה עוסקת בטלית"),
+    ("ראה שיטה זו (Rashi) לעיל", "ראה שיטה זו לעיל"),
+    ("סעיף (1) קובע", "סעיף (1) קובע"),                       # numeric-only aside untouched
+    ("עיין (רש\"י) שם", "עיין (רש\"י) שם"),                    # Hebrew-only aside untouched
+    ("עיין (עיין Rashi) שם", "עיין (עיין Rashi) שם"),          # mixed aside untouched
+])
+def test_strip_markers_removes_english_aside_in_hebrew_answers(raw, expected):
+    assert api._strip_markers(raw, he=True) == expected
+
+
+def test_strip_markers_keeps_english_aside_in_english_answers():
+    raw = "The sugya (Bava Metzia 3:1) discusses a garment"
+    assert api._strip_markers(raw, he=False) == raw
+
+
+# ── Fix (2026-08-02): a real user reported a SECOND bleed pattern in the same live test — a bare
+# English word mid-sentence with no parentheses at all ("שהוא אינו מ CLAIM על פחות מחצי"), which the
+# parenthetical strip above cannot catch (and mechanically deleting the word would leave broken
+# Hebrew grammar). _fix_bleeding_sentences asks the model to rewrite ONLY the offending sentence.
+from types import SimpleNamespace  # noqa: E402
+
+
+class _FakeLLM:
+    """Records every prompt it's asked to rewrite; replies with a scripted (or default) rewrite."""
+
+    def __init__(self, reply="תשובה נקייה", raises=False):
+        self.reply = reply
+        self.raises = raises
+        self.calls: list[str] = []
+
+    def generate(self, prompt, *, lang, max_tokens, temperature):
+        self.calls.append(prompt.question)
+        if self.raises:
+            raise RuntimeError("model unavailable")
+        return SimpleNamespace(text=self.reply)
+
+
+def test_fix_bleeding_sentences_rewrites_only_the_offending_sentence():
+    # The trailing '. ' is captured as a SEPARATOR by the splitter, not part of the sentence text —
+    # the scripted reply below (like a real rewrite) is just the sentence body, no trailing period.
+    llm = _FakeLLM(reply="הוא אינו טוען על פחות מחצי")
+    text = "משפט ראשון תקין. הוא אינו מ CLAIM על פחות מחצי. משפט שלישי תקין."
+    out = api._fix_bleeding_sentences(text, True, llm)
+    assert out == "משפט ראשון תקין. הוא אינו טוען על פחות מחצי. משפט שלישי תקין."
+    assert len(llm.calls) == 1
+    assert "CLAIM" in llm.calls[0]                # the fed sentence is exactly the bleeding one
+
+
+def test_fix_bleeding_sentences_noop_when_not_hebrew():
+    llm = _FakeLLM()
+    text = "The answer includes a CLAIM about the source."
+    assert api._fix_bleeding_sentences(text, False, llm) == text
+    assert llm.calls == []
+
+
+def test_fix_bleeding_sentences_noop_on_clean_hebrew():
+    llm = _FakeLLM()
+    text = "תשובה נקייה לגמרי בעברית, בלי שום מילה זרה."
+    assert api._fix_bleeding_sentences(text, True, llm) == text
+    assert llm.calls == []                        # never calls the model when there's nothing to fix
+
+
+def test_fix_bleeding_sentences_keeps_original_on_llm_failure():
+    llm = _FakeLLM(raises=True)
+    text = "משפט עם מילה CLAIM בעייתית."
+    assert api._fix_bleeding_sentences(text, True, llm) == text   # unchanged, not crashed
+
+
+def test_fix_bleeding_sentences_caps_the_number_of_fixes():
+    llm = _FakeLLM(reply="תוקן")
+    # 4 bleeding sentences, one more than _MAX_BLEED_FIXES (3)
+    text = " ".join(f"משפט {w} מספר {i}." for i, w in enumerate(["AA", "BB", "CC", "DD"], 1))
+    out = api._fix_bleeding_sentences(text, True, llm)
+    assert len(llm.calls) == api._MAX_BLEED_FIXES
+    assert "DD" in out                             # the 4th bleeding sentence was left untouched
+
+
+# ── Fix (2026-08-02, caught live): a genuinely-grounded 'explain' answer still contained the bare
+# sentence "אין תשובה במקורות — אמור זאת ואל תמציא" in the middle of real content — the model
+# echoing a fragment of its own grounding instruction (pipeline.py::_agentic_generate's
+# "## INSTRUCTIONS" block) as if it were an answer. Unlike bleed there's no meaning to preserve, so
+# the whole sentence is dropped, and its OWN trailing separator too, so the sentence before it joins
+# directly onto the sentence after it with no orphaned punctuation.
+@pytest.mark.parametrize("raw,expected", [
+    # the exact real leaked fragment (paraphrased, not byte-for-byte from the instruction text)
+    ("פתיחה תקינה. אין תשובה במקורות — אמור זאת ואל תמציא. סיום תקין.",
+     "פתיחה תקינה. סיום תקין."),
+    ("אין תשובה במקורות — אמור זאת ואל תמציא. סיום תקין.", "סיום תקין."),          # leaked sentence first
+    ("פתיחה תקינה. אין תשובה במקורות — אמור זאת ואל תמציא.", "פתיחה תקינה."),      # leaked sentence last
+    ("תשובה נקייה לגמרי בלי שום דבר חשוד.", "תשובה נקייה לגמרי בלי שום דבר חשוד."),  # no-op
+])
+def test_strip_instruction_echo(raw, expected):
+    assert api._strip_instruction_echo(raw, True) == expected
+
+
+def test_strip_instruction_echo_noop_in_english():
+    raw = "This is a fine English answer with no leaked instructions."
+    assert api._strip_instruction_echo(raw, False) == raw
 
 
 # ── Tier0 (2026-07 audit): chavruta weak-retrieval must use the dense-cosine gate, not the RRF score ──
@@ -359,6 +471,35 @@ def test_commentary_refs_reach_the_named_commentator_on_a_verse():
     # Onkelos has no '_on_' join and no comment index.
     assert commentary_refs(["Exodus.20.2"], ["onkelos"]) == ["Onkelos_Exodus.20.2"]
     assert commentary_refs(["Genesis.1.1"], []) == []
+
+
+# ── Fix (2026-08-02): a real user reported source names in the citation panel are "usually in
+# English" — true, the corpus stores every ref in Sefaria's English/transliterated spelling.
+# hebrew_display_ref gives a best-effort Hebrew rendering for the common cases (Tanakh, Mishnah,
+# Talmud Bavli base refs, and a curated set of classic commentators), verified against real refs
+# pulled live from production, and returns None for anything it can't render confidently (never a
+# half-translated guess).
+@pytest.mark.parametrize("ref,expected", [
+    ("Genesis.1.1", "בראשית 1:1"),
+    ("Exodus.20.1", "שמות 20:1"),
+    ("Mishnah_Sukkah.3.5", "משנה סוכה 3:5"),
+    ("Rashi_on_Genesis.1.1.1", 'רש"י על בראשית 1:1'),
+    ("Rashi_on_Genesis.1.1.2", 'רש"י על בראשית 1:1'),           # same verse, different comment index
+    ("Bava_Metzia.3.1", "בבא מציעא 2."),                        # amud-linear N=3 -> daf 2 amud a
+    ("Rashi_on_Bava_Metzia.3.1.1", 'רש"י על בבא מציעא 2.'),
+    ("Bartenura_on_Mishnah_Bava_Metzia.1.1.1", "ברטנורא על משנה בבא מציעא 1:1"),
+    ("Rambam_on_Mishnah_Bava_Metzia.1.1.1", 'רמב"ם על משנה בבא מציעא 1:1'),
+    # Commentaries whose base can't be told apart from a bare tractate name once stripped (Tosefta,
+    # Mishneh Torah, ...) must decline rather than guess wrong:
+    ("Maggid_Mishneh_on_Mishneh_Torah,_Plaintiff_and_Defendant.9.7.1", None),
+    ("Tosefta_Kifshutah_on_Bava_Metzia.1.1.1", None),
+    ("Tosefta_Bava_Metzia_(Lieberman).1.1", None),
+    (None, None),
+    ("", None),
+])
+def test_hebrew_display_ref(ref, expected):
+    from chavruta.corpus.refs import hebrew_display_ref
+    assert hebrew_display_ref(ref) == expected
 
 
 def test_amud_to_corpus_ignores_volume_numbered_works():
@@ -1164,3 +1305,37 @@ def test_create_session_async_deletes_orphan_on_failure(monkeypatch):
     job = _await_job("local", accepted.job_id)
     assert job.status == "error"
     assert deleted.get("sid-fail") == "local"      # orphan session cleaned up, not left behind
+
+
+# ── Fix (2026-08-03, requested live): the daily/weekly quota bucket was keyed by the UTC date, not
+# Israel local — "resets at midnight" meant UTC midnight, which lands 2-3h into the Israeli morning
+# (winter/DST). A user near that window would see a NOT-YET-RESET quota well past their own local
+# midnight. today_il() uses Asia/Jerusalem instead of UTC for the bucket key.
+def test_today_il_uses_israel_local_date_not_utc():
+    import app.db as db
+
+    # 21:30 UTC on 2026-08-03 is already past midnight in Israel (00:30, +3h DST) — the daily bucket
+    # must reflect the LOCAL date (08-04), not the still-previous UTC date (08-03).
+    utc_after_israel_midnight = datetime(2026, 8, 3, 21, 30, tzinfo=UTC)
+
+    class _FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return utc_after_israel_midnight.astimezone(tz) if tz else utc_after_israel_midnight
+
+    with unittest.mock.patch("app.db.datetime", _FixedDatetime):
+        assert db.today_il() == "2026-08-04"
+
+
+def test_week_days_still_starts_sunday_with_israel_local_dates():
+    import app.db as db
+    # 2026-08-02 is a Sunday; the week should run through the following Saturday, unaffected by
+    # the switch from UTC to Israel-local dates (both use the same calendar-date string).
+    assert db.week_days("2026-08-02") == [
+        "2026-08-02", "2026-08-03", "2026-08-04", "2026-08-05",
+        "2026-08-06", "2026-08-07", "2026-08-08",
+    ]
+
+
+from datetime import UTC, datetime  # noqa: E402
+import unittest.mock  # noqa: E402

@@ -13,6 +13,7 @@ export function Header({
   onToggleTheme,
   onOpenSessions,
   onOpenSources,
+  onNewChat,
 }: {
   lang: Lang;
   theme: "light" | "dark";
@@ -22,6 +23,7 @@ export function Header({
   onToggleTheme: () => void;
   onOpenSessions?: () => void;  // mobile only — opens the sessions drawer
   onOpenSources?: () => void;   // mobile only — opens the sources drawer
+  onNewChat?: () => void;       // mobile only — starts a new chat directly, no drawer detour
 }) {
   return (
     <header className="h-[70px] flex items-center justify-between px-4 lg:px-8 shrink-0">
@@ -33,10 +35,19 @@ export function Header({
         >
           <Icon name="forum" />
         </button>
+        {/* Starting a new chat used to take two taps on mobile (open the sessions drawer, then tap
+            "+ new chat" inside it) — this puts the same action one tap away, right in the header. */}
+        <button
+          onClick={onNewChat}
+          className="lg:hidden h-10 w-10 rounded-2xl grad text-white grid place-items-center shadow-lg shadow-tekhelet/20"
+          title={tr(lang, "newChatShort")}
+        >
+          <Icon name="add" />
+        </button>
         <div className="h-11 w-11 rounded-2xl grad grid place-items-center text-white font-serif text-xl font-black shadow-lg shadow-tekhelet/20">
           ח
         </div>
-        <h1 className="font-serif text-2xl font-bold text-tekhelet">{tr(lang, "brand")}</h1>
+        <h1 className="font-serif text-2xl font-bold text-tekhelet hidden sm:block">{tr(lang, "brand")}</h1>
       </div>
       <div className="flex items-center gap-2">
         {/* A gauge of whichever pool is closest to empty — no absolute figure, by design (see

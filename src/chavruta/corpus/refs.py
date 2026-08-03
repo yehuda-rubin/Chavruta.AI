@@ -17,6 +17,8 @@ import json
 import re
 from pathlib import Path
 
+from chavruta.intents.hebrew_refs import HE_BOOKS, HE_TRACTATES
+
 _HEB = re.compile(r"[֐-׿]")    # any Hebrew letter → the ref carries a Hebrew label prefix
 _SEP = re.compile(r"[_.,:;]+")           # Sefaria depth/segment separators, treated as equivalent
 _WS = re.compile(r"\s+")
@@ -276,3 +278,107 @@ def canonical_ref(s: str | None) -> str:
     s = _SEP.sub(" ", s)                  # _ . , : ; → space
     s = _WS.sub(" ", s).strip().lower()
     return s
+
+
+# ── Hebrew display names for citations ──────────────────────────────────────────────────────────
+# The corpus stores every ref in Sefaria's English/transliterated spelling ('Genesis.1.1',
+# 'Rashi_on_Genesis.1.1.1') — correct as a machine key, but a Hebrew-reading user sees a citation
+# titled in English on every single source card. `hebrew_display_ref` gives a best-effort Hebrew
+# rendering for the common cases (Tanakh, Mishnah, Talmud Bavli, and a curated set of classic
+# commentators) and returns None for anything else, so the caller falls back to the original ref
+# rather than a half-translated guess — an honest gap reads better than confidently wrong Hebrew
+# (Principle I). Reuses the Hebrew↔English book/tractate tables already built for parsing Hebrew
+# input refs (intents/hebrew_refs.py) instead of hand-duplicating them.
+_BOOK_HE = {en: he for he, en in HE_BOOKS.items()}            # 'Genesis' -> 'בראשית'
+_TRACTATE_HE = {en: he for he, en in HE_TRACTATES.items()}    # 'Sukkah' -> 'סוכה'
+
+# Curated on purpose: only classic Rishonim/Acharonim whose Sefaria "<Title>_on_<base>" ref is known
+# to point straight at a bare Tanakh/Talmud-Bavli ref or a 'Mishnah_<Tractate>' ref — both handled
+# unambiguously below. Commentators on the Tosefta, Yerushalmi, Mishneh Torah, Tur/Shulchan Aruch,
+# Midrash, or responsa are deliberately left out: their Sefaria base ref can look identical to a bare
+# tractate name (e.g. a Tosefta commentary's base strips to 'Bava_Metzia.1.1', not 'Tosefta_Bava_
+# Metzia...') which would make the daf/amud math below confidently wrong rather than absent — and
+# wrong is worse than untranslated.
+COMMENTATOR_HE: dict[str, str] = {
+    # Tanakh
+    "rashi": "רש\"י", "rashbam": "רשב\"ם", "ibn_ezra": "אבן עזרא", "ramban": "רמב\"ן",
+    "sforno": "ספורנו", "or_hachaim": "אור החיים", "kli_yakar": "כלי יקר", "malbim": "מלבי\"ם",
+    "metzudat_david": "מצודת דוד", "metzudat_zion": "מצודת ציון", "chizkuni": "חזקוני",
+    "radak": "רד\"ק", "baal_haturim": "בעל הטורים", "abarbanel": "אברבנאל",
+    "haamek_davar": "העמק דבר", "gur_aryeh": "גור אריה", "siftei_chachamim": "שפתי חכמים",
+    "targum_onkelos": "אונקלוס", "onkelos": "אונקלוס", "targum_yonatan": "תרגום יונתן",
+    # Talmud Bavli
+    "tosafot": "תוספות", "ritva": "ריטב\"א", "rashba": "רשב\"א", "ran": "ר\"ן", "meiri": "מאירי",
+    "rif": "רי\"ף", "rosh": "רא\"ש", "maharsha": "מהרש\"א", "maharshal": "מהרש\"ל",
+    "chananel": "רבינו חננאל", "yad_ramah": "יד רמ\"ה", "shittah_mekubetzet": "שיטה מקובצת",
+    "pnei_yehoshua": "פני יהושע", "rashbatz": "רשב\"ץ",
+    # Mishnah (Sefaria keeps the 'Mishnah_' prefix on the base for these, so no ambiguity)
+    "bartenura": "ברטנורא", "tiferet_yisrael": "תפארת ישראל", "yachin": "יכין", "boaz": "בועז",
+    "rambam": "רמב\"ם", "maggid_mishneh": "מגיד משנה", "kessef_mishneh": "כסף משנה",
+    "lechem_mishneh": "לחם משנה",
+}
+
+_HEAD_RE = re.compile(r"^(.+?)[ .](\d[\d. ]*)$")
+
+
+def _split_book(flat: str) -> tuple[str | None, str]:
+    """('Genesis 1.1' -> ('בראשית', '1:1')), ('Bava Metzia 3.1' -> ('בבא מציעא', '2.')) — the
+    corpus's amud-linear N converted back to daf+amud (see daf_amud_to_corpus_n), ('Mishnah Bava
+    Metzia 1.1' -> ('משנה בבא מציעא', '1:1')). (None, '') if the book/tractate isn't one of these
+    three known tables."""
+    m = _HEAD_RE.match(flat)
+    if not m:
+        return None, ""
+    book, tail = m.group(1).strip(), m.group(2).strip()
+    nums = re.split(r"[ .]+", tail)
+
+    if book.startswith("Mishnah "):
+        he_t = _TRACTATE_HE.get(book[len("Mishnah "):])
+        if not he_t or len(nums) < 2:
+            return None, ""
+        return f"משנה {he_t}", f"{nums[0]}:{nums[1]}"
+
+    if book in _TRACTATE_HE:
+        if not nums or not nums[0].isdigit():
+            return None, ""
+        n = int(nums[0])
+        daf, amud_mark = (n + 1) // 2, ("." if n % 2 else ":")
+        return _TRACTATE_HE[book], f"{daf}{amud_mark}"
+
+    if book in _BOOK_HE:
+        if len(nums) < 2:
+            return None, ""
+        return _BOOK_HE[book], f"{nums[0]}:{nums[1]}"
+
+    return None, ""
+
+
+def hebrew_display_ref(ref: str | None) -> str | None:
+    """Best-effort Hebrew rendering of a corpus ref for a Hebrew-reading user, or None if no Hebrew
+    name is known for some part of it — the caller then keeps showing the original ref, which reads
+    as more honest than a half-translated string.
+
+        'Genesis.1.1'                 -> 'בראשית 1:1'
+        'Bava_Metzia.3.1'             -> 'בבא מציעא 2.'      (daf 2a — see daf_amud_to_corpus_n)
+        'Rashi_on_Genesis.1.1.1'      -> 'רש"י על בראשית 1:1'
+        'Bartenura_on_Mishnah_Bava_Metzia.1.1.1' -> 'ברטנורא על משנה בבא מציעא 1:1'
+    """
+    if not ref:
+        return None
+    tail, prefix = ref, ""
+    cid = commentator_from_ref(ref)
+    if cid:
+        he_name = COMMENTATOR_HE.get(cid)
+        if not he_name:
+            return None
+        tail = ref.split(_ON, 1)[1]
+        # Drop the trailing comment-index segment ('<base-ref>.<k>') so what's left is the base ref.
+        head, _dot, last = tail.rpartition(".")
+        if head and last.isdigit():
+            tail = head
+        prefix = f'{he_name} על '
+
+    he_book, rest = _split_book(tail.replace("_", " "))
+    if he_book is None:
+        return None
+    return f"{prefix}{he_book} {rest}"

@@ -5,6 +5,10 @@ export type Intent = "qa" | "explain" | "compare" | "halacha" | "lesson";
 
 export interface Citation {
   ref: string;
+  // Best-effort Hebrew rendering of `ref` for display (empty when none is known). `ref` itself
+  // stays the English/transliterated corpus key — it's used to dedupe/group/key citations, so it
+  // must not change based on language.
+  ref_he?: string;
   text_he: string;
   text_en: string;
   commentator: string;

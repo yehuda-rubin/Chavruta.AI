@@ -125,7 +125,7 @@ export function SourcesPanel({
                         {commentatorTag(c)}
                       </p>
                       <h4 className="font-serif text-lg font-bold text-tekhelet mt-1 leading-tight break-words">
-                        {c.ref}
+                        {(lang !== "en" && c.ref_he) || c.ref}
                       </h4>
                     </div>
                     <Icon name={open ? "expand_less" : "expand_more"} className="text-ink/40 shrink-0" />
