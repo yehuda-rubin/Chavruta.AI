@@ -155,7 +155,7 @@ async function pollJob<T>(jobId: string, intervalMs = 1400, timeoutMs = 10 * 60 
       // page.tsx uses to pick the network-error message) is retried, and only for a bounded number of
       // consecutive misses; a clean 4xx/5xx from the server is a resolved response, not a thrown
       // TypeError, so it still fails immediately as before.
-      if ((e as Error)?.name !== "TypeError" || ++networkFailures > 5) throw e;
+      if ((e as Error)?.name !== "TypeError" || ++networkFailures > 10) throw e;
       await new Promise((r) => setTimeout(r, intervalMs));
       continue;
     }
