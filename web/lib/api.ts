@@ -141,8 +141,24 @@ interface JobStatus<T> {
 
 async function pollJob<T>(jobId: string, intervalMs = 1400, timeoutMs = 10 * 60 * 1000): Promise<T> {
   const start = Date.now();
+  let networkFailures = 0;
   for (;;) {
-    const s = await req<JobStatus<T>>(`/jobs/${jobId}`);
+    let s: JobStatus<T>;
+    try {
+      s = await req<JobStatus<T>>(`/jobs/${jobId}`);
+      networkFailures = 0;
+    } catch (e) {
+      // A transient network blip WHILE POLLING (a backgrounded mobile tab, a brief drop) must not
+      // throw away a job that's still running — or already finished — server-side; the user saw this
+      // as a false "no connection" error on a request that was actually still working. Only a real
+      // network-level failure (fetch never reaching the server, surfaced as a TypeError — same check
+      // page.tsx uses to pick the network-error message) is retried, and only for a bounded number of
+      // consecutive misses; a clean 4xx/5xx from the server is a resolved response, not a thrown
+      // TypeError, so it still fails immediately as before.
+      if ((e as Error)?.name !== "TypeError" || ++networkFailures > 5) throw e;
+      await new Promise((r) => setTimeout(r, intervalMs));
+      continue;
+    }
     if (s.status === "done") return s.result as T;
     if (s.status === "error") throw new Error(s.error || "generation failed");
     if (Date.now() - start > timeoutMs) throw new Error("timed out waiting for generation");
