@@ -1,5 +1,7 @@
 # 🕍 Chavruta.AI — a trustworthy Torah study partner (RAG over the Jewish bookshelf)
 
+🔗 **Live product: [chavruta.duckdns.org](https://chavruta.duckdns.org)**
+
 **Chavruta.AI** answers questions on the Jewish bookshelf by **retrieving the actual sources** —
 the verse or passage, plus the classical commentators (Rashi, Ramban, Ibn Ezra, Tosafot, Rambam,
 and many more) — and generating a **grounded, cited** answer. It quotes the source in its original
