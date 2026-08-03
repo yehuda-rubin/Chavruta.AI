@@ -82,14 +82,18 @@ class Tier:
 # rather than a marketing average. Keep it that way when tuning: if tokens and lessons drift apart,
 # the ratio the UI prints stops being honest.
 #
-# A typical conversation turn is ~15k normalized tokens, so free ~23/week, pro ~230/week.
+# A typical conversation turn is ~15k normalized tokens, so free ~35/week, pro ~350/week.
 # annual_price_ils is twelve months for the price of ten. It is the YEAR'S TOTAL, charged as twelve
 # monthly instalments — nothing is taken up front. See ANNUAL_INSTALMENTS for why.
+#
+# Free raised 2026-08-03 (+50% on both token pools, +1 lesson/week — real usage was routinely
+# maxing the old 350k/week pool inside a single heavy day) — every paid tier recomputed at its SAME
+# multiple against the new free baseline, preserving the honest-ratio invariant above.
 TIERS: tuple[Tier, ...] = (
-    Tier("free",          120_000,    350_000,  1,  1,   0.0,    0.0, "חינם",   "Free"),
-    Tier("basic",         360_000,  1_050_000,  3,  3,  29.0,  290.0, "בסיסי",  "Basic"),
-    Tier("pro",         1_200_000,  3_500_000, 10, 10,  49.9,  499.0, "מלא",    "Pro"),
-    Tier("institution", 4_800_000, 14_000_000, 40, 40, 199.0, 1990.0, "מוסדי",  "Institution"),
+    Tier("free",          180_000,    525_000,  2,  1,   0.0,    0.0, "חינם",   "Free"),
+    Tier("basic",         540_000,  1_575_000,  6,  3,  29.0,  290.0, "בסיסי",  "Basic"),
+    Tier("pro",         1_800_000,  5_250_000, 20, 10,  49.9,  499.0, "מלא",    "Pro"),
+    Tier("institution", 7_200_000, 21_000_000, 80, 40, 199.0, 1990.0, "מוסדי",  "Institution"),
 )
 
 # Output costs several times input everywhere; 3x is the round figure that holds across the models
