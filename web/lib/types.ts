@@ -43,6 +43,8 @@ export interface Session {
   created_at: string;
   updated_at?: string;
   mode?: Intent | null;
+  title?: string | null;
+  pinned_at?: string | null;
 }
 
 export interface QueryResponse {

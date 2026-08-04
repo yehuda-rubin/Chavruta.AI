@@ -184,6 +184,7 @@ export function ChatPane({
   lang,
   messages,
   loading,
+  thinkingHere,
   intent,
   locked,
   lessonFields,
@@ -196,6 +197,10 @@ export function ChatPane({
   lang: Lang;
   messages: Message[];
   loading: boolean;
+  // Whether the PENDING request belongs to the chat currently on screen — `loading` alone stays true
+  // in the background while its owning chat isn't the active one, so the "thinking" bubble must gate
+  // on this instead or it renders in whichever chat you happen to switch to.
+  thinkingHere: boolean;
   intent: IntentId;
   locked: boolean;
   lessonFields: LessonFields;
@@ -211,7 +216,7 @@ export function ChatPane({
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading]);
+  }, [messages, thinkingHere]);
 
   // Auto-grow the composer up to 128px, like the static UI's autogrow().
   useEffect(() => {
@@ -276,13 +281,13 @@ export function ChatPane({
         ) : (
           messages.map((m, i) => <Bubble key={m.id ?? i} lang={lang} m={m} onPreview={onPreviewFile} />)
         )}
-        {loading && (
+        {thinkingHere && (
           <div className="flex gap-3.5">
             <div className="h-9 w-9 rounded-2xl bg-white/80 grid place-items-center text-tekhelet font-serif font-black shrink-0 shadow-sm">
               ח
             </div>
             <div className="bg-white/70 rounded-3xl rounded-tr-md p-5 shadow-sm ring-1 ring-white/60 text-ink/50 font-serif">
-              {tr(lang, "thinking")}
+              {tr(lang, intent === "lesson" ? "lessonThinking" : "thinking")}
             </div>
           </div>
         )}
