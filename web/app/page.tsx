@@ -124,6 +124,15 @@ export default function Home() {
   useEffect(() => {
     refreshSessions();
   }, [refreshSessions, auth.user?.id]);
+  // Clear the open chat whenever the signed-in account changes (sign-out, or a different account
+  // signing in on the same tab) — otherwise the previous account's messages stay on screen until the
+  // new user happens to click something, briefly leaking one account's chat into another's session.
+  useEffect(() => {
+    setActiveId(null);
+    setMessages([]);
+    setSubtitle("");
+    setUserSources([]);
+  }, [auth.user?.id]);
 
   const selectSession = useCallback(async (s: Session) => {
     setActiveId(s.id);
