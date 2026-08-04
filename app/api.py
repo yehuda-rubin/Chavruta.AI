@@ -1894,6 +1894,8 @@ class SessionOut(BaseModel):
     created_at: str
     updated_at: str | None = None
     mode: str | None = None          # the chat's locked mode (intent from its first turn)
+    title: str | None = None         # user-given name; None = display first_q instead
+    pinned_at: str | None = None     # set when pinned (sorts to the top); None = not pinned
 
 
 class SessionCreateOut(SessionOut):
@@ -2122,6 +2124,43 @@ def get_messages(session_id: str, owner: str = Depends(current_owner)):
 def delete_session(session_id: str, owner: str = Depends(current_owner)):
     if not db.delete_session(session_id, owner):
         raise HTTPException(status_code=404, detail="session not found")
+
+
+class SessionUpdateIn(BaseModel):
+    # Both optional — a request touches whichever field(s) it sends (rename-only, pin-only, or both).
+    title: str | None = None
+    pinned: bool | None = None
+
+
+_PIN_LIMIT_MSG = (f"אפשר לנעוץ עד {db.MAX_PINNED_SESSIONS} צ'אטים. בטל נעיצה של אחד כדי לנעוץ חדש.",
+                  f"You can pin up to {db.MAX_PINNED_SESSIONS} chats. Unpin one to pin another.")
+
+
+@app.patch("/sessions/{session_id}", response_model=SessionOut)
+def update_session(session_id: str, req: SessionUpdateIn, lang: str = "he",
+                   owner: str = Depends(current_owner)):
+    """Rename and/or pin/unpin a chat. 404 if not owned; 422 for an empty/oversized title; 409 if
+    pinning would exceed db.MAX_PINNED_SESSIONS (the frontend also disables that button pre-emptively,
+    this is the server-side backstop)."""
+    if req.title is not None:
+        title = req.title.strip()
+        if not title:
+            raise HTTPException(status_code=422, detail="title must not be empty")
+        if len(title) > 200:
+            raise HTTPException(status_code=422, detail="title too long")
+        if not db.rename_session(session_id, owner, title):
+            raise HTTPException(status_code=404, detail="session not found")
+    if req.pinned is not None:
+        try:
+            if not db.set_session_pinned(session_id, owner, req.pinned):
+                raise HTTPException(status_code=404, detail="session not found")
+        except db.TooManyPinnedError:
+            he = (lang or "he").startswith("he")
+            raise HTTPException(status_code=409, detail=_PIN_LIMIT_MSG[0 if he else 1])
+    row = next((s for s in db.list_sessions(owner) if s["id"] == session_id), None)
+    if row is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return row
 
 
 class ReportIn(BaseModel):

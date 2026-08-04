@@ -66,7 +66,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 22
+SCHEMA_VERSION = 23
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -92,7 +92,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
             created_at   TEXT NOT NULL,
             updated_at   TEXT,
             mode         TEXT,         -- the chat's locked mode (intent chosen on the first turn)
-            owner_id     TEXT NOT NULL DEFAULT 'local'  -- who this belongs to; 'local' = single-user
+            owner_id     TEXT NOT NULL DEFAULT 'local',  -- who this belongs to; 'local' = single-user
+            title        TEXT,         -- user-given name; NULL = display first_q instead (unrenamed)
+            pinned_at    TEXT          -- when pinned, for ordering pinned chats most-recent-first;
+                                       -- NULL = not pinned. Capped at 3 pinned per owner (set_session_pinned).
         );
 
         CREATE TABLE IF NOT EXISTS messages (
@@ -436,6 +439,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
         if "reviewed_at" not in rcols:
             conn.execute("ALTER TABLE message_reports ADD COLUMN reviewed_at TEXT")
 
+    if version < 23:
+        # User-renamable chats + pinning (up to 3, enforced in set_session_pinned). Existing rows
+        # predate both and get NULL — unrenamed (falls back to first_q) and unpinned, unchanged
+        # behaviour.
+        scols = {r[1] for r in conn.execute("PRAGMA table_info(sessions)")}
+        if "title" not in scols:
+            conn.execute("ALTER TABLE sessions ADD COLUMN title TEXT")
+        if "pinned_at" not in scols:
+            conn.execute("ALTER TABLE sessions ADD COLUMN pinned_at TEXT")
+
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
 
@@ -588,13 +601,14 @@ def get_session_mode(sid: str, owner_id: str = "local") -> str | None:
 
 def list_sessions(owner_id: str = "local") -> list[dict[str, Any]]:
     with _LOCK:
-        # Only this owner's sessions. Order by last activity so a conversation you return to bubbles
-        # to the top; fall back to created_at for rows that predate updated_at.
+        # Only this owner's sessions. Pinned chats bubble to the very top (most-recently-pinned
+        # first), then the rest order by last activity; fall back to created_at for rows that
+        # predate updated_at.
         rows = get_conn().execute(
-            """SELECT id, first_q, created_at, updated_at, mode
+            """SELECT id, first_q, created_at, updated_at, mode, title, pinned_at
                FROM sessions
                WHERE owner_id=?
-               ORDER BY COALESCE(updated_at, created_at) DESC
+               ORDER BY pinned_at IS NULL, pinned_at DESC, COALESCE(updated_at, created_at) DESC
                LIMIT 100""",
             (owner_id,),
         ).fetchall()
@@ -605,6 +619,48 @@ def delete_session(sid: str, owner_id: str = "local") -> bool:
     with _tx(get_conn()) as conn:
         cur = conn.execute("DELETE FROM sessions WHERE id=? AND owner_id=?", (sid, owner_id))
     return cur.rowcount > 0
+
+
+def rename_session(sid: str, owner_id: str, title: str) -> bool:
+    """Set the user-given display name. `title` is already trimmed/validated by the caller."""
+    with _tx(get_conn()) as conn:
+        cur = conn.execute(
+            "UPDATE sessions SET title=? WHERE id=? AND owner_id=?", (title, sid, owner_id))
+    return cur.rowcount > 0
+
+
+MAX_PINNED_SESSIONS = 3
+
+
+class TooManyPinnedError(Exception):
+    """Raised by set_session_pinned when pinning would exceed MAX_PINNED_SESSIONS."""
+
+
+def set_session_pinned(sid: str, owner_id: str, pinned: bool) -> bool:
+    """Pin (or unpin) a chat so it sorts to the top of the list. Returns False if the session isn't
+    owned by this owner. Raises TooManyPinnedError if pinning would exceed MAX_PINNED_SESSIONS —
+    the caller must unpin one first, same as the frontend's own pre-emptive disabled state."""
+    with _tx(get_conn()) as conn:
+        row = conn.execute(
+            "SELECT pinned_at FROM sessions WHERE id=? AND owner_id=?", (sid, owner_id)).fetchone()
+        if row is None:
+            return False
+        if pinned:
+            if row["pinned_at"] is not None:
+                return True  # already pinned — idempotent
+            count = conn.execute(
+                "SELECT COUNT(*) FROM sessions WHERE owner_id=? AND pinned_at IS NOT NULL",
+                (owner_id,),
+            ).fetchone()[0]
+            if count >= MAX_PINNED_SESSIONS:
+                raise TooManyPinnedError(f"already {MAX_PINNED_SESSIONS} pinned chats")
+            conn.execute(
+                "UPDATE sessions SET pinned_at=? WHERE id=? AND owner_id=?",
+                (_now(), sid, owner_id))
+        else:
+            conn.execute(
+                "UPDATE sessions SET pinned_at=NULL WHERE id=? AND owner_id=?", (sid, owner_id))
+    return True
 
 
 # ── Messages ──────────────────────────────────────────────────────────────────
