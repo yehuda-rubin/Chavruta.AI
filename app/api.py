@@ -25,6 +25,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 # to citations, then we strip them from the DISPLAYED text so the answer reads cleanly.
 _MARKER_RE = re.compile(r"\s*[\[(（【]\s*S\d+(?:\s*,\s*S\d+)*\s*[\])）】]")
 
+# Caught live (2026-08-04): the model occasionally emits a literal backslash before a quote mark when
+# it quotes source text that itself contains a Hebrew abbreviation gershayim (e.g. verbatim-quoting a
+# source that has בר"ה becomes בר\"ה in the answer) — as if escaping the quote the way a JSON/code
+# string literal would, even though this is plain prose. A bare backslash has no legitimate use
+# anywhere in this app's output, so it is dropped outright wherever it precedes a quote-class char.
+_STRAY_ESCAPE_RE = re.compile(r'\\(?=["\'\u05f3\u05f4])')
+
 
 # Model multilingual bleed (Qwen occasionally injects '违反', 'требуется', 'giải', or — caught live,
 # 2026-08-02 — Arabic into Hebrew text). Rather than enumerating each script as it turns up (CJK,
@@ -65,6 +72,7 @@ def _strip_foreign_parens(text: str) -> str:
 
 def _strip_markers(text: str, he: bool = False) -> str:
     t = _MARKER_RE.sub("", text or "")
+    t = _STRAY_ESCAPE_RE.sub("", t)           # drop a leaked escape backslash before a quote mark
     t = _strip_foreign(t)                    # drop stray foreign-script tokens (model multilingual bleed)
     if he:
         t = _strip_foreign_parens(t)         # drop a stray English citation aside in a Hebrew answer
@@ -95,7 +103,15 @@ _BLEED_FIX_SYSTEM = (
 
 def _fix_bleeding_sentences(text: str, he: bool, llm) -> str:
     """Best-effort: a failed or degenerate rewrite call keeps the ORIGINAL sentence rather than
-    raising or blanking it — a language-cleanup pass must never be the reason a real answer breaks."""
+    raising or blanking it — a language-cleanup pass must never be the reason a real answer breaks.
+
+    Caught live (2026-08-04): a bleeding sentence ("...שNERואה כמשתחוה...", a bad mid-word
+    transliteration) reached a real user unfixed. The first cut of this function accepted WHATEVER
+    the rewrite call returned as long as it was non-empty, never checking whether the rewrite had
+    actually removed the Latin text — so a call that failed outright (caught below, kept the
+    original) and a call that succeeded but produced an equally-bleeding rewrite were both dead
+    ends after one try. One retry, on either failure mode, is cheap (bounded by _MAX_BLEED_FIXES
+    sentences) and gives the model a real second chance before we give up and keep the original."""
     if not he or not text or llm is None or not _LATIN_WORD_RE.search(text):
         return text
     parts = _SENTENCE_SPLIT_RE.split(text)   # alternates: sentence, separator, sentence, separator, …
@@ -106,13 +122,21 @@ def _fix_bleeding_sentences(text: str, he: bool, llm) -> str:
         sentence = parts[i]
         if not _LATIN_WORD_RE.search(sentence):
             continue
-        try:
-            prompt = GroundedPrompt(system=_BLEED_FIX_SYSTEM, sources=[], question=sentence)
-            res = llm.generate(prompt, lang="he", max_tokens=200, temperature=0.2)
-            rewritten = (res.text or "").strip()
-        except Exception:
-            _log.warning("bleed sentence-fix call failed; keeping the original sentence", exc_info=True)
-            continue
+        rewritten = None
+        for attempt in range(2):
+            try:
+                prompt = GroundedPrompt(system=_BLEED_FIX_SYSTEM, sources=[], question=sentence)
+                res = llm.generate(prompt, lang="he", max_tokens=200, temperature=0.2)
+                candidate = (res.text or "").strip()
+            except Exception:
+                _log.warning("bleed sentence-fix call failed (attempt %d/2)", attempt + 1, exc_info=True)
+                continue
+            if candidate and not _LATIN_WORD_RE.search(candidate):
+                rewritten = candidate
+                break
+            if candidate:
+                _log.warning("bleed sentence-fix rewrite still contained Latin text (attempt %d/2)",
+                            attempt + 1)
         if rewritten:
             parts[i] = rewritten
             fixed += 1
