@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Lang, Session } from "@/lib/types";
 import { tr } from "@/lib/i18n";
 import { Icon } from "./Icon";
@@ -37,7 +37,19 @@ export function SessionsPanel({
   // (or navigating away) abandons the first, matching how every other inline edit here behaves.
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  // The per-row "⋮" actions menu — one row-worth of buttons collapsed behind it instead of three
+  // separate icons competing for space (rename/pin/delete).
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const pinnedCount = sessions.filter((s) => s.pinned_at).length;
+
+  // Close the open menu on any click outside it. The menu's own buttons stopPropagation, so this
+  // only fires for a click elsewhere in the panel or page.
+  useEffect(() => {
+    if (!menuOpenId) return;
+    const close = () => setMenuOpenId(null);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [menuOpenId]);
 
   const startRename = (s: Session) => {
     setEditingId(s.id);
@@ -111,46 +123,65 @@ export function SessionsPanel({
                 </span>
               )}
               {!editing && (
-                <>
+                <div className="relative shrink-0">
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      startRename(s);
+                      setMenuOpenId(menuOpenId === s.id ? null : s.id);
                     }}
-                    title={tr(lang, "renameChat")}
-                    className="opacity-0 group-hover:opacity-100 text-ink/40 hover:text-tekhelet transition shrink-0"
-                  >
-                    <Icon name="edit" className="text-[16px]" />
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (!pinDisabled) onPin(s.id, !pinned);
-                    }}
-                    title={pinned ? tr(lang, "unpinChat") : pinDisabled ? tr(lang, "pinLimitTitle") : tr(lang, "pinChat")}
-                    disabled={pinDisabled}
+                    title={tr(lang, "chatActions")}
                     className={
-                      "transition shrink-0 " +
-                      (pinned
-                        ? "text-gold hover:text-gold/70"
-                        : "opacity-0 group-hover:opacity-100 text-ink/40 hover:text-tekhelet " +
-                          (pinDisabled ? "cursor-not-allowed" : "")
-                      )
+                      "text-ink/40 hover:text-tekhelet transition " +
+                      (menuOpenId === s.id ? "opacity-100" : "opacity-0 group-hover:opacity-100")
                     }
                   >
-                    <Icon name="push_pin" className="text-[16px]" />
+                    <Icon name="more_vert" className="text-[18px]" />
                   </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDelete(s.id);
-                    }}
-                    title={tr(lang, "deleteChat")}
-                    className="opacity-0 group-hover:opacity-100 text-ink/40 hover:text-red-500 transition shrink-0"
-                  >
-                    <Icon name="delete" className="text-[18px]" />
-                  </button>
-                </>
+                  {menuOpenId === s.id && (
+                    <div
+                      onClick={(e) => e.stopPropagation()}
+                      className="absolute end-0 top-full mt-1 z-10 w-44 glass rounded-2xl shadow-lg ring-1 ring-black/5 py-1.5 flex flex-col"
+                    >
+                      <button
+                        onClick={() => {
+                          startRename(s);
+                          setMenuOpenId(null);
+                        }}
+                        className="flex items-center gap-2 px-3 py-2 text-sm text-ink/75 hover:bg-white/60 hover:text-tekhelet transition"
+                      >
+                        <Icon name="edit" className="text-[17px]" />
+                        {tr(lang, "renameChat")}
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (!pinDisabled) onPin(s.id, !pinned);
+                          setMenuOpenId(null);
+                        }}
+                        disabled={pinDisabled}
+                        title={pinDisabled ? tr(lang, "pinLimitTitle") : undefined}
+                        className={
+                          "flex items-center gap-2 px-3 py-2 text-sm transition " +
+                          (pinDisabled
+                            ? "text-ink/30 cursor-not-allowed"
+                            : "text-ink/75 hover:bg-white/60 hover:text-tekhelet")
+                        }
+                      >
+                        <Icon name="push_pin" className={"text-[17px] " + (pinned ? "text-gold" : "")} />
+                        {pinned ? tr(lang, "unpinChat") : tr(lang, "pinChat")}
+                      </button>
+                      <button
+                        onClick={() => {
+                          onDelete(s.id);
+                          setMenuOpenId(null);
+                        }}
+                        className="flex items-center gap-2 px-3 py-2 text-sm text-ink/75 hover:bg-red-50 hover:text-red-500 transition"
+                      >
+                        <Icon name="delete" className="text-[17px]" />
+                        {tr(lang, "deleteChat")}
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           );
