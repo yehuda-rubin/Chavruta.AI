@@ -103,3 +103,18 @@ def test_cap_hits_base_text_alone_can_exceed_the_cap():
     out = api._cap_hits(base + commentary, max_total=10)
     assert len(out) == 15
     assert all(not h.commentator_id for h in out)
+
+
+# Caught live (2026-08-05): asked "what daf are we on", the model answered with the corpus's
+# internal amud-linear chunk number (194) instead of the real daf (97) — it has no way to tell the
+# two apart from the citation refs alone. _daf_yomi_context_note tells it the real number directly.
+def test_daf_yomi_context_note_states_the_real_daf_number_hebrew():
+    note = api._daf_yomi_context_note("Chullin", 97, True)
+    assert "Chullin" in note
+    assert "97" in note
+    assert "194" not in note   # never mentions the corpus-internal linear number
+
+
+def test_daf_yomi_context_note_states_the_real_daf_number_english():
+    note = api._daf_yomi_context_note("Chullin", 97, False)
+    assert "Chullin 97" in note

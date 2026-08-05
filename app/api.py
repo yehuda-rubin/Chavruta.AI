@@ -104,11 +104,13 @@ _SENTENCE_SPLIT_RE = re.compile(r"([.!?]\s+|\n+)")   # captured so separators ar
 _MAX_BLEED_FIXES = 3    # bound worst-case latency/cost if something is very wrong with one answer
 
 _BLEED_FIX_SYSTEM = (
-    "Rewrite the given Hebrew sentence so it contains NO English or other non-Hebrew words at all, "
-    "preserving its meaning. If the sentence already contains a citation marker such as [S1] or [S2], "
-    "keep that EXACT marker in the same place — but do not add, remove, or invent any marker that "
-    "is not already there verbatim in the input. Reply with ONLY the rewritten sentence and nothing "
-    "else — no preamble, no quotes around it."
+    "Rewrite the given Hebrew sentence so it contains NO English or other non-Hebrew words or "
+    "letters at all, preserving its meaning. Every foreign term has a Hebrew equivalent — use it "
+    "(e.g. 'sugya' -> 'סוגיה', 'mixture' -> 'תערובת', 'Rashi' -> 'רש\"י') — never simply omit the "
+    "word or leave it in English because you're unsure of the Hebrew. If the sentence already "
+    "contains a citation marker such as [S1] or [S2], keep that EXACT marker in the same place — "
+    "but do not add, remove, or invent any marker that is not already there verbatim in the input. "
+    "Reply with ONLY the rewritten sentence and nothing else — no preamble, no quotes around it."
 )
 
 
@@ -134,10 +136,13 @@ def _fix_bleeding_sentences(text: str, he: bool, llm) -> str:
         if not _has_bleed(sentence):
             continue
         rewritten = None
-        for attempt in range(2):
+        # A retry at the SAME low temperature on the SAME model tends to reproduce the SAME mistake
+        # (caught live: "sugya"/"mixture" survived two identical-temperature attempts) — the second
+        # try uses a higher temperature so it's a genuinely different roll, not a near-duplicate.
+        for attempt, temperature in enumerate((0.2, 0.6)):
             try:
                 prompt = GroundedPrompt(system=_BLEED_FIX_SYSTEM, sources=[], question=sentence, bare=True)
-                res = llm.generate(prompt, lang="he", max_tokens=200, temperature=0.2)
+                res = llm.generate(prompt, lang="he", max_tokens=200, temperature=temperature)
                 candidate = (res.text or "").strip()
             except Exception:
                 _log.warning("bleed sentence-fix call failed (attempt %d/2)", attempt + 1, exc_info=True)
@@ -1223,7 +1228,24 @@ def _run_daf_yomi(question: str, lang: str, history=None, owner_id: str = "local
                                           audience="yeshiva", grade_band="", length="medium",
                                           tpl=tpl, history=history, owner_id=owner_id, llm=llm)
     hits = _cap_hits(hits, _CHAVRUTA_HIT_CAP)
+    question = f"{_daf_yomi_context_note(info.tractate, info.daf, he)}\n{question}"
     return _generate_chavruta_turn(question, hits, lang, he, history, weak=(not hits), llm=llm)
+
+
+def _daf_yomi_context_note(tractate: str, daf: int, he: bool) -> str:
+    """Caught live (2026-08-05): asked "what daf are we on", the model answered with the CORPUS's
+    internal amud-linear chunk number (e.g. "194") instead of the real daf (97) — it has no way to
+    tell the two apart from the citation refs alone (fetch_by_refs/with_ref_variants deliberately
+    convert daf+amud INTO that linear form for lookup; nothing converts it back for display here).
+    We already know the real daf from Sefaria, so just tell the model directly rather than making
+    it infer a fact it structurally cannot get right from what it's shown."""
+    if he:
+        return (f"(לעיונך: הדף האמיתי של היום הוא {tractate} דף {daf}. אם המשתמש שואל על מספר הדף, "
+               f"ענה {daf} ולא מספר אחר — המספרים שמופיעים ברפרנסים של המקורות למטה הם מספור פנימי "
+               f"של מסד הנתונים, לא מספר הדף האמיתי.)")
+    return (f"(For reference: today's real daf is {tractate} {daf}. If asked which daf this is, "
+           f"answer {daf} — the numbers in the source refs below are the database's internal "
+           f"numbering, not the real daf number.)")
 
 
 # Global concurrency gate — every generation reaches the LLM/embedder/Qdrant through this one
