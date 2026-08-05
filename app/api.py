@@ -83,13 +83,23 @@ def _strip_markers(text: str, he: bool = False) -> str:
     return t.strip()
 
 
-# A run of 2+ Latin letters surviving mid-sentence in an otherwise-Hebrew answer is almost always
-# model multilingual bleed (Qwen occasionally writes a bare English word, e.g. "שהוא אינו מ CLAIM
-# על") — the parenthetical case above is cheap to strip outright, but a bare word is often
-# grammatically load-bearing, so deleting it would leave broken Hebrew ("שהוא אינו מ על"). Instead
-# _fix_bleeding_sentences asks the model to rewrite ONLY the offending sentence — cheap (one short
-# sentence, not the whole answer) and safe (every other sentence, and all citations, are untouched).
-_LATIN_WORD_RE = re.compile(r"(?<![A-Za-z])[A-Za-z]{2,}(?![A-Za-z])")
+# ANY character that isn't Hebrew, ASCII-non-letter (digits/punctuation), or the app's own allowed
+# typography is model multilingual bleed — a bare English word ("שהוא אינו מ CLAIM על"), a single
+# stray Latin letter mid-word ("שה cה"), or a whole foreign script (Arabic/Cyrillic/CJK). Checking
+# CHARACTERS rather than "is there a 2+ letter Latin WORD" catches the single-character case too
+# (caught live, 2026-08-04: "...שNERואה..." survived because the old word-level check only fired on
+# runs of 2+ Latin letters). [S1]/[S1, S5] markers are masked out first — they legitimately contain
+# a Latin "S". The parenthetical case above is cheap to strip outright, but bleed inside a sentence
+# is often grammatically load-bearing, so deleting it would leave broken Hebrew ("שהוא אינו מ על").
+# Instead _fix_bleeding_sentences asks the model to rewrite ONLY the offending sentence — cheap (one
+# short sentence, not the whole answer) and safe (every other sentence, and all citations, untouched).
+_BLEED_CHAR_RE = re.compile(rf"[A-Za-z]|[^\x00-\x7F֐-׿{_ALLOWED_EXTRA_PUNCT}]")
+
+
+def _has_bleed(text: str) -> bool:
+    return bool(_BLEED_CHAR_RE.search(_MARKER_RE.sub("", text or "")))
+
+
 _SENTENCE_SPLIT_RE = re.compile(r"([.!?]\s+|\n+)")   # captured so separators are preserved verbatim
 _MAX_BLEED_FIXES = 3    # bound worst-case latency/cost if something is very wrong with one answer
 
@@ -113,7 +123,7 @@ def _fix_bleeding_sentences(text: str, he: bool, llm) -> str:
     original) and a call that succeeded but produced an equally-bleeding rewrite were both dead
     ends after one try. One retry, on either failure mode, is cheap (bounded by _MAX_BLEED_FIXES
     sentences) and gives the model a real second chance before we give up and keep the original."""
-    if not he or not text or llm is None or not _LATIN_WORD_RE.search(text):
+    if not he or not text or llm is None or not _has_bleed(text):
         return text
     parts = _SENTENCE_SPLIT_RE.split(text)   # alternates: sentence, separator, sentence, separator, …
     fixed = 0
@@ -121,18 +131,18 @@ def _fix_bleeding_sentences(text: str, he: bool, llm) -> str:
         if fixed >= _MAX_BLEED_FIXES:
             break
         sentence = parts[i]
-        if not _LATIN_WORD_RE.search(sentence):
+        if not _has_bleed(sentence):
             continue
         rewritten = None
         for attempt in range(2):
             try:
-                prompt = GroundedPrompt(system=_BLEED_FIX_SYSTEM, sources=[], question=sentence)
+                prompt = GroundedPrompt(system=_BLEED_FIX_SYSTEM, sources=[], question=sentence, bare=True)
                 res = llm.generate(prompt, lang="he", max_tokens=200, temperature=0.2)
                 candidate = (res.text or "").strip()
             except Exception:
                 _log.warning("bleed sentence-fix call failed (attempt %d/2)", attempt + 1, exc_info=True)
                 continue
-            if candidate and not _LATIN_WORD_RE.search(candidate):
+            if candidate and not _has_bleed(candidate):
                 rewritten = candidate
                 break
             if candidate:
@@ -1013,7 +1023,7 @@ def _wants_full_lesson(question: str, llm=None) -> bool:
     `llm` overrides the classifier lookup (dependency injection for tests)."""
     llm = llm or _classifier_llm() or _get_pipeline().llm
     try:
-        prompt = GroundedPrompt(system=_WANTS_LESSON_SYSTEM, sources=[], question=question)
+        prompt = GroundedPrompt(system=_WANTS_LESSON_SYSTEM, sources=[], question=question, bare=True)
         res = llm.generate(prompt, lang="he", max_tokens=10, temperature=0.0)
         reply = (res.text or "").strip()
     except Exception:

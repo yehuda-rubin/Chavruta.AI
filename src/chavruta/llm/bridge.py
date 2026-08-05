@@ -94,6 +94,11 @@ class BridgeLLM:
 
     # ── LLMBackend interface ─────────────────────────────────────────────────────
     def _write_job_md(self, prompt: GroundedPrompt) -> str:
+        # See GroundedPrompt.bare: a one-shot non-QA call (rewrite/classify) skips the "## SOURCES /
+        # ## INSTRUCTIONS: answer only from sources, cite [S#]" framing entirely — that framing is
+        # exactly what a model can echo back when the actual task isn't answering a grounded question.
+        if prompt.bare:
+            return prompt.question.strip()
         lines = ["## QUESTION", prompt.question.strip(), "", "## SOURCES"]
         if prompt.sources:
             for s in prompt.sources:

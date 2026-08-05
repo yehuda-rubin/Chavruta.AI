@@ -307,6 +307,35 @@ def test_fix_bleeding_sentences_keeps_original_when_both_attempts_still_bleed():
     assert len(llm.calls) == 2                      # both attempts used, neither accepted
 
 
+# Fix (caught live 2026-08-05): "...שה cה הזו..." (a single stray Latin letter mid-word) survived
+# unfixed — the old trigger (_LATIN_WORD_RE) only fired on a RUN of 2+ Latin letters, so one bare
+# letter slipped through both this mechanism and the blind foreign-char stripper (which allows all
+# ASCII). _has_bleed checks CHARACTERS instead: anything that isn't Hebrew, ASCII-non-letter, or
+# the app's own typography — catching a single Latin letter, and any other foreign script too.
+def test_has_bleed_catches_a_single_stray_latin_letter():
+    assert api._has_bleed("יש חשש שה cה הזו תיראה") is True
+
+
+def test_has_bleed_catches_a_foreign_script_not_just_latin():
+    assert api._has_bleed("בזדון违反") is True          # Chinese
+    assert api._has_bleed("это требуется") is True      # Cyrillic
+
+
+def test_has_bleed_false_on_clean_hebrew_with_markers():
+    # [S1] contains a Latin "S" — must NOT itself count as bleed, or every cited sentence would
+    # trigger a pointless rewrite call.
+    assert api._has_bleed("זהו משפט נקי [S1] לגמרי.") is False
+    assert api._has_bleed("שני מקורות [S1, S5] כאן.") is False
+
+
+def test_fix_bleeding_sentences_fixes_a_single_stray_letter():
+    llm = _FakeLLM(reply="יש חשש שהתנועה הזו תיראה")
+    text = "יש חשש שה cה הזו תיראה כאילו הוא משתחווה לה."
+    out = api._fix_bleeding_sentences(text, True, llm)
+    assert "c" not in out
+    assert len(llm.calls) == 1
+
+
 # Fix (caught live 2026-08-04): the model quoted a source containing a Hebrew abbreviation gershayim
 # (בר"ה) and emitted a literal backslash before it (בר\"ה) — as if escaping the quote the way a
 # JSON/code string would. A bare backslash has no legitimate use in this app's output.

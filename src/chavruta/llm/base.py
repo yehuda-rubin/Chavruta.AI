@@ -34,6 +34,13 @@ class GroundedPrompt:
     sources: list[SourceBlock]
     question: str
     history: list[Turn] = field(default_factory=list)
+    # Caught live (2026-08-05): a one-shot non-QA call (rewrite this sentence; classify yes/no) sent
+    # through the normal QA template still gets wrapped in "המקורות (הידע היחיד המותר לך)... אם אין
+    # תשובה במקורות — אמור זאת ואל תמציא" — and the model sometimes echoes that framing back as if it
+    # were content, especially with sources=[] ("no sources retrieved"). bare=True skips the QA
+    # template entirely: `question` goes to the model as a plain instruction, nothing wrapped around
+    # it. Use this for anything that isn't itself a grounded-answer request.
+    bare: bool = False
 
 
 @dataclass
@@ -54,10 +61,17 @@ def render_messages(prompt: GroundedPrompt, lang: str) -> list[dict]:
 
     The system message carries the grounding rules. The sources are presented as the ONLY
     knowledge the model may use, each tagged with its marker so the model cites by marker.
+
+    prompt.bare skips all of that (see its docstring) — `question` goes out as a plain user message,
+    for one-shot calls that aren't themselves a grounded-answer request.
     """
     messages: list[dict] = [{"role": "system", "content": prompt.system}]
     for turn in prompt.history:
         messages.append({"role": turn.role, "content": turn.text})
+
+    if prompt.bare:
+        messages.append({"role": "user", "content": prompt.question})
+        return messages
 
     if prompt.sources:
         lines = []
