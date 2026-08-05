@@ -17,10 +17,12 @@ const LABEL_KEY: Record<IntentId, StringKey> = {
 // unless the account has calendar_modes_enabled, so most users never see an unavailable option.
 const BETA_INTENTS: ReadonlySet<IntentId> = new Set(["parsha", "dafyomi"]);
 
-// A single "current mode" trigger + gear icon, opening a dropdown with every mode — replaces the
-// old segmented row of buttons, which ran out of room once parsha/daf-yomi were added. Follows the
-// same pattern as SessionsPanel's "⋮" actions menu: a relative wrapper, a boolean open state, a
-// document click-outside listener, and an absolutely-positioned glass panel.
+// A single "current mode" trigger + chevron, opening a dropdown with every mode — replaces the old
+// segmented row of buttons, which ran out of room once parsha/daf-yomi were added. Lives inline in
+// the composer bar (where the mode label always was), so the dropdown opens UPWARD — this sits near
+// the bottom of the screen, and there's rarely room below it. Follows the same pattern as
+// SessionsPanel's "⋮" actions menu: a relative wrapper, a boolean open state, a document
+// click-outside listener, and an absolutely-positioned glass panel.
 export function IntentBar({
   lang,
   intent,
@@ -54,17 +56,20 @@ export function IntentBar({
         disabled={locked}
         title={locked ? "" : tr(lang, "chooseMode")}
         className={
-          "flex items-center gap-1.5 bg-white/50 rounded-full px-3 py-1.5 text-xs font-semibold transition " +
-          (locked ? "opacity-60 cursor-not-allowed" : "hover:bg-white/70 cursor-pointer")
+          "flex items-center gap-1 font-bold text-sm px-3 py-1.5 rounded-full whitespace-nowrap transition " +
+          (locked ? "text-gold/60 cursor-not-allowed"
+                  : "text-gold hover:bg-gold/10 cursor-pointer")
         }
       >
-        <span className="text-tekhelet">{tr(lang, LABEL_KEY[intent])}</span>
-        {!locked && <Icon name="settings" className="text-[15px] text-ink/50" />}
+        <span>{tr(lang, LABEL_KEY[intent])}</span>
+        {!locked && (
+          <Icon name={open ? "expand_less" : "expand_more"} className="text-[18px]" />
+        )}
       </button>
       {open && !locked && (
         <div
           onClick={(e) => e.stopPropagation()}
-          className="absolute end-0 top-full mt-1 z-10 w-48 glass rounded-2xl shadow-lg ring-1 ring-black/5 py-1.5 flex flex-col"
+          className="absolute start-0 bottom-full mb-1 z-10 w-48 glass rounded-2xl shadow-lg ring-1 ring-black/5 py-1.5 flex flex-col"
         >
           {visible.map((i) => {
             const active = i === intent;

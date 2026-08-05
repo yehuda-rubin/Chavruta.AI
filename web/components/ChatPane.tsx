@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import type { FileOut, Lang, Message } from "@/lib/types";
-import { EXAMPLES, INTENT_LABEL, IntentId, tr } from "@/lib/i18n";
+import { EXAMPLES, IntentId, tr } from "@/lib/i18n";
 import { commentatorTag, isHe, renderText } from "@/lib/format";
 import { downloadDoc } from "@/lib/doc";
 import { api } from "@/lib/api";
@@ -238,13 +238,11 @@ export function ChatPane({
 
   return (
     <main className="flex-1 glass rounded-[28px] flex flex-col overflow-hidden">
-      <div className="px-7 py-4 flex items-center justify-between gap-3 border-b border-white/40">
+      <div className="px-7 py-4 flex items-center gap-3 border-b border-white/40">
         <div className="min-w-0">
           <h2 className="font-serif text-lg font-bold text-tekhelet">{tr(lang, "discussionTitle")}</h2>
           {subtitle && <p className="text-[10px] tracking-widest text-gold font-bold uppercase truncate">{subtitle}</p>}
         </div>
-        <IntentBar lang={lang} intent={intent} locked={locked} onPick={onPickIntent}
-                  calendarModesEnabled={calendarModesEnabled} />
       </div>
 
       {intent === "lesson" && <LessonOptions lang={lang} value={lessonFields} onChange={onLessonChange} />}
@@ -302,9 +300,8 @@ export function ChatPane({
           onSubmit={submit}
           className="max-w-2xl mx-auto flex items-center gap-2 glass rounded-full px-3 py-2 focus-within:ring-2 focus-within:ring-indigo/30"
         >
-          <span className="text-gold font-bold text-sm px-3 py-1.5 rounded-full select-none whitespace-nowrap">
-            {INTENT_LABEL[lang][intent]}
-          </span>
+          <IntentBar lang={lang} intent={intent} locked={locked} onPick={onPickIntent}
+                    calendarModesEnabled={calendarModesEnabled} />
           <textarea
             ref={taRef}
             rows={1}
