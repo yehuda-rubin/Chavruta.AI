@@ -2105,8 +2105,17 @@ def _require_admin(owner: str = Depends(current_owner)) -> str:
 @app.get("/admin/overview")
 def admin_overview(since: str = "30d", owner: str = Depends(_require_admin)):
     cutoff = _since_cutoff(since)
+    local_accounts = db.count_accounts()
+    # db.count_accounts() only sees rows in the local `accounts` table, which is written only on a
+    # plan change or credit grant (accounts.count_supabase_users's docstring) — almost every free
+    # signup never touches it. Prefer Supabase's own signup record for "total"; fall back to the
+    # local (undercounted) figure only if Supabase isn't configured.
+    real_total = accounts.count_supabase_users()
     return {
-        "accounts": db.count_accounts(),
+        "accounts": {
+            "total": real_total if real_total is not None else local_accounts["total"],
+            "by_plan": local_accounts["by_plan"],
+        },
         "usage": db.usage_health(cutoff),
         "concurrency": db.usage_concurrency(cutoff),
         "revenue": db.revenue_summary(cutoff),

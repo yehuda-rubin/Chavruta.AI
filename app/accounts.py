@@ -13,6 +13,7 @@ not built.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
@@ -94,6 +95,37 @@ def _delete_supabase_user(owner_id: str) -> None:
             _log.warning("supabase admin delete failed for %s: HTTP %s", owner_id, exc.code)
     except Exception as exc:                # noqa: BLE001 — never let this abort the purge
         _log.warning("supabase admin delete errored for %s: %s", owner_id, exc.__class__.__name__)
+
+
+def count_supabase_users() -> int | None:
+    """Total signed-up accounts, from Supabase's own record — not app.db's `accounts` table, which
+    only gets a row when a plan changes or credits are granted (db.set_plan/add_credits). A free user
+    who never touched billing has NO row there at all, so that table drastically undercounts real
+    signups; this is the number the admin dashboard actually wants for "how many accounts do we have".
+    Returns None (caller falls back to the local count) if Supabase isn't configured."""
+    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    url = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
+    if not (key and url):
+        return None
+    import urllib.request
+
+    total = 0
+    page = 1
+    try:
+        while True:
+            req = urllib.request.Request(
+                f"{url}/auth/v1/admin/users?page={page}&per_page=1000",
+                headers={"Authorization": f"Bearer {key}", "apikey": key},
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                users = json.loads(resp.read()).get("users", [])
+            total += len(users)
+            if len(users) < 1000:
+                return total
+            page += 1
+    except Exception:                        # noqa: BLE001 — best-effort, never breaks the dashboard
+        _log.warning("supabase user count failed", exc_info=True)
+        return None
 
 
 def run_due_purges(now_iso: str | None = None) -> int:

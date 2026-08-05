@@ -6,6 +6,8 @@ else — and the always-exempt 'local' user — untouched.
 """
 from __future__ import annotations
 
+import urllib.request
+
 import pytest
 
 import app.accounts as accounts
@@ -128,6 +130,65 @@ def test_subscription_purged_with_account(fresh_db):
                                  updated_at="2026-07-19T00:00:00+00:00")
     fresh_db.purge_owner("u2")
     assert fresh_db.get_subscription("u2") is None
+
+
+# ── count_supabase_users: the admin dashboard's real "how many accounts" figure ──────────────────
+# Bug (caught live 2026-08-05): the dashboard showed db.count_accounts()'s total (3) next to
+# "usage this week from 27 distinct owners" — because that local `accounts` table only gets a row
+# on a plan change or credit grant (db.set_plan/add_credits), so almost every free signup never
+# touches it. Supabase's own user list is the real signup count.
+
+class _FakeResponse:
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def _users_page(n: int) -> bytes:
+    import json
+    return json.dumps({"users": [{"id": str(i)} for i in range(n)]}).encode()
+
+
+def test_supabase_user_count_none_when_not_configured(monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    assert accounts.count_supabase_users() is None
+
+
+def test_supabase_user_count_single_page(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://x.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "k")
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda req, timeout=10: _FakeResponse(_users_page(27)))
+    assert accounts.count_supabase_users() == 27
+
+
+def test_supabase_user_count_paginates(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://x.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "k")
+    pages = iter([_users_page(1000), _users_page(1000), _users_page(42)])
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda req, timeout=10: _FakeResponse(next(pages)))
+    assert accounts.count_supabase_users() == 2042
+
+
+def test_supabase_user_count_network_failure_is_none(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://x.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "k")
+
+    def boom(req, timeout=10):
+        raise OSError("network down")
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    assert accounts.count_supabase_users() is None
 
 
 if __name__ == "__main__":

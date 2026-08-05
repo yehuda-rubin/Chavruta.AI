@@ -385,7 +385,11 @@ class ChavrutaPipeline:
                                   if query.lang != "en" else
                                   "Note: this answer is not tied to a cited source — verify it.")
         # Citation-faithfulness: any verbatim quote not found in the retrieved sources is flagged.
-        bad_q = grounded.unverified_quotes(text, result.hits)
+        # Must include `fetched` (sources pulled by the agentic ===NEED_SOURCES=== loop, already
+        # folded into marker_map/citations above) — checking against result.hits alone false-flagged
+        # a faithful quote as "not found" whenever it came from a source the FIRST retrieval round
+        # missed and a later agentic round supplied.
+        bad_q = grounded.unverified_quotes(text, list(result.hits) + list(fetched or []))
         if bad_q:
             answer.caveats.append(("הערה: ציטוט/ים שלא נמצאו במקורות שנשלפו: «" + "», «".join(bad_q[:2]) + "» — יש לאמת.")
                                   if query.lang != "en" else

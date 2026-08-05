@@ -883,6 +883,46 @@ def test_qa_empty_retrieval_selffetch_fails_is_honest():
     assert ans.grounded is False and ans.citations == []      # honest no-source, never invented
 
 
+# ── Fix (caught live 2026-08-05): a verbatim quote from a source the agentic ===NEED_SOURCES=== loop
+# fetched — not part of the FIRST retrieval round — was flagged as "not found in the retrieved
+# sources". pipeline.py's unverified_quotes(text, result.hits) checked only the ORIGINAL hits; the
+# citation itself resolved fine (marker_map is separately extended with `fetched`), so an honestly-
+# cited, faithfully-quoted answer got a spurious "unverified quote" caveat — dragging down the
+# apparent grounding rate for something that was never actually a fabrication.
+def test_agentically_fetched_source_quote_is_not_falsely_flagged():
+    from chavruta.config.profile import Profile
+    from chavruta.corpus.schema import Intent, Query
+    from chavruta.llm.base import SourceBlock
+    from chavruta.retrieval.base import RankedHit, RetrievalResult
+
+    # First round's retrieval is non-empty but off-topic — thin enough that the model asks for more.
+    first_round_hit = RankedHit(chunk_id="a", ref="Bava Metzia 1.1", text="טקסט לא קשור לשאלה", score=1.0)
+    quote = "יאוש שלא מדעת אביי אמר לא הוי יאוש"
+    fetched_src = SourceBlock(marker="", ref="Bava Metzia 21b", commentator_id=None, text=quote)
+
+    class _Retriever:
+        def retrieve(self, q, top_k):
+            return RetrievalResult(hits=[first_round_hit], anchor_refs=[], is_empty=False)
+
+    class _LLM:
+        profile = "cloud"; model_id = "fake"
+        source_fetcher = staticmethod(lambda qs: [fetched_src])
+
+        def request(self, body_md, *, lang="he", token_budget=None):
+            assert "===NEED_SOURCES===" in body_md            # thin first round invites a self-fetch
+            return (f'התשובה נלמדת מכאן: "{quote}" [S2]', [fetched_src])
+
+    prof = Profile(name="cloud", collection="c", top_k=5, relevance_threshold=0.0)
+    pipeline = ChavrutaPipeline.from_backends(
+        prof, embedding=None, store=None, llm=_LLM(),
+        retriever=_Retriever(), router=SimpleNamespace(route=lambda q: q))
+
+    ans = pipeline.ask(Query(text="מה המקור ליאוש שלא מדעת", lang="he", intent=Intent.QA))
+    assert ans.grounded is True
+    assert not any("לא נמצאו במקורות" in c for c in ans.caveats), (
+        "a faithfully-quoted, agentically-fetched source must not be flagged as unverified")
+
+
 # ── Tier0 (2026-07 audit): per-hit relevance floor prunes dense semantic noise, keeps lexical hits ──
 # Bug: the honesty gate was all-or-nothing (top hit only), so off-topic-but-similar sources (Kilayim
 # for a Shabbat question) shipped to the model. The floor drops a hit ONLY if dense retrieval itself
