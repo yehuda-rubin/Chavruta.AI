@@ -36,6 +36,11 @@ class ParshaInfo:
     name_he: str
     ref_range: str    # Sefaria's own ref, e.g. "Genesis 1:1-6:8" — the FULL range, already
                        # holiday/combined-week correct; nothing here re-derives it
+    # The Haftarah — a SEPARATE reading from Nevi'im (Prophets), e.g. "Isaiah 54:11-55:5". Not to be
+    # confused with the Maftir, which is the final few verses of the TORAH portion itself (already
+    # covered by ref_range) read by the same person who then reads the Haftarah. "" if Sefaria's
+    # calendar didn't return one for some reason — never guessed.
+    haftarah_ref: str = ""
 
 
 @dataclass(frozen=True)
@@ -81,8 +86,10 @@ def resolve_parsha() -> ParshaInfo | None:
     if not item or not item.get("ref"):
         return None
     display = item.get("displayValue") or {}
+    haftarah = _find(items, "Haftarah")
     return ParshaInfo(
         name_en=display.get("en", ""), name_he=display.get("he", ""), ref_range=item["ref"],
+        haftarah_ref=(haftarah or {}).get("ref", ""),
     )
 
 

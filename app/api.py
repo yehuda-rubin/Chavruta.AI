@@ -1133,6 +1133,9 @@ def _resolve_daf_yomi_cached():
 # Lesson escalation matches the real "medium" lesson's top_k=16 with margin (see _LENGTHS).
 _CHAVRUTA_HIT_CAP = 25
 _LESSON_HIT_CAP = 40
+# The Haftarah is much shorter than a parsha (a handful of chapters, not several) — a small cap is
+# plenty and keeps it from ever dominating the combined source list.
+_HAFTARAH_HIT_CAP = 10
 
 
 def _cap_hits(hits: list, max_total: int) -> list:
@@ -1189,14 +1192,43 @@ def _run_parsha(question: str, lang: str, history=None, owner_id: str = "local",
     ref_variants = with_ref_variants(verse_refs)
     targets = ref_variants + commentary_refs(ref_variants, list(COMMENTATOR_HE))
     hits = _fetch_ranked_hits(targets, limit=max(len(targets) * 4, 400))
+    # The Haftarah (a separate Nevi'im reading) is fetched and capped SEPARATELY from the Torah
+    # portion — otherwise its few sources would simply be crowded out of _cap_hits by the parsha's
+    # much larger commentary volume, and it would never be represented at all.
+    haftarah_hits: list = []
+    if info.haftarah_ref:
+        haftarah_verse_refs = expand_range(info.haftarah_ref)
+        haftarah_variants = with_ref_variants(haftarah_verse_refs)
+        haftarah_targets = haftarah_variants + commentary_refs(haftarah_variants, list(COMMENTATOR_HE))
+        haftarah_hits = _cap_hits(
+            _fetch_ranked_hits(haftarah_targets, limit=max(len(haftarah_targets) * 4, 200)),
+            _HAFTARAH_HIT_CAP)
     topic = info.name_he if he else info.name_en
+    question = f"{_parsha_context_note(info, he)}\n{question}"
     if _wants_full_lesson(question):
         tpl = _select_template(topic, "yeshiva", "")
-        return _generate_lesson_from_hits(topic, _cap_hits(hits, _LESSON_HIT_CAP), lang, he,
-                                          audience="yeshiva", grade_band="", length="medium",
+        return _generate_lesson_from_hits(topic, _cap_hits(hits, _LESSON_HIT_CAP) + haftarah_hits,
+                                          lang, he, audience="yeshiva", grade_band="", length="medium",
                                           tpl=tpl, history=history, owner_id=owner_id, llm=llm)
-    hits = _cap_hits(hits, _CHAVRUTA_HIT_CAP)
+    hits = _cap_hits(hits, _CHAVRUTA_HIT_CAP) + haftarah_hits
     return _generate_chavruta_turn(question, hits, lang, he, history, weak=(not hits), llm=llm)
+
+
+def _parsha_context_note(info, he: bool) -> str:
+    """Caught live (2026-08-05): asked about the parsha, nothing distinguished the Maftir (the final
+    verses of the TORAH portion itself — already covered by ref_range — read by the same person who
+    then reads the Haftarah) from the Haftarah (a SEPARATE reading from Nevi'im/Prophets). Left to
+    infer this from the source refs alone, the model has no reason to keep them apart."""
+    if he:
+        note = f"(לעיונך: פרשת השבוע היא {info.ref_range}. המפטיר הוא הפסוקים האחרונים של קריאת התורה עצמה — חלק מהפרשה, לא קריאה נפרדת."
+        if info.haftarah_ref:
+            note += f" ההפטרה, לעומת זאת, היא קריאה נפרדת לגמרי מהנביאים: {info.haftarah_ref}. אל תבלבל בין השניים."
+        return note + ")"
+    note = (f"(For reference: this week's Torah portion is {info.ref_range}. The Maftir is the final "
+           f"verses of the Torah reading itself — part of the parsha, not a separate reading.")
+    if info.haftarah_ref:
+        note += f" The Haftarah, by contrast, is an entirely separate reading from Nevi'im/Prophets: {info.haftarah_ref}. Do not conflate the two."
+    return note + ")"
 
 
 def _run_daf_yomi(question: str, lang: str, history=None, owner_id: str = "local",

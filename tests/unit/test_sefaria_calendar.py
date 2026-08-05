@@ -46,7 +46,8 @@ def _no_real_sleep(monkeypatch):
 def test_resolve_parsha_normal_week(monkeypatch):
     monkeypatch.setattr(requests, "get", lambda *a, **k: _resp(_NORMAL_RESPONSE))
     info = cal.resolve_parsha()
-    assert info == cal.ParshaInfo(name_en="Re'eh", name_he="ראה", ref_range="Deuteronomy 11:26-16:17")
+    assert info == cal.ParshaInfo(name_en="Re'eh", name_he="ראה", ref_range="Deuteronomy 11:26-16:17",
+                                  haftarah_ref="Isaiah 54:11-55:5")
 
 
 def test_resolve_daf_yomi_normal_day(monkeypatch):
@@ -60,6 +61,12 @@ def test_resolve_parsha_combined_week(monkeypatch):
     info = cal.resolve_parsha()
     assert info.ref_range == "Exodus 35:1-40:38"
     assert info.name_en == "Vayakhel-Pekudei"
+
+
+def test_resolve_parsha_missing_haftarah_item_defaults_to_empty(monkeypatch):
+    # _COMBINED_PARSHA_RESPONSE has no "Haftarah" entry — must not crash, just default to "".
+    monkeypatch.setattr(requests, "get", lambda *a, **k: _resp(_COMBINED_PARSHA_RESPONSE))
+    assert cal.resolve_parsha().haftarah_ref == ""
 
 
 def test_resolve_daf_yomi_combined_week_response(monkeypatch):

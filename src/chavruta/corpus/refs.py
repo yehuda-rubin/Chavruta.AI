@@ -107,9 +107,10 @@ def with_ref_variants(refs) -> list[str]:
 
 
 # Per-chapter verse counts for the 5 Chumash books (Masoretic — fixed forever), fetched once from
-# Sefaria's /api/shape/<book> and checked in as static data. Used only by expand_range: a parsha
-# range spans many verses and fetch_by_refs has no native range support, so the range must be
-# enumerated into individual verse refs before it can be looked up.
+# Sefaria's /api/shape/<book> and checked in as static data — the fast path, no network, for the
+# overwhelmingly common case (a parsha range). Used only by expand_range: a range spans many verses
+# and fetch_by_refs has no native range support, so the range must be enumerated into individual
+# verse refs before it can be looked up.
 _TORAH_LENGTHS_PATH = Path(__file__).parent / "torah_chapter_lengths.json"
 _TORAH_CHAPTER_LENGTHS: dict[str, list[int]] | None = None
 
@@ -121,20 +122,64 @@ def _torah_chapter_lengths() -> dict[str, list[int]]:
     return _TORAH_CHAPTER_LENGTHS
 
 
+# The Haftarah is a range in NEVI'IM (Isaiah, Jeremiah, Ezekiel, or one of the 12 minor prophets —
+# whichever book varies by week), not one of the 5 Chumash books the static file covers. Rather than
+# hand-maintaining chapter-lengths for every book that could ever be a Haftarah source, fall back to
+# fetching it from the SAME Sefaria endpoint the static file was built from, once per book per
+# process lifetime (in-memory only — this is small, cheap, and reused for the rest of the week).
+_SHAPE_CACHE: dict[str, list[int]] = {}
+_SHAPE_MAX_ATTEMPTS = 2
+
+
+def _fetch_shape(book: str) -> list[int] | None:
+    import requests  # lazy, matching sefaria_calendar.py's convention
+
+    url = f"https://www.sefaria.org/api/shape/{book.replace(' ', '_')}"
+    for attempt in range(1, _SHAPE_MAX_ATTEMPTS + 1):
+        try:
+            resp = requests.get(url, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            chapters = (data[0] or {}).get("chapters") if isinstance(data, list) and data else None
+            if isinstance(chapters, list) and chapters:
+                return chapters
+            return None   # a well-formed-but-empty response won't improve on retry
+        except Exception:  # noqa: BLE001 — any failure just counts as an attempt
+            if attempt == _SHAPE_MAX_ATTEMPTS:
+                return None
+    return None
+
+
+def _chapter_lengths_for(book: str) -> list[int] | None:
+    """Chapter-verse-counts for ANY Tanakh book — the static Torah table first (no network for the
+    common case), then Sefaria's /api/shape on demand (cached in-memory per process) for anything
+    else, e.g. a Haftarah's Nevi'im book."""
+    lengths = _torah_chapter_lengths().get(book)
+    if lengths:
+        return lengths
+    if book in _SHAPE_CACHE:
+        return _SHAPE_CACHE[book]
+    lengths = _fetch_shape(book)
+    if lengths:
+        _SHAPE_CACHE[book] = lengths
+    return lengths
+
+
 _RANGE_RE = re.compile(r"^(?P<book>.+?)\s+(?P<c1>\d+):(?P<v1>\d+)-(?P<c2>\d+):(?P<v2>\d+)$")
 
 
 def expand_range(ref_range: str) -> list[str]:
-    """A Sefaria range ref ('Genesis 1:1-6:8', as returned by the calendar API for a parsha) to the
-    flat list of dotted verse refs it covers ('Genesis.1.1', 'Genesis.1.2', ..., 'Genesis.6.8') —
-    fetch_by_refs has no native range support, so the range must be enumerated first. Only the 5
-    Chumash books are covered; returns [] for anything else, or a range this can't parse, rather
-    than guessing wrong (Principle I: absent, not invented)."""
+    """A Sefaria range ref ('Genesis 1:1-6:8', as returned by the calendar API for a parsha or
+    Haftarah) to the flat list of dotted verse refs it covers ('Genesis.1.1', ..., 'Genesis.6.8') —
+    fetch_by_refs has no native range support, so the range must be enumerated first. Returns [] for
+    a book whose chapter lengths can't be resolved (static table miss AND the Sefaria fallback
+    failed) or a range this can't parse, rather than guessing wrong (Principle I: absent, not
+    invented)."""
     m = _RANGE_RE.match((ref_range or "").strip())
     if not m:
         return []
     book = m.group("book")
-    lengths = _torah_chapter_lengths().get(book)
+    lengths = _chapter_lengths_for(book)
     if not lengths:
         return []
     c1, v1, c2, v2 = int(m.group("c1")), int(m.group("v1")), int(m.group("c2")), int(m.group("v2"))

@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import date
 
 import app.api as api
+import chavruta.calendar.sefaria_calendar as cal
 import pytest
 from chavruta.retrieval.base import RankedHit
 
@@ -118,3 +119,23 @@ def test_daf_yomi_context_note_states_the_real_daf_number_hebrew():
 def test_daf_yomi_context_note_states_the_real_daf_number_english():
     note = api._daf_yomi_context_note("Chullin", 97, False)
     assert "Chullin 97" in note
+
+
+# Caught live (2026-08-05): the model conflated the Maftir (the final verses of the Torah portion
+# itself) with the Haftarah (a separate Nevi'im reading) when discussing the parsha.
+# _parsha_context_note states both explicitly so the model has no reason to guess.
+def test_parsha_context_note_distinguishes_maftir_from_haftarah_hebrew():
+    info = cal.ParshaInfo(name_en="Re'eh", name_he="ראה", ref_range="Deuteronomy 11:26-16:17",
+                          haftarah_ref="Isaiah 54:11-55:5")
+    note = api._parsha_context_note(info, True)
+    assert "Deuteronomy 11:26-16:17" in note
+    assert "Isaiah 54:11-55:5" in note
+    assert "מפטיר" in note
+    assert "הפטרה" in note
+
+
+def test_parsha_context_note_omits_haftarah_clause_when_none_resolved():
+    info = cal.ParshaInfo(name_en="Re'eh", name_he="ראה", ref_range="Deuteronomy 11:26-16:17")
+    note = api._parsha_context_note(info, True)
+    assert "הפטרה" not in note
+    assert "Deuteronomy 11:26-16:17" in note
