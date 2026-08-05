@@ -171,3 +171,37 @@ def test_run_parsha_defaults_to_qa_turn_not_chavruta(monkeypatch):
     res = api._run_parsha("מה מיוחד בפרשה?", "he")
     assert called.get("hit") is True
     assert res.answer == "ok"
+
+
+# Decision (2026-08-05): the Haftarah is a secondary reading relative to the parsha (whose full text
+# IS preloaded) — only its opening and closing pasuk are fetched up front, no commentaries at all;
+# the turn can self-fetch the rest via ===NEED_SOURCES=== if it actually needs them.
+def test_run_parsha_haftarah_gets_only_boundary_verses_no_commentary(monkeypatch):
+    info = cal.ParshaInfo(name_en="Re'eh", name_he="ראה", ref_range="Deuteronomy 11:26-16:17",
+                          haftarah_ref="Isaiah 54:11-55:5")
+    monkeypatch.setattr(api, "_get_pipeline", lambda: __import__("types").SimpleNamespace(llm="llm"))
+    monkeypatch.setattr(api, "_resolve_parsha_cached", lambda: info)
+    monkeypatch.setattr(api, "_wants_full_lesson", lambda *a, **k: False)
+    monkeypatch.setattr(api, "_generate_qa_turn_from_hits",
+                        lambda *a, **k: api.QueryResponse(answer="ok", citations=[], grounded=True,
+                                                          intent="qa", files=[]))
+
+    fetch_calls = []
+
+    def _fake_fetch(targets, **k):
+        fetch_calls.append(list(targets))
+        return [_hit(t) for t in targets]
+
+    monkeypatch.setattr(api, "_fetch_ranked_hits", _fake_fetch)
+
+    api._run_parsha("שאלה", "he")
+
+    # First call is the parsha's own full range+commentary; the SECOND is the haftarah fetch.
+    assert len(fetch_calls) == 2
+    haftarah_targets = fetch_calls[1]
+    # Isaiah 54:11-55:5 is many verses — only 2 distinct base pesukim (opening + closing) requested,
+    # never the full range and never a "Rashi on ..." style commentary ref among them.
+    assert len(haftarah_targets) <= 4          # the 2 boundary verses + their Sefaria ref variants
+    assert not any(" on " in t for t in haftarah_targets)
+    assert any("54.11" in t or "54:11" in t for t in haftarah_targets)   # opening verse
+    assert any("55.5" in t or "55:5" in t for t in haftarah_targets)     # closing verse

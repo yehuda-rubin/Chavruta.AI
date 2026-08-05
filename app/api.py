@@ -1185,9 +1185,6 @@ def _resolve_daf_yomi_cached():
 # Lesson escalation matches the real "medium" lesson's top_k=16 with margin (see _LENGTHS).
 _CHAVRUTA_HIT_CAP = 25
 _LESSON_HIT_CAP = 40
-# The Haftarah is much shorter than a parsha (a handful of chapters, not several) — a small cap is
-# plenty and keeps it from ever dominating the combined source list.
-_HAFTARAH_HIT_CAP = 10
 
 
 def _cap_hits(hits: list, max_total: int) -> list:
@@ -1244,17 +1241,18 @@ def _run_parsha(question: str, lang: str, history=None, owner_id: str = "local",
     ref_variants = with_ref_variants(verse_refs)
     targets = ref_variants + commentary_refs(ref_variants, list(COMMENTATOR_HE))
     hits = _fetch_ranked_hits(targets, limit=max(len(targets) * 4, 400))
-    # The Haftarah (a separate Nevi'im reading) is fetched and capped SEPARATELY from the Torah
-    # portion — otherwise its few sources would simply be crowded out of _cap_hits by the parsha's
-    # much larger commentary volume, and it would never be represented at all.
+    # The Haftarah (a separate Nevi'im reading) gets only its OPENING and CLOSING pasuk up front —
+    # not the full range, and no commentaries at all. It's a secondary reading relative to the
+    # parsha itself (whose full text + commentary IS preloaded above), so the model is given just
+    # enough to know what it is and where it starts/ends; if the turn actually needs the intervening
+    # verses or a commentary on them, the agentic ===NEED_SOURCES=== loop can pull them on demand
+    # (same self-fetch mechanism every other thin-retrieval turn already relies on).
     haftarah_hits: list = []
     if info.haftarah_ref:
         haftarah_verse_refs = expand_range(info.haftarah_ref)
-        haftarah_variants = with_ref_variants(haftarah_verse_refs)
-        haftarah_targets = haftarah_variants + commentary_refs(haftarah_variants, list(COMMENTATOR_HE))
-        haftarah_hits = _cap_hits(
-            _fetch_ranked_hits(haftarah_targets, limit=max(len(haftarah_targets) * 4, 200)),
-            _HAFTARAH_HIT_CAP)
+        if haftarah_verse_refs:
+            boundary_refs = {haftarah_verse_refs[0], haftarah_verse_refs[-1]}
+            haftarah_hits = _fetch_ranked_hits(with_ref_variants(list(boundary_refs)), limit=20)
     topic = info.name_he if he else info.name_en
     question = f"{_parsha_context_note(info, he)}\n{question}"
     if _wants_full_lesson(question):
@@ -1274,12 +1272,17 @@ def _parsha_context_note(info, he: bool) -> str:
     if he:
         note = f"(לעיונך: פרשת השבוע היא {info.ref_range}. המפטיר הוא הפסוקים האחרונים של קריאת התורה עצמה — חלק מהפרשה, לא קריאה נפרדת."
         if info.haftarah_ref:
-            note += f" ההפטרה, לעומת זאת, היא קריאה נפרדת לגמרי מהנביאים: {info.haftarah_ref}. אל תבלבל בין השניים."
+            note += (f" ההפטרה, לעומת זאת, היא קריאה נפרדת לגמרי מהנביאים: {info.haftarah_ref}. "
+                     f"אל תבלבל בין השניים. קיבלת רק את הפסוק הראשון והאחרון של ההפטרה — אם את/ה "
+                     f"צריך/ה את הפסוקים שביניהם, או פירוש עליהם, בקש/י אותם דרך ===NEED_SOURCES===.")
         return note + ")"
     note = (f"(For reference: this week's Torah portion is {info.ref_range}. The Maftir is the final "
            f"verses of the Torah reading itself — part of the parsha, not a separate reading.")
     if info.haftarah_ref:
-        note += f" The Haftarah, by contrast, is an entirely separate reading from Nevi'im/Prophets: {info.haftarah_ref}. Do not conflate the two."
+        note += (f" The Haftarah, by contrast, is an entirely separate reading from Nevi'im/Prophets: "
+                 f"{info.haftarah_ref}. Do not conflate the two. You were given only the Haftarah's "
+                 f"opening and closing verse — if you need the verses in between, or a commentary on "
+                 f"them, request them via ===NEED_SOURCES===.")
     return note + ")"
 
 
