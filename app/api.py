@@ -1000,7 +1000,10 @@ def _classifier_llm():
         return None
     from chavruta.llm.cloud import CloudLLM
 
-    model = os.environ.get("CHAVRUTA_CLASSIFIER_MODEL", _CLASSIFIER_MODEL_DEFAULT)
+    # Caught live: docker-compose sets this var to a present-but-EMPTY string when unset in .env
+    # (${CHAVRUTA_CLASSIFIER_MODEL:-}), and os.environ.get's default only applies when the key is
+    # ABSENT, not when it's empty — so `or` is required here, not `.get`'s own fallback.
+    model = os.environ.get("CHAVRUTA_CLASSIFIER_MODEL") or _CLASSIFIER_MODEL_DEFAULT
     _classifier_llm_cache = CloudLLM(model, profile.llm_base_url, profile.llm_api_key,
                                      timeout_s=15.0, max_retries=1)
     return _classifier_llm_cache
