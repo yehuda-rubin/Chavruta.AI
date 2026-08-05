@@ -205,12 +205,15 @@ function ByokKeyField({ lang }: { lang: Lang }) {
 
 export type Theme = "light" | "dark" | "auto";
 
-// Default-mode options match the static UI (lesson / explain / qa / shut).
+// Default-mode options match the static UI (lesson / explain / qa / shut / chavruta). parsha/
+// dafyomi are deliberately excluded — they're occasional calendar lookups, not a sensible default
+// for every new chat (and are beta-gated besides).
 const MODES: { id: IntentId; key: StringKey }[] = [
   { id: "lesson", key: "lesson" },
   { id: "explain", key: "explain" },
   { id: "qa", key: "qa" },
   { id: "shut", key: "shutMode" },
+  { id: "chavruta", key: "chavrutaMode" },
 ];
 
 function Seg<T extends string>({

@@ -193,6 +193,7 @@ export function ChatPane({
   onLessonChange,
   onSend,
   onPreviewFile,
+  calendarModesEnabled,
 }: {
   lang: Lang;
   messages: Message[];
@@ -209,6 +210,7 @@ export function ChatPane({
   onLessonChange: (v: LessonFields) => void;
   onSend: (text: string) => void;
   onPreviewFile: (f: FileOut) => void;
+  calendarModesEnabled?: boolean;
 }) {
   const [input, setInput] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
@@ -241,7 +243,8 @@ export function ChatPane({
           <h2 className="font-serif text-lg font-bold text-tekhelet">{tr(lang, "discussionTitle")}</h2>
           {subtitle && <p className="text-[10px] tracking-widest text-gold font-bold uppercase truncate">{subtitle}</p>}
         </div>
-        <IntentBar lang={lang} intent={intent} locked={locked} onPick={onPickIntent} />
+        <IntentBar lang={lang} intent={intent} locked={locked} onPick={onPickIntent}
+                  calendarModesEnabled={calendarModesEnabled} />
       </div>
 
       {intent === "lesson" && <LessonOptions lang={lang} value={lessonFields} onChange={onLessonChange} />}

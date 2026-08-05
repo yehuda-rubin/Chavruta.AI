@@ -43,6 +43,9 @@ export const STRINGS = {
     qa: "שאלה",
     shutMode: 'שו"ת',
     chavrutaMode: "חברותא",
+    parshaMode: "פרשת השבוע",
+    dafYomiMode: "דף יומי",
+    chooseMode: "בחר מצב",
     // lesson options
     forWhom: "עבור:",
     audAuto: "אוטומטי (מהפרומט)",
@@ -270,6 +273,9 @@ export const STRINGS = {
     qa: "Q&A",
     shutMode: "Responsa",
     chavrutaMode: "Chavruta",
+    parshaMode: "Parshat Hashavua",
+    dafYomiMode: "Daf Yomi",
+    chooseMode: "Choose mode",
     forWhom: "For:",
     audAuto: "Auto (from prompt)",
     audYeshiva: "Beit Midrash / Yeshiva",
@@ -457,8 +463,10 @@ export type StringKey = keyof (typeof STRINGS)["he"];
 
 // Intent goal labels for the composer (with emoji), matching the static UI.
 export const INTENT_LABEL: Record<Lang, Record<string, string>> = {
-  he: { lesson: "🎯 שיעור", explain: "🎯 הסבר", qa: "🎯 שאלה", shut: '🎯 שו"ת', chavruta: "🤝 חברותא" },
-  en: { lesson: "🎯 Lesson", explain: "🎯 Explain", qa: "🎯 Q&A", shut: "🎯 Responsa", chavruta: "🤝 Chavruta" },
+  he: { lesson: "🎯 שיעור", explain: "🎯 הסבר", qa: "🎯 שאלה", shut: '🎯 שו"ת', chavruta: "🤝 חברותא",
+        parsha: "📜 פרשת השבוע", dafyomi: "📖 דף יומי" },
+  en: { lesson: "🎯 Lesson", explain: "🎯 Explain", qa: "🎯 Q&A", shut: "🎯 Responsa", chavruta: "🤝 Chavruta",
+        parsha: "📜 Parshat Hashavua", dafyomi: "📖 Daf Yomi" },
 };
 
 // Example prompts shown on the empty welcome screen — click to prefill the composer. Well-known,
@@ -478,7 +486,7 @@ export const EXAMPLES: Record<Lang, string[]> = {
   ],
 };
 
-export const INTENTS = ["lesson", "explain", "qa", "shut", "chavruta"] as const;
+export const INTENTS = ["lesson", "explain", "qa", "shut", "chavruta", "parsha", "dafyomi"] as const;
 export type IntentId = (typeof INTENTS)[number];
 
 export function tr(lang: Lang, key: StringKey): string {

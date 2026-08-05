@@ -275,6 +275,9 @@ export interface Me {
   blocked: boolean;
   blocked_until: string | null;             // ISO ts the block lifts (null + blocked ⇒ permanent)
   blocked_reason: string;
+  // Parshat HaShavua / Daf Yomi — beta-gated to a hand-picked allowlist (app/api.py::
+  // _calendar_modes_enabled). false for everyone not on it; the picker hides both modes entirely.
+  calendar_modes_enabled: boolean;
 }
 
 export interface Tier {

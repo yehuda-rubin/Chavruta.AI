@@ -457,6 +457,7 @@ export default function Home() {
           onLessonChange={setLessonFields}
           onSend={send}
           onPreviewFile={setPreviewFile}
+          calendarModesEnabled={me?.calendar_modes_enabled}
         />
 
         <div className="hidden lg:contents">
