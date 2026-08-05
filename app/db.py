@@ -952,6 +952,23 @@ def count_accounts() -> dict[str, Any]:
     return {"total": sum(r["n"] for r in rows), "by_plan": {r["plan"]: r["n"] for r in rows}}
 
 
+def revenue_summary(since: str | None = None) -> dict[str, Any]:
+    """Billed amounts from billing_ledger, grouped by plan and currency, plus a grand total per
+    currency. No owner_id here (the table doesn't have one, by design — see its schema comment), so
+    this is inherently account-agnostic. Refunds are already negative-amount rows in the same table,
+    so they net out of the totals rather than needing separate handling."""
+    where = "WHERE charged_at >= ?" if since else ""
+    by_plan = _agg(
+        f"SELECT plan, currency, SUM(amount) AS total, COUNT(*) AS charges "   # noqa: S608
+        f"FROM billing_ledger {where} GROUP BY plan, currency ORDER BY total DESC",
+        ((since,) if since else ()))
+    totals = _agg(
+        f"SELECT currency, SUM(amount) AS total FROM billing_ledger "          # noqa: S608
+        f"{where} GROUP BY currency",
+        ((since,) if since else ()))
+    return {"by_plan": by_plan, "totals": {r["currency"]: r["total"] for r in totals}}
+
+
 def delete_sessions_older_than(cutoff_iso: str) -> int:
     """Delete chats untouched since `cutoff_iso`. Messages cascade. Returns how many went.
 

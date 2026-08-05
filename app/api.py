@@ -236,7 +236,27 @@ def _configure_logging() -> None:
     root.setLevel(getattr(logging, level, logging.INFO))
 
 
+def _configure_sentry() -> None:
+    """Backend error tracking — a no-op unless SENTRY_DSN is set, same "absent = inert" convention
+    as the Supabase auth integration. FastAPI's integration auto-captures unhandled exceptions; the
+    many existing inline `except Exception: _log.exception(...)` blocks in this file keep swallowing
+    exactly as they do today (this doesn't change any response behavior)."""
+    dsn = os.environ.get("SENTRY_DSN", "").strip()
+    if not dsn:
+        return
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+
+    sentry_sdk.init(
+        dsn=dsn,
+        integrations=[FastApiIntegration()],
+        send_default_pii=False,   # nothing here forwards user content to a third party by default
+        environment=os.environ.get("CHAVRUTA_ENV", "production"),
+    )
+
+
 _configure_logging()
+_configure_sentry()
 _log = logging.getLogger("chavruta.api")
 _pipeline = None
 # FastAPI runs sync endpoints in a threadpool, so the lazy singletons below can be raced by concurrent
@@ -1348,6 +1368,15 @@ def _calendar_modes_enabled(owner_id: str) -> bool:
     return owner_id in allowed
 
 
+def _is_admin(owner_id: str) -> bool:
+    """Admin dashboard access — a dedicated allowlist, separate from the calendar beta gate even
+    though today it's the same one account. No "*" wildcard: unlike a beta feature, admin access
+    should never mean "everyone"."""
+    raw = os.environ.get("CHAVRUTA_ADMIN_OWNERS", "").strip()
+    allowed = {o.strip() for o in raw.split(",") if o.strip()}
+    return owner_id in allowed
+
+
 def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Turn],
                     audience: str = "", grade_band: str = "", length: str = "",
                     owner_id: str = "local", llm=None) -> QueryResponse:
@@ -1996,6 +2025,9 @@ class MeOut(BaseModel):
     # enforcement (that's the server-side check in _run_query_impl, which runs regardless of what
     # the client shows).
     calendar_modes_enabled: bool = False
+    # Admin dashboard link — see _is_admin. UI convenience only, same as the field above; the real
+    # enforcement is the 404 every /admin/* route raises for a non-admin owner.
+    is_admin: bool = False
 
 
 @app.get("/me", response_model=MeOut)
@@ -2049,7 +2081,64 @@ def me(owner: str = Depends(current_owner)):
         blocked_until=ban["until"] if ban else None,
         blocked_reason=ban["reason"] if ban else "",
         calendar_modes_enabled=_calendar_modes_enabled(owner),
+        is_admin=_is_admin(owner),
     )
+
+
+def _since_cutoff(window: str) -> str | None:
+    """Translate a 7d/30d/all window into an ISO cutoff string for db.py's `since` params. Anything
+    other than "7d"/"30d" (including "all" or a bad value) means no cutoff — every db.py aggregate
+    already treats since=None as "all time"."""
+    days = {"7d": 7, "30d": 30}.get(window)
+    return None if days is None else (datetime.now(UTC) - timedelta(days=days)).isoformat()
+
+
+def _require_admin(owner: str = Depends(current_owner)) -> str:
+    """Dependency for every /admin/* route. Raises the same 404 a non-owner gets elsewhere in this
+    file (e.g. :2307) for someone else's session — so an unauthorized caller can't distinguish "wrong
+    owner" from "route doesn't exist"."""
+    if not _is_admin(owner):
+        raise HTTPException(status_code=404, detail="not found")
+    return owner
+
+
+@app.get("/admin/overview")
+def admin_overview(since: str = "30d", owner: str = Depends(_require_admin)):
+    cutoff = _since_cutoff(since)
+    return {
+        "accounts": db.count_accounts(),
+        "usage": db.usage_health(cutoff),
+        "concurrency": db.usage_concurrency(cutoff),
+        "revenue": db.revenue_summary(cutoff),
+    }
+
+
+@app.get("/admin/usage-by-owner")
+def admin_usage_by_owner(since: str = "30d", limit: int = 50, owner: str = Depends(_require_admin)):
+    return db.usage_by_owner(_since_cutoff(since), limit)
+
+
+@app.get("/admin/usage-by-intent")
+def admin_usage_by_intent(since: str = "30d", owner: str = Depends(_require_admin)):
+    return db.usage_by_intent(_since_cutoff(since))
+
+
+@app.get("/admin/usage-by-week")
+def admin_usage_by_week(since: str = "30d", owner: str = Depends(_require_admin)):
+    return db.usage_by_week(_since_cutoff(since))
+
+
+@app.get("/admin/flagged-messages")
+def admin_flagged_messages(reviewed: bool = False, limit: int = 100,
+                           owner: str = Depends(_require_admin)):
+    return db.list_flagged_messages(reviewed=reviewed, limit=limit)
+
+
+@app.post("/admin/flagged-messages/{report_id}/review")
+def admin_review_message(report_id: int, owner: str = Depends(_require_admin)):
+    if not db.mark_report_reviewed(report_id):
+        raise HTTPException(status_code=404, detail="report not found")
+    return {"ok": True}
 
 
 # ── Account deletion (scheduled, with a grace period + cancel) ────────────────
