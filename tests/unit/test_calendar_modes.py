@@ -145,3 +145,29 @@ def test_parsha_context_note_omits_haftarah_clause_when_none_resolved():
     note = api._parsha_context_note(info, True)
     assert "הפטרה" not in note
     assert "Deuteronomy 11:26-16:17" in note
+
+
+# Decision (2026-08-05): Parshat HaShavua's default (non-lesson) turn changed from the Socratic
+# chavruta style to direct Q&A — _run_daf_yomi is untouched and still defaults to chavruta.
+def test_run_parsha_defaults_to_qa_turn_not_chavruta(monkeypatch):
+    info = cal.ParshaInfo(name_en="Re'eh", name_he="ראה", ref_range="Deuteronomy 11:26-16:17")
+    monkeypatch.setattr(api, "_get_pipeline", lambda: __import__("types").SimpleNamespace(llm="llm"))
+    monkeypatch.setattr(api, "_resolve_parsha_cached", lambda: info)
+    monkeypatch.setattr(api, "_fetch_ranked_hits", lambda *a, **k: [_hit("Deuteronomy.11.26")])
+    monkeypatch.setattr(api, "_wants_full_lesson", lambda *a, **k: False)
+
+    def _boom_chavruta(*a, **k):
+        raise AssertionError("parsha's default turn must not go through _generate_chavruta_turn")
+
+    called = {}
+
+    def _fake_qa_turn(question, hits, lang, he, history, llm):
+        called["hit"] = True
+        return api.QueryResponse(answer="ok", citations=[], grounded=True, intent="qa", files=[])
+
+    monkeypatch.setattr(api, "_generate_chavruta_turn", _boom_chavruta)
+    monkeypatch.setattr(api, "_generate_qa_turn_from_hits", _fake_qa_turn)
+
+    res = api._run_parsha("מה מיוחד בפרשה?", "he")
+    assert called.get("hit") is True
+    assert res.answer == "ok"

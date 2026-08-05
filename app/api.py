@@ -200,6 +200,7 @@ from chavruta.corpus.refs import (
     with_ref_variants,
 )
 from chavruta.corpus.schema import Intent, Query, Turn
+from chavruta.retrieval.base import RetrievalResult
 from chavruta.llm import metering
 from chavruta.llm.agentic import is_degrade_message
 from chavruta.llm.base import GroundedPrompt
@@ -1043,19 +1044,20 @@ _WANTS_LESSON_YES_RE = re.compile(r"^(כן|yes)\b", re.I)
 
 def _wants_full_lesson(question: str, llm=None) -> bool:
     """Cheap yes/no check: did the user actually ask for a full lesson to be built (e.g. 'תבנה לי
-    שיעור על הפרשה'), as opposed to the default chavruta-style back-and-forth for parsha/daf-yomi
-    turns? Runs on _classifier_llm (a small/fast model), not the main pipeline LLM — this is a
-    trivial decision and should never add the main model's latency/cost before the real turn even
-    starts. Best-effort: any failure or unclear reply defaults to False (the cheaper, safer path),
-    same philosophy as _fix_bleeding_sentences — a misfire here must never break a turn.
-    `llm` overrides the classifier lookup (dependency injection for tests)."""
+    שיעור על הפרשה'), as opposed to the default turn style for parsha/daf-yomi (direct Q&A for
+    parsha, chavruta-style back-and-forth for daf-yomi)? Runs on _classifier_llm (a small/fast
+    model), not the main pipeline LLM — this is a trivial decision and should never add the main
+    model's latency/cost before the real turn even starts. Best-effort: any failure or unclear
+    reply defaults to False (the cheaper, safer path), same philosophy as _fix_bleeding_sentences —
+    a misfire here must never break a turn. `llm` overrides the classifier lookup (dependency
+    injection for tests)."""
     llm = llm or _classifier_llm() or _get_pipeline().llm
     try:
         prompt = GroundedPrompt(system=_WANTS_LESSON_SYSTEM, sources=[], question=question, bare=True)
         res = llm.generate(prompt, lang="he", max_tokens=10, temperature=0.0)
         reply = (res.text or "").strip()
     except Exception:
-        _log.warning("_wants_full_lesson classification call failed; defaulting to chavruta",
+        _log.warning("_wants_full_lesson classification call failed; defaulting to the non-lesson turn",
                      exc_info=True)
         return False
     return bool(_WANTS_LESSON_YES_RE.match(reply))
@@ -1086,6 +1088,36 @@ def _generate_chavruta_turn(question: str, hits, lang: str, he: bool, history, w
     clean = _strip_markers(_fix_bleeding_sentences(raw, he, llm), he=he)
     return QueryResponse(answer=clean, citations=used, grounded=bool(used),
                          intent="chavruta", files=[])
+
+
+def _generate_qa_turn_from_hits(question: str, hits, lang: str, he: bool, history, llm) -> QueryResponse:
+    """Direct Q&A generation from an already-resolved set of hits (a calendar-resolved ref, not the
+    pipeline's own retrieval) — used by `_run_parsha`'s default (non-lesson) path. Thin wrapper around
+    ChavrutaPipeline._qa_answer, the same method `pipeline.ask()` uses for a normal 'qa' turn, given a
+    RetrievalResult built from `hits` instead of running the retriever — same principle as
+    `_generate_lesson_from_hits` reusing the pipeline's own lesson machinery."""
+    pipeline = _get_pipeline()
+    llm = llm or pipeline.llm
+    query = Query(text=question, lang=lang or None, intent=Intent.QA)
+    result = RetrievalResult(hits=list(hits), anchor_refs=[], is_empty=not hits)
+    answer = pipeline._qa_answer(query, result, llm, history=history)
+
+    def _cite(c) -> CitationOut:
+        return CitationOut(
+            ref=c.ref,
+            ref_he=(hebrew_display_ref(c.ref) or "") if he else "",
+            text_he=getattr(c, "text_he", "") or getattr(c, "quote", ""),
+            text_en=getattr(c, "text_en", ""),
+            commentator=getattr(c, "commentator_id", "") or "",
+            deep_link=getattr(c, "deep_link", "") or "",
+        )
+
+    text = _strip_instruction_echo(answer.text, he)
+    clean = _strip_markers(_fix_bleeding_sentences(text, he, llm), he=he)
+    return QueryResponse(
+        answer=clean, citations=[_cite(c) for c in answer.citations],
+        grounded=answer.grounded, intent="qa", caveats=list(answer.caveats), files=[],
+    )
 
 
 def _run_chavruta(question: str, lang: str, history=None, llm=None) -> QueryResponse:
@@ -1195,7 +1227,7 @@ def _fetch_ranked_hits(targets: list[str], *, filters=None, limit: int | None = 
 def _run_parsha(question: str, lang: str, history=None, owner_id: str = "local",
                 llm=None) -> QueryResponse:
     """Parshat HaShavua: resolve this week's range from Sefaria's calendar (cached — see
-    _resolve_parsha_cached), fetch its verses + commentaries, then default to a chavruta-style turn
+    _resolve_parsha_cached), fetch its verses + commentaries, then default to a direct Q&A turn
     scoped to those sources — or a full lesson if the model judges the user actually asked for one
     (see _wants_full_lesson). No local parsha-name table: Sefaria's own ref range is authoritative,
     including on a combined-parsha week."""
@@ -1231,7 +1263,7 @@ def _run_parsha(question: str, lang: str, history=None, owner_id: str = "local",
                                           lang, he, audience="yeshiva", grade_band="", length="medium",
                                           tpl=tpl, history=history, owner_id=owner_id, llm=llm)
     hits = _cap_hits(hits, _CHAVRUTA_HIT_CAP) + haftarah_hits
-    return _generate_chavruta_turn(question, hits, lang, he, history, weak=(not hits), llm=llm)
+    return _generate_qa_turn_from_hits(question, hits, lang, he, history, llm=llm)
 
 
 def _parsha_context_note(info, he: bool) -> str:
