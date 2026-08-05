@@ -58,7 +58,7 @@ export function IntentBar({
           (locked ? "opacity-60 cursor-not-allowed" : "hover:bg-white/70 cursor-pointer")
         }
       >
-        <span className="grad bg-clip-text text-transparent">{tr(lang, LABEL_KEY[intent])}</span>
+        <span className="text-tekhelet">{tr(lang, LABEL_KEY[intent])}</span>
         {!locked && <Icon name="settings" className="text-[15px] text-ink/50" />}
       </button>
       {open && !locked && (
