@@ -218,18 +218,25 @@ from types import SimpleNamespace  # noqa: E402
 
 
 class _FakeLLM:
-    """Records every prompt it's asked to rewrite; replies with a scripted (or default) rewrite."""
+    """Records every prompt it's asked to rewrite; replies with a scripted (or default) rewrite.
+    `reply`/`raises` apply to every call; pass `replies`/`raises_on` (lists, one entry per successive
+    call) to script a DIFFERENT outcome each time — e.g. a failed or still-bleeding first attempt
+    followed by a clean retry."""
 
-    def __init__(self, reply="תשובה נקייה", raises=False):
+    def __init__(self, reply="תשובה נקייה", raises=False, replies=None, raises_on=None):
         self.reply = reply
         self.raises = raises
+        self.replies = replies
+        self.raises_on = raises_on or []
         self.calls: list[str] = []
 
     def generate(self, prompt, *, lang, max_tokens, temperature):
+        n = len(self.calls)
         self.calls.append(prompt.question)
-        if self.raises:
+        if self.raises_on[n] if n < len(self.raises_on) else self.raises:
             raise RuntimeError("model unavailable")
-        return SimpleNamespace(text=self.reply)
+        text = self.replies[n] if self.replies is not None and n < len(self.replies) else self.reply
+        return SimpleNamespace(text=text)
 
 
 def test_fix_bleeding_sentences_rewrites_only_the_offending_sentence():
@@ -270,6 +277,74 @@ def test_fix_bleeding_sentences_caps_the_number_of_fixes():
     out = api._fix_bleeding_sentences(text, True, llm)
     assert len(llm.calls) == api._MAX_BLEED_FIXES
     assert "DD" in out                             # the 4th bleeding sentence was left untouched
+
+
+# Fix (caught live 2026-08-04): a bleeding sentence reached a real user unfixed
+# ("...שNERואה כמשתחוה..."). The first cut of _fix_bleeding_sentences accepted whatever the rewrite
+# call returned as long as it was non-empty — never checking whether it had actually removed the
+# Latin text — so a call that raised, or one that succeeded but came back still bleeding, was a dead
+# end after a single try. It now retries once on either failure mode before giving up.
+def test_fix_bleeding_sentences_retries_when_the_first_rewrite_still_bleeds():
+    llm = _FakeLLM(replies=["still has CLAIM in it", "הוא אינו טוען דבר"])
+    text = "משפט עם מילה CLAIM בעייתית."
+    out = api._fix_bleeding_sentences(text, True, llm)
+    assert out == "הוא אינו טוען דבר"
+    assert len(llm.calls) == 2
+
+
+def test_fix_bleeding_sentences_retries_after_a_call_failure():
+    llm = _FakeLLM(raises_on=[True, False], reply="הוא אינו טוען דבר")
+    text = "משפט עם מילה CLAIM בעייתית."
+    out = api._fix_bleeding_sentences(text, True, llm)
+    assert out == "הוא אינו טוען דבר"
+    assert len(llm.calls) == 2
+
+
+def test_fix_bleeding_sentences_keeps_original_when_both_attempts_still_bleed():
+    llm = _FakeLLM(reply="still has CLAIM in it")   # every attempt comes back still bleeding
+    text = "משפט עם מילה CLAIM בעייתית."
+    assert api._fix_bleeding_sentences(text, True, llm) == text
+    assert len(llm.calls) == 2                      # both attempts used, neither accepted
+
+
+# Fix (caught live 2026-08-05): "...שה cה הזו..." (a single stray Latin letter mid-word) survived
+# unfixed — the old trigger (_LATIN_WORD_RE) only fired on a RUN of 2+ Latin letters, so one bare
+# letter slipped through both this mechanism and the blind foreign-char stripper (which allows all
+# ASCII). _has_bleed checks CHARACTERS instead: anything that isn't Hebrew, ASCII-non-letter, or
+# the app's own typography — catching a single Latin letter, and any other foreign script too.
+def test_has_bleed_catches_a_single_stray_latin_letter():
+    assert api._has_bleed("יש חשש שה cה הזו תיראה") is True
+
+
+def test_has_bleed_catches_a_foreign_script_not_just_latin():
+    assert api._has_bleed("בזדון违反") is True          # Chinese
+    assert api._has_bleed("это требуется") is True      # Cyrillic
+
+
+def test_has_bleed_false_on_clean_hebrew_with_markers():
+    # [S1] contains a Latin "S" — must NOT itself count as bleed, or every cited sentence would
+    # trigger a pointless rewrite call.
+    assert api._has_bleed("זהו משפט נקי [S1] לגמרי.") is False
+    assert api._has_bleed("שני מקורות [S1, S5] כאן.") is False
+
+
+def test_fix_bleeding_sentences_fixes_a_single_stray_letter():
+    llm = _FakeLLM(reply="יש חשש שהתנועה הזו תיראה")
+    text = "יש חשש שה cה הזו תיראה כאילו הוא משתחווה לה."
+    out = api._fix_bleeding_sentences(text, True, llm)
+    assert "c" not in out
+    assert len(llm.calls) == 1
+
+
+# Fix (caught live 2026-08-04): the model quoted a source containing a Hebrew abbreviation gershayim
+# (בר"ה) and emitted a literal backslash before it (בר\"ה) — as if escaping the quote the way a
+# JSON/code string would. A bare backslash has no legitimate use in this app's output.
+@pytest.mark.parametrize("raw,expected", [
+    ('נאמר: "הנוהגים לשחות בר\\"ה וי\\"ה כשאומרים".', 'נאמר: "הנוהגים לשחות בר"ה וי"ה כשאומרים".'),
+    ("תשובה נקייה לגמרי בלי בק סלאש.", "תשובה נקייה לגמרי בלי בק סלאש."),   # untouched when absent
+])
+def test_strip_markers_drops_a_leaked_escape_backslash_before_a_quote(raw, expected):
+    assert api._strip_markers(raw, he=True) == expected
 
 
 # ── Fix (2026-08-02, caught live): a genuinely-grounded 'explain' answer still contained the bare
@@ -1339,3 +1414,26 @@ def test_week_days_still_starts_sunday_with_israel_local_dates():
 
 from datetime import UTC, datetime  # noqa: E402
 import unittest.mock  # noqa: E402
+
+
+# _wants_full_lesson gates parsha/daf-yomi turns between the default chavruta-style back-and-forth
+# and the full lesson (Word-doc) pipeline — "the model decides", via a cheap classification call
+# (injected here via the llm= override so no real pipeline/classifier LLM is needed).
+def test_wants_full_lesson_true_on_a_clear_yes():
+    llm = _FakeLLM(reply="כן")
+    assert api._wants_full_lesson("תבנה לי שיעור על הפרשה", llm=llm) is True
+
+
+def test_wants_full_lesson_false_on_a_clear_no():
+    llm = _FakeLLM(reply="לא")
+    assert api._wants_full_lesson("מה רש\"י אומר כאן?", llm=llm) is False
+
+
+def test_wants_full_lesson_defaults_false_on_llm_failure():
+    llm = _FakeLLM(raises=True)
+    assert api._wants_full_lesson("תבנה לי שיעור", llm=llm) is False
+
+
+def test_wants_full_lesson_defaults_false_on_an_unclear_reply():
+    llm = _FakeLLM(reply="אולי, קשה לדעת")
+    assert api._wants_full_lesson("שאלה כלשהי", llm=llm) is False

@@ -44,6 +44,19 @@ def hit_kind(h: RankedHit) -> str:
     return "pasuk"
 
 
+# Daf Yomi source priority (requested: Gemara + Rashi first, Tosafot second, everything else
+# after). A base Gemara chunk has no commentator_id at all (None) — it belongs in the same top
+# tier as Rashi, not the unranked default, so it's listed explicitly rather than relying on the
+# fallback.
+_DAF_YOMI_PRIORITY = {None: 0, "rashi": 0, "tosafot": 1}
+
+
+def daf_yomi_sort_key(h: RankedHit) -> int:
+    """Sort key for Daf Yomi's source ordering: Gemara/Rashi (0), Tosafot (1), everything else (2).
+    `list.sort(key=daf_yomi_sort_key)` is stable, so within a tier hits keep their retrieval order."""
+    return _DAF_YOMI_PRIORITY.get(h.commentator_id, 2)
+
+
 def _section(stage: Stage, hits: list[RankedHit]) -> LessonSection:
     from chavruta.generation.grounded import source_body
 

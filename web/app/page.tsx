@@ -28,6 +28,10 @@ export default function Home() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
+  // Which chat the in-flight request belongs to (null = a not-yet-created new chat). `loading` alone
+  // stays true for the whole round trip even after the user switches away, so the "thinking" bubble
+  // must gate on this match, not on `loading` — otherwise it renders in whichever chat is on screen.
+  const [loadingTarget, setLoadingTarget] = useState<string | null>(null);
   const [intent, setIntent] = useState<IntentId>("qa");
   const [lessonFields, setLessonFields] = useState<LessonFields>({ audience: "", gradeBand: "", length: "" });
   const [userSources, setUserSources] = useState<Attachment[]>([]);
@@ -124,10 +128,19 @@ export default function Home() {
   useEffect(() => {
     refreshSessions();
   }, [refreshSessions, auth.user?.id]);
+  // Clear the open chat whenever the signed-in account changes (sign-out, or a different account
+  // signing in on the same tab) — otherwise the previous account's messages stay on screen until the
+  // new user happens to click something, briefly leaking one account's chat into another's session.
+  useEffect(() => {
+    setActiveId(null);
+    setMessages([]);
+    setSubtitle("");
+    setUserSources([]);
+  }, [auth.user?.id]);
 
   const selectSession = useCallback(async (s: Session) => {
     setActiveId(s.id);
-    setSubtitle(s.first_q || "");
+    setSubtitle(s.title || s.first_q || "");
     if (s.mode) setIntent(s.mode as IntentId);
     try {
       setMessages(await api.sessionMessages(s.id));
@@ -154,6 +167,32 @@ export default function Home() {
       refreshSessions();
     },
     [activeId, newDiscussion, refreshSessions],
+  );
+
+  const renameSession = useCallback(
+    async (id: string, title: string) => {
+      try {
+        await api.updateSession(id, { title }, lang);
+        if (id === activeId) setSubtitle(title);
+      } catch {
+        /* ignore — a transient failure just leaves the old name; nothing to roll back client-side */
+      }
+      refreshSessions();
+    },
+    [lang, activeId, refreshSessions],
+  );
+
+  const pinSession = useCallback(
+    async (id: string, pinned: boolean) => {
+      try {
+        await api.updateSession(id, { pinned }, lang);
+      } catch {
+        // The panel already disables pinning past the cap client-side, so a 409 here is only a rare
+        // race (e.g. two tabs); refreshSessions() below re-syncs the true state either way.
+      }
+      refreshSessions();
+    },
+    [lang, refreshSessions],
   );
 
   const clearHistory = useCallback(async () => {
@@ -269,6 +308,7 @@ export default function Home() {
       // chat it becomes known when onSession fires. Answers are only shown if this is still on screen.
       let target = activeId;
       setLoading(true);
+      setLoadingTarget(target);
       setMessages((prev) => [...prev, { role: "user", text, citations: [], caveats: [] }]);
       const appendIfCurrent = (msg: Message) =>
         setMessages((prev) => (activeIdRef.current === target ? [...prev, msg] : prev));
@@ -282,6 +322,7 @@ export default function Home() {
           // to the UI while the (possibly minutes-long) first lesson generates on the job queue.
           const s = await api.createSessionAsync(text, intent, lang, extras, att, (id) => {
             target = id;
+            setLoadingTarget(id);
             setActiveId(id);
             setSubtitle(text);
             refreshSessions();
@@ -304,6 +345,7 @@ export default function Home() {
         appendIfCurrent({ role: "assistant", text: msg, citations: [], caveats: [] });
       } finally {
         setLoading(false);
+        setLoadingTarget(null);
         refreshMe(); // update the remaining-quota pill (incl. after a 429)
       }
     },
@@ -344,6 +386,8 @@ export default function Home() {
         if (mobile) setMobileSessions(false);
       }}
       onDelete={deleteSession}
+      onRename={renameSession}
+      onPin={pinSession}
       onCollapse={() => (mobile ? setMobileSessions(false) : setSessionsCollapsed(true))}
       onOpenLessons={() => setShowLessons(true)}
       onOpenSettings={() => setShowSettings(true)}
@@ -404,6 +448,7 @@ export default function Home() {
           lang={lang}
           messages={messages}
           loading={loading}
+          thinkingHere={loading && activeId === loadingTarget}
           intent={intent}
           locked={locked}
           lessonFields={lessonFields}
@@ -412,6 +457,7 @@ export default function Home() {
           onLessonChange={setLessonFields}
           onSend={send}
           onPreviewFile={setPreviewFile}
+          calendarModesEnabled={me?.calendar_modes_enabled}
         />
 
         <div className="hidden lg:contents">

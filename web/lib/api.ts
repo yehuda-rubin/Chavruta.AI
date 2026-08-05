@@ -170,6 +170,10 @@ export const api = {
   listSessions: () => req<Session[]>("/sessions"),
   sessionMessages: (id: string) => req<Message[]>(`/sessions/${id}/messages`),
   deleteSession: (id: string) => req<{ ok: boolean }>(`/sessions/${id}`, { method: "DELETE" }),
+  // Rename and/or pin/unpin. `lang` only affects the 409 pin-limit message; the frontend already
+  // disables the pin button pre-emptively (see SessionsPanel), so that path is a rare backstop.
+  updateSession: (id: string, updates: { title?: string; pinned?: boolean }, lang: string = "he") =>
+    req<Session>(`/sessions/${id}?lang=${lang}`, { method: "PATCH", body: JSON.stringify(updates) }),
 
   // POST /sessions creates a session and runs the first query atomically (synchronous).
   createSession: (q: string, intent: string, lang: string, extras?: LessonExtras, att?: Attachment[]) =>
@@ -271,6 +275,9 @@ export interface Me {
   blocked: boolean;
   blocked_until: string | null;             // ISO ts the block lifts (null + blocked ⇒ permanent)
   blocked_reason: string;
+  // Parshat HaShavua / Daf Yomi — beta-gated to a hand-picked allowlist (app/api.py::
+  // _calendar_modes_enabled). false for everyone not on it; the picker hides both modes entirely.
+  calendar_modes_enabled: boolean;
 }
 
 export interface Tier {

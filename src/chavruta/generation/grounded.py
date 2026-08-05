@@ -228,6 +228,20 @@ _NIQQUD_RE = re.compile(r"[֑-ׇ]")            # Hebrew vowels + cantillation
 _NONHEB_RE = re.compile(r"[^א-ת]")           # keep only Hebrew letters
 _QUOTE_RE = re.compile(r'["“„״]([^"“”״\n]{12,})["”״]')  # gershayim / quote marks
 
+# A gershayim/" sitting directly between two Hebrew letters (no space either side) is almost always
+# a Hebrew ABBREVIATION mark (ר"ה, ואע"ג, סק"א…), not a quote boundary — real quote marks are always
+# preceded or followed by whitespace/punctuation (the start/end of the quoted span). _QUOTE_RE can't
+# tell the two apart on its own, so a quote spanning source text that itself contains an abbreviation
+# (extremely common in halachic sources) gets split at the abbreviation's internal mark, producing a
+# truncated fragment that then — correctly, but for the wrong reason — fails the corpus-containment
+# check: a real, faithfully-quoted source gets flagged as fabricated. _protect_abbreviations masks
+# those internal marks before matching so only genuine quote boundaries are treated as delimiters.
+_ABBREV_MARK_RE = re.compile(r'(?<=[א-ת])["״](?=[א-ת])')
+
+
+def _protect_abbreviations(s: str) -> str:
+    return _ABBREV_MARK_RE.sub("", s)  # 1-for-1 so positions still line up with the original
+
 
 def _heb_skeleton(s: str) -> str:
     return _NONHEB_RE.sub("", _NIQQUD_RE.sub("", s or ""))
@@ -242,11 +256,13 @@ def unverified_quotes(text: str, sources, min_len: int = 14) -> list[str]:
                                     for s in (sources or [])))
     if not corpus:
         return []
+    text = text or ""
     bad = []
-    for m in _QUOTE_RE.finditer(text or ""):
-        q = _heb_skeleton(m.group(1))
+    for m in _QUOTE_RE.finditer(_protect_abbreviations(text)):
+        raw = text[m.start(1):m.end(1)]   # same span, original characters (abbreviation marks intact)
+        q = _heb_skeleton(raw)
         if len(q) >= min_len and q[:min_len] not in corpus:   # opening not found in any source
-            bad.append(m.group(1).strip()[:60])
+            bad.append(raw.strip()[:60])
     return bad
 
 

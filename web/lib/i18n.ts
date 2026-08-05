@@ -28,7 +28,14 @@ export const STRINGS = {
     footer: "נבנה ביראת שמיים · אינו פסיקת הלכה למעשה",
     send: "שלח",
     thinking: "החברותא חושבת…",
+    lessonThinking: "החברותא בונה את השיעור… זה עשוי לקחת כמה דקות.",
     deleteChat: "מחק שיחה",
+    chatActions: "פעולות על הצ'אט",
+    renameChat: "שנה שם",
+    renameChatPlaceholder: "שם הצ'אט…",
+    pinChat: "נעץ צ'אט",
+    unpinChat: "בטל נעיצה",
+    pinLimitTitle: "אפשר לנעוץ עד 3 צ'אטים — בטל נעיצה של אחד כדי לנעוץ חדש",
     discussionTitle: "דיון עם החברותא",
     // intents
     lesson: "שיעור",
@@ -36,6 +43,9 @@ export const STRINGS = {
     qa: "שאלה",
     shutMode: 'שו"ת',
     chavrutaMode: "חברותא",
+    parshaMode: "פרשת השבוע",
+    dafYomiMode: "דף יומי",
+    chooseMode: "בחר מצב",
     // lesson options
     forWhom: "עבור:",
     audAuto: "אוטומטי (מהפרומט)",
@@ -249,13 +259,23 @@ export const STRINGS = {
     footer: "Built in reverence · Not a halachic ruling",
     send: "Send",
     thinking: "The Chavruta is thinking…",
+    lessonThinking: "The Chavruta is building the lesson… this can take a few minutes.",
     deleteChat: "Delete chat",
+    chatActions: "Chat actions",
+    renameChat: "Rename",
+    renameChatPlaceholder: "Chat name…",
+    pinChat: "Pin chat",
+    unpinChat: "Unpin",
+    pinLimitTitle: "You can pin up to 3 chats — unpin one to pin another",
     discussionTitle: "Discussion with the Chavruta",
     lesson: "Lesson",
     explain: "Explain",
     qa: "Q&A",
     shutMode: "Responsa",
     chavrutaMode: "Chavruta",
+    parshaMode: "Parshat Hashavua",
+    dafYomiMode: "Daf Yomi",
+    chooseMode: "Choose mode",
     forWhom: "For:",
     audAuto: "Auto (from prompt)",
     audYeshiva: "Beit Midrash / Yeshiva",
@@ -443,8 +463,10 @@ export type StringKey = keyof (typeof STRINGS)["he"];
 
 // Intent goal labels for the composer (with emoji), matching the static UI.
 export const INTENT_LABEL: Record<Lang, Record<string, string>> = {
-  he: { lesson: "🎯 שיעור", explain: "🎯 הסבר", qa: "🎯 שאלה", shut: '🎯 שו"ת', chavruta: "🤝 חברותא" },
-  en: { lesson: "🎯 Lesson", explain: "🎯 Explain", qa: "🎯 Q&A", shut: "🎯 Responsa", chavruta: "🤝 Chavruta" },
+  he: { lesson: "🎯 שיעור", explain: "🎯 הסבר", qa: "🎯 שאלה", shut: '🎯 שו"ת', chavruta: "🤝 חברותא",
+        parsha: "📜 פרשת השבוע", dafyomi: "📖 דף יומי" },
+  en: { lesson: "🎯 Lesson", explain: "🎯 Explain", qa: "🎯 Q&A", shut: "🎯 Responsa", chavruta: "🤝 Chavruta",
+        parsha: "📜 Parshat Hashavua", dafyomi: "📖 Daf Yomi" },
 };
 
 // Example prompts shown on the empty welcome screen — click to prefill the composer. Well-known,
@@ -464,7 +486,7 @@ export const EXAMPLES: Record<Lang, string[]> = {
   ],
 };
 
-export const INTENTS = ["lesson", "explain", "qa", "shut", "chavruta"] as const;
+export const INTENTS = ["lesson", "explain", "qa", "shut", "chavruta", "parsha", "dafyomi"] as const;
 export type IntentId = (typeof INTENTS)[number];
 
 export function tr(lang: Lang, key: StringKey): string {

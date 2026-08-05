@@ -1,7 +1,7 @@
 // Mirrors the FastAPI response shapes (app/api.py). The active static UI is the behavioural
 // source of truth; these types match what /query, /sessions, /lessons actually return.
 
-export type Intent = "qa" | "explain" | "compare" | "halacha" | "lesson";
+export type Intent = "qa" | "explain" | "compare" | "halacha" | "lesson" | "chavruta" | "parsha" | "dafyomi";
 
 export interface Citation {
   ref: string;
@@ -43,6 +43,8 @@ export interface Session {
   created_at: string;
   updated_at?: string;
   mode?: Intent | null;
+  title?: string | null;
+  pinned_at?: string | null;
 }
 
 export interface QueryResponse {

@@ -84,6 +84,13 @@ services:
       CHAVRUTA_MAX_CONCURRENT_GENERATIONS: ${CHAVRUTA_MAX_CONCURRENT_GENERATIONS:-2}
       CHAVRUTA_QUEUE_TIMEOUT_S: ${CHAVRUTA_QUEUE_TIMEOUT_S:-45}
 
+      # Parshat HaShavua / Daf Yomi — beta, hand-picked owner_ids only (see app/api.py::
+      # _calendar_modes_enabled). Empty = nobody sees the modes yet.
+      CHAVRUTA_CALENDAR_BETA_OWNERS: ${CHAVRUTA_CALENDAR_BETA_OWNERS:-}
+      # Small/fast model for the cheap _wants_full_lesson yes/no classification — deliberately NOT
+      # the main generation model (see app/api.py::_classifier_llm).
+      CHAVRUTA_CLASSIFIER_MODEL: ${CHAVRUTA_CLASSIFIER_MODEL:-}
+
       # Chat history — persisted to the named volume below.
       CHAVRUTA_DB_PATH: /app-data/chavruta.db
     volumes:

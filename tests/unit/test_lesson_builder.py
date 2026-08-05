@@ -6,7 +6,7 @@ import pytest
 
 from chavruta.config.profile import Profile
 from chavruta.corpus.schema import Intent
-from chavruta.lessons.builder import build_lesson_from_template, hit_kind
+from chavruta.lessons.builder import build_lesson_from_template, daf_yomi_sort_key, hit_kind
 from chavruta.lessons.templates import load_templates
 from chavruta.pipeline.pipeline import _top_k_for
 from chavruta.retrieval.base import RankedHit
@@ -33,6 +33,29 @@ def test_hit_kind_classification():
     assert hit_kind(_hit("p", "Genesis.1.1")) == "pasuk"
     assert hit_kind(_hit("r", "Rashi on Genesis.1.1", comm="rashi")) == "rishonim"
     assert hit_kind(_hit("m", "Malbim on Genesis.1.1", comm="malbim")) == "acharonim"
+
+
+# Daf Yomi source priority: Gemara + Rashi first, Tosafot second, everything else after.
+def test_daf_yomi_sort_key_orders_gemara_and_rashi_first():
+    gemara = _hit("g", "Berakhot.3.1")                              # no commentator_id at all
+    rashi = _hit("r", "Rashi on Berakhot.3.1", comm="rashi")
+    tosafot = _hit("t", "Tosafot on Berakhot.3.1", comm="tosafot")
+    ritva = _hit("v", "Ritva on Berakhot.3.1", comm="ritva")
+
+    hits = [ritva, tosafot, rashi, gemara]
+    hits.sort(key=daf_yomi_sort_key)
+
+    assert hits[:2] in ([gemara, rashi], [rashi, gemara])  # tier 0, either retrieval order
+    assert hits[2] is tosafot                              # tier 1
+    assert hits[3] is ritva                                # tier 2
+
+
+def test_daf_yomi_sort_key_is_stable_within_a_tier():
+    ritva = _hit("v", "Ritva on Berakhot.3.1", comm="ritva")
+    meiri = _hit("m", "Meiri on Berakhot.3.1", comm="meiri")
+    hits = [ritva, meiri]   # both tier 2 — original (retrieval) order must be preserved
+    hits.sort(key=daf_yomi_sort_key)
+    assert hits == [ritva, meiri]
     assert hit_kind(_hit("g", "Bava_Metzia.2a", work="talmud_bavli")) == "gemara"
 
 
