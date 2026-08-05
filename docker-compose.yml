@@ -91,11 +91,21 @@ services:
       # the main generation model (see app/api.py::_classifier_llm).
       CHAVRUTA_CLASSIFIER_MODEL: ${CHAVRUTA_CLASSIFIER_MODEL:-}
 
+      # Admin dashboard (see app/api.py::_is_admin) — a dedicated allowlist, no wildcard.
+      CHAVRUTA_ADMIN_OWNERS: ${CHAVRUTA_ADMIN_OWNERS:-}
+      # Backend error tracking (see app/api.py::_configure_sentry) — no-op unless set.
+      SENTRY_DSN: ${SENTRY_DSN:-}
+
       # Chat history — persisted to the named volume below.
       CHAVRUTA_DB_PATH: /app-data/chavruta.db
     volumes:
       - chavruta_db:/app-data             # SQLite conversation history (persists)
       - hf_cache:/root/.cache/huggingface # bge-m3 / model cache
+      # Corpus-derived link graph (pasuk↔commentary edges — see src/chavruta/corpus/links.py and
+      # pipeline.py's LinkStore/RefIndex loading). Built by scripts/build_link_index.py +
+      # scripts/build_corpus_links.py against the live corpus; read-only since the app never writes
+      # to it. Absent ⇒ pipeline.py falls back to no link expansion at all (not an error).
+      - ./data/linkgraph:/app/data:ro
     depends_on:
       - qdrant
     expose:
