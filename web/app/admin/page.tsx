@@ -76,6 +76,15 @@ export default function AdminDashboard() {
   }
 
   const money = (n: number) => `₪${n.toLocaleString("he-IL", { maximumFractionDigits: 0 })}`;
+  // Request latency as minutes:seconds — a raw "3233ms" makes people do the division in their
+  // head; most requests here are single-digit seconds, so this reads as "0:03" rather than "0
+  // minutes" (which a plain-minutes display would round down to for nearly everything).
+  const duration = (ms: number) => {
+    const totalSeconds = Math.round(ms / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${String(seconds).padStart(2, "0")}`;
+  };
 
   return (
     <div dir="rtl" className="h-screen overflow-y-auto py-10 px-4">
@@ -127,7 +136,7 @@ export default function AdminDashboard() {
                     : "—"
                 }
               />
-              <Card label="זמן ממוצע" value={overview.usage.avg_ms ? `${Math.round(overview.usage.avg_ms)}ms` : "—"} />
+              <Card label="זמן ממוצע (דק:שנ)" value={overview.usage.avg_ms ? duration(overview.usage.avg_ms) : "—"} />
               <Card label="שיא מקבילות" value={String(overview.concurrency.peak ?? 0)} />
               <Card label="הכנסות" value={money(overview.revenue.totals.ILS ?? 0)} />
             </div>
@@ -141,7 +150,7 @@ export default function AdminDashboard() {
                       <th className="py-2 px-3 font-semibold text-tekhelet text-start">משתמש</th>
                       <th className="py-2 px-3 font-semibold text-tekhelet text-start">בקשות</th>
                       <th className="py-2 px-3 font-semibold text-tekhelet text-start">טוקנים</th>
-                      <th className="py-2 px-3 font-semibold text-tekhelet text-start">זמן ממוצע</th>
+                      <th className="py-2 px-3 font-semibold text-tekhelet text-start">זמן ממוצע (דק:שנ)</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -150,7 +159,7 @@ export default function AdminDashboard() {
                         <td className="py-2 px-3 font-mono text-xs text-ink/70">{row.owner_id ?? "—"}</td>
                         <td className="py-2 px-3 text-ink/70">{row.requests}</td>
                         <td className="py-2 px-3 text-ink/70">{row.tokens ?? 0}</td>
-                        <td className="py-2 px-3 text-ink/70">{row.avg_ms ? `${Math.round(row.avg_ms)}ms` : "—"}</td>
+                        <td className="py-2 px-3 text-ink/70">{row.avg_ms ? duration(row.avg_ms) : "—"}</td>
                       </tr>
                     ))}
                     {(byOwner ?? []).length === 0 && (
