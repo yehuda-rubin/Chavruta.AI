@@ -12,6 +12,11 @@ from datetime import date
 
 import app.api as api
 import pytest
+from chavruta.retrieval.base import RankedHit
+
+
+def _hit(cid, comm=None):
+    return RankedHit(chunk_id=cid, ref=cid, text=f"text of {cid}", score=1.0, commentator_id=comm)
 
 
 def test_calendar_modes_disabled_by_default(monkeypatch):
@@ -69,3 +74,32 @@ def test_listed_owner_reaches_the_calendar_path(monkeypatch):
 ])
 def test_calendar_cache_key_buckets(kind, today, expected):
     assert api._calendar_cache_key(kind, today) == expected
+
+
+# _cap_hits: caught live — an uncapped parsha/daf-yomi fetch (a whole parsha's verses, or a whole
+# daf, times every commentator) produced a real 400/context-overflow from the provider, and on a
+# smaller-but-still-oversized daf-yomi request, a response that echoed its own instructions with
+# unbalanced ** markers. The fix keeps every base-text hit and trims only commentary.
+def test_cap_hits_noop_under_the_limit():
+    hits = [_hit("a"), _hit("b", comm="rashi")]
+    assert api._cap_hits(hits, max_total=10) == hits
+
+
+def test_cap_hits_keeps_all_base_text_and_trims_commentary():
+    base = [_hit(f"base{i}") for i in range(5)]
+    commentary = [_hit(f"c{i}", comm="rashi") for i in range(20)]
+    out = api._cap_hits(base + commentary, max_total=10)
+    assert len(out) == 10
+    assert all(h in out for h in base)          # every base hit survives
+    assert sum(1 for h in out if not h.commentator_id) == 5
+    assert sum(1 for h in out if h.commentator_id) == 5
+
+
+def test_cap_hits_base_text_alone_can_exceed_the_cap():
+    """If there's more base text than the cap (a long parsha), every base hit still survives —
+    trimming the primary text itself would be worse than a slightly larger prompt."""
+    base = [_hit(f"base{i}") for i in range(15)]
+    commentary = [_hit(f"c{i}", comm="rashi") for i in range(5)]
+    out = api._cap_hits(base + commentary, max_total=10)
+    assert len(out) == 15
+    assert all(not h.commentator_id for h in out)

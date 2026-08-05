@@ -1110,6 +1110,33 @@ def _resolve_daf_yomi_cached():
     return info
 
 
+# Chavruta turns are a conversational exchange (the DEFAULT retrieval path uses top_k=10) — a
+# little more headroom since the source set here is calendar-resolved, not a curated top-k.
+# Lesson escalation matches the real "medium" lesson's top_k=16 with margin (see _LENGTHS).
+_CHAVRUTA_HIT_CAP = 25
+_LESSON_HIT_CAP = 40
+
+
+def _cap_hits(hits: list, max_total: int) -> list:
+    """Caught live (2026-08-05): parsha/daf-yomi's fetch (a whole parsha's verses, or a whole daf,
+    times every commentator in COMMENTATOR_HE) can pull in hundreds of hits — far more than any
+    other job template in this app is written for. Fed unbounded into a job prompt, this produced a
+    real 400/context-overflow from the provider on parsha (surfaced as the "server configuration"
+    message — see cloud.py's LLMConfigError mapping) and, on daf yomi, a response so overloaded it
+    echoed fragments of its own instructions and left unbalanced ** markers (breaking bold
+    rendering for the rest of the message too).
+
+    Keeps EVERY base-text hit (there are never many — one daf's 2 amudim, or one parsha's verses —
+    and they're what the question is actually about) and fills the rest of the budget with
+    commentary, preserving whatever order it already arrives in (for daf yomi, that's
+    daf_yomi_sort_key's Gemara/Rashi-first ordering)."""
+    if len(hits) <= max_total:
+        return hits
+    base = [h for h in hits if not getattr(h, "commentator_id", None)]
+    commentary = [h for h in hits if getattr(h, "commentator_id", None)]
+    return base + commentary[:max(0, max_total - len(base))]
+
+
 def _fetch_ranked_hits(targets: list[str], *, filters=None, limit: int | None = None):
     """fetch_by_refs (exact ref/anchor_ref lookup) → RankedHit, via the SAME converter every
     retrieval path uses (hybrid.py's anchoring, Pipeline.base_sources_for_refs) — so parsha/daf-yomi
@@ -1147,9 +1174,10 @@ def _run_parsha(question: str, lang: str, history=None, owner_id: str = "local",
     topic = info.name_he if he else info.name_en
     if _wants_full_lesson(question):
         tpl = _select_template(topic, "yeshiva", "")
-        return _generate_lesson_from_hits(topic, hits, lang, he, audience="yeshiva", grade_band="",
-                                          length="medium", tpl=tpl, history=history,
-                                          owner_id=owner_id, llm=llm)
+        return _generate_lesson_from_hits(topic, _cap_hits(hits, _LESSON_HIT_CAP), lang, he,
+                                          audience="yeshiva", grade_band="", length="medium",
+                                          tpl=tpl, history=history, owner_id=owner_id, llm=llm)
+    hits = _cap_hits(hits, _CHAVRUTA_HIT_CAP)
     return _generate_chavruta_turn(question, hits, lang, he, history, weak=(not hits), llm=llm)
 
 
@@ -1178,9 +1206,10 @@ def _run_daf_yomi(question: str, lang: str, history=None, owner_id: str = "local
     topic = f"{info.tractate} {info.daf}"
     if _wants_full_lesson(question):
         tpl = _select_template(topic, "yeshiva", "")
-        return _generate_lesson_from_hits(topic, hits, lang, he, audience="yeshiva", grade_band="",
-                                          length="medium", tpl=tpl, history=history,
-                                          owner_id=owner_id, llm=llm)
+        return _generate_lesson_from_hits(topic, _cap_hits(hits, _LESSON_HIT_CAP), lang, he,
+                                          audience="yeshiva", grade_band="", length="medium",
+                                          tpl=tpl, history=history, owner_id=owner_id, llm=llm)
+    hits = _cap_hits(hits, _CHAVRUTA_HIT_CAP)
     return _generate_chavruta_turn(question, hits, lang, he, history, weak=(not hits), llm=llm)
 
 
