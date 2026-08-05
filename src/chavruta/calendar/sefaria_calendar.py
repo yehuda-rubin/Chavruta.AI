@@ -7,6 +7,13 @@ wrong by hand. Sefaria already maintains this centrally and returns both in Sefa
 vocabulary (`Genesis 1:1-6:8`, `Chullin 97`) — the exact vocabulary `chavruta.corpus.refs` is built
 to consume. So there is no local parsha-name table and no Daf Yomi cycle-start-date arithmetic here;
 this module is just a thin, retrying HTTP client plus the two lookups callers need.
+
+IMPORTANT — this module is IDENTIFICATION only, never content: `/api/calendars` returns a whole
+day's worth of items (Parashat Hashavua, Haftarah, 929, Daily Mishnah, Daily Rambam, Daf a Week, …),
+each with its own description/aliyot/etc. `ParshaInfo`/`DafYomiInfo` below keep only a name and a
+ref — enough to know WHICH parsha/daf it is. The actual verse/Gemara/Rashi/Tosafot TEXT a caller
+generates from always comes from our own corpus (fetch_by_refs in app/api.py), never from this
+API — we already have that text in the RAG; Sefaria's calendar just says which of it applies today.
 """
 
 from __future__ import annotations
