@@ -33,6 +33,12 @@ def test_calendar_modes_enabled_only_for_listed_owners(monkeypatch):
     assert api._calendar_modes_enabled("owner-c") is False
 
 
+def test_calendar_modes_wildcard_enables_everyone(monkeypatch):
+    monkeypatch.setenv("CHAVRUTA_CALENDAR_BETA_OWNERS", "*")
+    assert api._calendar_modes_enabled("anyone") is True
+    assert api._calendar_modes_enabled("local") is True
+
+
 @pytest.mark.parametrize("intent_str", ["parsha", "dafyomi"])
 def test_unlisted_owner_gets_a_friendly_message_not_the_pipeline(monkeypatch, intent_str):
     """The gate must short-circuit BEFORE touching _get_pipeline()/_run_parsha/_run_daf_yomi —

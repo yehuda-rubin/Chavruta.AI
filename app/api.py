@@ -1336,11 +1336,15 @@ def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
 
 
 def _calendar_modes_enabled(owner_id: str) -> bool:
-    """Parshat HaShavua / Daf Yomi are beta-gated to a hand-picked allowlist while they're being
-    verified — other accounts see nothing different (the frontend hides the options entirely; this
-    is the real server-side enforcement, checked whether or not the request came through the UI).
-    Comma-separated owner_ids in CHAVRUTA_CALENDAR_BETA_OWNERS; empty (default) = nobody yet."""
-    allowed = {o.strip() for o in os.environ.get("CHAVRUTA_CALENDAR_BETA_OWNERS", "").split(",") if o.strip()}
+    """Parshat HaShavua / Daf Yomi's rollout gate — other accounts see nothing different (the
+    frontend hides the options entirely; this is the real server-side enforcement, checked whether
+    or not the request came through the UI). CHAVRUTA_CALENDAR_BETA_OWNERS is either a comma-
+    separated allowlist of owner_ids, or "*" once the feature is out of beta for everyone; empty
+    (the default) means nobody yet."""
+    raw = os.environ.get("CHAVRUTA_CALENDAR_BETA_OWNERS", "").strip()
+    if raw == "*":
+        return True
+    allowed = {o.strip() for o in raw.split(",") if o.strip()}
     return owner_id in allowed
 
 
