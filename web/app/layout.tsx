@@ -3,13 +3,33 @@ import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
 import { AccessibilityWidget } from "@/components/AccessibilityWidget";
 
+const SITE_URL = "https://chavruta.duckdns.org";
+const SITE_TITLE = "חברותא AI · בית מדרש";
+const SITE_DESCRIPTION =
+  "שותפה ללימוד תורה — שאלה, הסבר ובניית שיעורים מעל המדף היהודי, עם מקורות מצוטטים.";
+
 export const metadata: Metadata = {
-  title: "חברותא AI · בית מדרש",
-  description:
-    "שותפה ללימוד תורה — שאלה, הסבר ובניית שיעורים מעל המדף היהודי, עם מקורות מצוטטים.",
+  metadataBase: new URL(SITE_URL),
+  title: SITE_TITLE,
+  description: SITE_DESCRIPTION,
   applicationName: "חברותא AI",
   appleWebApp: { capable: true, title: "חברותא", statusBarStyle: "default" },
   formatDetection: { telephone: false },
+  robots: { index: true, follow: true },
+  alternates: { canonical: "/" },
+  openGraph: {
+    type: "website",
+    locale: "he_IL",
+    url: SITE_URL,
+    siteName: SITE_TITLE,
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+  },
+  twitter: {
+    card: "summary",
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+  },
 };
 
 export const viewport: Viewport = {
