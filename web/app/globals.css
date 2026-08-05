@@ -63,6 +63,18 @@ body.a11y-contrast .glass {
   box-shadow: none !important;
 }
 body.a11y-contrast a { color: #ffe14d !important; }
+/* Without these, almost every piece of text/surface in the app keeps its normal light-theme color
+   (text-ink/text-tekhelet/text-gold, bg-white panels) while only the body and .glass background
+   turn black — dark text on a now-black background, i.e. nothing readable. Same pattern the
+   theme-dark rules above already use, pushed to true black/white instead of the softer dark palette. */
+body.a11y-contrast [class*="text-tekhelet"],
+body.a11y-contrast [class*="text-ink"] { color: #fff !important; }
+body.a11y-contrast [class*="text-gold"] { color: #ffe14d !important; }
+body.a11y-contrast [class*="bg-white"],
+body.a11y-contrast [class*="bg-ink"] { background-color: #000 !important; }
+body.a11y-contrast [class*="border-white"],
+body.a11y-contrast [class*="border-ink"],
+body.a11y-contrast [class*="border-line"] { border-color: #fff !important; }
 
 body.a11y-underline a { text-decoration: underline !important; }
 
