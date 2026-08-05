@@ -184,8 +184,12 @@ def token_estimate(intent: str | None) -> int:
     raw = _env_int(f"CHAVRUTA_TOKEN_ESTIMATE_{(intent or 'qa').strip().upper()}")
     if raw is not None:
         return raw
-    return {"compare": 40_000, "halacha": 40_000, "shut": 40_000, "explain": 25_000}.get(
-        (intent or "").strip().lower(), 20_000)
+    # parsha/dafyomi default to a chavruta-style turn (see _wants_full_lesson) — reserved like
+    # explain/chavruta, not like a full lesson; the rare turn that escalates into one still
+    # settles against its real usage (see _metered), so under-reserving here just means a
+    # slightly late top-up, not an unpaid lesson.
+    return {"compare": 40_000, "halacha": 40_000, "shut": 40_000, "explain": 25_000,
+            "parsha": 25_000, "dafyomi": 25_000}.get((intent or "").strip().lower(), 20_000)
 
 
 def canonical_cycle(cycle: str | None) -> str:

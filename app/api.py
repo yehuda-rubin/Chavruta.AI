@@ -8,6 +8,7 @@ The pipeline is loaded once at startup and shared across requests.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -15,7 +16,7 @@ import sys
 import threading
 import time
 from contextvars import ContextVar
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -176,7 +177,13 @@ from pydantic import BaseModel, Field
 from chavruta import __version__
 from chavruta.config.profile import Profile
 from chavruta.corpus import rights
-from chavruta.corpus.refs import hebrew_display_ref
+from chavruta.corpus.refs import (
+    COMMENTATOR_HE,
+    commentary_refs,
+    expand_range,
+    hebrew_display_ref,
+    with_ref_variants,
+)
 from chavruta.corpus.schema import Intent, Query, Turn
 from chavruta.llm import metering
 from chavruta.llm.agentic import is_degrade_message
@@ -777,15 +784,25 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
     if floor:
         fset = {b.ref for b in floor}
         hits = floor + [h for h in hits if h.ref not in fset]
+    return _generate_lesson_from_hits(topic, hits, lang, he, audience=aud, grade_band=band,
+                                      length=length, tpl=tpl, history=history, owner_id=owner_id, llm=llm)
+
+
+def _generate_lesson_from_hits(topic: str, hits, lang: str, he: bool, *, audience: str, grade_band: str,
+                               length: str, tpl: dict | None, history, owner_id: str, llm) -> QueryResponse:
+    """The lesson generation tail, shared by `_run_lesson` (hits from semantic retrieval) and
+    `_run_parsha`/`_run_daf_yomi` (hits from a calendar-resolved ref, when the model decides the
+    user wants a full lesson rather than a chavruta turn) — identical from here on regardless of
+    how `hits`/`topic` were produced."""
     # Even with ZERO retrieved sources we still build the job — STEP 0 instructs the model to reply
     # ===NEED_SOURCES=== and the agentic loop fetches its own. If it STILL comes back with nothing
     # (checked after the loop below), we return the honest "no sources" message then.
-    job = _lesson_job_md(topic, hits, lang, audience=aud, grade_band=band, length=length,
+    job = _lesson_job_md(topic, hits, lang, audience=audience, grade_band=grade_band, length=length,
                          tpl=tpl, history=history)
     # Lessons are the most expensive path (biggest source pool, longest output, most agentic rounds),
     # so cap the WHOLE request's output — not just each round, which multiplies by the round count.
     raw, fetched = llm.request(job, lang=lang,
-                              token_budget=_max_tokens_for(Intent.LESSON, pipeline.profile))
+                              token_budget=_max_tokens_for(Intent.LESSON, _get_pipeline().profile))
     # A loop degrade/timeout ('please try again' / 'couldn't retrieve') or empty answer must NOT be
     # packaged as a downloadable lesson marked grounded — surface it as a plain honest message.
     if is_degrade_message(raw):
@@ -862,9 +879,9 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
 
     # audience/grade tag woven into the file titles so downloads are self-describing
     tag = ""
-    if aud == "school":
-        tag = f" · כיתות {_GRADE_HE.get(band, band or '')}" if he else f" · grades {band or ''}"
-    elif aud == "yeshiva":
+    if audience == "school":
+        tag = f" · כיתות {_GRADE_HE.get(grade_band, grade_band or '')}" if he else f" · grades {grade_band or ''}"
+    elif audience == "yeshiva":
         tag = " · בית מדרש" if he else " · beit midrash"
     names = (["דף_מקורות.doc", "מהלך_השיעור.doc", "השיעור_המלא.doc"] if he
              else ["source_sheet.doc", "lesson_flow.doc", "full_lesson.doc"])
@@ -887,7 +904,7 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
         try:
             import uuid
             lesson_id = uuid.uuid4().hex[:12]
-            db.save_lesson(lesson_id, topic, aud or "", band or "", length, lang,
+            db.save_lesson(lesson_id, topic, audience or "", grade_band or "", length, lang,
                            [f.model_dump() for f in files], [c.model_dump() for c in used],
                            owner_id=owner_id)
         except Exception:
@@ -955,6 +972,84 @@ def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bo
     return "\n".join(lines)
 
 
+# A small/fast model dedicated to trivial yes/no classification (_wants_full_lesson) — same
+# provider/key as the main pipeline LLM, but NOT the main model_id. Verify this id is still live on
+# the configured provider's catalog before relying on it; CHAVRUTA_CLASSIFIER_MODEL overrides it.
+_CLASSIFIER_MODEL_DEFAULT = "Qwen/Qwen2.5-7B-Instruct"
+_classifier_llm_cache = None
+
+
+def _classifier_llm():
+    """Built once, reused. None on the 'bridge' backend (Claude in-session has no separate small
+    model to call there) — callers fall back to the main pipeline llm in that case."""
+    global _classifier_llm_cache
+    if _classifier_llm_cache is not None:
+        return _classifier_llm_cache
+    profile = getattr(_get_pipeline(), "profile", None)
+    if profile is None or getattr(profile, "llm_backend", None) == "bridge":
+        return None
+    from chavruta.llm.cloud import CloudLLM
+
+    model = os.environ.get("CHAVRUTA_CLASSIFIER_MODEL", _CLASSIFIER_MODEL_DEFAULT)
+    _classifier_llm_cache = CloudLLM(model, profile.llm_base_url, profile.llm_api_key,
+                                     timeout_s=15.0, max_retries=1)
+    return _classifier_llm_cache
+
+
+_WANTS_LESSON_SYSTEM = (
+    "האם ההודעה הבאה מבקשת שתיבנה שיעור מובנה מלא (דף מקורות + מהלך שיעור להורדה), להבדיל מבקשה "
+    "ללמוד/לשוחח יחד באופן אינטראקטיבי? ענה אך ורק במילה אחת: כן או לא."
+)
+_WANTS_LESSON_YES_RE = re.compile(r"^(כן|yes)\b", re.I)
+
+
+def _wants_full_lesson(question: str, llm=None) -> bool:
+    """Cheap yes/no check: did the user actually ask for a full lesson to be built (e.g. 'תבנה לי
+    שיעור על הפרשה'), as opposed to the default chavruta-style back-and-forth for parsha/daf-yomi
+    turns? Runs on _classifier_llm (a small/fast model), not the main pipeline LLM — this is a
+    trivial decision and should never add the main model's latency/cost before the real turn even
+    starts. Best-effort: any failure or unclear reply defaults to False (the cheaper, safer path),
+    same philosophy as _fix_bleeding_sentences — a misfire here must never break a turn.
+    `llm` overrides the classifier lookup (dependency injection for tests)."""
+    llm = llm or _classifier_llm() or _get_pipeline().llm
+    try:
+        prompt = GroundedPrompt(system=_WANTS_LESSON_SYSTEM, sources=[], question=question)
+        res = llm.generate(prompt, lang="he", max_tokens=10, temperature=0.0)
+        reply = (res.text or "").strip()
+    except Exception:
+        _log.warning("_wants_full_lesson classification call failed; defaulting to chavruta",
+                     exc_info=True)
+        return False
+    return bool(_WANTS_LESSON_YES_RE.match(reply))
+
+
+def _generate_chavruta_turn(question: str, hits, lang: str, he: bool, history, weak: bool,
+                            llm) -> QueryResponse:
+    """The chavruta generation tail, shared by `_run_chavruta` (hits from semantic retrieval) and
+    `_run_parsha`/`_run_daf_yomi` (hits from a calendar-resolved ref) — identical from here on
+    regardless of how `hits` was produced, same principle as _generate_lesson_from_hits below."""
+    job = _chavruta_job_md(question, hits, lang, history, weak_retrieval=weak)
+    # A chavruta turn is a conversational exchange, not a treatise — budget it like EXPLAIN.
+    raw, fetched = llm.request(job, lang=lang,
+                              token_budget=_max_tokens_for(Intent.EXPLAIN, _get_pipeline().profile))
+    hits = hits + list(fetched or [])   # include agentically-fetched so their [S#] resolve
+    nums, used, seen = [int(n) for n in re.findall(r"\[\s*S(\d+)\s*\]", raw)], [], set()
+    for i in nums:
+        if 1 <= i <= len(hits) and i not in seen:
+            seen.add(i)
+            h = hits[i - 1]
+            used.append(CitationOut(ref=h.ref, ref_he=(hebrew_display_ref(h.ref) or "") if he else "",
+                                    text_he=(getattr(h, "text", "") or ""), text_en="",
+                                    commentator=(getattr(h, "commentator_id", "") or ""),
+                                    deep_link=(getattr(h, "deep_link", "") or ""),
+                                    license=(getattr(h, "license", "") or ""),
+                                    version_title=(getattr(h, "version_title", "") or "")))
+    raw = _strip_instruction_echo(raw, he)
+    clean = _strip_markers(_fix_bleeding_sentences(raw, he, llm), he=he)
+    return QueryResponse(answer=clean, citations=used, grounded=bool(used),
+                         intent="chavruta", files=[])
+
+
 def _run_chavruta(question: str, lang: str, history=None, llm=None) -> QueryResponse:
     """Socratic study-partner mode: retrieve on the topic, then Claude plays a chavruta that asks
     questions and learns WITH the user (grounded), rather than lecturing. When retrieval confidence
@@ -976,26 +1071,117 @@ def _run_chavruta(question: str, lang: str, history=None, llm=None) -> QueryResp
     # (~0.02-0.06) on a different scale than relevance_threshold, so comparing them lit 'weak' on
     # EVERY hybrid turn and nudged the chavruta to stall instead of teach.
     weak = result.is_empty
-    job = _chavruta_job_md(question, hits, lang, history, weak_retrieval=weak)
-    # A chavruta turn is a conversational exchange, not a treatise — budget it like EXPLAIN.
-    raw, fetched = llm.request(job, lang=lang,
-                              token_budget=_max_tokens_for(Intent.EXPLAIN, pipeline.profile))
-    hits = hits + list(fetched or [])   # include agentically-fetched so their [S#] resolve
-    nums, used, seen = [int(n) for n in re.findall(r"\[\s*S(\d+)\s*\]", raw)], [], set()
-    for i in nums:
-        if 1 <= i <= len(hits) and i not in seen:
-            seen.add(i)
-            h = hits[i - 1]
-            used.append(CitationOut(ref=h.ref, ref_he=(hebrew_display_ref(h.ref) or "") if he else "",
-                                    text_he=(getattr(h, "text", "") or ""), text_en="",
-                                    commentator=(getattr(h, "commentator_id", "") or ""),
-                                    deep_link=(getattr(h, "deep_link", "") or ""),
-                                    license=(getattr(h, "license", "") or ""),
-                                    version_title=(getattr(h, "version_title", "") or "")))
-    raw = _strip_instruction_echo(raw, he)
-    clean = _strip_markers(_fix_bleeding_sentences(raw, he, llm), he=he)
-    return QueryResponse(answer=clean, citations=used, grounded=bool(used),
-                         intent="chavruta", files=[])
+    return _generate_chavruta_turn(question, hits, lang, he, history, weak, llm)
+
+
+def _calendar_cache_key(kind: str, today) -> str:
+    """The cache bucket identity: today's ISO date for daf_yomi (a new daf every day), the ISO
+    date of the most recent Sunday for parsha (the same parsha all week)."""
+    if kind == "daf_yomi":
+        return today.isoformat()
+    return (today - timedelta(days=today.isoweekday() % 7)).isoformat()
+
+
+def _resolve_parsha_cached():
+    from chavruta.calendar.sefaria_calendar import ParshaInfo, resolve_parsha
+
+    today = datetime.now(_LOCAL_TZ).date()
+    key = _calendar_cache_key("parsha", today)
+    cached = db.get_calendar_cache("parsha", key)
+    if cached:
+        return ParshaInfo(**json.loads(cached))
+    info = resolve_parsha()
+    if info is not None:
+        db.set_calendar_cache("parsha", key, json.dumps(info.__dict__))
+    return info
+
+
+def _resolve_daf_yomi_cached():
+    from chavruta.calendar.sefaria_calendar import DafYomiInfo, resolve_daf_yomi
+
+    today = datetime.now(_LOCAL_TZ).date()
+    key = _calendar_cache_key("daf_yomi", today)
+    cached = db.get_calendar_cache("daf_yomi", key)
+    if cached:
+        return DafYomiInfo(**json.loads(cached))
+    info = resolve_daf_yomi()
+    if info is not None:
+        db.set_calendar_cache("daf_yomi", key, json.dumps(info.__dict__))
+    return info
+
+
+def _fetch_ranked_hits(targets: list[str], *, filters=None, limit: int | None = None):
+    """fetch_by_refs (exact ref/anchor_ref lookup) → RankedHit, via the SAME converter every
+    retrieval path uses (hybrid.py's anchoring, Pipeline.base_sources_for_refs) — so parsha/daf-yomi
+    hits look identical to hits from semantic retrieval to everything downstream."""
+    from chavruta.retrieval.hybrid import _to_hit
+
+    pipeline = _get_pipeline()
+    if not targets:
+        return []
+    raw = pipeline.store.fetch_by_refs(pipeline.profile.collection, targets, filters=filters,
+                                       limit=limit or max(len(targets) * 4, 200))
+    return [_to_hit(h) for h in raw]
+
+
+def _run_parsha(question: str, lang: str, history=None, owner_id: str = "local",
+                llm=None) -> QueryResponse:
+    """Parshat HaShavua: resolve this week's range from Sefaria's calendar (cached — see
+    _resolve_parsha_cached), fetch its verses + commentaries, then default to a chavruta-style turn
+    scoped to those sources — or a full lesson if the model judges the user actually asked for one
+    (see _wants_full_lesson). No local parsha-name table: Sefaria's own ref range is authoritative,
+    including on a combined-parsha week."""
+    pipeline = _get_pipeline()
+    llm = llm or pipeline.llm
+    lang = lang or "he"
+    he = lang != "en"
+    info = _resolve_parsha_cached()
+    if info is None:
+        msg = ("לא הצלחנו לזהות את פרשת השבוע כרגע — נסו שוב בעוד רגע." if he
+               else "Couldn't resolve this week's parsha right now — please try again shortly.")
+        return QueryResponse(answer=msg, citations=[], grounded=False, intent="parsha", files=[])
+    verse_refs = expand_range(info.ref_range)
+    ref_variants = with_ref_variants(verse_refs)
+    targets = ref_variants + commentary_refs(ref_variants, list(COMMENTATOR_HE))
+    hits = _fetch_ranked_hits(targets, limit=max(len(targets) * 4, 400))
+    topic = info.name_he if he else info.name_en
+    if _wants_full_lesson(question):
+        tpl = _select_template(topic, "yeshiva", "")
+        return _generate_lesson_from_hits(topic, hits, lang, he, audience="yeshiva", grade_band="",
+                                          length="medium", tpl=tpl, history=history,
+                                          owner_id=owner_id, llm=llm)
+    return _generate_chavruta_turn(question, hits, lang, he, history, weak=(not hits), llm=llm)
+
+
+def _run_daf_yomi(question: str, lang: str, history=None, owner_id: str = "local",
+                  llm=None) -> QueryResponse:
+    """Daf Yomi: resolve today's daf from Sefaria's calendar (cached), fetch BOTH amudim (Daf Yomi
+    covers a whole daf per day) plus their commentaries, sort so Gemara/Rashi lead and Tosafot
+    follows (daf_yomi_sort_key), then default to a chavruta-style turn — or a full lesson if the
+    model judges the user actually asked for one."""
+    from chavruta.lessons.builder import daf_yomi_sort_key
+
+    pipeline = _get_pipeline()
+    llm = llm or pipeline.llm
+    lang = lang or "he"
+    he = lang != "en"
+    info = _resolve_daf_yomi_cached()
+    if info is None:
+        msg = ("לא הצלחנו לזהות את הדף היומי כרגע — נסו שוב בעוד רגע." if he
+               else "Couldn't resolve today's daf yomi right now — please try again shortly.")
+        return QueryResponse(answer=msg, citations=[], grounded=False, intent="dafyomi", files=[])
+    daf_refs = [f"{info.tractate} {info.daf}a", f"{info.tractate} {info.daf}b"]
+    ref_variants = with_ref_variants(daf_refs)
+    targets = ref_variants + commentary_refs(ref_variants, list(COMMENTATOR_HE))
+    hits = _fetch_ranked_hits(targets, limit=max(len(targets) * 4, 400))
+    hits.sort(key=daf_yomi_sort_key)
+    topic = f"{info.tractate} {info.daf}"
+    if _wants_full_lesson(question):
+        tpl = _select_template(topic, "yeshiva", "")
+        return _generate_lesson_from_hits(topic, hits, lang, he, audience="yeshiva", grade_band="",
+                                          length="medium", tpl=tpl, history=history,
+                                          owner_id=owner_id, llm=llm)
+    return _generate_chavruta_turn(question, hits, lang, he, history, weak=(not hits), llm=llm)
 
 
 # Global concurrency gate — every generation reaches the LLM/embedder/Qdrant through this one
@@ -1053,6 +1239,15 @@ def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
         _generation_semaphore.release()
 
 
+def _calendar_modes_enabled(owner_id: str) -> bool:
+    """Parshat HaShavua / Daf Yomi are beta-gated to a hand-picked allowlist while they're being
+    verified — other accounts see nothing different (the frontend hides the options entirely; this
+    is the real server-side enforcement, checked whether or not the request came through the UI).
+    Comma-separated owner_ids in CHAVRUTA_CALENDAR_BETA_OWNERS; empty (default) = nobody yet."""
+    allowed = {o.strip() for o in os.environ.get("CHAVRUTA_CALENDAR_BETA_OWNERS", "").split(",") if o.strip()}
+    return owner_id in allowed
+
+
 def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Turn],
                     audience: str = "", grade_band: str = "", length: str = "",
                     owner_id: str = "local", llm=None) -> QueryResponse:
@@ -1061,6 +1256,12 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
         intent_str = "halacha"
     if intent_str == "chavruta":      # Socratic study-partner mode (its own path)
         return _run_chavruta(question, lang, history=history, llm=llm)
+    if intent_str in ("parsha", "dafyomi"):   # beta — see _calendar_modes_enabled
+        if not _calendar_modes_enabled(owner_id):
+            msg = ("המצב הזה עוד לא זמין לכולם." if he else "This mode isn't available to everyone yet.")
+            return QueryResponse(answer=msg, citations=[], grounded=False, intent=intent_str, files=[])
+        fn = _run_parsha if intent_str == "parsha" else _run_daf_yomi
+        return fn(question, lang, history=history, owner_id=owner_id, llm=llm)
     intent = None
     if intent_str:
         try:
@@ -1542,7 +1743,11 @@ def _metered(owner: str, reserved: int, intent: str, fn, req: QueryRequest | Non
                 error = type(exc).__name__
                 raise
             finally:
-                if intent == "lesson" and _lesson_id_of(result):
+                # Outcome-based, not intent-string-based: parsha/daf-yomi turns that the model
+                # escalated into a full lesson (see _wants_full_lesson) also set lesson_id, and
+                # must be charged from the lesson pool the same as a turn requested as "lesson" —
+                # charging by what actually happened, not by which mode was originally selected.
+                if _lesson_id_of(result):
                     _charge_lesson_unit(owner, used_byok=(meter == db.BYOK_TOKENS))
                     _settle_tokens(owner, reserved, {}, intent, meter=meter)
                 else:
@@ -1686,6 +1891,11 @@ class MeOut(BaseModel):
     blocked: bool = False            # account on the blocklist
     blocked_until: str | None = None  # ISO ts the block lifts (None + blocked ⇒ permanent)
     blocked_reason: str = ""
+    # Parshat HaShavua / Daf Yomi — beta-gated (see _calendar_modes_enabled). Most accounts get
+    # False and the frontend never shows the two modes at all; this is UX only, not the real
+    # enforcement (that's the server-side check in _run_query_impl, which runs regardless of what
+    # the client shows).
+    calendar_modes_enabled: bool = False
 
 
 @app.get("/me", response_model=MeOut)
@@ -1738,6 +1948,7 @@ def me(owner: str = Depends(current_owner)):
         blocked=ban is not None,
         blocked_until=ban["until"] if ban else None,
         blocked_reason=ban["reason"] if ban else "",
+        calendar_modes_enabled=_calendar_modes_enabled(owner),
     )
 
 

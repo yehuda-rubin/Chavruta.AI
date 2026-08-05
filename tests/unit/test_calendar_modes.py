@@ -1,0 +1,71 @@
+"""Parshat HaShavua / Daf Yomi: the beta allowlist gate and the calendar-cache bucket key.
+
+_run_parsha/_run_daf_yomi's happy path needs a real pipeline (Qdrant + LLM) and is exercised
+manually against the live corpus (see the feature's rollout notes); what's unit-testable in
+isolation is the gate itself (an unlisted owner must never reach the pipeline at all) and the
+cache-key logic.
+"""
+
+from __future__ import annotations
+
+from datetime import date
+
+import app.api as api
+import pytest
+
+
+def test_calendar_modes_disabled_by_default(monkeypatch):
+    monkeypatch.delenv("CHAVRUTA_CALENDAR_BETA_OWNERS", raising=False)
+    assert api._calendar_modes_enabled("anyone") is False
+    assert api._calendar_modes_enabled("local") is False
+
+
+def test_calendar_modes_enabled_only_for_listed_owners(monkeypatch):
+    monkeypatch.setenv("CHAVRUTA_CALENDAR_BETA_OWNERS", "owner-a, owner-b")
+    assert api._calendar_modes_enabled("owner-a") is True
+    assert api._calendar_modes_enabled("owner-b") is True
+    assert api._calendar_modes_enabled("owner-c") is False
+
+
+@pytest.mark.parametrize("intent_str", ["parsha", "dafyomi"])
+def test_unlisted_owner_gets_a_friendly_message_not_the_pipeline(monkeypatch, intent_str):
+    """The gate must short-circuit BEFORE touching _get_pipeline()/_run_parsha/_run_daf_yomi —
+    an unlisted owner's request must never reach the (real, heavy) generation path at all."""
+    monkeypatch.delenv("CHAVRUTA_CALENDAR_BETA_OWNERS", raising=False)
+
+    def _boom():
+        raise AssertionError("pipeline must not be touched for a gated-out owner")
+
+    monkeypatch.setattr(api, "_get_pipeline", _boom)
+    monkeypatch.setattr(api, "_run_parsha", lambda *a, **k: _boom())
+    monkeypatch.setattr(api, "_run_daf_yomi", lambda *a, **k: _boom())
+
+    res = api._run_query_impl("שאלה", "he", intent_str, [], owner_id="not-listed")
+    assert res.grounded is False
+    assert res.intent == intent_str
+    assert res.answer  # a friendly message, not empty and not a raised exception
+
+
+def test_listed_owner_reaches_the_calendar_path(monkeypatch):
+    """The inverse check: a listed owner's request DOES reach _run_parsha, not the gate message."""
+    monkeypatch.setenv("CHAVRUTA_CALENDAR_BETA_OWNERS", "owner-a")
+    called = {}
+
+    def _fake_run_parsha(question, lang, history=None, owner_id="local", llm=None):
+        called["question"] = question
+        return api.QueryResponse(answer="ok", citations=[], grounded=True, intent="parsha", files=[])
+
+    monkeypatch.setattr(api, "_run_parsha", _fake_run_parsha)
+    res = api._run_query_impl("מה הפרשה השבוע?", "he", "parsha", [], owner_id="owner-a")
+    assert called["question"] == "מה הפרשה השבוע?"
+    assert res.answer == "ok"
+
+
+@pytest.mark.parametrize("kind,today,expected", [
+    ("daf_yomi", date(2026, 8, 5), "2026-08-05"),      # daily bucket = today's own date
+    ("parsha", date(2026, 8, 5), "2026-08-02"),        # Wednesday -> that week's Sunday
+    ("parsha", date(2026, 8, 2), "2026-08-02"),        # Sunday itself -> same day
+    ("parsha", date(2026, 8, 8), "2026-08-02"),        # Saturday -> the Sunday that started the week
+])
+def test_calendar_cache_key_buckets(kind, today, expected):
+    assert api._calendar_cache_key(kind, today) == expected

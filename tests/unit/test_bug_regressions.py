@@ -1385,3 +1385,26 @@ def test_week_days_still_starts_sunday_with_israel_local_dates():
 
 from datetime import UTC, datetime  # noqa: E402
 import unittest.mock  # noqa: E402
+
+
+# _wants_full_lesson gates parsha/daf-yomi turns between the default chavruta-style back-and-forth
+# and the full lesson (Word-doc) pipeline — "the model decides", via a cheap classification call
+# (injected here via the llm= override so no real pipeline/classifier LLM is needed).
+def test_wants_full_lesson_true_on_a_clear_yes():
+    llm = _FakeLLM(reply="כן")
+    assert api._wants_full_lesson("תבנה לי שיעור על הפרשה", llm=llm) is True
+
+
+def test_wants_full_lesson_false_on_a_clear_no():
+    llm = _FakeLLM(reply="לא")
+    assert api._wants_full_lesson("מה רש\"י אומר כאן?", llm=llm) is False
+
+
+def test_wants_full_lesson_defaults_false_on_llm_failure():
+    llm = _FakeLLM(raises=True)
+    assert api._wants_full_lesson("תבנה לי שיעור", llm=llm) is False
+
+
+def test_wants_full_lesson_defaults_false_on_an_unclear_reply():
+    llm = _FakeLLM(reply="אולי, קשה לדעת")
+    assert api._wants_full_lesson("שאלה כלשהי", llm=llm) is False
