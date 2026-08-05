@@ -244,6 +244,22 @@ export const api = {
       headers: { "X-User-LLM-Key": candidateKey },
       body: JSON.stringify({ model, base_url: baseUrl }),
     }),
+
+  // Owner-only admin dashboard (see app/api.py's /admin/* routes and _is_admin). Goes through req()
+  // (not a bare fetch, unlike /billing/limits) so the bearer token is attached — this data is gated.
+  admin: {
+    overview: (since: AdminWindow) => req<AdminOverview>(`/admin/overview?since=${since}`),
+    usageByOwner: (since: AdminWindow, limit = 50) =>
+      req<UsageByOwnerRow[]>(`/admin/usage-by-owner?since=${since}&limit=${limit}`),
+    usageByIntent: (since: AdminWindow) =>
+      req<UsageByIntentRow[]>(`/admin/usage-by-intent?since=${since}`),
+    usageByWeek: (since: AdminWindow) =>
+      req<UsageByWeekRow[]>(`/admin/usage-by-week?since=${since}`),
+    flaggedMessages: (reviewed = false) =>
+      req<FlaggedMessage[]>(`/admin/flagged-messages?reviewed=${reviewed}`),
+    reviewMessage: (reportId: number) =>
+      req<{ ok: boolean }>(`/admin/flagged-messages/${reportId}/review`, { method: "POST" }),
+  },
 };
 
 // Account + today's free-tier quota (GET /me). daily_quota / remaining are null when unlimited
@@ -278,6 +294,9 @@ export interface Me {
   // Parshat HaShavua / Daf Yomi — beta-gated to a hand-picked allowlist (app/api.py::
   // _calendar_modes_enabled). false for everyone not on it; the picker hides both modes entirely.
   calendar_modes_enabled: boolean;
+  // Admin dashboard link — see app/api.py::_is_admin. UI convenience only; the real gate is the
+  // 404 every /admin/* route raises for a non-admin owner.
+  is_admin: boolean;
 }
 
 export interface Tier {
@@ -303,4 +322,59 @@ export interface Redeemed {
 
 export interface Deletion {
   deletion_scheduled_for: string | null;
+}
+
+// Admin dashboard — mirrors app/db.py's aggregate helpers (usage_health, count_accounts,
+// revenue_summary, etc.), each already exercised by scripts/usage_report.py before this UI existed.
+export type AdminWindow = "7d" | "30d" | "all";
+
+export interface AdminOverview {
+  accounts: { total: number; by_plan: Record<string, number> };
+  usage: {
+    requests?: number; tokens?: number; grounded?: number; no_source?: number;
+    errors?: number; agentic?: number; avg_ms?: number; users?: number;
+  };
+  concurrency: { peak?: number; avg?: number };
+  revenue: {
+    by_plan: { plan: string | null; currency: string; total: number; charges: number }[];
+    totals: Record<string, number>;
+  };
+}
+
+export interface UsageByOwnerRow {
+  owner_id: string | null;
+  requests: number;
+  tokens: number | null;
+  calls: number | null;
+  avg_ms: number | null;
+  grounded: number;
+}
+
+export interface UsageByIntentRow {
+  intent: string;
+  requests: number;
+  tokens: number | null;
+  avg_tokens: number | null;
+  avg_ms: number | null;
+  grounded: number;
+  no_source: number;
+}
+
+export interface UsageByWeekRow {
+  week: string;
+  requests: number;
+  users: number;
+}
+
+export interface FlaggedMessage {
+  id: number;
+  message_id: number;
+  owner_id: string;
+  reason: string;
+  source: string;
+  reviewed_at: string | null;
+  created_at: string;
+  role: string;
+  text: string;
+  session_id: string;
 }

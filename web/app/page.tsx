@@ -418,6 +418,7 @@ export default function Home() {
         onOpenSessions={() => setMobileSessions(true)}
         onOpenSources={() => setMobileSources(true)}
         onNewChat={newDiscussion}
+        isAdmin={me?.is_admin}
       />
       <div className="flex flex-1 overflow-hidden px-4 pb-4 gap-4">
         {/* Sessions — desktop inline only (hidden on mobile, opened as a drawer). lg:contents keeps

@@ -45,6 +45,7 @@ const nextConfig = {
       ...proxy("coupons"),    // /coupons/redeem
       ...proxy("health"),
       ...proxy("ready"),
+      ...proxy("admin"),      // owner-only dashboard — see app/api.py::_is_admin
     ];
   },
 };
