@@ -1,6 +1,6 @@
 import type { MetadataRoute } from "next";
 
-const SITE_URL = "https://chavruta.duckdns.org";
+const SITE_URL = "https://chavrutaai.org";
 
 // Only the routes meant for public discovery. /reset-password is a utility page
 // reached from an email link, not something anyone should find via search.

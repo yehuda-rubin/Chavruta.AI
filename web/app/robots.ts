@@ -1,6 +1,6 @@
 import type { MetadataRoute } from "next";
 
-const SITE_URL = "https://chavruta.duckdns.org";
+const SITE_URL = "https://chavrutaai.org";
 
 export default function robots(): MetadataRoute.Robots {
   return {
