@@ -106,6 +106,48 @@ def with_ref_variants(refs) -> list[str]:
     return out
 
 
+# Per-chapter verse counts for the 5 Chumash books (Masoretic — fixed forever), fetched once from
+# Sefaria's /api/shape/<book> and checked in as static data. Used only by expand_range: a parsha
+# range spans many verses and fetch_by_refs has no native range support, so the range must be
+# enumerated into individual verse refs before it can be looked up.
+_TORAH_LENGTHS_PATH = Path(__file__).parent / "torah_chapter_lengths.json"
+_TORAH_CHAPTER_LENGTHS: dict[str, list[int]] | None = None
+
+
+def _torah_chapter_lengths() -> dict[str, list[int]]:
+    global _TORAH_CHAPTER_LENGTHS
+    if _TORAH_CHAPTER_LENGTHS is None:
+        _TORAH_CHAPTER_LENGTHS = json.loads(_TORAH_LENGTHS_PATH.read_text(encoding="utf-8"))
+    return _TORAH_CHAPTER_LENGTHS
+
+
+_RANGE_RE = re.compile(r"^(?P<book>.+?)\s+(?P<c1>\d+):(?P<v1>\d+)-(?P<c2>\d+):(?P<v2>\d+)$")
+
+
+def expand_range(ref_range: str) -> list[str]:
+    """A Sefaria range ref ('Genesis 1:1-6:8', as returned by the calendar API for a parsha) to the
+    flat list of dotted verse refs it covers ('Genesis.1.1', 'Genesis.1.2', ..., 'Genesis.6.8') —
+    fetch_by_refs has no native range support, so the range must be enumerated first. Only the 5
+    Chumash books are covered; returns [] for anything else, or a range this can't parse, rather
+    than guessing wrong (Principle I: absent, not invented)."""
+    m = _RANGE_RE.match((ref_range or "").strip())
+    if not m:
+        return []
+    book = m.group("book")
+    lengths = _torah_chapter_lengths().get(book)
+    if not lengths:
+        return []
+    c1, v1, c2, v2 = int(m.group("c1")), int(m.group("v1")), int(m.group("c2")), int(m.group("v2"))
+    if c1 < 1 or c2 > len(lengths) or c1 > c2:
+        return []
+    out: list[str] = []
+    for c in range(c1, c2 + 1):
+        start_v = v1 if c == c1 else 1
+        end_v = v2 if c == c2 else lengths[c - 1]
+        out.extend(f"{book}.{c}.{v}" for v in range(start_v, end_v + 1))
+    return out
+
+
 # Sefaria names a commentary "<Commentator>_on_<Base>" — 'Rashi_on_Genesis.1.1.1',
 # 'Kessef_Mishneh_on_Mishneh_Torah,_Prayer.12.17.4'. Match is CASE-SENSITIVE on purpose: title words
 # are capitalised, so a lowercase '_on_' is the join and never a fragment of a name. Without that,

@@ -66,7 +66,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 23
+SCHEMA_VERSION = 24
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -281,6 +281,18 @@ def _migrate(conn: sqlite3.Connection) -> None:
             reason       TEXT
         );
 
+        -- Sefaria's /api/calendars is called at most once per cache bucket (once a Hebrew day for
+        -- Daf Yomi, once a week for Parshat HaShavua) rather than once per request. date_key is the
+        -- bucket's identity (today's ISO date for daf_yomi; the week's ISO date for parsha) — not a
+        -- freshness timestamp, so a lookup is an exact match, not a "still fresh?" comparison.
+        CREATE TABLE IF NOT EXISTS calendar_cache (
+            kind        TEXT NOT NULL,   -- 'parsha' | 'daf_yomi'
+            date_key    TEXT NOT NULL,
+            payload     TEXT NOT NULL,   -- JSON-serialized ParshaInfo/DafYomiInfo
+            resolved_at TEXT NOT NULL,
+            PRIMARY KEY (kind, date_key)
+        );
+
         -- Subscription state (billing). Provider-agnostic: `provider` names the processor (e.g.
         -- 'payplus') and `provider_ref` holds its handle for this subscriber (a saved card token /
         -- subscription id). The billing webhook writes status + period end here and flips accounts.plan.
@@ -448,6 +460,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute("ALTER TABLE sessions ADD COLUMN title TEXT")
         if "pinned_at" not in scols:
             conn.execute("ALTER TABLE sessions ADD COLUMN pinned_at TEXT")
+
+    # v24: calendar_cache is a brand-new table (see CREATE TABLE IF NOT EXISTS above) — no ALTER
+    # needed, the executescript already created it for both fresh and pre-existing databases.
 
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
@@ -1569,3 +1584,25 @@ def purge_owner(owner_id: str) -> None:
         # and dropping them would silently rewrite history for every aggregate that has already been
         # reported. Detaching the identity satisfies the deletion request; the counts stay true.
         conn.execute("UPDATE usage_events SET owner_id=NULL WHERE owner_id=?", (owner_id,))
+
+
+# ── Calendar cache (Parshat HaShavua / Daf Yomi) ───────────────────────────────
+# Sefaria's /api/calendars is resolved lazily (on first request of the day/week, not a scheduled
+# job) and cached here so it's called at most once per bucket, not once per request. Not owner-
+# scoped — the parsha/daf is the same for everyone, so one row serves every account.
+
+def get_calendar_cache(kind: str, date_key: str) -> str | None:
+    with _LOCK:
+        r = get_conn().execute(
+            "SELECT payload FROM calendar_cache WHERE kind=? AND date_key=?",
+            (kind, date_key)).fetchone()
+    return r["payload"] if r else None
+
+
+def set_calendar_cache(kind: str, date_key: str, payload: str) -> None:
+    with _tx(get_conn()) as conn:
+        conn.execute(
+            "INSERT INTO calendar_cache (kind, date_key, payload, resolved_at) VALUES (?,?,?,?) "
+            "ON CONFLICT(kind, date_key) DO UPDATE SET payload=excluded.payload, "
+            "resolved_at=excluded.resolved_at",
+            (kind, date_key, payload, _now()))
