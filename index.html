@@ -144,6 +144,70 @@
     padding: 18px 20px;
   }
 
+  .example-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 20px 22px;
+    text-align: start;
+  }
+  .example-q {
+    font-weight: 700;
+    color: var(--tekhelet-2);
+    margin: 0 0 10px;
+  }
+  .example-a { margin: 0 0 14px; }
+  .quote-box {
+    background: color-mix(in srgb, var(--gold-soft) 14%, transparent);
+    border-inline-start: 4px solid var(--gold);
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin: 0 0 8px;
+  }
+  .quote-box .src-text { font-weight: 600; }
+  .quote-ref { font-size: 0.85rem; color: var(--muted); margin: 0; }
+
+  .compare {
+    display: grid;
+    gap: 10px;
+    margin-top: 18px;
+  }
+  .compare .row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    font-size: 0.92rem;
+  }
+  .compare .row.bad { color: var(--muted); }
+  .compare .row.good { color: var(--ink); font-weight: 500; }
+
+  .faq-item {
+    margin: 0 0 18px;
+  }
+  .faq-item .q {
+    font-weight: 700;
+    color: var(--tekhelet-2);
+    margin: 0 0 6px;
+  }
+  .faq-item .a { margin: 0; color: var(--ink); }
+
+  .suggested-q {
+    display: inline-block;
+    background: var(--panel);
+    border: 1px dashed var(--gold-soft);
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 0.9rem;
+    color: var(--muted);
+    margin-bottom: 16px;
+  }
+
+  .trust-line {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-top: 6px;
+  }
+
   .footer {
     padding: 30px 0 50px;
     text-align: center;
@@ -183,6 +247,43 @@
       <span data-lang-block="he">לניסיון — חינם</span>
       <span data-lang-block="en">Try it — free</span>
     </a>
+    <p class="trust-line">
+      <span data-lang-block="he">נבנה על ידי יהודה רובין · מבוסס על ספריא (Sefaria)</span>
+      <span data-lang-block="en">Built by Yehuda Rubin · Powered by Sefaria</span>
+    </p>
+  </section>
+
+  <section class="block">
+    <div data-lang-block="he">
+      <h2>ככה זה נראה בפועל</h2>
+      <div class="example-card">
+        <p class="example-q">מה אומר רש"י על הפסוק הראשון בתורה?</p>
+        <p class="example-a">רש"י שואל למה התורה פותחת בסיפור הבריאה ולא במצווה הראשונה שנצטוו בה ישראל, ומביא תשובה מתהלים קי"א:</p>
+        <div class="quote-box">
+          <p class="src-text">"אָמַר רַבִּי יִצְחָק לֹא הָיָה צָרִיךְ לְהַתְחִיל אֶת הַתּוֹרָה אֶלָּא מֵהַחֹדֶשׁ הַזֶּה לָכֶם, שֶׁהִיא מִצְוָה רִאשׁוֹנָה שֶׁנִּצְטַוּוּ בָּהּ יִשְׂרָאֵל, וּמַה טַּעַם פָּתַח בִּבְרֵאשִׁית..."</p>
+          <p class="quote-ref">— רש"י, בראשית א׳:א׳ (מצוטט מילה במילה מספריא)</p>
+        </div>
+        <div class="compare">
+          <div class="row bad">✕ AI כללי: עלול לנסח ציטוט מקירוב, בלי לוודא שהוא נכון מילה במילה.</div>
+          <div class="row good">✓ חברותא: הציטוט נשלף מהמקור עצמו — אפשר לבדוק אותו בספריא ישירות.</div>
+        </div>
+      </div>
+    </div>
+    <div data-lang-block="en">
+      <h2>Here's what it actually looks like</h2>
+      <div class="example-card">
+        <p class="example-q">What does Rashi say on the first verse of the Torah?</p>
+        <p class="example-a">Rashi asks why the Torah opens with the story of Creation instead of the first commandment given to Israel, and answers by citing Psalms 111:</p>
+        <div class="quote-box">
+          <p class="src-text">"Rabbi Isaac said: The Torah should have commenced with the verse 'This month shall be unto you the first of the months,' which is the first commandment given to Israel. What is the reason, then, that it commences with the account of the Creation?..."</p>
+          <p class="quote-ref">— Rashi, Genesis 1:1 (quoted verbatim from Sefaria)</p>
+        </div>
+        <div class="compare">
+          <div class="row bad">✕ A general AI: may paraphrase a quote approximately, without verifying it's word-for-word accurate.</div>
+          <div class="row good">✓ Chavruta: the quote is pulled from the source itself — you can check it directly on Sefaria.</div>
+        </div>
+      </div>
+    </div>
   </section>
 
   <section class="block">
@@ -226,21 +327,80 @@
   <section class="block">
     <div data-lang-block="he">
       <h2>מהיקף ארון הספרים</h2>
-      <p>תנ״ך, משנה, גמרא, ראשונים ופוסקים — ממאגר מקורות רחב ומורשה, לא רק כמה טקסטים נבחרים.</p>
+      <p>תנ״ך, משנה, גמרא, ראשונים ופוסקים — ממאגר של ספריא (Sefaria), עם רישיונות שימוש מסודרים, לא רק כמה טקסטים נבחרים.</p>
     </div>
     <div data-lang-block="en">
       <h2>The full bookshelf</h2>
-      <p>Tanakh, Mishnah, Gemara, Rishonim and Poskim — from a broad, licensed source corpus, not a handful of selected texts.</p>
+      <p>Tanakh, Mishnah, Gemara, Rishonim and Poskim — from Sefaria's corpus, under proper licensing, not a handful of selected texts.</p>
+    </div>
+  </section>
+
+  <section class="block">
+    <div data-lang-block="he">
+      <h2>מה זה כן, ומה זה לא</h2>
+      <div class="trust-box">
+        <p>חברותא AI היא שותפה ללימוד ועיון — לא רב שפוסק הלכה למעשה. התשובות מיועדות ללימוד, לא להכרעה הלכתית, ממונית או אישית. בכל שאלה מעשית יש להתייעץ עם רב מוסמך. זה בדיוק ההבדל: כלי שמראה לך מה כתוב במקורות, לא כלי שמחליט בשבילך.</p>
+      </div>
+    </div>
+    <div data-lang-block="en">
+      <h2>What this is, and isn't</h2>
+      <div class="trust-box">
+        <p>Chavruta AI is a study and research partner — not a rabbi issuing a practical halachic ruling. Answers are for study, not for halachic, financial, or personal decisions. For any practical question, consult a qualified rabbi. That's exactly the point: a tool that shows you what the sources say, not one that decides for you.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <div data-lang-block="he">
+      <h2>שאלות נפוצות</h2>
+      <div class="faq-item">
+        <p class="q">זה חינם לגמרי?</p>
+        <p class="a">כן, כרגע השירות חינמי במלואו.</p>
+      </div>
+      <div class="faq-item">
+        <p class="q">אילו מקורות יש במאגר?</p>
+        <p class="a">תנ״ך, משנה, גמרא, ראשונים ופוסקים — ממאגר ספריא, עם ציטוט מדויק מכל מקור שנשלף.</p>
+      </div>
+      <div class="faq-item">
+        <p class="q">מה קורה עם המידע והשיחות שלי?</p>
+        <p class="a">יש מדיניות פרטיות מפורטת, כולל אפשרות להחריג שיחות ספציפיות משימוש עתידי לשיפור השירות. אנחנו לא מוכרים מידע לצד שלישי — פרטים מלאים ב<a href="https://chavrutaai.org/privacy" target="_blank" rel="noopener">מדיניות הפרטיות</a>.</p>
+      </div>
+      <div class="faq-item">
+        <p class="q">זה מחליף רב?</p>
+        <p class="a">לא. זה כלי ללימוד ועיון. בכל שאלה הלכתית למעשה יש להתייעץ עם רב מוסמך.</p>
+      </div>
+    </div>
+    <div data-lang-block="en">
+      <h2>Frequently asked questions</h2>
+      <div class="faq-item">
+        <p class="q">Is it completely free?</p>
+        <p class="a">Yes, the service is currently fully free.</p>
+      </div>
+      <div class="faq-item">
+        <p class="q">What sources are in the corpus?</p>
+        <p class="a">Tanakh, Mishnah, Gemara, Rishonim and Poskim — from Sefaria, with an exact quote from every source retrieved.</p>
+      </div>
+      <div class="faq-item">
+        <p class="q">What happens to my data and conversations?</p>
+        <p class="a">There's a detailed privacy policy, including the option to exclude specific conversations from future use for service improvement. We don't sell data to third parties — full details in the <a href="https://chavrutaai.org/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</p>
+      </div>
+      <div class="faq-item">
+        <p class="q">Does this replace a rabbi?</p>
+        <p class="a">No. This is a study and research tool. For any practical halachic question, consult a qualified rabbi.</p>
+      </div>
     </div>
   </section>
 
   <section class="block end-cta">
     <div data-lang-block="he">
       <p>בחינם, בלי הרשמה מסובכת.</p>
+      <p class="suggested-q">נסו לשאול: "מה אומר רש״י על..." או "מה ההבדל בין רש״י לרמב"ן ב..."</p>
     </div>
     <div data-lang-block="en">
       <p>Free, no complicated signup.</p>
+      <p class="suggested-q">Try asking: "What does Rashi say about..." or "What's the difference between Rashi and Ramban on..."</p>
     </div>
+    <br>
     <a class="cta" href="https://chavrutaai.org" target="_blank" rel="noopener">
       <span data-lang-block="he">להתחיל ללמוד</span>
       <span data-lang-block="en">Start learning</span>
