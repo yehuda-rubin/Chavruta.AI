@@ -5,6 +5,41 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>חברותא AI — שותף ללימוד תורה מבוסס מקורות</title>
 <meta name="description" content="חברותא AI עונה על שאלות בתנ״ך, משנה, גמרא והלכה מתוך מקורות מצוטטים — לא ניחוש. שיעורים, הסברים ולימוד בחברותא, בחינם.">
+
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://yehuda-rubin.github.io/Chavruta.AI/">
+<meta property="og:title" content="חברותא AI — שותף ללימוד תורה שעונה ממקורות אמיתיים">
+<meta property="og:description" content="שואלים שאלה על סוגיה, פרשה או הלכה — ומקבלים תשובה עם ציטוט מדויק מהמקור עצמו. אם אין מקור, הוא אומר את זה בפירוש, במקום להמציא. מבוסס על ספריא, בחינם.">
+<meta property="og:image" content="https://yehuda-rubin.github.io/Chavruta.AI/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="he_IL">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="חברותא AI — שותף ללימוד תורה שעונה ממקורות אמיתיים">
+<meta name="twitter:description" content="שואלים שאלה — מקבלים תשובה עם ציטוט מדויק מהמקור עצמו. אם אין מקור, הוא אומר את זה, במקום להמציא.">
+<meta name="twitter:image" content="https://yehuda-rubin.github.io/Chavruta.AI/og-image.png">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "זה חינם לגמרי?",
+     "acceptedAnswer": {"@type": "Answer", "text": "כן, כרגע השירות חינמי במלואו."}},
+    {"@type": "Question", "name": "אילו מקורות יש במאגר?",
+     "acceptedAnswer": {"@type": "Answer", "text": "תנ״ך, משנה, גמרא, ראשונים ופוסקים — ממאגר ספריא, עם ציטוט מדויק מכל מקור שנשלף."}},
+    {"@type": "Question", "name": "מה קורה עם המידע והשיחות שלי?",
+     "acceptedAnswer": {"@type": "Answer", "text": "יש מדיניות פרטיות מפורטת, כולל אפשרות להחריג שיחות ספציפיות משימוש עתידי לשיפור השירות. אנחנו לא מוכרים מידע לצד שלישי."}},
+    {"@type": "Question", "name": "זה מחליף רב?",
+     "acceptedAnswer": {"@type": "Answer", "text": "לא. זה כלי ללימוד ועיון. בכל שאלה הלכתית למעשה יש להתייעץ עם רב מוסמך."}},
+    {"@type": "Question", "name": "זה קורא ארמית של גמרא?",
+     "acceptedAnswer": {"@type": "Answer", "text": "כן. המקורות בגמרא נשלפים ומצוטטים בשפת המקור (ארמית/עברית), עם ההסבר בשפה שבה שאלתם."}},
+    {"@type": "Question", "name": "זה עובד גם באנגלית?",
+     "acceptedAnswer": {"@type": "Answer", "text": "כן. אפשר לשאול ולקבל הסבר בעברית או באנגלית — הציטוט מהמקור עצמו תמיד נשאר בשפת המקור."}}
+  ]
+}
+</script>
+
 <style>
   @font-face {
     font-family: 'Heebo';
@@ -208,6 +243,29 @@
     margin-top: 6px;
   }
 
+  .sefaria-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid var(--gold-soft);
+    border-radius: 999px;
+    padding: 6px 16px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--tekhelet-2);
+    margin-top: 8px;
+  }
+  .sefaria-badge .dot { color: var(--gold); }
+
+  .refusal-box {
+    background: color-mix(in srgb, var(--muted) 8%, transparent);
+    border: 1px dashed var(--muted);
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin: 14px 0 8px;
+    font-style: italic;
+  }
+
   .footer {
     padding: 30px 0 50px;
     text-align: center;
@@ -244,13 +302,17 @@
       <p class="lead">Ask a question on a sugya, a parsha, or a halachic topic — and get an answer with an exact quote from the source itself. If there's no source, it says so plainly, instead of inventing one.</p>
     </div>
     <a class="cta" href="https://chavrutaai.org" target="_blank" rel="noopener">
-      <span data-lang-block="he">לניסיון — חינם</span>
-      <span data-lang-block="en">Try it — free</span>
+      <span data-lang-block="he">נסו בחינם</span>
+      <span data-lang-block="en">Try it free</span>
     </a>
     <p class="trust-line">
-      <span data-lang-block="he">נבנה על ידי יהודה רובין · מבוסס על ספריא (Sefaria)</span>
-      <span data-lang-block="en">Built by Yehuda Rubin · Powered by Sefaria</span>
+      <span data-lang-block="he">נבנה על ידי יהודה רובין</span>
+      <span data-lang-block="en">Built by Yehuda Rubin</span>
     </p>
+    <div class="sefaria-badge">
+      <span class="dot">◆</span>
+      <span>Powered by Sefaria</span>
+    </div>
   </section>
 
   <section class="block">
@@ -268,6 +330,17 @@
           <div class="row good">✓ חברותא: הציטוט נשלף מהמקור עצמו — אפשר לבדוק אותו בספריא ישירות.</div>
         </div>
       </div>
+
+      <div class="example-card" style="margin-top:16px;">
+        <p class="example-q">מתי בדיוק אברהם אבינו נולד, לפי תאריך לועזי?</p>
+        <p class="example-a">שאלה שאין עליה מקור ישיר וברור במאגר — וזה בדיוק הרגע שבו ההבדל נבדק באמת:</p>
+        <div class="refusal-box">
+          <p>"לא מצאתי במאגר מקור שקובע זאת באופן ישיר. אני מעדיף לומר זאת בפירוש במקום לנחש או להמציא תשובה שמתחזה למקור."</p>
+        </div>
+        <div class="compare">
+          <div class="row good">✓ זה בדיוק הרגע שאף AI כללי לא מעז להראות — "אני לא יודע", במקום תשובה בטוחה ושגויה.</div>
+        </div>
+      </div>
     </div>
     <div data-lang-block="en">
       <h2>Here's what it actually looks like</h2>
@@ -281,6 +354,17 @@
         <div class="compare">
           <div class="row bad">✕ A general AI: may paraphrase a quote approximately, without verifying it's word-for-word accurate.</div>
           <div class="row good">✓ Chavruta: the quote is pulled from the source itself — you can check it directly on Sefaria.</div>
+        </div>
+      </div>
+
+      <div class="example-card" style="margin-top:16px;">
+        <p class="example-q">What's the exact secular-calendar birth date of Abraham?</p>
+        <p class="example-a">A question with no direct source in the corpus — and this is exactly where the difference gets tested for real:</p>
+        <div class="refusal-box">
+          <p>"I didn't find a source in the corpus that states this directly. I'd rather say so plainly than guess or invent an answer that pretends to be sourced."</p>
+        </div>
+        <div class="compare">
+          <div class="row good">✓ This is exactly the moment no general AI dares to show — "I don't know," instead of a confident, wrong answer.</div>
         </div>
       </div>
     </div>
@@ -369,6 +453,14 @@
         <p class="q">זה מחליף רב?</p>
         <p class="a">לא. זה כלי ללימוד ועיון. בכל שאלה הלכתית למעשה יש להתייעץ עם רב מוסמך.</p>
       </div>
+      <div class="faq-item">
+        <p class="q">זה קורא ארמית של גמרא?</p>
+        <p class="a">כן. המקורות בגמרא נשלפים ומצוטטים בשפת המקור (ארמית/עברית), עם ההסבר בשפה שבה שאלתם.</p>
+      </div>
+      <div class="faq-item">
+        <p class="q">זה עובד גם באנגלית?</p>
+        <p class="a">כן. אפשר לשאול ולקבל הסבר בעברית או באנגלית — הציטוט מהמקור עצמו תמיד נשאר בשפת המקור.</p>
+      </div>
     </div>
     <div data-lang-block="en">
       <h2>Frequently asked questions</h2>
@@ -387,6 +479,14 @@
       <div class="faq-item">
         <p class="q">Does this replace a rabbi?</p>
         <p class="a">No. This is a study and research tool. For any practical halachic question, consult a qualified rabbi.</p>
+      </div>
+      <div class="faq-item">
+        <p class="q">Does it read the Aramaic of the Gemara?</p>
+        <p class="a">Yes. Gemara sources are retrieved and quoted in their original language (Aramaic/Hebrew), with the explanation in whichever language you asked in.</p>
+      </div>
+      <div class="faq-item">
+        <p class="q">Does it work in English too?</p>
+        <p class="a">Yes. You can ask and get an explanation in Hebrew or English — the quote from the source itself always stays in its original language.</p>
       </div>
     </div>
   </section>
