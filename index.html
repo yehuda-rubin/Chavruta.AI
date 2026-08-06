@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="he" dir="rtl" data-lang="he">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>חברותא AI — שותפה ללימוד תורה מבוססת מקורות</title>
+<meta name="description" content="חברותא AI עונה על שאלות בתנ״ך, משנה, גמרא והלכה מתוך מקורות מצוטטים — לא ניחוש. שיעורים, הסברים ולימוד בחברותא, בחינם.">
+<style>
+  @font-face {
+    font-family: 'Heebo';
+    font-style: normal;
+    font-weight: 400 700;
+    font-display: swap;
+    src: url('fonts/heebo-hebrew.woff2') format('woff2');
+    unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
+  }
+  @font-face {
+    font-family: 'Heebo';
+    font-style: normal;
+    font-weight: 400 700;
+    font-display: swap;
+    src: url('fonts/heebo-latin.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122;
+  }
+
+  :root {
+    --ink: #1c1a17;
+    --tekhelet: #002045;
+    --tekhelet-2: #1a365d;
+    --gold: #8a6510;
+    --gold-soft: #b88f2e;
+    --bg: #faf7ef;
+    --panel: #ffffff;
+    --line: #ece2cf;
+    --muted: #5a5650;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #eae6df;
+      --tekhelet: #a9c2f0;
+      --tekhelet-2: #cddafb;
+      --gold: #e8c66b;
+      --gold-soft: #f0d78a;
+      --bg: #0f1626;
+      --panel: #16203a;
+      --line: #2a3554;
+      --muted: #a3a9bd;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: 'Heebo', sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--tekhelet-2); }
+  .wrap { max-width: 780px; margin: 0 auto; padding: 0 20px; }
+
+  header.top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 18px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .brand { font-weight: 700; font-size: 1.15rem; color: var(--tekhelet); display: flex; align-items: center; gap: 8px; }
+  .brand .mark { font-size: 1.3rem; }
+
+  #langToggle {
+    font-family: inherit;
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--ink);
+    border-radius: 8px;
+    padding: 6px 14px;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+  #langToggle:hover { border-color: var(--gold-soft); }
+
+  .hero { padding: 56px 0 40px; text-align: center; }
+  .hero h1 {
+    font-size: clamp(1.6rem, 4vw, 2.3rem);
+    color: var(--tekhelet);
+    margin: 0 0 14px;
+  }
+  .hero p.lead {
+    font-size: 1.1rem;
+    color: var(--muted);
+    max-width: 560px;
+    margin: 0 auto 30px;
+  }
+
+  .cta {
+    display: inline-block;
+    background: var(--tekhelet);
+    color: #fff;
+    text-decoration: none;
+    font-weight: 600;
+    padding: 14px 32px;
+    border-radius: 10px;
+    font-size: 1.05rem;
+    transition: background 0.15s ease;
+  }
+  .cta:hover { background: var(--tekhelet-2); }
+  @media (prefers-color-scheme: dark) {
+    .cta { color: #0f1626; }
+  }
+
+  section.block {
+    padding: 36px 0;
+    border-top: 1px solid var(--line);
+  }
+  section.block h2 {
+    color: var(--tekhelet);
+    font-size: 1.35rem;
+    margin: 0 0 16px;
+  }
+  section.block p { margin: 0 0 14px; }
+
+  .modes {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 14px;
+  }
+  .modes li {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .modes .mode-name { font-weight: 700; color: var(--tekhelet-2); margin-inline-end: 6px; }
+
+  .trust-box {
+    background: var(--panel);
+    border: 1px solid var(--gold-soft);
+    border-radius: 10px;
+    padding: 18px 20px;
+  }
+
+  .footer {
+    padding: 30px 0 50px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+  .footer a { color: var(--muted); margin: 0 8px; }
+
+  .end-cta { text-align: center; padding: 10px 0 6px; }
+
+  [data-lang-block] { display: none; }
+  html[data-lang="he"] [data-lang-block="he"] { display: block; }
+  html[data-lang="en"] [data-lang-block="en"] { display: block; }
+  html[data-lang="he"] .hero [data-lang-block="he"],
+  html[data-lang="en"] .hero [data-lang-block="en"] { display: block; }
+</style>
+</head>
+<body>
+
+<header class="top wrap">
+  <div class="brand"><span class="mark">🕍</span><span>חברותא AI</span></div>
+  <button id="langToggle" onclick="toggleLang()">English</button>
+</header>
+
+<main class="wrap">
+
+  <section class="hero">
+    <div data-lang-block="he">
+      <h1>שותפה ללימוד תורה שעונה ממקורות אמיתיים</h1>
+      <p class="lead">שואלים שאלה על סוגיה, פרשה או הלכה — ומקבלים תשובה עם ציטוט מדויק מהמקור עצמו. אם אין מקור, היא אומרת את זה בפירוש, במקום להמציא.</p>
+    </div>
+    <div data-lang-block="en">
+      <h1>A Torah study partner that answers from real sources</h1>
+      <p class="lead">Ask a question on a sugya, a parsha, or a halachic topic — and get an answer with an exact quote from the source itself. If there's no source, it says so plainly, instead of inventing one.</p>
+    </div>
+    <a class="cta" href="https://chavrutaai.org" target="_blank" rel="noopener">
+      <span data-lang-block="he">לניסיון — חינם</span>
+      <span data-lang-block="en">Try it — free</span>
+    </a>
+  </section>
+
+  <section class="block">
+    <div data-lang-block="he">
+      <h2>מה מיוחד בזה</h2>
+      <div class="trust-box">
+        <p>זה לא צ׳אטבוט כללי שממציא "דבר תורה" מהזיכרון שלו. כל טענה בתשובה מעוגנת בקטע מקור שאפשר לראות ולבדוק בעצמך. כשאין מקור מתאים במאגר — התשובה אומרת זאת ישירות, במקום לנחש.</p>
+      </div>
+    </div>
+    <div data-lang-block="en">
+      <h2>What makes it different</h2>
+      <div class="trust-box">
+        <p>This isn't a general chatbot inventing a "dvar Torah" from memory. Every claim in an answer is anchored to a source passage you can see and check yourself. When the corpus doesn't have a matching source, the answer says so directly instead of guessing.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <div data-lang-block="he">
+      <h2>חמישה אופנים ללמוד</h2>
+      <ul class="modes">
+        <li><span class="mode-name">שיעור</span>— בונה מהלך שלם על נושא, עם דף מקורות מסודר.</li>
+        <li><span class="mode-name">הסבר</span>— מסביר מקום ספציפי, כולל מה אומר מפרש מסוים דווקא.</li>
+        <li><span class="mode-name">שאלה</span>— תשובה ישירה וממוקדת על כל שאלה בלימוד.</li>
+        <li><span class="mode-name">שו"ת</span>— מהלך הלכתי מלא, מהמקור ועד הפוסקים.</li>
+        <li><span class="mode-name">חברותא</span>— לומד איתך בשיחה — שואל בחזרה, לא רק מרצה.</li>
+      </ul>
+    </div>
+    <div data-lang-block="en">
+      <h2>Five ways to study</h2>
+      <ul class="modes">
+        <li><span class="mode-name">Lesson</span>— builds a full walkthrough on a topic, with an organized source sheet.</li>
+        <li><span class="mode-name">Explain</span>— explains a specific place, including what a particular commentator actually says.</li>
+        <li><span class="mode-name">Question</span>— a direct, focused answer to any study question.</li>
+        <li><span class="mode-name">Responsa</span>— a full halachic walkthrough, from the source to the poskim.</li>
+        <li><span class="mode-name">Chavruta</span>— studies with you in conversation — asks questions back, doesn't just lecture.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="block">
+    <div data-lang-block="he">
+      <h2>מהיקף ארון הספרים</h2>
+      <p>תנ״ך, משנה, גמרא, ראשונים ופוסקים — ממאגר מקורות רחב ומורשה, לא רק כמה טקסטים נבחרים.</p>
+    </div>
+    <div data-lang-block="en">
+      <h2>The full bookshelf</h2>
+      <p>Tanakh, Mishnah, Gemara, Rishonim and Poskim — from a broad, licensed source corpus, not a handful of selected texts.</p>
+    </div>
+  </section>
+
+  <section class="block end-cta">
+    <div data-lang-block="he">
+      <p>בחינם, בלי הרשמה מסובכת.</p>
+    </div>
+    <div data-lang-block="en">
+      <p>Free, no complicated signup.</p>
+    </div>
+    <a class="cta" href="https://chavrutaai.org" target="_blank" rel="noopener">
+      <span data-lang-block="he">להתחיל ללמוד</span>
+      <span data-lang-block="en">Start learning</span>
+    </a>
+  </section>
+
+</main>
+
+<footer class="footer wrap">
+  <div>
+    <a href="https://chavrutaai.org/terms" target="_blank" rel="noopener"><span data-lang-block="he">תנאי שימוש</span><span data-lang-block="en">Terms</span></a>
+    <a href="https://chavrutaai.org/privacy" target="_blank" rel="noopener"><span data-lang-block="he">פרטיות</span><span data-lang-block="en">Privacy</span></a>
+    <a href="mailto:rubinyehuda8@gmail.com">rubinyehuda8@gmail.com</a>
+  </div>
+</footer>
+
+<script>
+  function toggleLang() {
+    var html = document.documentElement;
+    var isHe = html.getAttribute('data-lang') === 'he';
+    var next = isHe ? 'en' : 'he';
+    html.setAttribute('data-lang', next);
+    html.setAttribute('lang', next);
+    html.setAttribute('dir', next === 'he' ? 'rtl' : 'ltr');
+    document.getElementById('langToggle').textContent = next === 'he' ? 'English' : 'עברית';
+  }
+</script>
+
+</body>
+</html>
