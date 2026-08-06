@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://yehuda-rubin.github.io/Chavruta.AI/sitemap.xml
