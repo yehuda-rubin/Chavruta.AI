@@ -65,6 +65,17 @@ Every knob in Chavruta.AI is an environment variable. No code changes are requir
 | `CHAVRUTA_MAX_BODY_BYTES` | Maximum request body size in bytes | `2,097,152` (2 MB) | `app/security.py:223` | **DoS risk** – large bodies can exhaust memory |
 | `CHAVRUTA_PUBLIC_HEALTH_DETAILS` | If non-empty, expose internal details in `/health` endpoint | `""` | `app/api.py:935` | **Information disclosure** – leaks internal state |
 
+## Admin dashboard & error tracking
+
+Both optional; unset means off. `CHAVRUTA_ADMIN_OWNERS` is a dedicated allowlist — separate from
+`CHAVRUTA_CALENDAR_BETA_OWNERS` even when it names the same account, and with no `"*"` wildcard
+(admin access should never mean "everyone").
+
+| Variable | Purpose | Default | Where read |
+|----------|---------|---------|------------|
+| `CHAVRUTA_ADMIN_OWNERS` | Comma-separated Supabase owner_ids allowed to see `/admin` | `""` (nobody) | `app/api.py::_is_admin` |
+| `SENTRY_DSN` | Backend error tracking (sentry.io, free tier) — sign up, create a Python/FastAPI project, paste its DSN | `""` (off) | `app/api.py::_configure_sentry` |
+
 ## Plans, quotas & billing
 
 These variables override the default subscription tiers and credit costs defined in `app/plans.py`. The tier IDs are: `free`, `basic`, `pro`, `institution`.

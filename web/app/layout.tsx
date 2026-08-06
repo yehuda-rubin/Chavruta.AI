@@ -3,7 +3,7 @@ import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
 import { AccessibilityWidget } from "@/components/AccessibilityWidget";
 
-const SITE_URL = "https://chavruta.duckdns.org";
+const SITE_URL = "https://chavrutaai.org";
 const SITE_TITLE = "חברותא AI · בית מדרש";
 const SITE_DESCRIPTION =
   "שותפה ללימוד תורה — שאלה, הסבר ובניית שיעורים מעל המדף היהודי, עם מקורות מצוטטים.";

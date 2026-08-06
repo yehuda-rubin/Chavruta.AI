@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { Lang } from "@/lib/types";
 import { tr } from "@/lib/i18n";
 import { Icon } from "./Icon";
@@ -14,6 +15,7 @@ export function Header({
   onOpenSessions,
   onOpenSources,
   onNewChat,
+  isAdmin = false,
 }: {
   lang: Lang;
   theme: "light" | "dark";
@@ -24,6 +26,8 @@ export function Header({
   onOpenSessions?: () => void;  // mobile only — opens the sessions drawer
   onOpenSources?: () => void;   // mobile only — opens the sources drawer
   onNewChat?: () => void;       // mobile only — starts a new chat directly, no drawer detour
+  isAdmin?: boolean;            // from me.is_admin (app/api.py::_is_admin) — hidden entirely, not
+                                // just disabled, for the near-everyone who isn't the admin account.
 }) {
   return (
     <header className="h-[70px] flex items-center justify-between px-4 lg:px-8 shrink-0">
@@ -95,6 +99,15 @@ export function Header({
         >
           <Icon name={theme === "dark" ? "light_mode" : "dark_mode"} />
         </button>
+        {isAdmin && (
+          <Link
+            href="/admin"
+            className="h-10 w-10 rounded-full glass grid place-items-center text-tekhelet"
+            title="דשבורד ניהול"
+          >
+            <Icon name="admin_panel_settings" />
+          </Link>
+        )}
         <div className="hidden sm:grid h-10 w-10 rounded-full grad place-items-center text-white font-bold">א</div>
       </div>
     </header>

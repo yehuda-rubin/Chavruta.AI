@@ -351,6 +351,14 @@ class ChavrutaPipeline:
         if query.intent in (Intent.LESSON, Intent.HALACHA):
             return self._lesson_answer(query, result, llm)
 
+        return self._qa_answer(query, result, llm, history=history, missing_note=missing_note)
+
+    def _qa_answer(self, query, result, llm=None, *, history=None, missing_note=None):
+        """QA/EXPLAIN/COMPARE generation from an already-resolved `result` (its own retrieval, in
+        `ask()`'s normal path — OR pre-resolved hits from elsewhere, e.g. app/api.py's parsha/daf-yomi
+        calendar modes, which build a `RetrievalResult` from a calendar-resolved ref instead of
+        running the retriever, same principle as `_lesson_answer` being callable either way."""
+        llm = llm or self.llm
         prompt, marker_map = grounded.build_prompt(
             query.text, result.hits, intent=query.intent, history=history, lang=query.lang
         )
@@ -385,7 +393,11 @@ class ChavrutaPipeline:
                                   if query.lang != "en" else
                                   "Note: this answer is not tied to a cited source — verify it.")
         # Citation-faithfulness: any verbatim quote not found in the retrieved sources is flagged.
-        bad_q = grounded.unverified_quotes(text, result.hits)
+        # Must include `fetched` (sources pulled by the agentic ===NEED_SOURCES=== loop, already
+        # folded into marker_map/citations above) — checking against result.hits alone false-flagged
+        # a faithful quote as "not found" whenever it came from a source the FIRST retrieval round
+        # missed and a later agentic round supplied.
+        bad_q = grounded.unverified_quotes(text, list(result.hits) + list(fetched or []))
         if bad_q:
             answer.caveats.append(("הערה: ציטוט/ים שלא נמצאו במקורות שנשלפו: «" + "», «".join(bad_q[:2]) + "» — יש לאמת.")
                                   if query.lang != "en" else

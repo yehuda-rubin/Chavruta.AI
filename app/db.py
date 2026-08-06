@@ -66,7 +66,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 24
+SCHEMA_VERSION = 25
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -94,8 +94,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
             mode         TEXT,         -- the chat's locked mode (intent chosen on the first turn)
             owner_id     TEXT NOT NULL DEFAULT 'local',  -- who this belongs to; 'local' = single-user
             title        TEXT,         -- user-given name; NULL = display first_q instead (unrenamed)
-            pinned_at    TEXT          -- when pinned, for ordering pinned chats most-recent-first;
+            pinned_at    TEXT,         -- when pinned, for ordering pinned chats most-recent-first;
                                        -- NULL = not pinned. Capped at 3 pinned per owner (set_session_pinned).
+            excluded_from_review INTEGER NOT NULL DEFAULT 0
+                                       -- opt-out of the operator's post-10.8.2026 review/improvement
+                                       -- use (privacy policy section 12); 0 = included (default)
         );
 
         CREATE TABLE IF NOT EXISTS messages (
@@ -464,6 +467,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # v24: calendar_cache is a brand-new table (see CREATE TABLE IF NOT EXISTS above) — no ALTER
     # needed, the executescript already created it for both fresh and pre-existing databases.
 
+    if version < 25:
+        # Per-chat opt-out from the operator's post-10.8.2026 review/improvement use (privacy policy
+        # section 12). Existing rows predate the flag and default to 0 (included) — the privacy
+        # policy change only applies to sessions created from 10.8.2026 onward anyway, so pre-existing
+        # rows never fall under that use regardless of this flag's value.
+        scols = {r[1] for r in conn.execute("PRAGMA table_info(sessions)")}
+        if "excluded_from_review" not in scols:
+            conn.execute(
+                "ALTER TABLE sessions ADD COLUMN excluded_from_review INTEGER NOT NULL DEFAULT 0")
+
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
 
@@ -620,7 +633,8 @@ def list_sessions(owner_id: str = "local") -> list[dict[str, Any]]:
         # first), then the rest order by last activity; fall back to created_at for rows that
         # predate updated_at.
         rows = get_conn().execute(
-            """SELECT id, first_q, created_at, updated_at, mode, title, pinned_at
+            """SELECT id, first_q, created_at, updated_at, mode, title, pinned_at,
+                      excluded_from_review
                FROM sessions
                WHERE owner_id=?
                ORDER BY pinned_at IS NULL, pinned_at DESC, COALESCE(updated_at, created_at) DESC
@@ -641,6 +655,17 @@ def rename_session(sid: str, owner_id: str, title: str) -> bool:
     with _tx(get_conn()) as conn:
         cur = conn.execute(
             "UPDATE sessions SET title=? WHERE id=? AND owner_id=?", (title, sid, owner_id))
+    return cur.rowcount > 0
+
+
+def set_session_excluded(sid: str, owner_id: str, excluded: bool) -> bool:
+    """Opt this chat in/out of the operator's post-10.8.2026 review/improvement use (privacy policy
+    section 12). Returns False if the session isn't owned by this owner."""
+    with _tx(get_conn()) as conn:
+        cur = conn.execute(
+            "UPDATE sessions SET excluded_from_review=? WHERE id=? AND owner_id=?",
+            (1 if excluded else 0, sid, owner_id),
+        )
     return cur.rowcount > 0
 
 
@@ -950,6 +975,23 @@ def count_accounts() -> dict[str, Any]:
     generated anything (that's usage_health()'s 'users', a different, usage-based count)."""
     rows = _agg("SELECT plan, COUNT(*) AS n FROM accounts GROUP BY plan")
     return {"total": sum(r["n"] for r in rows), "by_plan": {r["plan"]: r["n"] for r in rows}}
+
+
+def revenue_summary(since: str | None = None) -> dict[str, Any]:
+    """Billed amounts from billing_ledger, grouped by plan and currency, plus a grand total per
+    currency. No owner_id here (the table doesn't have one, by design — see its schema comment), so
+    this is inherently account-agnostic. Refunds are already negative-amount rows in the same table,
+    so they net out of the totals rather than needing separate handling."""
+    where = "WHERE charged_at >= ?" if since else ""
+    by_plan = _agg(
+        f"SELECT plan, currency, SUM(amount) AS total, COUNT(*) AS charges "   # noqa: S608
+        f"FROM billing_ledger {where} GROUP BY plan, currency ORDER BY total DESC",
+        ((since,) if since else ()))
+    totals = _agg(
+        f"SELECT currency, SUM(amount) AS total FROM billing_ledger "          # noqa: S608
+        f"{where} GROUP BY currency",
+        ((since,) if since else ()))
+    return {"by_plan": by_plan, "totals": {r["currency"]: r["total"] for r in totals}}
 
 
 def delete_sessions_older_than(cutoff_iso: str) -> int:

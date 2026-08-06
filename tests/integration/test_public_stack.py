@@ -96,6 +96,33 @@ def test_async_owner_isolation_over_http(client, monkeypatch):
     assert len(client.get("/sessions", headers=a).json()) == 1
 
 
+def test_exclude_session_from_review_is_owner_scoped(client, monkeypatch):
+    # Per-chat opt-out from the operator's post-10.8.2026 review/improvement use (privacy policy
+    # section 12) — reuses the existing PATCH /sessions/{id} route, same as rename/pin.
+    monkeypatch.setenv("CHAVRUTA_API_KEYS", "alice-key,bob-key")
+    a = {"Authorization": "Bearer alice-key"}
+    b = {"Authorization": "Bearer bob-key"}
+
+    r = client.post("/sessions/async", headers=a, json={"question": "שאלה", "intent": "qa"})
+    sid = r.json()["session_id"]
+
+    # New sessions default to included.
+    session = next(s for s in client.get("/sessions", headers=a).json() if s["id"] == sid)
+    assert session["excluded_from_review"] is False
+
+    # Bob cannot exclude Alice's session.
+    assert client.patch(f"/sessions/{sid}", headers=b, json={"excluded": True}).status_code == 404
+
+    # Alice can, and it's reflected back.
+    r = client.patch(f"/sessions/{sid}", headers=a, json={"excluded": True})
+    assert r.status_code == 200, r.text
+    assert r.json()["excluded_from_review"] is True
+
+    # And she can flip it back.
+    r = client.patch(f"/sessions/{sid}", headers=a, json={"excluded": False})
+    assert r.json()["excluded_from_review"] is False
+
+
 def test_auth_required_when_keys_set(client, monkeypatch):
     monkeypatch.setenv("CHAVRUTA_API_KEYS", "the-only-key")
     # No key → 401; health still open.

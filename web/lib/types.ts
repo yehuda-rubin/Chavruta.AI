@@ -45,6 +45,7 @@ export interface Session {
   mode?: Intent | null;
   title?: string | null;
   pinned_at?: string | null;
+  excluded_from_review?: boolean;
 }
 
 export interface QueryResponse {

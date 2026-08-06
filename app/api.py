@@ -200,6 +200,7 @@ from chavruta.corpus.refs import (
     with_ref_variants,
 )
 from chavruta.corpus.schema import Intent, Query, Turn
+from chavruta.retrieval.base import RetrievalResult
 from chavruta.llm import metering
 from chavruta.llm.agentic import is_degrade_message
 from chavruta.llm.base import GroundedPrompt
@@ -236,7 +237,27 @@ def _configure_logging() -> None:
     root.setLevel(getattr(logging, level, logging.INFO))
 
 
+def _configure_sentry() -> None:
+    """Backend error tracking — a no-op unless SENTRY_DSN is set, same "absent = inert" convention
+    as the Supabase auth integration. FastAPI's integration auto-captures unhandled exceptions; the
+    many existing inline `except Exception: _log.exception(...)` blocks in this file keep swallowing
+    exactly as they do today (this doesn't change any response behavior)."""
+    dsn = os.environ.get("SENTRY_DSN", "").strip()
+    if not dsn:
+        return
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+
+    sentry_sdk.init(
+        dsn=dsn,
+        integrations=[FastApiIntegration()],
+        send_default_pii=False,   # nothing here forwards user content to a third party by default
+        environment=os.environ.get("CHAVRUTA_ENV", "production"),
+    )
+
+
 _configure_logging()
+_configure_sentry()
 _log = logging.getLogger("chavruta.api")
 _pipeline = None
 # FastAPI runs sync endpoints in a threadpool, so the lazy singletons below can be raced by concurrent
@@ -1023,19 +1044,20 @@ _WANTS_LESSON_YES_RE = re.compile(r"^(כן|yes)\b", re.I)
 
 def _wants_full_lesson(question: str, llm=None) -> bool:
     """Cheap yes/no check: did the user actually ask for a full lesson to be built (e.g. 'תבנה לי
-    שיעור על הפרשה'), as opposed to the default chavruta-style back-and-forth for parsha/daf-yomi
-    turns? Runs on _classifier_llm (a small/fast model), not the main pipeline LLM — this is a
-    trivial decision and should never add the main model's latency/cost before the real turn even
-    starts. Best-effort: any failure or unclear reply defaults to False (the cheaper, safer path),
-    same philosophy as _fix_bleeding_sentences — a misfire here must never break a turn.
-    `llm` overrides the classifier lookup (dependency injection for tests)."""
+    שיעור על הפרשה'), as opposed to the default turn style for parsha/daf-yomi (direct Q&A for
+    parsha, chavruta-style back-and-forth for daf-yomi)? Runs on _classifier_llm (a small/fast
+    model), not the main pipeline LLM — this is a trivial decision and should never add the main
+    model's latency/cost before the real turn even starts. Best-effort: any failure or unclear
+    reply defaults to False (the cheaper, safer path), same philosophy as _fix_bleeding_sentences —
+    a misfire here must never break a turn. `llm` overrides the classifier lookup (dependency
+    injection for tests)."""
     llm = llm or _classifier_llm() or _get_pipeline().llm
     try:
         prompt = GroundedPrompt(system=_WANTS_LESSON_SYSTEM, sources=[], question=question, bare=True)
         res = llm.generate(prompt, lang="he", max_tokens=10, temperature=0.0)
         reply = (res.text or "").strip()
     except Exception:
-        _log.warning("_wants_full_lesson classification call failed; defaulting to chavruta",
+        _log.warning("_wants_full_lesson classification call failed; defaulting to the non-lesson turn",
                      exc_info=True)
         return False
     return bool(_WANTS_LESSON_YES_RE.match(reply))
@@ -1066,6 +1088,36 @@ def _generate_chavruta_turn(question: str, hits, lang: str, he: bool, history, w
     clean = _strip_markers(_fix_bleeding_sentences(raw, he, llm), he=he)
     return QueryResponse(answer=clean, citations=used, grounded=bool(used),
                          intent="chavruta", files=[])
+
+
+def _generate_qa_turn_from_hits(question: str, hits, lang: str, he: bool, history, llm) -> QueryResponse:
+    """Direct Q&A generation from an already-resolved set of hits (a calendar-resolved ref, not the
+    pipeline's own retrieval) — used by `_run_parsha`'s default (non-lesson) path. Thin wrapper around
+    ChavrutaPipeline._qa_answer, the same method `pipeline.ask()` uses for a normal 'qa' turn, given a
+    RetrievalResult built from `hits` instead of running the retriever — same principle as
+    `_generate_lesson_from_hits` reusing the pipeline's own lesson machinery."""
+    pipeline = _get_pipeline()
+    llm = llm or pipeline.llm
+    query = Query(text=question, lang=lang or None, intent=Intent.QA)
+    result = RetrievalResult(hits=list(hits), anchor_refs=[], is_empty=not hits)
+    answer = pipeline._qa_answer(query, result, llm, history=history)
+
+    def _cite(c) -> CitationOut:
+        return CitationOut(
+            ref=c.ref,
+            ref_he=(hebrew_display_ref(c.ref) or "") if he else "",
+            text_he=getattr(c, "text_he", "") or getattr(c, "quote", ""),
+            text_en=getattr(c, "text_en", ""),
+            commentator=getattr(c, "commentator_id", "") or "",
+            deep_link=getattr(c, "deep_link", "") or "",
+        )
+
+    text = _strip_instruction_echo(answer.text, he)
+    clean = _strip_markers(_fix_bleeding_sentences(text, he, llm), he=he)
+    return QueryResponse(
+        answer=clean, citations=[_cite(c) for c in answer.citations],
+        grounded=answer.grounded, intent="qa", caveats=list(answer.caveats), files=[],
+    )
 
 
 def _run_chavruta(question: str, lang: str, history=None, llm=None) -> QueryResponse:
@@ -1133,9 +1185,6 @@ def _resolve_daf_yomi_cached():
 # Lesson escalation matches the real "medium" lesson's top_k=16 with margin (see _LENGTHS).
 _CHAVRUTA_HIT_CAP = 25
 _LESSON_HIT_CAP = 40
-# The Haftarah is much shorter than a parsha (a handful of chapters, not several) — a small cap is
-# plenty and keeps it from ever dominating the combined source list.
-_HAFTARAH_HIT_CAP = 10
 
 
 def _cap_hits(hits: list, max_total: int) -> list:
@@ -1175,7 +1224,7 @@ def _fetch_ranked_hits(targets: list[str], *, filters=None, limit: int | None = 
 def _run_parsha(question: str, lang: str, history=None, owner_id: str = "local",
                 llm=None) -> QueryResponse:
     """Parshat HaShavua: resolve this week's range from Sefaria's calendar (cached — see
-    _resolve_parsha_cached), fetch its verses + commentaries, then default to a chavruta-style turn
+    _resolve_parsha_cached), fetch its verses + commentaries, then default to a direct Q&A turn
     scoped to those sources — or a full lesson if the model judges the user actually asked for one
     (see _wants_full_lesson). No local parsha-name table: Sefaria's own ref range is authoritative,
     including on a combined-parsha week."""
@@ -1192,17 +1241,18 @@ def _run_parsha(question: str, lang: str, history=None, owner_id: str = "local",
     ref_variants = with_ref_variants(verse_refs)
     targets = ref_variants + commentary_refs(ref_variants, list(COMMENTATOR_HE))
     hits = _fetch_ranked_hits(targets, limit=max(len(targets) * 4, 400))
-    # The Haftarah (a separate Nevi'im reading) is fetched and capped SEPARATELY from the Torah
-    # portion — otherwise its few sources would simply be crowded out of _cap_hits by the parsha's
-    # much larger commentary volume, and it would never be represented at all.
+    # The Haftarah (a separate Nevi'im reading) gets only its OPENING and CLOSING pasuk up front —
+    # not the full range, and no commentaries at all. It's a secondary reading relative to the
+    # parsha itself (whose full text + commentary IS preloaded above), so the model is given just
+    # enough to know what it is and where it starts/ends; if the turn actually needs the intervening
+    # verses or a commentary on them, the agentic ===NEED_SOURCES=== loop can pull them on demand
+    # (same self-fetch mechanism every other thin-retrieval turn already relies on).
     haftarah_hits: list = []
     if info.haftarah_ref:
         haftarah_verse_refs = expand_range(info.haftarah_ref)
-        haftarah_variants = with_ref_variants(haftarah_verse_refs)
-        haftarah_targets = haftarah_variants + commentary_refs(haftarah_variants, list(COMMENTATOR_HE))
-        haftarah_hits = _cap_hits(
-            _fetch_ranked_hits(haftarah_targets, limit=max(len(haftarah_targets) * 4, 200)),
-            _HAFTARAH_HIT_CAP)
+        if haftarah_verse_refs:
+            boundary_refs = {haftarah_verse_refs[0], haftarah_verse_refs[-1]}
+            haftarah_hits = _fetch_ranked_hits(with_ref_variants(list(boundary_refs)), limit=20)
     topic = info.name_he if he else info.name_en
     question = f"{_parsha_context_note(info, he)}\n{question}"
     if _wants_full_lesson(question):
@@ -1211,7 +1261,7 @@ def _run_parsha(question: str, lang: str, history=None, owner_id: str = "local",
                                           lang, he, audience="yeshiva", grade_band="", length="medium",
                                           tpl=tpl, history=history, owner_id=owner_id, llm=llm)
     hits = _cap_hits(hits, _CHAVRUTA_HIT_CAP) + haftarah_hits
-    return _generate_chavruta_turn(question, hits, lang, he, history, weak=(not hits), llm=llm)
+    return _generate_qa_turn_from_hits(question, hits, lang, he, history, llm=llm)
 
 
 def _parsha_context_note(info, he: bool) -> str:
@@ -1222,12 +1272,17 @@ def _parsha_context_note(info, he: bool) -> str:
     if he:
         note = f"(לעיונך: פרשת השבוע היא {info.ref_range}. המפטיר הוא הפסוקים האחרונים של קריאת התורה עצמה — חלק מהפרשה, לא קריאה נפרדת."
         if info.haftarah_ref:
-            note += f" ההפטרה, לעומת זאת, היא קריאה נפרדת לגמרי מהנביאים: {info.haftarah_ref}. אל תבלבל בין השניים."
+            note += (f" ההפטרה, לעומת זאת, היא קריאה נפרדת לגמרי מהנביאים: {info.haftarah_ref}. "
+                     f"אל תבלבל בין השניים. קיבלת רק את הפסוק הראשון והאחרון של ההפטרה — אם את/ה "
+                     f"צריך/ה את הפסוקים שביניהם, או פירוש עליהם, בקש/י אותם דרך ===NEED_SOURCES===.")
         return note + ")"
     note = (f"(For reference: this week's Torah portion is {info.ref_range}. The Maftir is the final "
            f"verses of the Torah reading itself — part of the parsha, not a separate reading.")
     if info.haftarah_ref:
-        note += f" The Haftarah, by contrast, is an entirely separate reading from Nevi'im/Prophets: {info.haftarah_ref}. Do not conflate the two."
+        note += (f" The Haftarah, by contrast, is an entirely separate reading from Nevi'im/Prophets: "
+                 f"{info.haftarah_ref}. Do not conflate the two. You were given only the Haftarah's "
+                 f"opening and closing verse — if you need the verses in between, or a commentary on "
+                 f"them, request them via ===NEED_SOURCES===.")
     return note + ")"
 
 
@@ -1344,6 +1399,15 @@ def _calendar_modes_enabled(owner_id: str) -> bool:
     raw = os.environ.get("CHAVRUTA_CALENDAR_BETA_OWNERS", "").strip()
     if raw == "*":
         return True
+    allowed = {o.strip() for o in raw.split(",") if o.strip()}
+    return owner_id in allowed
+
+
+def _is_admin(owner_id: str) -> bool:
+    """Admin dashboard access — a dedicated allowlist, separate from the calendar beta gate even
+    though today it's the same one account. No "*" wildcard: unlike a beta feature, admin access
+    should never mean "everyone"."""
+    raw = os.environ.get("CHAVRUTA_ADMIN_OWNERS", "").strip()
     allowed = {o.strip() for o in raw.split(",") if o.strip()}
     return owner_id in allowed
 
@@ -1996,6 +2060,9 @@ class MeOut(BaseModel):
     # enforcement (that's the server-side check in _run_query_impl, which runs regardless of what
     # the client shows).
     calendar_modes_enabled: bool = False
+    # Admin dashboard link — see _is_admin. UI convenience only, same as the field above; the real
+    # enforcement is the 404 every /admin/* route raises for a non-admin owner.
+    is_admin: bool = False
 
 
 @app.get("/me", response_model=MeOut)
@@ -2049,7 +2116,73 @@ def me(owner: str = Depends(current_owner)):
         blocked_until=ban["until"] if ban else None,
         blocked_reason=ban["reason"] if ban else "",
         calendar_modes_enabled=_calendar_modes_enabled(owner),
+        is_admin=_is_admin(owner),
     )
+
+
+def _since_cutoff(window: str) -> str | None:
+    """Translate a 7d/30d/all window into an ISO cutoff string for db.py's `since` params. Anything
+    other than "7d"/"30d" (including "all" or a bad value) means no cutoff — every db.py aggregate
+    already treats since=None as "all time"."""
+    days = {"7d": 7, "30d": 30}.get(window)
+    return None if days is None else (datetime.now(UTC) - timedelta(days=days)).isoformat()
+
+
+def _require_admin(owner: str = Depends(current_owner)) -> str:
+    """Dependency for every /admin/* route. Raises the same 404 a non-owner gets elsewhere in this
+    file (e.g. :2307) for someone else's session — so an unauthorized caller can't distinguish "wrong
+    owner" from "route doesn't exist"."""
+    if not _is_admin(owner):
+        raise HTTPException(status_code=404, detail="not found")
+    return owner
+
+
+@app.get("/admin/overview")
+def admin_overview(since: str = "30d", owner: str = Depends(_require_admin)):
+    cutoff = _since_cutoff(since)
+    local_accounts = db.count_accounts()
+    # db.count_accounts() only sees rows in the local `accounts` table, which is written only on a
+    # plan change or credit grant (accounts.count_supabase_users's docstring) — almost every free
+    # signup never touches it. Prefer Supabase's own signup record for "total"; fall back to the
+    # local (undercounted) figure only if Supabase isn't configured.
+    real_total = accounts.count_supabase_users()
+    return {
+        "accounts": {
+            "total": real_total if real_total is not None else local_accounts["total"],
+            "by_plan": local_accounts["by_plan"],
+        },
+        "usage": db.usage_health(cutoff),
+        "concurrency": db.usage_concurrency(cutoff),
+        "revenue": db.revenue_summary(cutoff),
+    }
+
+
+@app.get("/admin/usage-by-owner")
+def admin_usage_by_owner(since: str = "30d", limit: int = 50, owner: str = Depends(_require_admin)):
+    return db.usage_by_owner(_since_cutoff(since), limit)
+
+
+@app.get("/admin/usage-by-intent")
+def admin_usage_by_intent(since: str = "30d", owner: str = Depends(_require_admin)):
+    return db.usage_by_intent(_since_cutoff(since))
+
+
+@app.get("/admin/usage-by-week")
+def admin_usage_by_week(since: str = "30d", owner: str = Depends(_require_admin)):
+    return db.usage_by_week(_since_cutoff(since))
+
+
+@app.get("/admin/flagged-messages")
+def admin_flagged_messages(reviewed: bool = False, limit: int = 100,
+                           owner: str = Depends(_require_admin)):
+    return db.list_flagged_messages(reviewed=reviewed, limit=limit)
+
+
+@app.post("/admin/flagged-messages/{report_id}/review")
+def admin_review_message(report_id: int, owner: str = Depends(_require_admin)):
+    if not db.mark_report_reviewed(report_id):
+        raise HTTPException(status_code=404, detail="report not found")
+    return {"ok": True}
 
 
 # ── Account deletion (scheduled, with a grace period + cancel) ────────────────
@@ -2231,6 +2364,9 @@ class SessionOut(BaseModel):
     mode: str | None = None          # the chat's locked mode (intent from its first turn)
     title: str | None = None         # user-given name; None = display first_q instead
     pinned_at: str | None = None     # set when pinned (sorts to the top); None = not pinned
+    excluded_from_review: bool = False  # opted out of the operator's review/improvement use
+                                         # (privacy policy section 12) — only meaningful for chats
+                                         # created on/after 2026-08-10, see docs/legal/privacy-he.md
 
 
 class SessionCreateOut(SessionOut):
@@ -2462,9 +2598,11 @@ def delete_session(session_id: str, owner: str = Depends(current_owner)):
 
 
 class SessionUpdateIn(BaseModel):
-    # Both optional — a request touches whichever field(s) it sends (rename-only, pin-only, or both).
+    # All optional — a request touches whichever field(s) it sends (rename-only, pin-only, etc.).
     title: str | None = None
     pinned: bool | None = None
+    excluded: bool | None = None     # opt this chat in/out of the review/improvement use
+                                      # (privacy policy section 12)
 
 
 _PIN_LIMIT_MSG = (f"אפשר לנעוץ עד {db.MAX_PINNED_SESSIONS} צ'אטים. בטל נעיצה של אחד כדי לנעוץ חדש.",
@@ -2492,6 +2630,9 @@ def update_session(session_id: str, req: SessionUpdateIn, lang: str = "he",
         except db.TooManyPinnedError:
             he = (lang or "he").startswith("he")
             raise HTTPException(status_code=409, detail=_PIN_LIMIT_MSG[0 if he else 1])
+    if req.excluded is not None:
+        if not db.set_session_excluded(session_id, owner, req.excluded):
+            raise HTTPException(status_code=404, detail="session not found")
     row = next((s for s in db.list_sessions(owner) if s["id"] == session_id), None)
     if row is None:
         raise HTTPException(status_code=404, detail="session not found")

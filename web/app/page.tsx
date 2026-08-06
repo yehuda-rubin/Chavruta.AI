@@ -195,6 +195,18 @@ export default function Home() {
     [lang, refreshSessions],
   );
 
+  const excludeSession = useCallback(
+    async (id: string, excluded: boolean) => {
+      try {
+        await api.updateSession(id, { excluded }, lang);
+      } catch {
+        // Transient failure — refreshSessions() below re-syncs the true state either way.
+      }
+      refreshSessions();
+    },
+    [lang, refreshSessions],
+  );
+
   const clearHistory = useCallback(async () => {
     const ids = sessions.map((s) => s.id);
     await Promise.allSettled(ids.map((id) => api.deleteSession(id)));
@@ -388,6 +400,7 @@ export default function Home() {
       onDelete={deleteSession}
       onRename={renameSession}
       onPin={pinSession}
+      onExclude={excludeSession}
       onCollapse={() => (mobile ? setMobileSessions(false) : setSessionsCollapsed(true))}
       onOpenLessons={() => setShowLessons(true)}
       onOpenSettings={() => setShowSettings(true)}
@@ -418,6 +431,7 @@ export default function Home() {
         onOpenSessions={() => setMobileSessions(true)}
         onOpenSources={() => setMobileSources(true)}
         onNewChat={newDiscussion}
+        isAdmin={me?.is_admin}
       />
       <div className="flex flex-1 overflow-hidden px-4 pb-4 gap-4">
         {/* Sessions — desktop inline only (hidden on mobile, opened as a drawer). lg:contents keeps

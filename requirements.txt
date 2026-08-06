@@ -43,6 +43,9 @@ PyJWT[crypto]==2.13.0
 # is configured.
 requests==2.34.2
 
+# Error tracking — a no-op unless SENTRY_DSN is set (see app.api._configure_sentry).
+sentry-sdk[fastapi]==2.66.1
+
 # Dev / config
 python-dotenv==1.2.2
 pytest==9.0.3

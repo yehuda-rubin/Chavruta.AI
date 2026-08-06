@@ -15,6 +15,7 @@ export function SessionsPanel({
   onDelete,
   onRename,
   onPin,
+  onExclude,
   onCollapse,
   onOpenLessons,
   onOpenSettings,
@@ -28,6 +29,7 @@ export function SessionsPanel({
   onDelete: (id: string) => void;
   onRename: (id: string, title: string) => void;
   onPin: (id: string, pinned: boolean) => void;
+  onExclude: (id: string, excluded: boolean) => void;
   onCollapse: () => void;
   onOpenLessons: () => void;
   onOpenSettings: () => void;
@@ -85,6 +87,7 @@ export function SessionsPanel({
         {sessions.map((s) => {
           const active = s.id === activeId;
           const pinned = !!s.pinned_at;
+          const excluded = !!s.excluded_from_review;
           const editing = editingId === s.id;
           const pinDisabled = !pinned && pinnedCount >= MAX_PINNED;
           return (
@@ -168,6 +171,17 @@ export function SessionsPanel({
                       >
                         <Icon name="push_pin" className={"text-[17px] " + (pinned ? "text-gold" : "")} />
                         {pinned ? tr(lang, "unpinChat") : tr(lang, "pinChat")}
+                      </button>
+                      <button
+                        onClick={() => {
+                          onExclude(s.id, !excluded);
+                          setMenuOpenId(null);
+                        }}
+                        title={tr(lang, "excludeChatHint")}
+                        className="flex items-center gap-2 px-3 py-2 text-sm text-ink/75 hover:bg-white/60 hover:text-tekhelet transition"
+                      >
+                        <Icon name={excluded ? "visibility_off" : "visibility"} className="text-[17px]" />
+                        {excluded ? tr(lang, "includeChat") : tr(lang, "excludeChat")}
                       </button>
                       <button
                         onClick={() => {

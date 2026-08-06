@@ -79,3 +79,27 @@ def test_pin_limit_is_per_owner_not_global(d):
         d.set_session_pinned(sid, ALICE, True)
     bob_sid = d.create_session("b", owner_id=BOB)
     assert d.set_session_pinned(bob_sid, BOB, True) is True
+
+
+# ── excluded_from_review: per-chat opt-out from the operator's post-10.8.2026 review/improvement
+# use (privacy policy section 12). Default must be "included" — an opt-out default would mean
+# nobody ever bothers to exclude anything, defeating the point of offering the choice.
+
+def test_new_session_defaults_to_included(d):
+    sid = d.create_session("שאלה", owner_id=ALICE)
+    row = d.list_sessions(ALICE)[0]
+    assert row["excluded_from_review"] == 0
+
+
+def test_exclude_and_reinclude_a_session(d):
+    sid = d.create_session("שאלה", owner_id=ALICE)
+    assert d.set_session_excluded(sid, ALICE, True) is True
+    assert d.list_sessions(ALICE)[0]["excluded_from_review"] == 1
+    assert d.set_session_excluded(sid, ALICE, False) is True
+    assert d.list_sessions(ALICE)[0]["excluded_from_review"] == 0
+
+
+def test_another_user_cannot_exclude_it(d):
+    sid = d.create_session("שאלה", owner_id=ALICE)
+    assert d.set_session_excluded(sid, BOB, True) is False
+    assert d.list_sessions(ALICE)[0]["excluded_from_review"] == 0
