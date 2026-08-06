@@ -6,7 +6,13 @@
 
 # Terms of Use — Chavruta AI
 
-**Version 1.9 · Effective 2 August 2026**
+**Version 1.10 · Effective 10 August 2026**
+
+Changes in version 1.10: section 9 updated — data is also used, subject to the Privacy Policy
+(sections 2 and 12 there) and only for conversations from 10 August 2026 onward, for quality
+control, improving the Service, and developing or fine-tuning models by the operator, with the
+option to exclude a specific conversation or all of them. See Privacy Policy version 1.8 for full
+detail.
 
 Changes in version 1.9: section 6 gained a disclosure of **automatic message scanning** (keyword-
 based, not AI) for unlawful, abusive, or potentially defamatory content — see the Privacy Policy,
@@ -150,8 +156,11 @@ for your personal purposes subject to these terms.
 
 ## 9. Privacy
 We store your email address (via the registration provider), your conversation and lesson history, and
-usage counters. We do not sell your data to third parties. Data is used only to run the Service and to
-associate your content with you.
+usage counters. We do not sell your data to third parties. Data is used to run the Service and to
+associate your content with you, and also — subject to the Privacy Policy and its exclusion
+mechanism, and only for conversations from 10 August 2026 onward — for quality control, improving
+the Service, and developing or fine-tuning models by the operator. See the Privacy Policy for full
+detail and how to exclude a conversation.
 
 ## 10. Quotas, Paid Plans and Cancellation
 The Service may include a free plan with a daily quota, and paid plans. We may change quotas, prices

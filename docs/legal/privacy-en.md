@@ -6,7 +6,18 @@
 
 # Privacy Policy — Chavruta AI
 
-**Version 1.7 · Effective 2 August 2026**
+**Version 1.8 · Effective 10 August 2026**
+
+Changes in version 1.8: a new section (12) has been added — **starting 10 August 2026, at 00:00**,
+we may review conversation content (not only flagged messages, as today) and use it for internal
+quality review, improving the Service, and developing or fine-tuning our own models by the operator
+(section 2, and section 11 purpose 8) — distinct from what the model provider does with the data
+(section 3, unchanged). **This applies only to conversations created from that date onward** — not
+retroactively to existing conversations (section 5). In practice, review or use of content begins 24
+hours later (11 August 2026), to give real time to exclude a conversation before anything is
+actually read. You can exclude a specific conversation, or all of them at once with a single toggle
+(new section 12). **There are now registered users on the Service**, so this update is also sent by
+advance email notice — not only published here.
 
 Changes in version 1.7: the AI model provider and the hosting provider are now **named — Nebius**
 (sections 3, 4, 9) instead of being described only generically — Nebius both runs the Service itself
@@ -91,6 +102,13 @@ To operate the Service and generate answers; to associate your conversations and
 account; to enforce quotas; and to secure the Service and prevent abuse. We do not use your content
 for advertising.
 
+**In addition, and subject to the exclusion mechanism in section 12:** we may review conversation
+content and use it for internal quality review, improving the Service, and developing or
+fine-tuning models by the operator. This is **different** from section 3 (what the model provider,
+Nebius, does with the data to generate an answer in real time) — this is about our own use, as the
+operator, of content held with us. This use applies only to conversations from 10 August 2026
+onward (section 5), and you can exclude a specific conversation or all of them from it.
+
 ## 3. Processing and Training by the Model Provider
 To generate an answer, your question (and any source you attach) is sent to our AI model provider —
 **Nebius**. **Nebius may use the data sent to it — your questions and attached sources — also to
@@ -124,6 +142,10 @@ disclose information if required by law.
   automatically, with its messages. Any new message in the conversation resets the count — a
   conversation you keep returning to will not be deleted.
   **We recommend downloading and saving content that is important to you for the long term.**
+- **Review and use for quality control, improvement, and model development (section 2)** applies
+  **only** to conversations created from 10 August 2026 onward — not retroactively to earlier
+  conversations. You can exclude a specific conversation from this, or all of your conversations
+  with a single global toggle — see section 12.
 - **Lessons you create: not deleted automatically.** They are your work product and are kept until you
   delete them or until the account is closed.
 - **Measurement data** (section 1) is kept for trend analysis. On account deletion it is **detached
@@ -147,7 +169,7 @@ disclose information if required by law.
 **The Service is for users aged 18 and over only** (Terms of Use, section 5). Registration requires an
 explicit age confirmation, which is recorded with the account. **We do not knowingly collect personal
 information from minors.** If we learn that an account was opened by a minor we will close it and
-delete the information. If you know of such a case, contact us (section 12) and we will act.
+delete the information. If you know of such a case, contact us (section 13) and we will act.
 
 **This is a declaration, not verification**, and we say so explicitly: registration is by email
 address and we have no means of checking age. What exists is a clear scoping of the intended audience
@@ -183,7 +205,7 @@ affected users as required by law. However, no method is 100% secure and we cann
 security.
 
 ## 11. The Database, Its Purposes, and the Applicable Law
-**Database owner and manager:** Yehuda Rubin, the operator of the Service. Contact details in section 12.
+**Database owner and manager:** Yehuda Rubin, the operator of the Service. Contact details in section 13.
 
 **Purposes of the database** — the information itemised in section 1 is collected and used for these
 purposes only:
@@ -193,7 +215,10 @@ purposes only:
 4. billing, issuing invoices and meeting accounting obligations;
 5. securing the Service;
 6. detecting unlawful, abusive, or defamation-risk content, for our own manual review (section 1);
-7. understanding aggregate usage patterns in order to improve the Service.
+7. understanding aggregate usage patterns in order to improve the Service;
+8. internal quality review, improving the Service, and developing or fine-tuning models by the
+   operator — only for conversations from 10 August 2026 onward, and subject to the exclusion
+   mechanism (section 12).
 
 **We do not use the information for any other purpose and we do not sell it.** Use for a new purpose
 would require an update to this policy and advance notice.
@@ -210,6 +235,24 @@ the Law, performs no systematic monitoring, and records measurements rather than
 This is our assessment, it is revisited as the scale grows, and an appointment will be made if and
 when the obligation arises.
 
-## 12. Changes and Contact
+## 12. Excluding Specific Conversations from Section 2's Use
+The use described in section 2 (quality control, improvement, and developing or fine-tuning models)
+applies **only** to conversations created from **10 August 2026** onward (section 5, section 11
+purpose 8). Excluding a conversation does **not** affect how the conversation itself works — an
+excluded conversation keeps working normally; it is simply not included in this use.
+
+**Excluding a specific conversation:** every conversation has a "Don't use this conversation" toggle,
+next to the pin and rename options. The default is that a conversation is **included**, unless you
+mark it otherwise.
+
+**Global exclusion:** Settings has an additional toggle that excludes **all** of your conversations at
+once, for anyone who would rather not go conversation by conversation. This toggle overrides the
+per-conversation setting.
+
+In practice, review or use of conversation content begins **24 hours** after the effective date —
+that is, from **11 August 2026** — to give real time to mark an exclusion before anything is actually
+read.
+
+## 13. Changes and Contact
 We may update this policy; the current version is always shown in the Service. For privacy questions:
 rubinyehuda8@gmail.com
