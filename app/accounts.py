@@ -128,6 +128,41 @@ def count_supabase_users() -> int | None:
         return None
 
 
+def list_supabase_user_emails() -> list[str]:
+    """All registered user email addresses from Supabase auth.
+
+    Uses the same pagination pattern as count_supabase_users() but collects email addresses instead
+    of counting. Returns an empty list if Supabase isn't configured (empty is a valid response,
+    not "unknown"). This is the recipient list for operator broadcasts (e.g. policy updates).
+    """
+    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    url = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
+    if not (key and url):
+        return []
+    import urllib.request
+
+    emails = []
+    page = 1
+    try:
+        while True:
+            req = urllib.request.Request(
+                f"{url}/auth/v1/admin/users?page={page}&per_page=1000",
+                headers={"Authorization": f"Bearer {key}", "apikey": key},
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                users = json.loads(resp.read()).get("users", [])
+            for user in users:
+                email = user.get("email")
+                if email:
+                    emails.append(email)
+            if len(users) < 1000:
+                return emails
+            page += 1
+    except Exception:                        # noqa: BLE001 — best-effort, never breaks the caller
+        _log.warning("supabase user email list failed", exc_info=True)
+        return []
+
+
 def run_due_purges(now_iso: str | None = None) -> int:
     """Purge every account whose grace period has lapsed. Returns how many were purged."""
     now_iso = now_iso or datetime.now(UTC).isoformat()

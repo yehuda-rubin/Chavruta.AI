@@ -6,6 +6,7 @@ else — and the always-exempt 'local' user — untouched.
 """
 from __future__ import annotations
 
+import json
 import urllib.request
 
 import pytest
@@ -189,6 +190,84 @@ def test_supabase_user_count_network_failure_is_none(monkeypatch):
 
     monkeypatch.setattr(urllib.request, "urlopen", boom)
     assert accounts.count_supabase_users() is None
+
+
+# ── list_supabase_user_emails: recipient list for broadcasts ─────────────────────────────
+def test_supabase_user_emails_empty_when_not_configured(monkeypatch):
+    """When Supabase is not configured, returns empty list (not None)."""
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    assert accounts.list_supabase_user_emails() == []
+
+
+def test_supabase_user_emails_single_page(monkeypatch):
+    """Collects email addresses from a single page of users."""
+    monkeypatch.setenv("SUPABASE_URL", "https://x.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "k")
+
+    users_page = json.dumps({
+        "users": [
+            {"id": "1", "email": "user1@example.com"},
+            {"id": "2", "email": "user2@example.com"},
+            {"id": "3", "email": "user3@example.com"},
+        ]
+    }).encode()
+
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda req, timeout=10: _FakeResponse(users_page))
+    emails = accounts.list_supabase_user_emails()
+    assert emails == ["user1@example.com", "user2@example.com", "user3@example.com"]
+
+
+def test_supabase_user_emails_paginates(monkeypatch):
+    """Collects email addresses across multiple pages."""
+    monkeypatch.setenv("SUPABASE_URL", "https://x.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "k")
+
+    page1 = json.dumps({"users": [{"id": str(i), "email": f"user{i}@example.com"} for i in range(1000)]}).encode()
+    page2 = json.dumps({"users": [{"id": str(i), "email": f"user{i}@example.com"} for i in range(1000, 2000)]}).encode()
+    page3 = json.dumps({"users": [{"id": str(i), "email": f"user{i}@example.com"} for i in range(2000, 2042)]}).encode()
+
+    pages = iter([page1, page2, page3])
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda req, timeout=10: _FakeResponse(next(pages)))
+    emails = accounts.list_supabase_user_emails()
+    assert len(emails) == 2042
+    assert emails[0] == "user0@example.com"
+    assert emails[1000] == "user1000@example.com"
+    assert emails[2000] == "user2000@example.com"
+
+
+def test_supabase_user_emails_skips_missing_email(monkeypatch):
+    """Users without email addresses are skipped (defensive)."""
+    monkeypatch.setenv("SUPABASE_URL", "https://x.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "k")
+
+    users_page = json.dumps({
+        "users": [
+            {"id": "1", "email": "user1@example.com"},
+            {"id": "2"},  # No email
+            {"id": "3", "email": "user3@example.com"},
+            {"id": "4", "email": None},  # Null email
+        ]
+    }).encode()
+
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda req, timeout=10: _FakeResponse(users_page))
+    emails = accounts.list_supabase_user_emails()
+    assert emails == ["user1@example.com", "user3@example.com"]
+
+
+def test_supabase_user_emails_network_failure_returns_empty(monkeypatch):
+    """Network error returns empty list (not None)."""
+    monkeypatch.setenv("SUPABASE_URL", "https://x.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "k")
+
+    def boom(req, timeout=10):
+        raise OSError("network down")
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    assert accounts.list_supabase_user_emails() == []
 
 
 if __name__ == "__main__":
