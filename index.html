@@ -266,6 +266,31 @@
     font-style: italic;
   }
 
+  .file-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+    margin: 14px 0 4px;
+  }
+  .file-cards .file-card {
+    background: color-mix(in srgb, var(--gold-soft) 10%, transparent);
+    border: 1px solid var(--gold-soft);
+    border-radius: 8px;
+    padding: 12px 10px;
+    text-align: center;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--tekhelet-2);
+  }
+  .file-cards .file-card .emoji { display: block; font-size: 1.4rem; margin-bottom: 4px; }
+
+  .availability-box {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 18px 20px;
+  }
+
   .footer {
     padding: 30px 0 50px;
     text-align: center;
@@ -341,6 +366,16 @@
           <div class="row good">✓ זה בדיוק הרגע שאף AI כללי לא מעז להראות — "אני לא יודע", במקום תשובה בטוחה ושגויה.</div>
         </div>
       </div>
+
+      <div class="example-card" style="margin-top:16px;">
+        <p class="example-q">בקשה לשיעור מסודר על נושא</p>
+        <p class="example-a">במצב "שיעור" מתקבלים 3 קבצים נפרדים להורדה — לא רק תשובה אחת:</p>
+        <div class="file-cards">
+          <div class="file-card"><span class="emoji">📄</span>דף מקורות</div>
+          <div class="file-card"><span class="emoji">📋</span>מהלך השיעור</div>
+          <div class="file-card"><span class="emoji">📖</span>השיעור המלא</div>
+        </div>
+      </div>
     </div>
     <div data-lang-block="en">
       <h2>Here's what it actually looks like</h2>
@@ -367,6 +402,16 @@
           <div class="row good">✓ This is exactly the moment no general AI dares to show — "I don't know," instead of a confident, wrong answer.</div>
         </div>
       </div>
+
+      <div class="example-card" style="margin-top:16px;">
+        <p class="example-q">Requesting a structured lesson on a topic</p>
+        <p class="example-a">"Lesson" mode produces 3 separate downloadable files — not just one answer:</p>
+        <div class="file-cards">
+          <div class="file-card"><span class="emoji">📄</span>Source sheet</div>
+          <div class="file-card"><span class="emoji">📋</span>Lesson flow</div>
+          <div class="file-card"><span class="emoji">📖</span>Full lesson</div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -389,7 +434,7 @@
     <div data-lang-block="he">
       <h2>חמישה אופנים ללמוד</h2>
       <ul class="modes">
-        <li><span class="mode-name">שיעור</span>— בונה מהלך שלם על נושא, עם דף מקורות מסודר.</li>
+        <li><span class="mode-name">שיעור</span>— בונה על נושא 3 קבצים נפרדים להורדה: דף מקורות, מהלך השיעור, והשיעור המלא.</li>
         <li><span class="mode-name">הסבר</span>— מסביר מקום ספציפי, כולל מה אומר מפרש מסוים דווקא.</li>
         <li><span class="mode-name">שאלה</span>— תשובה ישירה וממוקדת על כל שאלה בלימוד.</li>
         <li><span class="mode-name">שו"ת</span>— מהלך הלכתי מלא, מהמקור ועד הפוסקים.</li>
@@ -399,7 +444,7 @@
     <div data-lang-block="en">
       <h2>Five ways to study</h2>
       <ul class="modes">
-        <li><span class="mode-name">Lesson</span>— builds a full walkthrough on a topic, with an organized source sheet.</li>
+        <li><span class="mode-name">Lesson</span>— builds 3 separate downloadable files on a topic: a source sheet, a lesson flow, and the full lesson.</li>
         <li><span class="mode-name">Explain</span>— explains a specific place, including what a particular commentator actually says.</li>
         <li><span class="mode-name">Question</span>— a direct, focused answer to any study question.</li>
         <li><span class="mode-name">Responsa</span>— a full halachic walkthrough, from the source to the poskim.</li>
@@ -430,6 +475,21 @@
       <h2>What this is, and isn't</h2>
       <div class="trust-box">
         <p>Chavruta AI is a study and research partner — not a rabbi issuing a practical halachic ruling. Answers are for study, not for halachic, financial, or personal decisions. For any practical question, consult a qualified rabbi. That's exactly the point: a tool that shows you what the sources say, not one that decides for you.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <div data-lang-block="he">
+      <h2>כשאין לך עם מי ללמוד</h2>
+      <div class="availability-box">
+        <p>לחברותא אין קושי לענות שוב על אותה שאלה, בלי שיפוטיות, בכל שעה — בשתיים בלילה, לפני מבחן, כשנתקעת על תוספות. זה לא במקום ללמוד עם אדם או עם רב — זה בשביל הרגעים שבהם פשוט אין עם מי.</p>
+      </div>
+    </div>
+    <div data-lang-block="en">
+      <h2>For when you have no one to learn with</h2>
+      <div class="availability-box">
+        <p>Chavruta doesn't mind answering the same question again, without judgment, at any hour — at 2am, before a test, when you're stuck on a Tosafot. It's not a substitute for learning with a person or a rabbi — it's for the moments when there simply isn't one available.</p>
       </div>
     </div>
   </section>
