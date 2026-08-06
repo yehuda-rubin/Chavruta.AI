@@ -195,6 +195,18 @@ export default function Home() {
     [lang, refreshSessions],
   );
 
+  const excludeSession = useCallback(
+    async (id: string, excluded: boolean) => {
+      try {
+        await api.updateSession(id, { excluded }, lang);
+      } catch {
+        // Transient failure — refreshSessions() below re-syncs the true state either way.
+      }
+      refreshSessions();
+    },
+    [lang, refreshSessions],
+  );
+
   const clearHistory = useCallback(async () => {
     const ids = sessions.map((s) => s.id);
     await Promise.allSettled(ids.map((id) => api.deleteSession(id)));
@@ -388,6 +400,7 @@ export default function Home() {
       onDelete={deleteSession}
       onRename={renameSession}
       onPin={pinSession}
+      onExclude={excludeSession}
       onCollapse={() => (mobile ? setMobileSessions(false) : setSessionsCollapsed(true))}
       onOpenLessons={() => setShowLessons(true)}
       onOpenSettings={() => setShowSettings(true)}

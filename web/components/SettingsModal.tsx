@@ -473,6 +473,22 @@ export function SettingsModal({
               <span>{tr(lang, "marketingConsentSetting")}</span>
             </label>
 
+            {/* Global data-review opt-out — overrides the per-chat toggle in SessionsPanel. Only
+                meaningful for chats created on/after 2026-08-10 (privacy policy section 12); stored
+                in user_metadata like marketing_consent above, not a server-side schema change. */}
+            <label className="mt-2 flex items-center gap-2 text-xs text-ink/70 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={Boolean(auth.user.user_metadata?.data_review_opt_out)}
+                onChange={(e) => auth.updateMetadata({
+                  data_review_opt_out: e.target.checked,
+                  data_review_opt_out_at: new Date().toISOString(),
+                })}
+                className="accent-tekhelet"
+              />
+              <span>{tr(lang, "dataReviewOptOutSetting")}</span>
+            </label>
+
             {/* Plan + billing — upgrade (free) or cancel subscription (paid). */}
             <div className="mt-2 flex items-center justify-between gap-2">
               <span className="text-xs text-ink/60">

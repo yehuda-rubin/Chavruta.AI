@@ -2364,6 +2364,9 @@ class SessionOut(BaseModel):
     mode: str | None = None          # the chat's locked mode (intent from its first turn)
     title: str | None = None         # user-given name; None = display first_q instead
     pinned_at: str | None = None     # set when pinned (sorts to the top); None = not pinned
+    excluded_from_review: bool = False  # opted out of the operator's review/improvement use
+                                         # (privacy policy section 12) — only meaningful for chats
+                                         # created on/after 2026-08-10, see docs/legal/privacy-he.md
 
 
 class SessionCreateOut(SessionOut):
@@ -2595,9 +2598,11 @@ def delete_session(session_id: str, owner: str = Depends(current_owner)):
 
 
 class SessionUpdateIn(BaseModel):
-    # Both optional — a request touches whichever field(s) it sends (rename-only, pin-only, or both).
+    # All optional — a request touches whichever field(s) it sends (rename-only, pin-only, etc.).
     title: str | None = None
     pinned: bool | None = None
+    excluded: bool | None = None     # opt this chat in/out of the review/improvement use
+                                      # (privacy policy section 12)
 
 
 _PIN_LIMIT_MSG = (f"אפשר לנעוץ עד {db.MAX_PINNED_SESSIONS} צ'אטים. בטל נעיצה של אחד כדי לנעוץ חדש.",
@@ -2625,6 +2630,9 @@ def update_session(session_id: str, req: SessionUpdateIn, lang: str = "he",
         except db.TooManyPinnedError:
             he = (lang or "he").startswith("he")
             raise HTTPException(status_code=409, detail=_PIN_LIMIT_MSG[0 if he else 1])
+    if req.excluded is not None:
+        if not db.set_session_excluded(session_id, owner, req.excluded):
+            raise HTTPException(status_code=404, detail="session not found")
     row = next((s for s in db.list_sessions(owner) if s["id"] == session_id), None)
     if row is None:
         raise HTTPException(status_code=404, detail="session not found")
