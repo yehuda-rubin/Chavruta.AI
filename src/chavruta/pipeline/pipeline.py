@@ -418,17 +418,26 @@ class ChavrutaPipeline:
         else:
             prompt, marker_map = grounded.build_prompt(
                 query.text, result.hits, intent=query.intent, lang=query.lang)
-        llm_out = llm.generate(
-            prompt, lang=query.lang,
-            max_tokens=_max_tokens_for(query.intent, self.profile),
-            temperature=self.profile.llm_temperature,
-        )
-        # Agentic retrieval may have appended sources during generation (bridge runs the loop inside
-        # generate) — extend the marker map so a responsa/lesson that fetched its own sources keeps
-        # those [S#] citations (and prune_lesson_to_cited doesn't then delete the sections citing them).
-        for i, s in enumerate(getattr(llm_out, "fetched_sources", None) or [], len(marker_map) + 1):
+        # Run through the agentic ===NEED_SOURCES=== loop, same as _qa_answer: a lesson/responsa
+        # whose initial sources share only a surface word with a modern real-world question (e.g.
+        # "computer" retrieving a games sugya instead of the corpus's own electricity/muktzeh
+        # responsa — a real 2026-08-07 production case) can pull the right sources itself instead
+        # of declining outright from a single, unreviewable round.
+        raw, fetched = self._agentic_generate(prompt, query.lang, query.intent, llm)
+        from chavruta.llm.agentic import is_degrade_message
+        if is_degrade_message(raw):
+            llm_out = llm.generate(
+                prompt, lang=query.lang,
+                max_tokens=_max_tokens_for(query.intent, self.profile),
+                temperature=self.profile.llm_temperature,
+            )
+            raw, fetched = llm_out.text, getattr(llm_out, "fetched_sources", None) or []
+        # Agentically-fetched sources continue the S# numbering — extend the marker map so a
+        # responsa/lesson that fetched its own sources keeps those [S#] citations (and
+        # prune_lesson_to_cited doesn't then delete the sections citing them).
+        for i, s in enumerate(fetched or [], len(marker_map) + 1):
             marker_map.setdefault(f"S{i}", s)
-        text, citations, is_grounded = grounded.enforce_citations(llm_out.text, marker_map)
+        text, citations, is_grounded = grounded.enforce_citations(raw, marker_map)
         if plan.sections:
             plan = grounded.prune_lesson_to_cited(plan, citations)
         answer = Answer(text=text, citations=citations, grounded=is_grounded,
