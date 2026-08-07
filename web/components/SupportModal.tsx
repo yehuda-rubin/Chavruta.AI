@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import type { Lang } from "@/lib/types";
 import { tr } from "@/lib/i18n";
 import { Modal } from "./Modal";
@@ -39,6 +40,13 @@ export function SupportModal({ open, lang, onClose }: { open: boolean; lang: Lan
               {CONTACT_EMAIL}
             </a>
           </p>
+          <Link
+            href="/feedback"
+            onClick={onClose}
+            className="mt-2 inline-block text-sm text-tekhelet/80 font-semibold hover:text-tekhelet"
+          >
+            {tr(lang, "supFeedbackCta")}
+          </Link>
         </div>
 
         {/* Legal docs are their own pages (/terms, /privacy) — open in a new tab. */}

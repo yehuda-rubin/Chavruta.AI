@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import type { Lang, Session } from "@/lib/types";
 import { tr } from "@/lib/i18n";
 import { Icon } from "./Icon";
@@ -224,13 +223,6 @@ export function SessionsPanel({
           <Icon name="help" className="text-[19px]" />
           <span>{tr(lang, "supportTitle")}</span>
         </button>
-        <Link
-          href="/feedback"
-          className="w-full px-4 py-2.5 rounded-2xl glass text-ink/70 font-semibold text-sm hover:bg-white/60 hover:text-tekhelet transition flex items-center gap-2 cursor-pointer"
-        >
-          <Icon name="rate_review" className="text-[19px]" />
-          <span>{tr(lang, "feedbackLink")}</span>
-        </Link>
       </div>
     </aside>
   );
