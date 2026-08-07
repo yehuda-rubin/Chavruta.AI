@@ -295,10 +295,10 @@ export function ChatPane({
         <div ref={endRef} />
       </div>
 
-      <div className="p-5">
+      <div className="p-3 sm:p-5">
         <form
           onSubmit={submit}
-          className="max-w-2xl mx-auto flex items-center gap-2 glass rounded-full px-3 py-2 focus-within:ring-2 focus-within:ring-indigo/30"
+          className="max-w-2xl mx-auto flex items-center gap-2 glass rounded-full px-3 py-1.5 sm:py-2 focus-within:ring-2 focus-within:ring-indigo/30"
         >
           <IntentBar lang={lang} intent={intent} locked={locked} onPick={onPickIntent}
                     calendarModesEnabled={calendarModesEnabled} />
@@ -310,7 +310,7 @@ export function ChatPane({
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) submit(e);
             }}
-            className="flex-1 bg-transparent outline-none font-serif text-[16px] placeholder:text-ink/35 resize-none leading-relaxed max-h-32 py-1"
+            className="flex-1 bg-transparent outline-none font-serif text-[16px] placeholder:text-ink/35 resize-none leading-snug sm:leading-relaxed max-h-32 py-1"
             placeholder={tr(lang, "askPlaceholder")}
           />
           <button

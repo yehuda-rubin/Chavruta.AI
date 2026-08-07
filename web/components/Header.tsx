@@ -87,7 +87,7 @@ export function Header({
         </button>
         <button
           onClick={onToggleLang}
-          className="px-4 py-2 rounded-full glass text-ink/70 text-sm"
+          className="px-4 py-2 rounded-full glass text-ink/70 text-sm whitespace-nowrap"
           title="עברית · EN"
         >
           עברית · EN
