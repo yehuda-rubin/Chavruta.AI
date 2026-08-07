@@ -98,6 +98,10 @@ def send_email(to: str | list[str], subject: str, html: str, text: str | None = 
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
+                # Resend sits behind Cloudflare, which 403s (error 1010) urllib's default
+                # "Python-urllib/x.y" user agent as a banned browser signature — same issue
+                # documented for Novita in docs/DEV_MODELS.local.md. A browser-like UA passes.
+                "User-Agent": "curl/8.5.0",
             },
             data=json.dumps(body).encode("utf-8"),
         )
