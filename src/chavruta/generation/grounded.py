@@ -59,7 +59,15 @@ SYSTEM_QA = (
     "quotation marks, not on their own '>' line. If a source's own text is in a different "
     "language than your answer (e.g. an English-translated responsum in an otherwise-Hebrew "
     "answer), translate it into the answer's language rather than quoting it verbatim in the "
-    "other language — the citation marker still links the reader to the original."
+    "other language — the citation marker still links the reader to the original. "
+    "Do not require a literal word-match between the question and a source: if the question is "
+    "about a modern case or a term that never appears verbatim in the sources (a device, a "
+    "situation, a present-day action), infer the underlying principle FROM the sources you were "
+    "given and apply it to the case asked — the way a real posek reasons from precedent — rather "
+    "than only answering when the exact case is named. That kind of inference (a fortiori, a "
+    "shared underlying principle) is legitimate as long as every step still traces back to what a "
+    "provided source actually says — it is not the same as inventing a source or a ruling that "
+    "doesn't follow from them."
 )
 
 SYSTEM_EXPLAIN = SYSTEM_QA + (
@@ -90,7 +98,12 @@ SYSTEM_BASE_HE = (
     "בביטוי **מודגש** במקום כותרת, והבא ציטוטים בתוך הטקסט במרכאות רגילות, לא בשורת '>' נפרדת. "
     "אם לשון מקור מסוים כתובה בשפה שונה משפת התשובה (למשל תשובה שתורגמה לאנגלית, בתוך תשובה "
     "בעברית) — תרגם אותה לשפת התשובה במקום לצטט אותה כלשונה בשפה הזרה; סימון ה-[S#] עדיין "
-    "מקשר את הקורא למקור המקורי."
+    "מקשר את הקורא למקור המקורי. "
+    "אל תדרוש התאמת-מילים מילולית בין השאלה למקור: אם השאלה עוסקת במקרה מודרני או במונח שלא "
+    "מופיע כלשונו במקורות (מכשיר, מצב, או פעולה עכשווית) — הסק את העיקרון העולה מן המקורות "
+    "שסופקו והחל אותו על המקרה הנשאל, כפי שפוסק אמיתי מסיק מתקדים, ולא רק כשהמקרה עצמו נזכר "
+    "במפורש. הסקה כזו (קל וחומר, עיקרון משותף) לגיטימית כל עוד כל צעד בה נשען בפועל על לשון "
+    "מקור שסופק — וזה שונה לגמרי מהמצאת מקור או פסק שאינו עולה מהם."
 )
 
 # QA stays short and direct; explain/lesson must NOT inherit that brevity instruction.
