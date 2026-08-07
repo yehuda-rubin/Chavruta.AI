@@ -143,11 +143,6 @@ function Bubble({ lang, m, onPreview }: { lang: Lang; m: Message; onPreview: (f:
           </p>
         )}
         {hasFiles && <LessonFiles lang={lang} files={m.files!} onPreview={onPreview} />}
-        {m.caveats?.map((c, i) => (
-          <p key={i} className="mt-3 text-[13px] text-gold/90 bg-gold/5 rounded-xl px-3 py-2 leading-relaxed">
-            {c}
-          </p>
-        ))}
         {!hasFiles && tags.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-2">
             {tags.map((t) => (
