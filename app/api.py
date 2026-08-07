@@ -2675,7 +2675,13 @@ class FeedbackIn(BaseModel):
 
 # General comment/correction/suggestion channel — not tied to any specific message (unlike the
 # per-answer report above). Reviewed the same way, from /admin/feedback.
-@app.post("/feedback", status_code=201)
+#
+# Deliberately NOT bare "/feedback" — that path is also a real Next.js page (web/app/feedback/
+# page.tsx), and unlike /admin (where every API sub-route has a segment after it) this endpoint
+# and the page would otherwise collide on the exact same URL, distinguished only by HTTP method —
+# something nginx can't route on cleanly (see docker/nginx.conf). "/submit" gives the API its own
+# sub-path, same fix shape as /admin's dedicated block.
+@app.post("/feedback/submit", status_code=201)
 def submit_feedback(req: FeedbackIn, owner: str = Depends(current_owner)):
     text = req.text.strip()
     if not text:

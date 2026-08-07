@@ -237,7 +237,7 @@ export const api = {
 
   // General comment/correction/suggestion — not tied to any specific message (unlike reportMessage).
   submitFeedback: (text: string) =>
-    req<{ ok: boolean }>("/feedback", { method: "POST", body: JSON.stringify({ text }) }),
+    req<{ ok: boolean }>("/feedback/submit", { method: "POST", body: JSON.stringify({ text }) }),
 
   // BYOK: validate a candidate key/base-url/model BEFORE saving it (see setUserLLMKey et al.) — the
   // candidate key is sent explicitly as a header (overriding whatever is already saved) so this

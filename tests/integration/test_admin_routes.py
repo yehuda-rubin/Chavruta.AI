@@ -95,7 +95,7 @@ def test_submit_and_review_feedback(client, monkeypatch):
     h = {"Authorization": "Bearer k"}
     owner = client.get("/me", headers=h).json()["owner"]
 
-    submit = client.post("/feedback", headers=h, json={"text": "יש טעות בשיעור על פרשת נח"})
+    submit = client.post("/feedback/submit", headers=h, json={"text": "יש טעות בשיעור על פרשת נח"})
     assert submit.status_code == 201, submit.text
 
     monkeypatch.setenv("CHAVRUTA_ADMIN_OWNERS", owner)
@@ -111,7 +111,7 @@ def test_submit_and_review_feedback(client, monkeypatch):
 def test_submit_feedback_rejects_empty_text(client, monkeypatch):
     monkeypatch.setenv("CHAVRUTA_API_KEYS", "k")
     h = {"Authorization": "Bearer k"}
-    assert client.post("/feedback", headers=h, json={"text": "   "}).status_code == 422
+    assert client.post("/feedback/submit", headers=h, json={"text": "   "}).status_code == 422
 
 
 if __name__ == "__main__":
