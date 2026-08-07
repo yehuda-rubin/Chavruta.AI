@@ -27,7 +27,15 @@ SOURCE_REQUEST_INSTRUCTION = (
     "with ONLY a block that starts with the exact line '===NEED_SOURCES===' followed by 1–5 focused "
     "search queries, one per line (Hebrew or English, e.g. a sugya, a ref, a topic). The system will "
     "retrieve them and re-send this job with the extra sources appended. Prefer this over answering "
-    "from unrelated sources. When you have enough, write the real answer."
+    "from unrelated sources. When you have enough, write the real answer.\n"
+    "WATCH FOR A SPECIFIC TRAP: a question about a MODERN object or activity (a computer, phone, "
+    "car, appliance) can retrieve sources that only share a literal word with the question but "
+    "address a different, older concept (e.g. a question about playing on a computer retrieving a "
+    "sugya about games/jest in general, instead of the halachically operative issue — using an "
+    "electrical device). If the sources you were given don't address the real-world thing the "
+    "question is actually about, don't conclude 'no source' from them — first request sources on "
+    "the underlying halachic category the modern case actually raises (e.g. electricity/muktzeh/"
+    "writing for an electronic device, rather than the sugya sharing its surface wording)."
 )
 
 _NEED_RE = re.compile(r"^\s*={2,}\s*NEED[ _]SOURCES\s*={2,}\s*$", re.M | re.I)

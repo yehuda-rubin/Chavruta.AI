@@ -82,6 +82,34 @@ _HALACHA_PAT = re.compile(
     r"|הלכה\s+למעשה|כיצד\s+(נוהגים|יש\s+לנהוג|פוסקים)", re.IGNORECASE)
 
 
+# Modern technology terms whose halachically-operative concept shares no root with the surface
+# word. A question like "is it permitted to play on a COMPUTER on Shabbat" embeds close to the
+# literal שחוק (games/jest) sugyot — a real 2026-08-07 production case where that sugya was
+# retrieved instead of the corpus's own (excellent, directly on-point) B'Mareh HaBazak responsa on
+# electrical-device use, simply because "מחשב" and "חשמל" don't share a lexical root for the
+# embedding to latch onto. Bias retrieval toward the right concept WITHOUT touching what the model
+# sees (query.text stays untouched — this only appends to query.search_text, the embedding input).
+_TECH_TERMS: tuple[str, ...] = (
+    "מחשב", "מחשבים", "לפטופ", "טלפון", "סמארטפון", "סמרטפון", "נייד", "פלאפון",
+    "טאבלט", "אייפד", "אינטרנט", "וויפי", "מסך", "טלוויזיה", "מקרר", "מיקרוגל",
+    "מזגן", "מדיח", "רמקול", "בלוטות", "מצלמה", "רחפן", "אלקסה", "שעון חכם",
+    "אפליקציה", "קונסולה", "פלייסטיישן", "אקסבוקס",
+    "computer", "laptop", "smartphone", "tablet", "ipad", "internet", "wifi",
+    "screen", "television", "fridge", "refrigerator", "microwave",
+    "air conditioner", "dishwasher", "speaker", "bluetooth", "camera", "drone",
+    "alexa", "smartwatch", "app", "video game", "console", "playstation", "xbox",
+)
+_TECH_CONCEPT_EXPANSION = (
+    "חשמל שימוש במכשיר חשמלי הפעלת מעגל חשמלי מוקצה "
+    "electricity electrical device muktzeh"
+)
+
+
+def _has_tech_term(text: str) -> bool:
+    low = text.lower()
+    return any(_alias_hit(t, text, low) for t in _TECH_TERMS)
+
+
 # Lesson/prepare lead-ins to strip from the RETRIEVAL text (they pollute the embedding;
 # the intent is already known). The related-material breadth itself is desirable — this
 # only sharpens the central match so the sugya's core source surfaces for the opening.
@@ -187,6 +215,9 @@ class Router:
 
         if not query.search_text:
             query.search_text = retrieval_text(query.text)
+
+        if _has_tech_term(query.text) and _TECH_CONCEPT_EXPANSION not in query.search_text:
+            query.search_text = f"{query.search_text} {_TECH_CONCEPT_EXPANSION}"
 
         commentators = detect_commentators(query.text)
         if commentators and not query.commentator_ids:

@@ -94,6 +94,26 @@ def test_router_sets_search_text():
     assert q.search_text == "שניים אוחזין"
 
 
+@pytest.mark.parametrize("text", [
+    "האם מותר לשחק במחשב בשבת",
+    "אפשר להשתמש בטלפון בשבת?",
+    "is it permitted to use a computer on Shabbat",
+])
+def test_router_expands_tech_terms_toward_electricity_concept(text):
+    """Regression (2026-08-07 prod finding): a modern-device question embeds close to an unrelated
+    sugya sharing only a surface word (e.g. שחק/שחוק) and misses the corpus's own on-point
+    electricity/muktzeh responsa. search_text (embedding input only) must carry the concept bridge;
+    query.text (what the model sees) must stay untouched."""
+    q = Router().route(Query(text=text))
+    assert "חשמל" in q.search_text
+    assert q.text == text
+
+
+def test_router_does_not_expand_tech_terms_when_absent():
+    q = Router().route(Query(text="מה אומר רש\"י על בראשית א:א?"))
+    assert "חשמל" not in q.search_text
+
+
 # ── 5 more (Phase 1–3 hardening) ─────────────────────────────────────────────────
 
 def test_dedup_keeps_highest_score():
