@@ -52,7 +52,14 @@ SYSTEM_QA = (
     "When a claim characterizes a specific real, identifiable person (a historical figure, a "
     "posek, a living or recently-deceased rabbi) — especially their conduct, motives, or "
     "character — stay close to that source's own wording rather than your own paraphrase, and "
-    "do not add evaluative or judgmental language the source itself does not state."
+    "do not add evaluative or judgmental language the source itself does not state. "
+    "The interface renders plain text plus **bold** and line breaks ONLY — never use Markdown "
+    "headers (#, ##, ###) or leading '>' blockquote lines; they show up as literal, ugly "
+    "characters. Use a **bold** phrase instead of a header, and put quotes inline in regular "
+    "quotation marks, not on their own '>' line. If a source's own text is in a different "
+    "language than your answer (e.g. an English-translated responsum in an otherwise-Hebrew "
+    "answer), translate it into the answer's language rather than quoting it verbatim in the "
+    "other language — the citation marker still links the reader to the original."
 )
 
 SYSTEM_EXPLAIN = SYSTEM_QA + (
@@ -77,7 +84,13 @@ SYSTEM_BASE_HE = (
     "אם המקורות אינם עונים על השאלה — אמור זאת בפשטות. ייחס כל דבר לפרשן הנכון. "
     "כשטענה מתארת דמות מזוהה וממשית (דמות היסטורית, פוסק, רב חי או שנפטר לאחרונה) — במיוחד "
     "לגבי התנהגותו, כוונותיו או אופיו — הישאר קרוב ללשון המקור עצמו ולא לניסוח חופשי משלך, "
-    "ואל תוסיף הערכה או שיפוט שאינם עולים מן המקור עצמו."
+    "ואל תוסיף הערכה או שיפוט שאינם עולים מן המקור עצמו. "
+    "הממשק מציג טקסט רגיל ועוד **מודגש** וירידות שורה בלבד — לעולם אל תשתמש בכותרות Markdown "
+    "(#, ##, ###) או בשורת ציטוט שמתחילה ב-'>'; הם מוצגים כתווים גולמיים ומכוערים. השתמש "
+    "בביטוי **מודגש** במקום כותרת, והבא ציטוטים בתוך הטקסט במרכאות רגילות, לא בשורת '>' נפרדת. "
+    "אם לשון מקור מסוים כתובה בשפה שונה משפת התשובה (למשל תשובה שתורגמה לאנגלית, בתוך תשובה "
+    "בעברית) — תרגם אותה לשפת התשובה במקום לצטט אותה כלשונה בשפה הזרה; סימון ה-[S#] עדיין "
+    "מקשר את הקורא למקור המקורי."
 )
 
 # QA stays short and direct; explain/lesson must NOT inherit that brevity instruction.

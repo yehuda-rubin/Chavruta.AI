@@ -272,11 +272,13 @@ def test_fix_bleeding_sentences_keeps_original_on_llm_failure():
 
 def test_fix_bleeding_sentences_caps_the_number_of_fixes():
     llm = _FakeLLM(reply="תוקן")
-    # 4 bleeding sentences, one more than _MAX_BLEED_FIXES (3)
-    text = " ".join(f"משפט {w} מספר {i}." for i, w in enumerate(["AA", "BB", "CC", "DD"], 1))
+    # One more bleeding sentence than _MAX_BLEED_FIXES, whatever that's currently set to — the
+    # LAST word is the one expected to survive uncapped, regardless of the cap's exact value.
+    words = [f"W{i}" for i in range(api._MAX_BLEED_FIXES + 1)]
+    text = " ".join(f"משפט {w} מספר {i}." for i, w in enumerate(words, 1))
     out = api._fix_bleeding_sentences(text, True, llm)
     assert len(llm.calls) == api._MAX_BLEED_FIXES
-    assert "DD" in out                             # the 4th bleeding sentence was left untouched
+    assert words[-1] in out                        # the extra bleeding sentence was left untouched
 
 
 # Fix (caught live 2026-08-04): a bleeding sentence reached a real user unfixed

@@ -101,7 +101,11 @@ def _has_bleed(text: str) -> bool:
 
 
 _SENTENCE_SPLIT_RE = re.compile(r"([.!?]\s+|\n+)")   # captured so separators are preserved verbatim
-_MAX_BLEED_FIXES = 3    # bound worst-case latency/cost if something is very wrong with one answer
+_MAX_BLEED_FIXES = 8    # bound worst-case latency/cost if something is very wrong with one answer.
+# Was 3 — caught live (2026-08-07): a responsa answer with several long quoted English source
+# excerpts had 6 distinct bleeding sentences; the cap silently left half of them unfixed. A
+# lesson/responsa answer can legitimately quote many sources, so it needs more headroom than a
+# short QA turn ever did.
 
 _BLEED_FIX_SYSTEM = (
     "Rewrite the given Hebrew sentence so it contains NO English or other non-Hebrew words or "
