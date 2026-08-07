@@ -5,7 +5,7 @@ export const metadata = { title: "לא נמצא · חברותא AI" };
 // Branded 404 (replaces Next's default). Owns its scroll — the app body is overflow-hidden.
 export default function NotFound() {
   return (
-    <div dir="rtl" className="h-screen overflow-y-auto grid place-items-center p-6">
+    <div dir="rtl" className="h-dvh overflow-y-auto grid place-items-center p-6">
       <div className="glass rounded-[28px] p-10 w-full max-w-sm text-center flex flex-col gap-4">
         <div className="h-16 w-16 mx-auto rounded-3xl grad grid place-items-center text-white font-serif text-3xl font-black shadow-lg shadow-tekhelet/20">
           ח

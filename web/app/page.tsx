@@ -367,7 +367,7 @@ export default function Home() {
   // Auth gate (Supabase mode only). While the initial session check runs, show a minimal splash;
   // if no user, show the sign-in screen. In local mode auth.enabled is false and neither fires.
   if (auth.enabled && auth.loading) {
-    return <div className="min-h-screen grid place-items-center text-ink/50">{tr(lang, "authWorking")}</div>;
+    return <div className="min-h-dvh grid place-items-center text-ink/50">{tr(lang, "authWorking")}</div>;
   }
   if (auth.enabled && !auth.user) {
     return <SignIn lang={lang} />;
@@ -420,7 +420,7 @@ export default function Home() {
   );
 
   return (
-    <div className="flex flex-col h-screen">
+    <div className="flex flex-col h-dvh">
       <Header
         lang={lang}
         theme={effectiveDark ? "dark" : "light"}

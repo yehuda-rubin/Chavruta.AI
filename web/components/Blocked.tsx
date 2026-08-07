@@ -14,7 +14,7 @@ export function Blocked({ lang, until, reason }: { lang: Lang; until: string | n
     new Date(iso).toLocaleString(lang === "he" ? "he-IL" : "en-US",
       { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" });
   return (
-    <div className="min-h-screen grid place-items-center p-4">
+    <div className="min-h-dvh grid place-items-center p-4">
       <div className="glass rounded-[28px] p-8 w-full max-w-sm flex flex-col gap-4 text-center">
         <div className="h-14 w-14 mx-auto rounded-2xl bg-red-500/10 ring-1 ring-red-500/20 grid place-items-center text-red-500">
           <Icon name="block" className="text-[26px]" />

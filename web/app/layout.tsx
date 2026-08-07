@@ -46,7 +46,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   // lang/dir default to Hebrew-first RTL, matching the static UI. The client toggles them at runtime.
   return (
     <html lang="he" dir="rtl">
-      <body className="font-sans text-ink h-screen overflow-hidden">
+      {/* h-dvh (dynamic viewport height), not h-screen (100vh): on mobile Chrome, 100vh assumes the
+          address bar is hidden, so whenever it's actually showing (very common right after
+          navigating between chats), content anchored to a 100vh container overflows past the real
+          visible area and gets clipped — caught live 2026-08-07 as the header vanishing on mobile. */}
+      <body className="font-sans text-ink h-dvh overflow-hidden">
         {/* Inert unless Supabase env is set — then it gates the app behind sign-in. */}
         <AuthProvider>{children}</AuthProvider>
         <AccessibilityWidget />

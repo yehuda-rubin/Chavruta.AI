@@ -147,6 +147,14 @@ services:
   # It is also what appends the real client IP, which the API's per-IP rate limiter depends on
   # (CHAVRUTA_TRUSTED_PROXY_HOPS=1) — exposing `ui` directly instead would collapse every caller
   # into a single address.
+  #
+  # ⚠️ Deploying a nginx.conf change needs `docker compose up -d --force-recreate web`, NOT just
+  # `docker compose up -d web` (let alone rebuilding api/ui alone). `git pull` replaces this file via
+  # write-new+rename rather than editing in place, and a single-file bind mount on an ALREADY-RUNNING
+  # container can keep pointing at the old (now-unlinked) inode — `nginx -s reload` inside that
+  # container then faithfully reloads the STALE config. Caught live 2026-08-07: the routing fix for
+  # /feedback/submit tested as a 500 (nginx serving its own stale config, no route matched, request
+  # never reached FastAPI at all) until `--force-recreate` was used on `web` specifically.
   web:
     image: nginx:1.27-alpine
     container_name: chavruta-web

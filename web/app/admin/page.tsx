@@ -67,12 +67,12 @@ export default function AdminDashboard() {
   }
 
   if (meLoading) {
-    return <div className="h-screen grid place-items-center text-ink/50 text-sm">טוען…</div>;
+    return <div className="h-dvh grid place-items-center text-ink/50 text-sm">טוען…</div>;
   }
 
   if (!isAdmin) {
     return (
-      <div dir="rtl" className="h-screen grid place-items-center p-4">
+      <div dir="rtl" className="h-dvh grid place-items-center p-4">
         <div className="glass rounded-[28px] p-8 max-w-sm text-center flex flex-col gap-3">
           <h1 className="font-serif text-xl font-bold text-tekhelet">אין הרשאה</h1>
           <p className="text-sm text-ink/60">העמוד הזה זמין רק לחשבון המנהל.</p>
@@ -96,7 +96,7 @@ export default function AdminDashboard() {
   };
 
   return (
-    <div dir="rtl" className="h-screen overflow-y-auto py-10 px-4">
+    <div dir="rtl" className="h-dvh overflow-y-auto py-10 px-4">
       <div className="max-w-4xl mx-auto flex flex-col gap-5">
         <div className="flex items-center justify-between gap-3">
           <Link href="/" className="text-xs text-tekhelet/80 hover:text-tekhelet font-semibold inline-flex items-center gap-1">
