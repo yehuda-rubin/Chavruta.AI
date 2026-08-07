@@ -2185,6 +2185,19 @@ def admin_review_message(report_id: int, owner: str = Depends(_require_admin)):
     return {"ok": True}
 
 
+@app.get("/admin/feedback")
+def admin_feedback(reviewed: bool = False, limit: int = 100,
+                   owner: str = Depends(_require_admin)):
+    return db.list_feedback(reviewed=reviewed, limit=limit)
+
+
+@app.post("/admin/feedback/{feedback_id}/review")
+def admin_review_feedback(feedback_id: int, owner: str = Depends(_require_admin)):
+    if not db.mark_feedback_reviewed(feedback_id):
+        raise HTTPException(status_code=404, detail="feedback not found")
+    return {"ok": True}
+
+
 # ── Account deletion (scheduled, with a grace period + cancel) ────────────────
 class DeletionOut(BaseModel):
     deletion_scheduled_for: str | None = None
@@ -2653,6 +2666,23 @@ def report_message(message_id: int, req: ReportIn, owner: str = Depends(current_
         db.report_message(message_id, owner, req.reason)
     except ValueError:
         raise HTTPException(status_code=404, detail="message not found")
+    return {"ok": True}
+
+
+class FeedbackIn(BaseModel):
+    text: str
+
+
+# General comment/correction/suggestion channel — not tied to any specific message (unlike the
+# per-answer report above). Reviewed the same way, from /admin/feedback.
+@app.post("/feedback", status_code=201)
+def submit_feedback(req: FeedbackIn, owner: str = Depends(current_owner)):
+    text = req.text.strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="feedback text must not be empty")
+    if len(text) > 4000:
+        raise HTTPException(status_code=422, detail="feedback text too long")
+    db.submit_feedback(owner, text)
     return {"ok": True}
 
 

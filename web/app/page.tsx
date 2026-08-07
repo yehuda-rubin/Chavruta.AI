@@ -424,8 +424,6 @@ export default function Home() {
       <Header
         lang={lang}
         theme={effectiveDark ? "dark" : "light"}
-        dayLeft={me?.day_left ?? null}
-        weekLeft={me?.week_left ?? null}
         onToggleLang={() => setLang((l) => (l === "he" ? "en" : "he"))}
         onToggleTheme={() => setTheme(effectiveDark ? "light" : "dark")}
         onOpenSessions={() => setMobileSessions(true)}
@@ -551,6 +549,7 @@ export default function Home() {
         credits={me?.credits}
         cycle={me?.cycle}
         cancelAtPeriodEnd={me?.cancel_at_period_end}
+        dayLeft={me?.day_left ?? null}
         weekLeft={me?.week_left ?? null}
         lessonsLeft={me?.lessons_left ?? null}
         billingEnabled={billingEnabled}

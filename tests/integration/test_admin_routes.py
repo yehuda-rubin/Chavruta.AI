@@ -37,6 +37,8 @@ def test_non_admin_gets_404_on_every_admin_route(client, monkeypatch):
     assert client.get("/admin/usage-by-week", headers=h).status_code == 404
     assert client.get("/admin/flagged-messages", headers=h).status_code == 404
     assert client.post("/admin/flagged-messages/1/review", headers=h).status_code == 404
+    assert client.get("/admin/feedback", headers=h).status_code == 404
+    assert client.post("/admin/feedback/1/review", headers=h).status_code == 404
 
 
 def test_local_unauthenticated_caller_also_gets_404(client):
@@ -86,6 +88,30 @@ def test_admin_can_review_a_flagged_message(client, monkeypatch):
     assert review.status_code == 200 and review.json()["ok"] is True
 
     assert client.get("/admin/flagged-messages?reviewed=false", headers=h).json() == []
+
+
+def test_submit_and_review_feedback(client, monkeypatch):
+    monkeypatch.setenv("CHAVRUTA_API_KEYS", "k")
+    h = {"Authorization": "Bearer k"}
+    owner = client.get("/me", headers=h).json()["owner"]
+
+    submit = client.post("/feedback", headers=h, json={"text": "יש טעות בשיעור על פרשת נח"})
+    assert submit.status_code == 201, submit.text
+
+    monkeypatch.setenv("CHAVRUTA_ADMIN_OWNERS", owner)
+    unreviewed = client.get("/admin/feedback?reviewed=false", headers=h).json()
+    assert len(unreviewed) == 1
+    assert unreviewed[0]["owner_id"] == owner
+
+    review = client.post(f"/admin/feedback/{unreviewed[0]['id']}/review", headers=h)
+    assert review.status_code == 200 and review.json()["ok"] is True
+    assert client.get("/admin/feedback?reviewed=false", headers=h).json() == []
+
+
+def test_submit_feedback_rejects_empty_text(client, monkeypatch):
+    monkeypatch.setenv("CHAVRUTA_API_KEYS", "k")
+    h = {"Authorization": "Bearer k"}
+    assert client.post("/feedback", headers=h, json={"text": "   "}).status_code == 422
 
 
 if __name__ == "__main__":

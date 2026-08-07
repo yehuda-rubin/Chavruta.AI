@@ -6,6 +6,7 @@ import {
   api,
   type AdminOverview,
   type AdminWindow,
+  type FeedbackItem,
   type FlaggedMessage,
   type UsageByOwnerRow,
 } from "@/lib/api";
@@ -26,6 +27,7 @@ export default function AdminDashboard() {
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [byOwner, setByOwner] = useState<UsageByOwnerRow[] | null>(null);
   const [flagged, setFlagged] = useState<FlaggedMessage[] | null>(null);
+  const [feedback, setFeedback] = useState<FeedbackItem[] | null>(null);
   const [dataLoading, setDataLoading] = useState(true);
   const [error, setError] = useState(false);
 
@@ -42,11 +44,13 @@ export default function AdminDashboard() {
       api.admin.overview(since),
       api.admin.usageByOwner(since, 20),
       api.admin.flaggedMessages(false),
+      api.admin.feedback(false),
     ])
-      .then(([ov, owners, flags]) => {
+      .then(([ov, owners, flags, fb]) => {
         setOverview(ov);
         setByOwner(owners);
         setFlagged(flags);
+        setFeedback(fb);
       })
       .catch(() => setError(true))
       .finally(() => setDataLoading(false));
@@ -55,6 +59,11 @@ export default function AdminDashboard() {
   async function reviewMessage(reportId: number) {
     await api.admin.reviewMessage(reportId);
     setFlagged((cur) => (cur ? cur.filter((f) => f.id !== reportId) : cur));
+  }
+
+  async function reviewFeedback(feedbackId: number) {
+    await api.admin.reviewFeedback(feedbackId);
+    setFeedback((cur) => (cur ? cur.filter((f) => f.id !== feedbackId) : cur));
   }
 
   if (meLoading) {
@@ -189,6 +198,29 @@ export default function AdminDashboard() {
                 ))}
                 {(flagged ?? []).length === 0 && (
                   <p className="text-sm text-ink/40 text-center py-2">אין הודעות ממתינות לבדיקה 🎉</p>
+                )}
+              </div>
+            </section>
+
+            <section className="glass rounded-[24px] p-5 flex flex-col gap-3">
+              <h2 className="font-serif text-lg font-bold text-tekhelet">משוב והצעות</h2>
+              <div className="flex flex-col gap-2">
+                {(feedback ?? []).map((f) => (
+                  <div key={f.id} className="rounded-2xl bg-ink/5 p-3 flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between gap-2 text-xs text-ink/50">
+                      <span>{f.owner_id} · {new Date(f.created_at).toLocaleString("he-IL")}</span>
+                      <button
+                        onClick={() => reviewFeedback(f.id)}
+                        className="px-3 py-1 rounded-full glass text-tekhelet text-xs font-semibold hover:bg-tekhelet/10"
+                      >
+                        סומן כנבדק
+                      </button>
+                    </div>
+                    <p className="text-sm text-ink/80 whitespace-pre-line">{f.text}</p>
+                  </div>
+                ))}
+                {(feedback ?? []).length === 0 && (
+                  <p className="text-sm text-ink/40 text-center py-2">אין משוב ממתין לבדיקה 🎉</p>
                 )}
               </div>
             </section>

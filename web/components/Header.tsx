@@ -8,8 +8,6 @@ import { Icon } from "./Icon";
 export function Header({
   lang,
   theme,
-  dayLeft,
-  weekLeft,
   onToggleLang,
   onToggleTheme,
   onOpenSessions,
@@ -19,8 +17,6 @@ export function Header({
 }: {
   lang: Lang;
   theme: "light" | "dark";
-  dayLeft?: number | null;     // fraction of today's conversation allowance left; null = uncapped
-  weekLeft?: number | null;    // fraction of the week's left — the gauge shows whichever is lower
   onToggleLang: () => void;
   onToggleTheme: () => void;
   onOpenSessions?: () => void;  // mobile only — opens the sessions drawer
@@ -54,30 +50,9 @@ export function Header({
         <h1 className="font-serif text-2xl font-bold text-tekhelet hidden sm:block">{tr(lang, "brand")}</h1>
       </div>
       <div className="flex items-center gap-2">
-        {/* A gauge of whichever pool is closest to empty — no absolute figure, by design (see
-            app/plans.py). The daily fraction alone would read as "plenty left" right up to the
-            moment the WEEK runs out, which is the one thing a user needs to see coming. */}
-        {(() => {
-          const pools = [dayLeft, weekLeft].filter((v): v is number => typeof v === "number");
-          if (!pools.length) return null;
-          const left = Math.min(...pools);
-          const pct = Math.round(left * 100);
-          const tone = left === 0 ? "text-red-500" : left <= 0.15 ? "text-amber-600" : "text-ink/60";
-          const bar = left === 0 ? "bg-red-500" : left <= 0.15 ? "bg-amber-500" : "bg-tekhelet/60";
-          return (
-            <span
-              className={"px-3 py-1.5 rounded-full glass text-xs font-semibold flex items-center gap-2 " + tone}
-              title={`${tr(lang, "usageLeft")} — ${pct}%`}
-              role="img"
-              aria-label={`${tr(lang, "usageLeft")}: ${pct}%`}
-            >
-              <span className="hidden sm:inline">{tr(lang, "usageLeft")}</span>
-              <span className="w-12 h-1.5 rounded-full bg-ink/10 overflow-hidden" aria-hidden="true">
-                <span className={"block h-full rounded-full " + bar} style={{ width: `${pct}%` }} />
-              </span>
-            </span>
-          );
-        })()}
+        {/* Usage-remaining is Settings-only now (see SettingsModal) — the header stayed crowded at
+            narrow widths / larger accessibility text-scale, and this pill was the easiest thing to
+            move without losing the information anywhere. */}
         <button
           onClick={onOpenSources}
           className="lg:hidden h-10 w-10 rounded-full glass grid place-items-center text-tekhelet"

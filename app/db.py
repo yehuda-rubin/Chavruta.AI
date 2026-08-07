@@ -66,7 +66,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 25
+SCHEMA_VERSION = 26
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -132,6 +132,17 @@ def _migrate(conn: sqlite3.Connection) -> None:
             owner_id    TEXT NOT NULL,
             reason      TEXT,
             source      TEXT NOT NULL DEFAULT 'user',
+            reviewed_at TEXT,
+            created_at  TEXT NOT NULL
+        );
+
+        -- Free-text feedback/suggestions — a general channel, not tied to any specific message
+        -- (unlike message_reports, which is always about one flagged answer). reviewed_at is NULL
+        -- until an operator marks it handled, same backlog convention as message_reports.
+        CREATE TABLE IF NOT EXISTS feedback (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id    TEXT NOT NULL,
+            text        TEXT NOT NULL,
             reviewed_at TEXT,
             created_at  TEXT NOT NULL
         );
@@ -477,6 +488,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute(
                 "ALTER TABLE sessions ADD COLUMN excluded_from_review INTEGER NOT NULL DEFAULT 0")
 
+    # v26: feedback is a brand-new table (see CREATE TABLE IF NOT EXISTS above) — no ALTER needed.
+
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
 
@@ -818,6 +831,33 @@ def mark_report_reviewed(report_id: int) -> bool:
         cur = conn.execute(
             "UPDATE message_reports SET reviewed_at=? WHERE id=? AND reviewed_at IS NULL",
             (datetime.now(UTC).isoformat(), report_id))
+    return cur.rowcount > 0
+
+
+def submit_feedback(owner_id: str, text: str) -> None:
+    """Record a general comment/correction/suggestion — not tied to any specific message, unlike
+    report_message(). `text` is already trimmed/length-checked by the caller."""
+    with _tx(get_conn()) as conn:
+        conn.execute(
+            "INSERT INTO feedback (owner_id, text, created_at) VALUES (?,?,?)",
+            (owner_id, text, datetime.now(UTC).isoformat()),
+        )
+
+
+def list_feedback(reviewed: bool = False, limit: int = 100) -> list[dict[str, Any]]:
+    """Feedback awaiting operator review by default (reviewed=False); pass True for handled ones."""
+    return _agg(
+        "SELECT id, owner_id, text, created_at, reviewed_at FROM feedback "
+        "WHERE (reviewed_at IS NOT NULL) = ? ORDER BY created_at DESC LIMIT ?",
+        (int(reviewed), limit))
+
+
+def mark_feedback_reviewed(feedback_id: int) -> bool:
+    """Mark one feedback item as handled, so it drops off the default (unreviewed) backlog."""
+    with _tx(get_conn()) as conn:
+        cur = conn.execute(
+            "UPDATE feedback SET reviewed_at=? WHERE id=? AND reviewed_at IS NULL",
+            (datetime.now(UTC).isoformat(), feedback_id))
     return cur.rowcount > 0
 
 

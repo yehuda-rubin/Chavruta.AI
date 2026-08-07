@@ -235,6 +235,10 @@ export const api = {
       body: JSON.stringify({ reason }),
     }),
 
+  // General comment/correction/suggestion — not tied to any specific message (unlike reportMessage).
+  submitFeedback: (text: string) =>
+    req<{ ok: boolean }>("/feedback", { method: "POST", body: JSON.stringify({ text }) }),
+
   // BYOK: validate a candidate key/base-url/model BEFORE saving it (see setUserLLMKey et al.) — the
   // candidate key is sent explicitly as a header (overriding whatever is already saved) so this
   // checks what the user just typed, not necessarily what's persisted yet.
@@ -259,6 +263,10 @@ export const api = {
       req<FlaggedMessage[]>(`/admin/flagged-messages?reviewed=${reviewed}`),
     reviewMessage: (reportId: number) =>
       req<{ ok: boolean }>(`/admin/flagged-messages/${reportId}/review`, { method: "POST" }),
+    feedback: (reviewed = false) =>
+      req<FeedbackItem[]>(`/admin/feedback?reviewed=${reviewed}`),
+    reviewFeedback: (feedbackId: number) =>
+      req<{ ok: boolean }>(`/admin/feedback/${feedbackId}/review`, { method: "POST" }),
   },
 };
 
@@ -377,4 +385,12 @@ export interface FlaggedMessage {
   role: string;
   text: string;
   session_id: string;
+}
+
+export interface FeedbackItem {
+  id: number;
+  owner_id: string;
+  text: string;
+  reviewed_at: string | null;
+  created_at: string;
 }

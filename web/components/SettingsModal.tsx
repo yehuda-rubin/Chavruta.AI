@@ -244,19 +244,44 @@ function Seg<T extends string>({
 
 /** A remaining-allowance bar. Percentage only — the absolute figure behind it is deliberately not
  *  published (see app/plans.py), and a token count would mean nothing to a reader anyway. */
-function Gauge({ label, value }: { label: string; value: number }) {
+function Gauge({ label, value, caption }: { label: string; value: number; caption?: string }) {
   const pct = Math.round(value * 100);
   const bar = value === 0 ? "bg-red-500" : value <= 0.15 ? "bg-amber-500" : "bg-tekhelet/60";
   return (
-    <div className="flex items-center gap-2 text-xs text-ink/60">
-      <span className="w-20 shrink-0">{label}</span>
-      <span className="flex-1 h-1.5 rounded-full bg-ink/10 overflow-hidden"
-            role="img" aria-label={`${label}: ${pct}%`}>
-        <span className={"block h-full rounded-full " + bar} style={{ width: `${pct}%` }} />
-      </span>
-      <span className="w-9 text-end tabular-nums">{pct}%</span>
+    <div className="flex flex-col gap-0.5">
+      <div className="flex items-center gap-2 text-xs text-ink/60">
+        <span className="w-20 shrink-0">{label}</span>
+        <span className="flex-1 h-1.5 rounded-full bg-ink/10 overflow-hidden"
+              role="img" aria-label={`${label}: ${pct}%`}>
+          <span className={"block h-full rounded-full " + bar} style={{ width: `${pct}%` }} />
+        </span>
+        <span className="w-9 text-end tabular-nums">{pct}%</span>
+      </div>
+      {caption && <p className="text-[11px] text-ink/40 ps-[88px]">{caption}</p>}
     </div>
   );
+}
+
+/** How long until a quota pool next resets — daily pools at local midnight, weekly pools (including
+ *  the separate lessons pool, see app/plans.py) at the coming Sunday 00:00, matching the actual
+ *  reset moment the backend's own quota messages already describe ("It resets on Sunday" / "It
+ *  resets tomorrow" — app/api.py). Computed client-side since both are deterministic; no backend
+ *  field needed. */
+function resetsIn(kind: "day" | "week", lang: Lang): string {
+  const now = new Date();
+  const target = new Date(now);
+  if (kind === "day") {
+    target.setHours(24, 0, 0, 0);
+  } else {
+    const day = now.getDay(); // 0 = Sunday
+    target.setDate(now.getDate() + (day === 0 ? 7 : 7 - day));
+    target.setHours(0, 0, 0, 0);
+  }
+  const hours = Math.round((target.getTime() - now.getTime()) / 3_600_000);
+  if (hours < 1) return lang === "he" ? "מתאפס בקרוב" : "resets soon";
+  if (hours < 24) return lang === "he" ? `מתאפס בעוד כ-${hours} שעות` : `resets in about ${hours}h`;
+  const days = Math.round(hours / 24);
+  return lang === "he" ? `מתאפס בעוד כ-${days} ימים` : `resets in about ${days}d`;
 }
 
 /** Coupon entry. Keeps its own state so a failed attempt doesn't disturb the rest of settings; the
@@ -348,6 +373,7 @@ export function SettingsModal({
   credits,
   cycle,
   cancelAtPeriodEnd,
+  dayLeft,
   weekLeft,
   lessonsLeft,
   billingEnabled,
@@ -376,6 +402,7 @@ export function SettingsModal({
   credits?: number;                        // prepaid generations left
   cycle?: string;                          // 'monthly' | 'annual' | 'coupon'
   cancelAtPeriodEnd?: boolean;             // cancelled: access runs to planUntil, then lapses
+  dayLeft?: number | null;                 // fraction of today's conversation allowance left
   weekLeft?: number | null;                // fraction of this week's conversation allowance left
   lessonsLeft?: number | null;             // fraction of this week's lessons left (separate pool)
   billingEnabled?: boolean;
@@ -524,15 +551,20 @@ export function SettingsModal({
               )}
             </div>
 
-            {/* Two gauges because there are two independent pools: running out of conversation
-                usage does not touch lessons, and a single combined bar would imply it does. */}
-            {(typeof weekLeft === "number" || typeof lessonsLeft === "number") && (
-              <div className="mt-2 flex flex-col gap-1.5">
+            {/* Three gauges because there are up to three independent pools: daily and weekly
+                conversation usage, and lessons (its own pool — running out of conversation usage
+                does not touch it, and a single combined bar would imply it does). Moved here from
+                the main header entirely — see Header.tsx. */}
+            {(typeof dayLeft === "number" || typeof weekLeft === "number" || typeof lessonsLeft === "number") && (
+              <div className="mt-2 flex flex-col gap-2.5">
+                {typeof dayLeft === "number" && (
+                  <Gauge label={tr(lang, "usageLeftDay")} value={dayLeft} caption={resetsIn("day", lang)} />
+                )}
                 {typeof weekLeft === "number" && (
-                  <Gauge label={tr(lang, "usageLeft")} value={weekLeft} />
+                  <Gauge label={tr(lang, "usageLeftWeek")} value={weekLeft} caption={resetsIn("week", lang)} />
                 )}
                 {typeof lessonsLeft === "number" && (
-                  <Gauge label={tr(lang, "lessonsLeft")} value={lessonsLeft} />
+                  <Gauge label={tr(lang, "lessonsLeft")} value={lessonsLeft} caption={resetsIn("week", lang)} />
                 )}
               </div>
             )}
