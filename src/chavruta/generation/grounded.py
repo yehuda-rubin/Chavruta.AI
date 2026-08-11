@@ -274,7 +274,18 @@ _QUOTE_RE = re.compile(r'["“„״]([^"“”״\n]{12,})["”״]')  # gershayim
 # truncated fragment that then — correctly, but for the wrong reason — fails the corpus-containment
 # check: a real, faithfully-quoted source gets flagged as fabricated. _protect_abbreviations masks
 # those internal marks before matching so only genuine quote boundaries are treated as delimiters.
-_ABBREV_MARK_RE = re.compile(r'(?<=[א-ת])["״](?=[א-ת])')
+#
+# "between two Hebrew letters" alone is NOT enough, though, and getting that wrong cost the guard its
+# teeth. Hebrew attaches one-letter prefixes straight onto an opening quote — ש"אסור לטלטל…",
+# ו"היה אם שמוע…", ה"כלל הגדול…" — and that opening mark also sits between two Hebrew letters. Masking
+# it deleted the opening delimiter, so the whole quotation went invisible to the checker and a
+# FABRICATED quote written that way passed unflagged (reproduced 2026-08-11 on realistic halachic
+# prose). A false negative here is far worse than the false positive the mask was added for.
+#
+# What separates the two is what FOLLOWS the mark: an abbreviation ends almost immediately (רש"י,
+# רמב"ם, שו"ע, ב"ק — one letter, occasionally two), while a quotation runs on into a word. So the
+# mask applies only when at most two Hebrew letters remain before the next boundary.
+_ABBREV_MARK_RE = re.compile(r'(?<=[א-ת])["״](?=[א-ת]{1,2}(?![א-ת]))')
 
 
 def _protect_abbreviations(s: str) -> str:

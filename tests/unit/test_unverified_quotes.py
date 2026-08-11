@@ -42,3 +42,39 @@ def test_abbreviation_at_the_very_edge_of_the_quote_is_not_mistaken_for_a_bounda
     source = 'עיין בזה בשו"ע ובנושאי כליו לענין הדין הנדון כאן באריכות רבה ובפרטי הפרטים'
     answer = f'כתוב: "{source}" עיין שם.'
     assert unverified_quotes(answer, [_hit(source)]) == []
+
+
+# ── Fix (2026-08-11): the abbreviation mask was too broad and cost the guard its teeth ──────────
+# Hebrew attaches one-letter prefixes straight onto an opening quote — ש"אסור לטלטל…", ו"היה…".
+# That opening mark also sits between two Hebrew letters, so the mask deleted it, the quotation
+# became invisible to the checker, and a FABRICATED quote written that way passed unflagged. A
+# false negative here is far worse than the false positive the mask was added for.
+
+_PROSE = ('כתב השו"ע באו"ח סי\' ש"י ס"א, ובהג"ה של הרמ"א שם, וכן דעת המ"ב בשעה"צ, '
+          'שהעיקר הוא ש"{quote}", וכ"כ בכה"ח ובא"ר, ועיין בשו"ת חת"ס או"ח סי\' ק"ה.')
+_SOURCE = "אסור לטלטל מוקצה בשבת אלא לצורך גופו או מקומו"
+
+
+def test_fabricated_quote_attached_to_a_hebrew_prefix_is_caught():
+    """The regression: an invented quote opened with ש" inside dense abbreviation prose."""
+    fake = "מותר לטלטל כל מוקצה בשבת ללא הגבלה כלל"
+    flagged = unverified_quotes(_PROSE.format(quote=fake), [_hit(_SOURCE)])
+    assert flagged, "a fabricated quote opened with a ש\" prefix must not slip through"
+    assert fake[:20] in flagged[0]
+
+
+def test_faithful_quote_attached_to_a_hebrew_prefix_is_not_flagged():
+    """…and the same construction quoting the source correctly must stay silent."""
+    assert unverified_quotes(_PROSE.format(quote=_SOURCE), [_hit(_SOURCE)]) == []
+
+
+def test_dense_abbreviations_alone_still_produce_no_quote():
+    """The original false positive must stay fixed: abbreviations are not quote delimiters."""
+    text = 'רש"י ורמב"ם ושו"ע ובב"ק ותשפ"ה — אין כאן שום ציטוט, רק ראשי תיבות רבים.'
+    assert unverified_quotes(text, [_hit(_SOURCE)]) == []
+
+
+def test_two_letter_abbreviation_is_still_masked():
+    """Abbreviations ending in two letters (מהדו"ק-style) must remain masked, not read as quotes."""
+    text = 'עיין בשו"ע ובמהדו"ק ובאבה"ע לענין זה, ואין כאן ציטוט כלל ועיקר בכלל.'
+    assert unverified_quotes(text, [_hit(_SOURCE)]) == []
