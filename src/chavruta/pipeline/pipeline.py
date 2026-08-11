@@ -12,6 +12,7 @@ Grounding is enforced here and in `generation.grounded`, never trusted to the mo
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 
 from chavruta.config.profile import Profile
 from chavruta.corpus.links import LinkGraph
@@ -235,6 +236,40 @@ class ChavrutaPipeline:
             return self.router.route(request)
         return request
 
+    # A follow-up this short carries no topic of its own — it only means something relative to the
+    # turn before it. Longer messages are assumed to stand alone, so a genuine change of subject
+    # mid-conversation still retrieves on its own terms.
+    _FOLLOWUP_MAX_WORDS = 6
+
+    def _anchor_followup(self, query: Query, history) -> Query:
+        """Point a short follow-up's RETRIEVAL at the topic it's following up on.
+
+        Caught live (2026-08-11): a user asked about a Rashi/Tosafot dispute, got a "not in the
+        corpus" answer, and replied "תנסה". Retrieval embedded the bare word, matched the corpus's
+        sources about the CONCEPT of a test (Job 4:2, the Akeidah, 'מה תנסון'), and the model duly
+        explained what ניסיון means — instead of retrying the question. `_run_chavruta` already
+        anchors its retrieval this way; nothing else did.
+
+        Only `search_text` (the embedding input) is touched. `query.text` — what the model reads —
+        stays exactly as the user typed it, so this steers retrieval without putting words in the
+        user's mouth.
+        """
+        if not history:
+            return query
+        current = (query.text or "").strip()
+        if len(current.split()) > self._FOLLOWUP_MAX_WORDS:
+            return query
+        prior = [t for h in history
+                 if getattr(h, "role", "user") == "user"
+                 and (t := (getattr(h, "text", "") or "").strip()) and t != current]
+        if not prior:
+            return query
+        base = (query.search_text or current).strip()
+        anchor = prior[-1]
+        if anchor in base:
+            return query
+        return replace(query, search_text=f"{anchor} {base}".strip())
+
     def _agentic_selffetch(self, query: Query, history, llm) -> Answer | None:
         """When retrieval returned NOTHING, give the model one chance to pull its own sources via the
         agentic ===NEED_SOURCES=== loop (the same mechanism the lesson/chavruta paths use). Returns a
@@ -306,7 +341,7 @@ class ChavrutaPipeline:
         override (BYOK — app/api.py::_byok_llm) so a single turn is billed to the caller's own
         provider key instead, without touching the pipeline's shared state."""
         llm = llm or self.llm
-        query = self._resolve_query(request)
+        query = self._anchor_followup(self._resolve_query(request), history)
 
         # Out-of-corpus work honesty (spec edge case): the question explicitly asks about
         # a body of work that is not loaded → say so; never substitute similar-sounding
@@ -341,6 +376,16 @@ class ChavrutaPipeline:
             present = {h.commentator_id for h in result.hits if h.commentator_id}
             missing = [c for c in query.commentator_ids if c not in present]
             if missing and len(missing) == len(query.commentator_ids):
+                # NONE of the named commentators came back — but a thematic question ("the dispute
+                # between Rashi and Tosafot about building the Beit HaMikdash") can miss them simply
+                # because the first retrieval round scored other material higher, not because the
+                # corpus lacks them. Declining here without letting the model search for itself is
+                # the system deciding on its behalf; the self-fetch loop is exactly the mechanism for
+                # this, and it was previously reachable only when retrieval came back completely
+                # empty. If it still finds nothing, the honest answer below is unchanged.
+                selffetched = self._agentic_selffetch(query, history, llm)
+                if selffetched is not None:
+                    return selffetched
                 return grounded.no_commentator_answer(query.lang, missing, query.intent)
             if missing:
                 missing_note = grounded.missing_commentator_note(query.lang, missing)

@@ -1497,3 +1497,93 @@ def test_wants_full_lesson_defaults_false_on_llm_failure():
 def test_wants_full_lesson_defaults_false_on_an_unclear_reply():
     llm = _FakeLLM(reply="אולי, קשה לדעת")
     assert api._wants_full_lesson("שאלה כלשהי", llm=llm) is False
+
+
+# ── Fix (caught live 2026-08-11, from a real chat): two failures in one exchange ──────────────
+# The user asked for the Rashi/Tosafot dispute about building the Beit HaMikdash and got
+# "no Rashi commentary found here"; they replied "תנסה" and were served an essay on what the word
+# נסה means in Tanakh. Two separate defects, both of them the system deciding on the model's behalf.
+
+def test_named_commentators_missing_triggers_selffetch_before_declining():
+    """A thematic explain/compare question can miss its named commentators simply because the first
+    retrieval round scored other material higher. The model must get to search for them itself
+    before the pipeline answers "not in the corpus" — the self-fetch loop used to be reachable only
+    when retrieval came back COMPLETELY empty, so a non-empty-but-missing round declined outright."""
+    from chavruta.config.profile import Profile
+    from chavruta.corpus.schema import Intent, Query
+    from chavruta.llm.base import SourceBlock
+    from chavruta.retrieval.base import RankedHit, RetrievalResult
+
+    # Retrieval returns real hits, but none of them are Rashi or Tosafot.
+    other = RankedHit(chunk_id="x", ref="Middot.1.1", text="הר הבית", score=0.4, commentator_id=None)
+    fetched = SourceBlock(marker="", ref="Rashi on Sukkah 41a", commentator_id="rashi",
+                          text="בנין העתיד לבא")
+
+    class _Retriever:
+        def retrieve(self, q, top_k):
+            return RetrievalResult(hits=[other], anchor_refs=[], is_empty=False)
+
+    class _LLM:
+        profile = "cloud"; model_id = "fake"
+        source_fetcher = staticmethod(lambda qs: [fetched])
+
+        def request(self, body_md, *, lang="he", token_budget=None):
+            return ("רש\"י סובר שהמקדש העתידי יורד בנוי [S1]", [fetched])
+
+    prof = Profile(name="cloud", collection="c", top_k=5, relevance_threshold=0.0)
+    pipeline = ChavrutaPipeline.from_backends(prof, embedding=None, store=None, llm=_LLM(),
+                                              retriever=_Retriever(),
+                                              router=SimpleNamespace(route=lambda q: q))
+    q = Query(text="מה המחלוקת בין רש\"י לתוספות", lang="he", intent=Intent.COMPARE,
+              commentator_ids=["rashi", "tosafot"])
+    ans = pipeline.ask(q)
+    assert ans.grounded is True and ans.no_source is False
+    assert any(c.ref == "Rashi on Sukkah 41a" for c in ans.citations)
+
+
+def test_short_followup_retrieves_on_the_previous_topic():
+    """'תנסה' has no topic of its own: retrieval used to embed the bare word and match the corpus's
+    sources about the CONCEPT of a test, so the model explained what ניסיון means instead of
+    retrying. The follow-up's search_text must carry the previous question; the text the MODEL sees
+    must stay exactly what the user typed."""
+    from chavruta.config.profile import Profile
+    from chavruta.corpus.schema import Intent, Query, Turn
+
+    prof = Profile(name="cloud", collection="c", top_k=5, relevance_threshold=0.0)
+    pipeline = ChavrutaPipeline.from_backends(prof, embedding=None, store=None, llm=None,
+                                              retriever=SimpleNamespace(),
+                                              router=SimpleNamespace(route=lambda q: q))
+    prev = "מה המחלוקת בין רש\"י לתוספות לגבי בניית בית המקדש"
+    q = Query(text="תנסה", lang="he", intent=Intent.QA, search_text="תנסה")
+    out = pipeline._anchor_followup(q, [Turn(role="user", text=prev),
+                                        Turn(role="assistant", text="לא נמצא בקורפוס")])
+    assert prev in out.search_text          # retrieval now sees the actual topic
+    assert out.text == "תנסה"               # the model still reads what the user wrote
+
+
+def test_long_followup_is_not_anchored():
+    """A full question mid-conversation stands on its own — anchoring it would drag the previous
+    topic into a deliberate change of subject."""
+    from chavruta.config.profile import Profile
+    from chavruta.corpus.schema import Intent, Query, Turn
+
+    prof = Profile(name="cloud", collection="c", top_k=5, relevance_threshold=0.0)
+    pipeline = ChavrutaPipeline.from_backends(prof, embedding=None, store=None, llm=None,
+                                              retriever=SimpleNamespace(),
+                                              router=SimpleNamespace(route=lambda q: q))
+    new_q = "עכשיו שאלה אחרת לגמרי על הלכות מוקצה בשבת ומה אומר השולחן ערוך"
+    q = Query(text=new_q, lang="he", intent=Intent.QA, search_text=new_q)
+    out = pipeline._anchor_followup(q, [Turn(role="user", text="שאלה קודמת על בית המקדש")])
+    assert out.search_text == new_q
+
+
+def test_followup_without_history_is_unchanged():
+    from chavruta.config.profile import Profile
+    from chavruta.corpus.schema import Intent, Query
+
+    prof = Profile(name="cloud", collection="c", top_k=5, relevance_threshold=0.0)
+    pipeline = ChavrutaPipeline.from_backends(prof, embedding=None, store=None, llm=None,
+                                              retriever=SimpleNamespace(),
+                                              router=SimpleNamespace(route=lambda q: q))
+    q = Query(text="תנסה", lang="he", intent=Intent.QA, search_text="תנסה")
+    assert pipeline._anchor_followup(q, None).search_text == "תנסה"
