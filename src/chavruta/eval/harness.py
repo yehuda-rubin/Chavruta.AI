@@ -88,6 +88,8 @@ class EvalReport:
     n_unanswerable: int = 0
     fabricated_quotes: int = 0       # answers quoting text found in no retrieved source
     n_quote_checked: int = 0         # answers the quote check actually ran on (generation only)
+    expected_found: int = 0          # expected refs that DID surface, summed over items
+    expected_total: int = 0          # expected refs asked for, summed over items
     failures: list[dict] = field(default_factory=list)
     seconds: float = 0.0
 
@@ -104,6 +106,16 @@ class EvalReport:
         return self.no_source_honest / self.n_unanswerable if self.n_unanswerable else 1.0
 
     @property
+    def source_coverage(self) -> float:
+        """Of every source an item expected, what share actually surfaced.
+
+        `retrieval_at_k` answers "did we find something?" and saturates at 1.0 while half the
+        relevant material is still missing; this answers "did we find it ALL?". The two diverging is
+        the signature of a system whose answers are accurate but under-sourced.
+        """
+        return self.expected_found / self.expected_total if self.expected_total else 0.0
+
+    @property
     def quote_faithfulness(self) -> float:
         """Share of generated answers whose every verbatim quote was found in a retrieved source.
         1.0 when nothing was checked (retrieval-only runs), so it never reads as a failure."""
@@ -116,6 +128,7 @@ class EvalReport:
             "dataset": self.dataset, "profile": self.profile, "top_k": self.top_k,
             "n_items": self.n_items,
             "retrieval_at_k": round(self.retrieval_at_k, 4),
+            "source_coverage": round(self.source_coverage, 4),
             "grounding_rate": round(self.grounding_rate, 4),
             "honesty_rate": round(self.honesty_rate, 4),
             "quote_faithfulness": round(self.quote_faithfulness, 4),
@@ -149,12 +162,24 @@ def evaluate(pipeline, items: list[EvaluationItem], *, dataset_name: str = "",
         if item.expected_refs:
             report.n_answerable += 1
             got_refs = [h.ref for h in result.hits] + (result.anchor_refs or [])
-            hit = any(_ref_matches(e, g) for e in item.expected_refs for g in got_refs)
+            found = [e for e in item.expected_refs if any(_ref_matches(e, g) for g in got_refs)]
+            hit = bool(found)
             if hit:
                 report.retrieval_hits += 1
             else:
                 report.failures.append({"qid": item.qid, "kind": "retrieval",
                                         "expected": item.expected_refs, "got": got_refs[:8]})
+            # COVERAGE, as distinct from the hit above: retrieval_at_k asks "did anything expected
+            # show up?", which an item listing five sources passes on the strength of one. That
+            # hides the failure mode the answers actually have once they're accurate — the sources
+            # that were relevant and simply never came (observed by the operator 2026-08-11:
+            # "the answers are near-perfect; what may still be missing is all the related sources").
+            report.expected_total += len(item.expected_refs)
+            report.expected_found += len(found)
+            missing = [e for e in item.expected_refs if e not in found]
+            if missing and hit:      # a partial hit — invisible in retrieval_at_k by construction
+                report.failures.append({"qid": item.qid, "kind": "coverage",
+                                        "missing": missing, "found": found})
 
             if retrieval_only:
                 if hit:
