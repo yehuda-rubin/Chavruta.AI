@@ -1414,6 +1414,23 @@ def set_coupon_active(code: str, active: bool) -> bool:
         return cur.rowcount > 0
 
 
+def delete_coupon(code: str) -> bool:
+    """Drop a coupon row outright. Returns True if a row was removed.
+
+    Only safe for a code with NO redemptions — `coupon_redemptions` records who was granted what and
+    references the code, so deleting a used one would leave that history pointing at nothing. The
+    caller (admin_delete_coupon) checks redeemed_count and falls back to set_coupon_active(False);
+    the guard is repeated here so a future caller can't quietly lose the audit trail.
+    """
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        used = conn.execute("SELECT 1 FROM coupon_redemptions WHERE code=? LIMIT 1",
+                            (code,)).fetchone()
+        if used:
+            return False
+        return conn.execute("DELETE FROM coupons WHERE code=?", (code,)).rowcount > 0
+
+
 def list_redemptions(code: str | None = None) -> list[dict[str, Any]]:
     conn = get_conn()
     sql = "SELECT * FROM coupon_redemptions"

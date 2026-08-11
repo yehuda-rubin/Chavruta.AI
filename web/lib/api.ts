@@ -267,8 +267,62 @@ export const api = {
       req<FeedbackItem[]>(`/admin/feedback?reviewed=${reviewed}`),
     reviewFeedback: (feedbackId: number) =>
       req<{ ok: boolean }>(`/admin/feedback/${feedbackId}/review`, { method: "POST" }),
+    coupons: () => req<Coupon[]>("/admin/coupons"),
+    createCoupon: (body: CouponIn) =>
+      req<{ code: string }>("/admin/coupons", { method: "POST", body: JSON.stringify(body) }),
+    // Revokes; also removes the row when the code was never redeemed (`deleted` says which).
+    deleteCoupon: (code: string) =>
+      req<{ ok: boolean; deleted: boolean }>(`/admin/coupons/${encodeURIComponent(code)}`,
+                                             { method: "DELETE" }),
+    grant: (body: GrantIn) =>
+      req<GrantResult>("/admin/grant", { method: "POST", body: JSON.stringify(body) }),
   },
 };
+
+export interface Coupon {
+  code: string;
+  kind: "plan" | "credits";
+  plan: string | null;
+  days: number | null;
+  credits: number | null;
+  max_redemptions: number;      // 0 = unlimited
+  redeemed_count: number;
+  expires_at: string | null;    // null = never
+  active: number;               // 0 = revoked
+  note: string | null;
+  created_at: string;
+}
+
+export interface CouponIn {
+  kind: "plan" | "credits";
+  plan?: string;
+  days?: number;
+  credits?: number;
+  code?: string;                // blank → generated
+  max_redemptions?: number;
+  expires_in_days?: number | null;
+  note?: string;
+}
+
+export interface GrantIn {
+  owner_id: string;
+  kind: "plan" | "credits";
+  plan?: string;
+  days?: number;
+  credits?: number;
+  note?: string;
+}
+
+export interface GrantResult {
+  ok: boolean;
+  code: string;                 // the single-use code minted to carry the grant
+  kind: string;
+  mode: string;                 // grant | discount | boost | credits
+  plan: string | null;
+  until: string | null;
+  credits_added: number;
+  credits_balance: number;
+}
 
 // Account + today's free-tier quota (GET /me). daily_quota / remaining are null when unlimited
 // (the local user, or quota disabled) — the UI then shows no counter.

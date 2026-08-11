@@ -2250,6 +2250,107 @@ def admin_review_feedback(feedback_id: int, owner: str = Depends(_require_admin)
     return {"ok": True}
 
 
+# ── Coupons (operator) ────────────────────────────────────────────────────────
+# Issuing used to be CLI-only (scripts/manage_coupons.py). These routes put the same operations
+# behind the admin gate so codes can be minted and pulled from the panel — the CLI still works and
+# calls the exact same app/coupons.py functions, so neither path can drift from the other.
+class CouponIn(BaseModel):
+    kind: str = "plan"                     # 'plan' | 'credits'
+    plan: str = "pro"                      # kind='plan'
+    days: int = 30                         # kind='plan'
+    credits: int = 0                       # kind='credits'
+    code: str = ""                         # blank → a generated ~59-bit code
+    max_redemptions: int = 1               # 0 = unlimited
+    expires_in_days: int | None = None
+    note: str = ""
+
+
+class GrantIn(BaseModel):
+    owner_id: str
+    kind: str = "plan"
+    plan: str = "pro"
+    days: int = 30
+    credits: int = 0
+    note: str = ""
+
+
+@app.get("/admin/coupons")
+def admin_list_coupons(owner: str = Depends(_require_admin)):
+    return db.list_coupons()
+
+
+@app.post("/admin/coupons")
+def admin_create_coupon(req: CouponIn, owner: str = Depends(_require_admin)):
+    try:
+        if req.kind == "credits":
+            code = coupons.issue_credit_coupon(
+                credits=req.credits, code=req.code, max_redemptions=req.max_redemptions,
+                expires_in_days=req.expires_in_days, note=req.note)
+        else:
+            code = coupons.issue_plan_coupon(
+                plan=req.plan, days=req.days, code=req.code,
+                max_redemptions=req.max_redemptions, expires_in_days=req.expires_in_days,
+                note=req.note)
+    except ValueError as exc:                      # unknown plan, bad code, duplicate, non-positive
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _log.info("admin %s issued coupon %s (%s)", owner, code, req.kind)
+    return {"code": code}
+
+
+@app.delete("/admin/coupons/{code}")
+def admin_delete_coupon(code: str, owner: str = Depends(_require_admin)):
+    """Revoke a code — and drop the row entirely when nothing was ever redeemed on it.
+
+    A code with redemptions is kept and merely deactivated: `coupon_redemptions` records who was
+    granted what, and deleting the coupon would leave that history pointing at nothing. A code that
+    was never used has no history to protect, so a mistyped or superseded one can just go.
+    """
+    stored = coupons.normalize(code)
+    c = db.get_coupon(stored)
+    if c is None:
+        raise HTTPException(status_code=404, detail="coupon not found")
+    if int(c.get("redeemed_count") or 0) == 0 and db.delete_coupon(stored):
+        _log.info("admin %s deleted unused coupon %s", owner, stored)
+        return {"ok": True, "deleted": True}
+    db.set_coupon_active(stored, False)
+    _log.info("admin %s revoked coupon %s (kept: %s redemptions)", owner, stored,
+              c.get("redeemed_count"))
+    return {"ok": True, "deleted": False}
+
+
+@app.post("/admin/grant")
+def admin_grant(req: GrantIn, owner: str = Depends(_require_admin)):
+    """Give a plan or credits straight to an account by its owner id.
+
+    Implemented as "mint a single-use code and redeem it for them" rather than writing the plan
+    directly, so it goes through the one code path that already knows how a grant must behave on an
+    account with a live PayPlus subscription — never overwriting plan/provider_ref/current_period_end
+    (see app/coupons.py::_redeem_against_active_subscription). It also leaves the same audit trail a
+    normal redemption does: the coupon row plus a redemption row naming this account.
+    """
+    target = (req.owner_id or "").strip()
+    if not target or target == "local":
+        raise HTTPException(status_code=422, detail="owner_id is required")
+    note = req.note or f"admin grant by {owner}"
+    try:
+        if req.kind == "credits":
+            code = coupons.issue_credit_coupon(credits=req.credits, max_redemptions=1, note=note)
+        else:
+            code = coupons.issue_plan_coupon(plan=req.plan, days=req.days, max_redemptions=1,
+                                             note=note)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
+        res = coupons.redeem(target, code, bypass_throttle=True)
+    except coupons.RedeemError as exc:
+        # The code was minted but not applied (e.g. 'downgrade' — the account already has more than
+        # this grant would give). Pull it so a dangling single-use code isn't left lying around.
+        db.set_coupon_active(coupons.normalize(code), False)
+        raise HTTPException(status_code=422, detail=exc.reason) from exc
+    _log.info("admin %s granted %s to %s via %s", owner, req.kind, target, code)
+    return {"ok": True, "code": code, **res}
+
+
 # ── Account deletion (scheduled, with a grace period + cancel) ────────────────
 class DeletionOut(BaseModel):
     deletion_scheduled_for: str | None = None

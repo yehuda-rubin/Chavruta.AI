@@ -129,7 +129,8 @@ class RedeemError(Exception):
         self.reason = reason
 
 
-def redeem(owner_id: str, code: str, *, now: datetime | None = None) -> dict:
+def redeem(owner_id: str, code: str, *, now: datetime | None = None,
+           bypass_throttle: bool = False) -> dict:
     """Apply a coupon to an account. Returns a summary of what was granted, with a `mode` of
     "grant" (time-boxed plan, no active paid subscription), "discount" (ILS credit rebated off the
     next PayPlus charge(s), because the coupon's plan is at or below what's already being paid for),
@@ -138,13 +139,18 @@ def redeem(owner_id: str, code: str, *, now: datetime | None = None) -> dict:
 
     Raises RedeemError with one of: throttled · invalid · already_redeemed · exhausted · expired ·
     downgrade.
+
+    `bypass_throttle` is for the operator grant path (/admin/grant), which issues a fresh code and
+    redeems it on the account's behalf. The throttle exists because redemption is a public guessing
+    target; an admin handing out access is not guessing, and an operator granting to several accounts
+    in a row would otherwise lock themselves out after ten.
     """
     if owner_id == "local":
         raise RedeemError("sign_in_required")
     stored = normalize(code)
     if not _VALID.match(stored):
         raise RedeemError("invalid")
-    if _throttled(owner_id):
+    if not bypass_throttle and _throttled(owner_id):
         raise RedeemError("throttled")
 
     now = now or datetime.now(UTC)

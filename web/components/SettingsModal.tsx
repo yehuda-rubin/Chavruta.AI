@@ -412,6 +412,7 @@ export function SettingsModal({
   byokSupported?: boolean;   // /me: whether this deployment's backend accepts a provider key at all
 }) {
   const auth = useAuth();
+  const [idCopied, setIdCopied] = useState(false);
   const fmtDate = (iso: string) =>
     new Date(iso).toLocaleDateString(lang === "he" ? "he-IL" : "en-US",
       { year: "numeric", month: "long", day: "numeric" });
@@ -474,7 +475,25 @@ export function SettingsModal({
         {auth.enabled && auth.user && (
           <Field label={tr(lang, "account")}>
             <div className="flex items-center justify-between gap-2">
-              <span className="text-xs text-ink/60 truncate">{auth.user.email}</span>
+              <div className="min-w-0 flex flex-col gap-0.5">
+                <span className="text-xs text-ink/60 truncate">{auth.user.email}</span>
+                {/* The account id, under the email. It's what support needs to identify an account
+                    (grants and coupons are applied by this id, never by email), so it has to be
+                    readable and copyable by the person being helped. Click copies it. */}
+                <button
+                  type="button"
+                  title={tr(lang, "copyUserId")}
+                  onClick={() => {
+                    navigator.clipboard?.writeText(auth.user!.id);
+                    setIdCopied(true);
+                    setTimeout(() => setIdCopied(false), 1500);
+                  }}
+                  className="text-[11px] font-mono text-ink/40 hover:text-tekhelet truncate text-start transition"
+                  dir="ltr"
+                >
+                  {idCopied ? tr(lang, "copied") : auth.user.id}
+                </button>
+              </div>
               <button
                 onClick={() => auth.signOut()}
                 className="px-4 py-2 rounded-2xl glass text-red-500 font-semibold text-sm hover:bg-red-500/10 transition shrink-0"
