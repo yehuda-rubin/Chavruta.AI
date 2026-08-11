@@ -97,3 +97,23 @@ def test_talmud_title_never_falls_through_to_raw_numbers():
     for ref, raw in [("Rashash_on_Gittin.61.3", "61:3"), ("Bava_Metzia.3.1", "3:1")]:
         out = hebrew_display_ref(ref)
         assert out is None or raw not in out
+
+
+# ── Yerushalmi: same Sefaria category as Bavli, different storage ────────────────
+# The amud-linear conversion is a property of Talmud BAVLI in this corpus. Sefaria files the
+# Yerushalmi under "Talmud" too, so refusing the whole category left every Jerusalem Talmud source
+# rendered in English on the source sheet (reported 2026-08-12 from a real lesson).
+
+@pytest.mark.parametrize("ref,expected", [
+    ("Jerusalem_Talmud_Bava_Metzia.1.1.1", "תלמוד ירושלמי בבא מציעא 1:1:1"),
+    ("Penei_Moshe_on_Jerusalem_Talmud_Bava_Metzia.1.1.1.1",
+     "פני משה על תלמוד ירושלמי בבא מציעא 1:1:1:1"),
+])
+def test_yerushalmi_renders_in_hebrew_without_daf_math(ref, expected):
+    assert hebrew_display_ref(ref) == expected
+
+
+def test_bavli_still_gets_its_daf_conversion():
+    """The guard must stay in place for the corner it was built for."""
+    assert hebrew_display_ref("Bava_Metzia.3.1") == "בבא מציעא 2."
+    assert hebrew_display_ref("Rashi_on_Bava_Metzia.3.1.1") == 'רש"י על בבא מציעא 2.'

@@ -203,9 +203,17 @@ class ChavrutaPipeline:
                     ref = getattr(h, "ref", "") or ""
                     if ref and ref not in seen:
                         seen.add(ref)
+                        # Carry the display/rights fields too — a self-fetched source is rendered on
+                        # the source sheet exactly like a first-round hit, and dropping them there is
+                        # what left those sheets bilingual and licence-less.
                         out.append(SourceBlock(marker="", ref=ref,
                                                commentator_id=getattr(h, "commentator_id", None),
-                                               text=getattr(h, "text", "") or ""))
+                                               text=getattr(h, "text", "") or "",
+                                               text_he=getattr(h, "text_he", "") or "",
+                                               text_en=getattr(h, "text_en", "") or "",
+                                               deep_link=getattr(h, "deep_link", "") or "",
+                                               license=getattr(h, "license", "") or "",
+                                               version_title=getattr(h, "version_title", "") or ""))
                 if len(out) >= 24:
                     break
             return out[:24]

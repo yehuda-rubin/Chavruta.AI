@@ -56,3 +56,38 @@ def test_unknown_license_is_named_rather_than_left_blank():
 
 def test_empty_selection_yields_no_table():
     assert _license_table([], he=True) == ""
+
+
+# ── Sources the agentic loop fetched must render like any other ──────────────────
+# They arrive as SourceBlock, not RankedHit. SourceBlock used to carry only marker/ref/
+# commentator_id/text, so a self-fetched source fell back to the combined Hebrew+English blob and
+# had no licence — and with ~75% of requests reaching a second retrieval round, that was most
+# sources on most sheets (reported 2026-08-12).
+
+def test_source_block_carries_the_reader_facing_fields():
+    from chavruta.llm.base import SourceBlock
+
+    sb = SourceBlock(marker="S1", ref="Bava_Metzia.3.1", commentator_id=None,
+                     text="[header]\nעברית\nEnglish translation",
+                     text_he="עברית", text_en="English translation",
+                     license="CC-BY-SA", version_title="Wikisource Talmud Bavli",
+                     deep_link="https://www.sefaria.org/Bava_Metzia.3.1")
+    # The sheet builder reads these off the hit via getattr — the same call path for both types.
+    assert getattr(sb, "text_he", "") == "עברית"
+    assert getattr(sb, "license", "") == "CC-BY-SA"
+    assert getattr(sb, "version_title", "") == "Wikisource Talmud Bavli"
+
+
+def test_self_fetched_source_renders_hebrew_only_with_its_licence():
+    from chavruta.llm.base import SourceBlock
+
+    sb = SourceBlock(marker="S1", ref="Bava_Metzia.3.1", commentator_id=None,
+                     text="[בבא מציעא] Bava Metzia 3:1\nמתני׳ שנים אוחזין\nTwo men are holding",
+                     text_he="מתני׳ שנים אוחזין", text_en="Two men are holding",
+                     license="Public Domain", version_title="Vilna Edition")
+    cit = CitationOut(ref=sb.ref, ref_he="בבא מציעא 2.",
+                      text_he=sb.text_he, text_en=sb.text_en, commentator="",
+                      deep_link=sb.deep_link, license=sb.license, version_title=sb.version_title)
+    assert "Two men are holding" not in _source_sheet_entry(1, cit)
+    assert "רישיון לא ידוע" not in _license_table([cit], he=True)
+    assert "נחלת הכלל" in _license_table([cit], he=True)

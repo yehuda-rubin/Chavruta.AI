@@ -438,6 +438,23 @@ _HEAD_RE = re.compile(r"^(.+?)[ .](\d[\d. ]*)$")
 _derived_commentator_he: dict[str, str] | None = None
 
 
+def _is_bavli(entry: dict[str, str] | None) -> bool:
+    """Whether a titles-map entry is Talmud BAVLI — the one corner stored amud-linearly here, whose
+    numbers are meaningless without `_split_book`'s daf/amud conversion.
+
+    Sefaria files the Yerushalmi under the same top-level "Talmud" category, but the corpus stores it
+    as chapter.halacha like any other work, so treating the whole category as amud-linear left every
+    Jerusalem Talmud source untranslated. The sub-category is what tells them apart. An entry from an
+    older map without `sub` falls back to the cautious reading — refuse — rather than risk a wrong daf.
+    """
+    if not entry:
+        return False
+    if (entry.get("cat") or "").strip().lower() != "talmud":
+        return False
+    sub = (entry.get("sub") or "").strip().lower()
+    return sub != "yerushalmi"
+
+
 def _commentator_he(cid: str) -> str | None:
     """Hebrew name for a commentator: the curated table first, then one derived from Sefaria's own
     commentary titles.
@@ -545,12 +562,11 @@ def hebrew_display_ref(ref: str | None) -> str | None:
     if m := _HEAD_RE.match(ref.replace("_", " ")):
         title, nums = m.group(1).strip(), m.group(2).strip()
         entry = _load_hebrew_titles().get(title)
-        if entry and entry.get("he") and (entry.get("cat") or "").strip().lower() != "talmud":
+        if entry and entry.get("he") and not _is_bavli(entry):
             return f"{entry['he']} {':'.join(re.split(r'[ .]+', nums))}"
 
-    # 3) A Talmud commentary whose commentator isn't in the curated table (e.g. Rashash on Gittin):
-    #    the name comes from Sefaria, the daf conversion still from `_split_book`. Gated on the
-    #    category so only genuine Bavli refs get here.
-    if cid and entry and (entry.get("cat") or "").strip().lower() == "talmud":
+    # 3) A Bavli commentary whose commentator isn't in the curated table (e.g. Rashash on Gittin):
+    #    the name comes from Sefaria, the daf conversion still from `_split_book`.
+    if cid and entry and _is_bavli(entry):
         return _curated(cid, _commentator_he(cid))
     return None

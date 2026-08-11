@@ -26,32 +26,33 @@ def _get_json(endpoint: str) -> dict | list:
 
 
 def build_hebrew_titles() -> dict[str, dict[str, str]]:
-    """Walk the Sefaria TOC and return {English title: {"he": Hebrew title, "cat": top category}}.
+    """Walk the Sefaria TOC → {English title: {"he": …, "cat": top category, "sub": second level}}.
 
-    The top-level category travels with each title because the consumer must treat Talmud
-    differently from everything else: the corpus stores Bavli refs amud-linearly, so a Talmud ref's
-    numbers need the daf/amud conversion in refs.py and must NOT be rendered straight through. The
-    category is what lets `hebrew_display_ref` refuse the generic path for exactly those titles
-    instead of confidently printing a wrong daf (see refs.py, `_split_book`).
+    The category travels with each title because the consumer must treat one corner differently:
+    the corpus stores TALMUD BAVLI refs amud-linearly, so their numbers need the daf/amud conversion
+    in refs.py and must never be rendered straight through. `cat` alone was too blunt a signal —
+    Sefaria files the Yerushalmi under "Talmud" too, and the Yerushalmi is NOT amud-linear here, so
+    refusing the whole category left every Jerusalem Talmud source in English (reported 2026-08-12).
+    `sub` is what separates Bavli from Yerushalmi.
     """
     toc = _get_json("index/")
     titles: dict[str, dict[str, str]] = {}
 
-    def walk(node, top_cat: str):
+    def walk(node, top_cat: str, sub_cat: str):
         """Recursively walk the TOC tree, extracting titles from leaf nodes."""
         if "contents" in node:
-            # This is a category — recurse into its children
+            # This is a category — recurse into its children, remembering the first two levels.
             for child in node["contents"]:
-                walk(child, top_cat)
+                walk(child, top_cat, sub_cat or (child.get("category", "") or ""))
         else:
             # This is a leaf node — extract title and heTitle
             title = node.get("title")
             he_title = node.get("heTitle")
             if title and he_title:
-                titles[title] = {"he": he_title, "cat": top_cat}
+                titles[title] = {"he": he_title, "cat": top_cat, "sub": sub_cat}
 
     for node in toc:
-        walk(node, node.get("category", "") or "")
+        walk(node, node.get("category", "") or "", "")
 
     return titles
 
