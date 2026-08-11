@@ -567,16 +567,34 @@ def test_commentary_refs_reach_the_named_commentator_on_a_verse():
     ("Bartenura_on_Mishnah_Bava_Metzia.1.1.1", "ברטנורא על משנה בבא מציעא 1:1"),
     ("Rambam_on_Mishnah_Bava_Metzia.1.1.1", 'רמב"ם על משנה בבא מציעא 1:1'),
     # Commentaries whose base can't be told apart from a bare tractate name once stripped (Tosefta,
-    # Mishneh Torah, ...) must decline rather than guess wrong:
-    ("Maggid_Mishneh_on_Mishneh_Torah,_Plaintiff_and_Defendant.9.7.1", None),
-    ("Tosefta_Kifshutah_on_Bava_Metzia.1.1.1", None),
-    ("Tosefta_Bava_Metzia_(Lieberman).1.1", None),
+    # Mishneh Torah, ...) used to DECLINE, because the curated tables were the only source of Hebrew
+    # and letting `_split_book` see their base rendered chapter:halacha as a daf. They now render
+    # through Sefaria's own title map, which carries the work's CATEGORY — so the Tosefta/Halakhah
+    # base is recognised as not-Talmud and its numbers pass through untouched. What must never come
+    # back is the daf conversion; `test_tosefta_base_never_gets_daf_math` below locks that.
+    ("Maggid_Mishneh_on_Mishneh_Torah,_Plaintiff_and_Defendant.9.7.1",
+     "מגיד משנה על משנה תורה, הלכות טוען ונטען 9:7:1"),
+    ("Tosefta_Kifshutah_on_Bava_Metzia.1.1.1", "תוספתא כפשוטה על בבא מציעא 1:1:1"),
+    ("Tosefta_Bava_Metzia_(Lieberman).1.1", "תוספתא בבא מציעא (ליברמן) 1:1"),
     (None, None),
     ("", None),
 ])
 def test_hebrew_display_ref(ref, expected):
     from chavruta.corpus.refs import hebrew_display_ref
     assert hebrew_display_ref(ref) == expected
+
+
+def test_tosefta_base_never_gets_daf_math():
+    """A Tosefta commentary strips to a base spelled exactly like a Bavli tractate
+    ('Tosefta_Kifshutah_on_Bava_Metzia' → 'Bava Metzia'). Rendering chapter 1 halacha 1 as 'daf 1a'
+    is the specific wrong answer this module has always refused to give — caught live while wiring
+    in the full Sefaria title map, when a derived commentator name let `_split_book` see that base.
+    """
+    from chavruta.corpus.refs import hebrew_display_ref
+    out = hebrew_display_ref("Tosefta_Kifshutah_on_Bava_Metzia.1.1.1")
+    assert out is not None
+    assert "1." not in out.replace("1.1", "")   # no amud mark: it's chapter:halacha, not a daf
+    assert out.endswith("1:1:1")
 
 
 def test_amud_to_corpus_ignores_volume_numbered_works():
