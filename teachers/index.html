@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>חברותא AI למורים — בונה שיעורים עם דף מקורות מוכן</title>
+<meta name="description" content="מצב שיעור מייצר שלושה קבצי Word להורדה: דף מקורות, מהלך השיעור והשיעור המלא — מותאם לבית מדרש או לכיתות א׳–י״ב, עם ציטוט מדויק מספריא מכל מקור.">
+
+<meta property="og:type" content="website">
+<link rel="canonical" href="https://yehuda-rubin.github.io/Chavruta.AI/teachers/">
+<meta property="og:url" content="https://yehuda-rubin.github.io/Chavruta.AI/teachers/">
+<meta property="og:title" content="חברותא AI למורים — השיעור הבא שלכם, עם דף מקורות שכבר מוכן">
+<meta property="og:description" content="בוחרים נושא ולאיזו כיתה, ומקבלים דף מקורות, מהלך שיעור ושיעור מלא — שלושה קבצי Word להורדה. כל מקור מצוטט מילה במילה מספריא, כדי שתוכלו לבדוק לפני הכיתה.">
+<meta property="og:image" content="https://yehuda-rubin.github.io/Chavruta.AI/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="he_IL">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="חברותא AI למורים — השיעור הבא שלכם, עם דף מקורות שכבר מוכן">
+<meta name="twitter:description" content="דף מקורות, מהלך שיעור ושיעור מלא — שלושה קבצי Word, מותאמים לגיל, עם ציטוט מדויק מספריא.">
+<meta name="twitter:image" content="https://yehuda-rubin.github.io/Chavruta.AI/og-image.png">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "זה חינם?",
+     "acceptedAnswer": {"@type": "Answer", "text": "יש מסלול חינמי מלא, כולל בניית שיעורים. אם וכאשר יתווספו תוכניות בתשלום, זה יפורסם בבירור."}},
+    {"@type": "Question", "name": "מותר להדפיס את דף המקורות ולחלק בכיתה?",
+     "acceptedAnswer": {"@type": "Answer", "text": "כן. כל המאגר בנוי מטקסטים ברישיון שמתיר שימוש מסחרי — נחלת הכלל, CC0, CC-BY ו-CC-BY-SA. כשמקור שנכנס לדף דורש ייחוס, הייחוס נוסף אוטומטית בתחתית דף המקורות."}},
+    {"@type": "Question", "name": "כמה זמן לוקח לבנות שיעור?",
+     "acceptedAnswer": {"@type": "Answer", "text": "בניית שיעור מלא לוקחת כמה דקות. היא רצה ברקע — אפשר לפתוח שיחה אחרת ולחזור לשיעור כשהוא מוכן, והוא נשמר בספריית 'השיעורים שלי'."}},
+    {"@type": "Question", "name": "זה מחליף את ההכנה לשיעור?",
+     "acceptedAnswer": {"@type": "Answer", "text": "לא. זה מקצר את איסוף המקורות ואת בניית המבנה. הבדיקה, ההדגשים והכיתה נשארים שלכם — וכשציטוט בשיעור לא אומת מול המקורות שנשלפו, המערכת מסמנת את זה בהערה במקום להסתיר."}},
+    {"@type": "Question", "name": "התלמידים שלי יכולים להשתמש בזה?",
+     "acceptedAnswer": {"@type": "Answer", "text": "השירות מיועד לבני 18 ומעלה, וההרשמה כוללת אישור גיל מפורש. בכיתה המודל הוא שהמורה מפעיל את הכלי והתלמיד מקבל את החומר — אין חשבונות תלמידים, ואין להזין פרטים מזהים של תלמידים."}},
+    {"@type": "Question", "name": "זה קורא ארמית של גמרא?",
+     "acceptedAnswer": {"@type": "Answer", "text": "כן. המקורות בגמרא נשלפים ומצוטטים בשפת המקור, עם ההסבר בשפה שבה שאלתם."}},
+    {"@type": "Question", "name": "זה מחליף רב?",
+     "acceptedAnswer": {"@type": "Answer", "text": "לא. זה כלי ללימוד ולהכנת חומרי לימוד. בכל שאלה הלכתית למעשה יש להתייעץ עם רב מוסמך."}}
+  ]
+}
+</script>
+
+<style>
+  @font-face {
+    font-family: 'Heebo';
+    font-style: normal;
+    font-weight: 400 700;
+    font-display: swap;
+    src: url('../fonts/heebo-hebrew.woff2') format('woff2');
+    unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
+  }
+  @font-face {
+    font-family: 'Heebo';
+    font-style: normal;
+    font-weight: 400 700;
+    font-display: swap;
+    src: url('../fonts/heebo-latin.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122;
+  }
+
+  :root {
+    --ink: #1c1a17;
+    --tekhelet: #002045;
+    --tekhelet-2: #1a365d;
+    --gold: #8a6510;
+    --gold-soft: #b88f2e;
+    --bg: #faf7ef;
+    --panel: #ffffff;
+    --line: #ece2cf;
+    --muted: #5a5650;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #eae6df;
+      --tekhelet: #a9c2f0;
+      --tekhelet-2: #cddafb;
+      --gold: #e8c66b;
+      --gold-soft: #f0d78a;
+      --bg: #0f1626;
+      --panel: #16203a;
+      --line: #2a3554;
+      --muted: #a3a9bd;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: 'Heebo', sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--tekhelet-2); }
+  .wrap { max-width: 780px; margin: 0 auto; padding: 0 20px; }
+
+  header.top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 18px 0;
+    border-bottom: 1px solid var(--line);
+    gap: 12px;
+  }
+  .brand { font-weight: 700; font-size: 1.15rem; color: var(--tekhelet); display: flex; align-items: center; gap: 8px; }
+  .brand .mark { font-size: 1.3rem; }
+  .brand .for-who {
+    font-weight: 500;
+    font-size: 0.8rem;
+    color: var(--muted);
+    border-inline-start: 1px solid var(--line);
+    padding-inline-start: 8px;
+  }
+  .top-link { font-size: 0.85rem; color: var(--muted); text-decoration: none; }
+  .top-link:hover { color: var(--tekhelet-2); text-decoration: underline; }
+
+  .hero { padding: 52px 0 40px; text-align: center; }
+  .hero h1 {
+    font-size: clamp(1.6rem, 4vw, 2.3rem);
+    color: var(--tekhelet);
+    margin: 0 0 14px;
+  }
+  .hero p.lead {
+    font-size: 1.1rem;
+    color: var(--muted);
+    max-width: 600px;
+    margin: 0 auto 30px;
+  }
+
+  .cta {
+    display: inline-block;
+    background: var(--tekhelet);
+    color: #fff;
+    text-decoration: none;
+    font-weight: 600;
+    padding: 14px 32px;
+    border-radius: 10px;
+    font-size: 1.05rem;
+    transition: background 0.15s ease;
+  }
+  .cta:hover { background: var(--tekhelet-2); }
+  @media (prefers-color-scheme: dark) {
+    .cta { color: #0f1626; }
+  }
+
+  .trust-line { font-size: 0.85rem; color: var(--muted); margin-top: 10px; }
+
+  section.block {
+    padding: 36px 0;
+    border-top: 1px solid var(--line);
+  }
+  section.block h2 {
+    color: var(--tekhelet);
+    font-size: 1.35rem;
+    margin: 0 0 16px;
+  }
+  section.block h3 {
+    color: var(--tekhelet-2);
+    font-size: 1rem;
+    margin: 22px 0 8px;
+  }
+  section.block p { margin: 0 0 14px; }
+
+  .file-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin: 20px 0 8px;
+    text-align: start;
+  }
+  .file-cards .file-card {
+    background: color-mix(in srgb, var(--gold-soft) 10%, transparent);
+    border: 1px solid var(--gold-soft);
+    border-radius: 10px;
+    padding: 16px 16px 14px;
+  }
+  .file-cards .file-card .emoji { display: block; font-size: 1.5rem; margin-bottom: 6px; }
+  .file-cards .file-card .fname { display: block; font-weight: 700; color: var(--tekhelet-2); margin-bottom: 4px; }
+  .file-cards .file-card .fdesc { display: block; font-size: 0.87rem; color: var(--muted); line-height: 1.5; }
+
+  .modes { list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; }
+  .modes li {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .modes .mode-name { font-weight: 700; color: var(--tekhelet-2); margin-inline-end: 6px; }
+
+  .trust-box {
+    background: var(--panel);
+    border: 1px solid var(--gold-soft);
+    border-radius: 10px;
+    padding: 18px 20px;
+  }
+  .plain-box {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 18px 20px;
+  }
+
+  .example-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 20px 22px;
+    text-align: start;
+  }
+  .example-q { font-weight: 700; color: var(--tekhelet-2); margin: 0 0 10px; }
+  .example-a { margin: 0 0 14px; }
+  .quote-box {
+    background: color-mix(in srgb, var(--gold-soft) 14%, transparent);
+    border-inline-start: 4px solid var(--gold);
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin: 0 0 8px;
+  }
+  .quote-box .src-text { font-weight: 600; margin: 0 0 6px; }
+  .quote-ref { font-size: 0.85rem; color: var(--muted); margin: 0; }
+
+  .refusal-box {
+    background: color-mix(in srgb, var(--muted) 8%, transparent);
+    border: 1px dashed var(--muted);
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin: 14px 0 8px;
+    font-style: italic;
+  }
+  .refusal-box p { margin: 0; }
+
+  .compare { display: grid; gap: 10px; margin-top: 18px; }
+  .compare .row { display: flex; gap: 10px; align-items: flex-start; font-size: 0.92rem; }
+  .compare .row.bad { color: var(--muted); }
+  .compare .row.good { color: var(--ink); font-weight: 500; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 6px; }
+  .chip {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 0.88rem;
+    color: var(--tekhelet-2);
+  }
+  .chip-label { font-size: 0.85rem; color: var(--muted); align-self: center; margin-inline-end: 4px; }
+
+  .hero-image {
+    max-width: 100%;
+    width: 480px;
+    border-radius: 14px;
+    box-shadow: 0 8px 28px rgba(0,0,0,0.18);
+    margin: 18px auto 6px;
+    display: block;
+  }
+
+  .faq-item { margin: 0 0 18px; }
+  .faq-item .q { font-weight: 700; color: var(--tekhelet-2); margin: 0 0 6px; }
+  .faq-item .a { margin: 0; color: var(--ink); }
+
+  .suggested-q {
+    display: inline-block;
+    background: var(--panel);
+    border: 1px dashed var(--gold-soft);
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 0.9rem;
+    color: var(--muted);
+    margin-bottom: 16px;
+  }
+
+  .end-cta { text-align: center; padding: 10px 0 6px; }
+
+  .footer {
+    padding: 30px 0 50px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+  .footer a { color: var(--muted); margin: 0 8px; }
+</style>
+</head>
+<body>
+
+<header class="top wrap">
+  <div class="brand">
+    <span class="mark">🕍</span><span>חברותא AI</span>
+    <span class="for-who">למורים ולמלמדים</span>
+  </div>
+  <a class="top-link" href="../">הדף הכללי</a>
+</header>
+
+<main class="wrap">
+
+  <section class="hero">
+    <h1>השיעור הבא שלכם — עם דף מקורות שכבר מוכן</h1>
+    <p class="lead">בוחרים נושא, בוחרים לאיזו כיתה, ומקבלים שלושה קבצי Word להורדה: דף מקורות, מהלך השיעור, והשיעור המלא. כל מקור בדף מצוטט מילה במילה מספריא — כדי שתוכלו לבדוק אותו לפני שאתם נכנסים לכיתה.</p>
+    <a class="cta" href="https://chavrutaai.org" target="_blank" rel="noopener">לבנות שיעור — בחינם</a>
+    <p class="trust-line">נבנה על ידי יהודה רובין · מבוסס על ספריא (Sefaria)</p>
+  </section>
+
+  <section class="block">
+    <h2>הבעיה שכל מורה שניסה AI מכיר</h2>
+    <p>ביקשתם מקור, קיבלתם "רמב״ן על אתר" שנשמע מצוין — ואז חיפשתם, ולא מצאתם. מודל כללי כותב מהזיכרון שלו, ולכן הוא יכול להמציא מפרש, לייחס דברים לספר הלא נכון, או לנסח ציטוט "בערך".</p>
+    <p>חברותא בנויה הפוך: היא שולפת קודם קטעי מקור אמיתיים מהמאגר, וכותבת רק עליהם. וכשאין מקור מתאים — היא אומרת את זה, במקום למלא את החלל:</p>
+    <div class="refusal-box">
+      <p>"לא מצאתי במאגר מקור שקובע זאת באופן ישיר. אני מעדיף לומר זאת בפירוש במקום לנחש או להמציא תשובה שמתחזה למקור."</p>
+    </div>
+    <div class="compare">
+      <div class="row bad">✕ AI כללי: תשובה בטוחה, ומקור שאי אפשר למצוא.</div>
+      <div class="row good">✓ חברותא: ציטוט שנשלף מהמקור עצמו — או הודאה שאין.</div>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2>מה בדיוק מקבלים ב"מצב שיעור"</h2>
+    <p>לא תשובה אחת ארוכה בצ׳אט, אלא שלושה קבצים נפרדים שנפתחים ב-Word ואפשר לערוך ולהדפיס:</p>
+    <div class="file-cards">
+      <div class="file-card">
+        <span class="emoji">📄</span>
+        <span class="fname">דף מקורות</span>
+        <span class="fdesc">המקורות שנכנסו לשיעור, ממוספרים, בטקסט המלא שלהם ובשפת המקור — עם המראה המדויק לכל אחד. זה הדף שמחלקים בכיתה.</span>
+      </div>
+      <div class="file-card">
+        <span class="emoji">📋</span>
+        <span class="fname">מהלך השיעור</span>
+        <span class="fdesc">השלבים לפי הסדר עם חלוקת זמנים, מותאמת לאורך שביקשתם. זה הדף שנשאר אצלכם על השולחן.</span>
+      </div>
+      <div class="file-card">
+        <span class="emoji">📖</span>
+        <span class="fname">השיעור המלא</span>
+        <span class="fdesc">המהלך כתוב במלואו — ההסבר, השאלות והקישור בין המקורות, עם הפניה לכל מקור בדף.</span>
+      </div>
+    </div>
+    <p style="margin-top:16px;">שם הקובץ נושא את הנושא ואת הקהל, כך שאחרי חמישה שיעורים התיקייה עדיין מובנת. כל שיעור נשמר גם בספריית <strong>"השיעורים שלי"</strong> בתוך המערכת — אפשר לפתוח אותו מחדש, להוריד שוב, או לבנות עליו שיעור המשך.</p>
+
+    <h3>מותאם למי שיושב מולכם</h3>
+    <p>אותו נושא נראה אחרת בכיתה ד׳ ואחרת בשיעור עיון בישיבה. לפני הבנייה בוחרים:</p>
+    <div class="chips">
+      <span class="chip-label">עבור:</span>
+      <span class="chip">בית מדרש / ישיבה</span>
+      <span class="chip">כיתות א׳–ג׳</span>
+      <span class="chip">כיתות ד׳–ו׳</span>
+      <span class="chip">כיתות ז׳–ט׳</span>
+      <span class="chip">כיתות י׳–י״ב</span>
+    </div>
+    <div class="chips">
+      <span class="chip-label">אורך:</span>
+      <span class="chip">קצר</span>
+      <span class="chip">בינוני</span>
+      <span class="chip">ארוך</span>
+    </div>
+    <p style="margin-top:14px;">הבחירה משנה את בחירת המקורות, את רמת ההסבר ואת חלוקת הזמנים — לא רק את גודל הפונט.</p>
+  </section>
+
+  <section class="block">
+    <h2>איך נראה פריט בדף המקורות</h2>
+    <div class="example-card">
+      <p class="example-q">שיעור על: למה התורה פותחת בבראשית</p>
+      <div class="quote-box">
+        <p class="src-text">"אָמַר רַבִּי יִצְחָק לֹא הָיָה צָרִיךְ לְהַתְחִיל אֶת הַתּוֹרָה אֶלָּא מֵהַחֹדֶשׁ הַזֶּה לָכֶם, שֶׁהִיא מִצְוָה רִאשׁוֹנָה שֶׁנִּצְטַוּוּ בָּהּ יִשְׂרָאֵל, וּמַה טַּעַם פָּתַח בִּבְרֵאשִׁית..."</p>
+        <p class="quote-ref">— רש"י, בראשית א׳:א׳ (מצוטט מילה במילה מספריא)</p>
+      </div>
+      <p class="example-a" style="margin-top:14px;">הטקסט המלא, לא תקציר של המודל, ולידו ההפניה המדויקת. אפשר לפתוח את המקום בספריא ולוודא לפני שמדפיסים.</p>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2>גם כשלא בונים שיעור</h2>
+    <ul class="modes">
+      <li><span class="mode-name">הסבר</span>— מפרק מקום מסוים, כולל מה בדיוק אומר מפרש אחד דווקא ("מה אומר כאן המהרש״א").</li>
+      <li><span class="mode-name">שאלה</span>— תשובה ישירה על שאלה בלימוד, עם המקור שממנו היא באה.</li>
+      <li><span class="mode-name">שו"ת</span>— מהלך הלכתי מלא, מהמקור בגמרא ועד הפוסקים.</li>
+      <li><span class="mode-name">חברותא</span>— לומד איתכם בשיחה: שואל בחזרה, מחדד, לא רק מרצה. שימושי כשאתם עצמכם נתקעים על תוספות בשתיים בלילה.</li>
+    </ul>
+    <img class="hero-image" src="../hero.jpg" alt="לומד יושב עם ספרים פתוחים על השולחן, בשיחה עם דמות חברותא דיגיטלית זוהרת שנראית כמותו — החברותא שואל שאלה על הפסוק">
+  </section>
+
+  <section class="block">
+    <h2>מקורות משלכם</h2>
+    <div class="plain-box">
+      <p style="margin:0;">אם יש לכם דף מקורות קיים, קטע שסרקתם או טקסט שהקלדתם — אפשר לצרף אותו (PDF, Word או טקסט) והשיעור ייבנה סביבו יחד עם המקורות מהמאגר. שימו לב: מה שמזינים נשלח לספק המודל, ולכן אין להזין פרטים מזהים של אף אדם — תלמידים בכלל זה.</p>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2>מה זה כן, ומה זה לא</h2>
+    <div class="trust-box">
+      <p>חברותא AI היא שותפה להכנה ולעיון — לא רב שפוסק הלכה למעשה, ולא תחליף להכנה שלכם. היא מקצרת את השלב של איסוף המקורות ובניית המבנה; הבדיקה, ההדגשים והכיתה נשארים שלכם.</p>
+      <p style="margin-bottom:0;">וכשציטוט שנכנס לשיעור לא אומת מול המקורות שנשלפו, הקובץ מגיע עם הערה שאומרת זאת במפורש, במקום להשתיק את זה. בכל שאלה הלכתית למעשה — רב מוסמך.</p>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2>שאלות נפוצות</h2>
+    <div class="faq-item">
+      <p class="q">זה חינם?</p>
+      <p class="a">יש מסלול חינמי מלא, כולל בניית שיעורים. אם וכאשר יתווספו תוכניות בתשלום, זה יפורסם בבירור.</p>
+    </div>
+    <div class="faq-item">
+      <p class="q">מותר להדפיס את דף המקורות ולחלק בכיתה?</p>
+      <p class="a">כן. כל המאגר בנוי מטקסטים ברישיון שמתיר שימוש מסחרי — נחלת הכלל, CC0, CC-BY ו-CC-BY-SA. כשמקור שנכנס לדף דורש ייחוס, הייחוס נוסף אוטומטית בתחתית דף המקורות, כך שהדף שאתם מחלקים כבר עומד בתנאי הרישיון.</p>
+    </div>
+    <div class="faq-item">
+      <p class="q">כמה זמן לוקח לבנות שיעור?</p>
+      <p class="a">כמה דקות. הבנייה רצה ברקע — אפשר לפתוח בינתיים שיחה אחרת ולחזור לשיעור כשהוא מוכן, והוא נשמר בספרייה בכל מקרה.</p>
+    </div>
+    <div class="faq-item">
+      <p class="q">זה מחליף את ההכנה לשיעור?</p>
+      <p class="a">לא, וגם לא מתיימר. הוא נותן לכם נקודת פתיחה עם מקורות אמיתיים במקום דף ריק. מה להדגיש, מה לוותר ואיפה לעצור — זה שלכם.</p>
+    </div>
+    <div class="faq-item">
+      <p class="q">התלמידים שלי יכולים להשתמש בזה?</p>
+      <p class="a">השירות מיועד לבני 18 ומעלה, וההרשמה כוללת אישור גיל מפורש. המודל הוא שהמורה מפעיל את הכלי והתלמיד מקבל את החומר — אין חשבונות תלמידים ואין צורך בשום נתון על תלמיד. הכנת שיעור לכיתה ג׳ לא מחייבת את שמו של אף ילד.</p>
+    </div>
+    <div class="faq-item">
+      <p class="q">זה קורא ארמית של גמרא?</p>
+      <p class="a">כן. המקורות בגמרא נשלפים ומצוטטים בשפת המקור, וההסבר מגיע בשפה שבה שאלתם. אפשר לעבוד בעברית או באנגלית.</p>
+    </div>
+    <div class="faq-item">
+      <p class="q">זה מחליף רב?</p>
+      <p class="a">לא. זה כלי ללימוד ולהכנת חומרי לימוד. בכל שאלה הלכתית למעשה יש להתייעץ עם רב מוסמך.</p>
+    </div>
+  </section>
+
+  <section class="block end-cta">
+    <p>הרשמה של דקה, ואפשר לבנות את השיעור הראשון.</p>
+    <p class="suggested-q">נסו לבקש: "בנה שיעור על שניים אוחזין בטלית, לכיתה ט׳, בינוני"</p>
+    <br>
+    <a class="cta" href="https://chavrutaai.org" target="_blank" rel="noopener">להתחיל לבנות</a>
+  </section>
+
+</main>
+
+<footer class="footer wrap">
+  <div>
+    <a href="../">הדף הכללי</a>
+    <a href="https://chavrutaai.org/terms" target="_blank" rel="noopener">תנאי שימוש</a>
+    <a href="https://chavrutaai.org/privacy" target="_blank" rel="noopener">פרטיות</a>
+    <a href="mailto:rubinyehuda8@gmail.com">rubinyehuda8@gmail.com</a>
+  </div>
+</footer>
+
+</body>
+</html>
