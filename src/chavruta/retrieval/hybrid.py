@@ -60,6 +60,7 @@ def _to_hit(h) -> RankedHit:
         work_id=p.get("work_id", ""),
         anchor_ref=p.get("anchor_ref"),
         period=p.get("period"),
+        lang=lang,
         # …and if the payload carries neither (it carries neither on any point of the commercial
         # corpus), fall back to the work-level table. Licence is a property of the EDITION, not of
         # the chunk, so a per-work lookup is both correct and the only affordable option — see

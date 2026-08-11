@@ -16,6 +16,7 @@ import sys
 import threading
 import time
 from contextvars import ContextVar
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -624,6 +625,40 @@ def _resolve_topic(question: str, history) -> str:
     return subs[-1] if subs else question
 
 
+def _prefer_hebrew_edition(hit):
+    """For a Hebrew source sheet: if this hit is the ENGLISH edition of a work, return the Hebrew
+    edition of the same ref instead (when the corpus has one); otherwise return the hit unchanged.
+
+    The corpus stores a work's Hebrew and English editions as separate chunks sharing one `ref`, and
+    retrieval returns whichever scored — so an English-language chunk can win even for a work whose
+    Hebrew is right there. On a Hebrew source sheet that reads as a bug: the sheet is what gets
+    printed and taught from. Falling back to English stays correct for the works that genuinely have
+    no Hebrew in the corpus (several responsa exist only as translations).
+
+    Best-effort and non-fatal: any store failure just keeps the original hit — a source sheet that
+    shows the English text it already had beats a request that 500s over a cosmetic preference.
+    """
+    if (getattr(hit, "lang", "he") or "he").lower().startswith("he"):
+        return hit
+    try:
+        pipeline = _get_pipeline()
+        found = pipeline.store.fetch_by_refs(pipeline.profile.collection, [hit.ref], limit=20)
+    except Exception:
+        _log.warning("Hebrew-edition lookup failed for %s; keeping the retrieved text", hit.ref,
+                     exc_info=True)
+        return hit
+    for h in found or []:
+        p = getattr(h, "payload", None) or {}
+        if p.get("ref") != hit.ref or not (p.get("text") or "").strip():
+            continue
+        if (p.get("lang") or "").lower().startswith("he"):
+            return replace(hit, text=p["text"], lang="he",
+                           license=p.get("license") or p.get("license_he") or hit.license,
+                           version_title=p.get("version_title") or p.get("version_he")
+                           or hit.version_title)
+    return hit
+
+
 # Tolerate the model bolding/indenting the delimiter (**===FULL_LESSON===**, leading spaces, RTL marks).
 def _source_sheet_entry(n: int, c: CitationOut) -> str:
     """One source on the sheet: the verbatim text, plus credit where the licence requires it.
@@ -633,8 +668,15 @@ def _source_sheet_entry(n: int, c: CitationOut) -> str:
     Naming only the ref, as this did, is not TASL for a work by a named translator or publisher:
     it omits which edition the text is and under what terms. Public-domain and CC0 sources need no
     credit line, so they don't get noise.
+
+    The heading uses the HEBREW ref when one is known (`ref_he`, already resolved by the caller via
+    hebrew_display_ref) — a Hebrew source sheet handed to a class shouldn't title every source in
+    transliterated English. Falls back to the English ref when no Hebrew rendering exists, which is
+    the same honest-gap rule hebrew_display_ref itself follows. Likewise the body prefers the Hebrew
+    text and only falls back to the English one when the source has no Hebrew at all (some responsa
+    in the corpus exist only as English translations).
     """
-    entry = f"**{n}. {c.ref}**\n{c.text_he}"
+    entry = f"**{n}. {c.ref_he or c.ref}**\n{c.text_he or c.text_en}"
     if rights.requires_attribution(c.license):
         entry += "\n\n> " + rights.attribution_line(
             ref=c.ref, version_title=c.version_title,
@@ -877,9 +919,15 @@ def _generate_lesson_from_hits(topic: str, hits, lang: str, he: bool, *, audienc
     for i in nums:
         if 1 <= i <= len(hits) and i not in seen:
             seen.add(i)
-            h = hits[i - 1]
+            h = _prefer_hebrew_edition(hits[i - 1]) if he else hits[i - 1]
+            # Route the text by the chunk's ACTUAL language, so _source_sheet_entry's
+            # "Hebrew, else English" fallback is a real language choice rather than a field name:
+            # everything used to be dropped into text_he regardless of what language it was.
+            is_he_text = (getattr(h, "lang", "he") or "he").lower().startswith("he")
+            text = getattr(h, "text", "") or ""
             used.append(CitationOut(ref=h.ref, ref_he=(hebrew_display_ref(h.ref) or "") if he else "",
-                                    text_he=(getattr(h, "text", "") or ""), text_en="",
+                                    text_he=text if is_he_text else "",
+                                    text_en="" if is_he_text else text,
                                     commentator=(getattr(h, "commentator_id", "") or ""),
                                     deep_link=(getattr(h, "deep_link", "") or ""),
                                     license=(getattr(h, "license", "") or ""),

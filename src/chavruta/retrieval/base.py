@@ -23,6 +23,11 @@ class RankedHit:
     work_id: str = ""
     anchor_ref: str | None = None
     period: str | None = None      # halachic era for sources w/o a commentator (e.g. responsa)
+    # Language of THIS chunk's `text` ('he' / 'en'). The corpus stores a work's Hebrew and English
+    # editions as separate chunks, so a hit's text may be either — the caller needs to know which
+    # to show a Hebrew source sheet the Hebrew edition and fall back to English only when the work
+    # has no Hebrew in the corpus at all.
+    lang: str = "he"
     # Rights of the edition this chunk's text came from — carried through so the caller can credit
     # it (CC-BY requires TASL) and so a paid tier can refuse to reproduce what it may not.
     # Empty = unknown = treat as all-rights-reserved (see corpus/rights.py).
