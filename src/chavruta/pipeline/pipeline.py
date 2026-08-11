@@ -349,7 +349,7 @@ class ChavrutaPipeline:
         # that follows its arc and keeps only the sources it actually uses. Both run the same
         # machine; HALACHA just selects the separate responsa template set (shared corpus).
         if query.intent in (Intent.LESSON, Intent.HALACHA):
-            return self._lesson_answer(query, result, llm)
+            return self._lesson_answer(query, result, llm, history=history)
 
         return self._qa_answer(query, result, llm, history=history, missing_note=missing_note)
 
@@ -404,20 +404,26 @@ class ChavrutaPipeline:
                                   ("Note: quote(s) not found in the retrieved sources: «" + "», «".join(bad_q[:2]) + "» — verify."))
         return grounded.maybe_halacha_caveat(answer, query.lang)
 
-    def _lesson_answer(self, query, result, llm=None):
+    def _lesson_answer(self, query, result, llm=None, *, history=None):
         """Generate the lesson — or responsa (שו"ת) — as a flowing walkthrough that follows
         the arc (opening → branches → convergence), then keep in each section only the sources
         the walkthrough actually cited. HALACHA uses the responsa template set + voice. `llm`
-        defaults to the pipeline's own shared backend; a caller may override it (BYOK)."""
+        defaults to the pipeline's own shared backend; a caller may override it (BYOK).
+
+        `history` is the conversation so far. It used not to be passed here at all, so every
+        lesson/responsa turn was answered in isolation — a follow-up ("ומה אם זה חולה שאין בו
+        סכנה?") arrived with no memory of the question it was following up on, while the same
+        follow-up in Q&A mode kept its thread. Both prompt builders now carry it.
+        """
         llm = llm or self.llm
         is_shut = query.intent is Intent.HALACHA
         plan = self._build_lesson(query, result)
         if plan.sections:
             prompt, marker_map = grounded.build_lesson_walkthrough_prompt(
-                plan, query.text, lang=query.lang, shut=is_shut)
+                plan, query.text, lang=query.lang, shut=is_shut, history=history)
         else:
             prompt, marker_map = grounded.build_prompt(
-                query.text, result.hits, intent=query.intent, lang=query.lang)
+                query.text, result.hits, intent=query.intent, lang=query.lang, history=history)
         # Run through the agentic ===NEED_SOURCES=== loop, same as _qa_answer: a lesson/responsa
         # whose initial sources share only a surface word with a modern real-world question (e.g.
         # "computer" retrieving a games sugya instead of the corpus's own electricity/muktzeh

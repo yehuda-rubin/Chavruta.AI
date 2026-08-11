@@ -67,7 +67,14 @@ SYSTEM_QA = (
     "than only answering when the exact case is named. That kind of inference (a fortiori, a "
     "shared underlying principle) is legitimate as long as every step still traces back to what a "
     "provided source actually says — it is not the same as inventing a source or a ruling that "
-    "doesn't follow from them."
+    "doesn't follow from them. "
+    "This is one continuous conversation, not a series of unrelated questions. Read the "
+    "conversation so far before answering: a short follow-up ('and what about…', 'why?') refers to "
+    "what was just discussed, and the sources already quoted earlier still count — don't make the "
+    "user repeat themselves. Each turn, choose deliberately: answer from what you already have "
+    "(this conversation and its sources) if that genuinely suffices; ask for more sources if it "
+    "doesn't; or, when the request is truly ambiguous and the answer would differ materially "
+    "depending on the reading, ask the user one short clarifying question instead of guessing."
 )
 
 SYSTEM_EXPLAIN = SYSTEM_QA + (
@@ -103,7 +110,12 @@ SYSTEM_BASE_HE = (
     "מופיע כלשונו במקורות (מכשיר, מצב, או פעולה עכשווית) — הסק את העיקרון העולה מן המקורות "
     "שסופקו והחל אותו על המקרה הנשאל, כפי שפוסק אמיתי מסיק מתקדים, ולא רק כשהמקרה עצמו נזכר "
     "במפורש. הסקה כזו (קל וחומר, עיקרון משותף) לגיטימית כל עוד כל צעד בה נשען בפועל על לשון "
-    "מקור שסופק — וזה שונה לגמרי מהמצאת מקור או פסק שאינו עולה מהם."
+    "מקור שסופק — וזה שונה לגמרי מהמצאת מקור או פסק שאינו עולה מהם. "
+    "זו שיחה אחת מתמשכת, לא רצף שאלות מנותקות. קרא את השיחה שעד כה לפני שאתה עונה: שאלת המשך "
+    "קצרה ('ומה אם…', 'למה?') מתייחסת למה שנדון זה עתה, והמקורות שכבר הובאו קודם עדיין עומדים — "
+    "אל תגרום למשתמש לחזור על עצמו. בכל תור בחר במודע: ענה ממה שכבר יש לך (השיחה הזו והמקורות "
+    "שבה) אם זה באמת מספיק; בקש מקורות נוספים אם לא; או, כשהבקשה באמת דו-משמעית והתשובה תשתנה "
+    "מהותית לפי הפירוש — שאל את המשתמש שאלת הבהרה אחת קצרה במקום לנחש."
 )
 
 # QA stays short and direct; explain/lesson must NOT inherit that brevity instruction.
@@ -340,12 +352,15 @@ def no_source_answer(lang: str, intent: Intent = Intent.QA) -> Answer:
 
 
 def build_lesson_walkthrough_prompt(plan: LessonPlan, question: str, lang: str = "he",
-                                    shut: bool = False):
+                                    shut: bool = False, history=None):
     """Prompt the model to deliver the lesson — or responsa (`shut=True`) — as a flowing
     walkthrough (the "מהלך"), laying out the arc's stages in order with sources as [S#].
 
     Returns (GroundedPrompt, marker_map) — marker_map values are the plan's Citations, so
     enforce_citations resolves the cited sources and lets the caller keep only those.
+
+    `history` (the conversation so far) is carried onto the prompt so a lesson/responsa turn can
+    be a follow-up rather than a standalone question — this used to be hard-coded empty.
     """
     seen: dict[str, str] = {}
     sources: list[SourceBlock] = []
@@ -380,7 +395,9 @@ def build_lesson_walkthrough_prompt(plan: LessonPlan, question: str, lang: str =
         lines += ["", "Now write the full walkthrough following these stages — open straight "
                   "from the source, without restating the question."]
         system = SYSTEM_SHUT_WALKTHROUGH if shut else SYSTEM_LESSON_WALKTHROUGH
-    prompt = GroundedPrompt(system=system, sources=sources, question="\n".join(lines), history=[])
+    llm_history = [LLMTurn(role=t.role, text=t.text) for t in (history or [])]
+    prompt = GroundedPrompt(system=system, sources=sources, question="\n".join(lines),
+                            history=llm_history)
     return prompt, marker_map
 
 
