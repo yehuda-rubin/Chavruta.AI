@@ -1,0 +1,29 @@
+# Chavruta.AI — REGRESSION eval v1: questions that FAILED in production, with what should surface.
+#
+# WHY THIS EXISTS
+#   The other datasets here were written from the outside in — "what should a Torah RAG answer?".
+#   This one is written from the inside out: every row is a real failure a real user hit, with the
+#   date it was caught. Those are the most valuable eval items there are, because they are the only
+#   ones already proven to be reachable. A generic set tells you how good the system is; this set
+#   tells you whether a bug you already paid for came back.
+#
+#   It is also, deliberately, the seed of any future RL training set (docs/REINFORCEMENT_LEARNING.md):
+#   the reward signal for retrieval — "did the right source surface?" — is exactly what each row
+#   encodes, and these rows need no human labelling because production already labelled them.
+#
+# FORMAT  {"qid","question","lang","expected_refs":[...],"intent","note","history":[...]}
+#   expected_refs  segment-prefix matched by the harness, so a topic-level anchor
+#                  ("Shulchan_Arukh,_Orach_Chayim.310") matches any segment under it.
+#   history        prior USER turns, oldest first — for follow-ups that carry no topic of their own.
+#   expected_refs == []  ⇒  honest no-source must hold.
+#
+# RUN   python scripts/run_eval.py --dataset eval/regressions_v1.jsonl --retrieval-only
+#
+{"qid": "reg-modern-01", "question": "האם מותר לשחק במחשב בשבת", "lang": "he", "expected_refs": ["Shulchan_Arukh,_Orach_Chayim.310", "B'Mareh_HaBazak"], "intent": "qa", "note": "2026-08-07: a modern device must reach the electricity/muktzeh sources, not the שחוק sugya (Avodah Zarah 56) it shares a root with. Fixed by the router's tech-concept bridge."}
+{"qid": "reg-modern-02", "question": "האם מותר להשתמש בחשמל בשבת", "lang": "he", "expected_refs": ["B'Mareh_HaBazak"], "intent": "qa", "note": "2026-08-07 control case: the SAME halachic question phrased directly always worked. If this passes while reg-modern-01 fails, the gap is query understanding, not the corpus."}
+{"qid": "reg-modern-03", "question": "מותר לדבר בטלפון בשבת?", "lang": "he", "expected_refs": ["Shulchan_Arukh,_Orach_Chayim.310", "B'Mareh_HaBazak"], "intent": "qa", "note": "same class as reg-modern-01, different device — guards the fix generalising past the one word that was caught."}
+{"qid": "reg-followup-01", "question": "תנסה", "lang": "he", "expected_refs": ["Middot", "Sukkah", "Shekalim"], "intent": "qa", "history": ["מה המחלוקת בין רש\"י לתוספות לגבי בניית בית המקדש ואיך אפשר ליישב אותה"], "note": "2026-08-11: a bare follow-up retrieved on the literal word and returned sources about the CONCEPT of a test (Job 4:2, the Akeidah). It must retrieve on the topic it is following up on."}
+{"qid": "reg-followup-02", "question": "למה?", "lang": "he", "expected_refs": ["Shulchan_Arukh,_Orach_Chayim.310"], "intent": "qa", "history": ["האם מותר לטלטל מחשב בשבת"], "note": "same class as reg-followup-01 — the shortest possible follow-up, which carries no retrievable content whatsoever."}
+{"qid": "reg-followup-03", "question": "עכשיו שאלה אחרת לגמרי — מה הדין של נטילת ידיים לסעודה", "lang": "he", "expected_refs": ["Shulchan_Arukh,_Orach_Chayim.158"], "intent": "qa", "note": "the NEGATIVE case for follow-up anchoring: a full question mid-conversation must retrieve on its own topic, not be dragged back to the previous one."}
+{"qid": "reg-commentator-01", "question": "מה אומר רש\"י על בניית בית המקדש לעתיד לבוא", "lang": "he", "expected_refs": ["Rashi_on_Sukkah", "Sukkah.41", "Rashi_on_Rosh_Hashanah"], "intent": "explain", "note": "2026-08-11: a thematic question naming a commentator answered 'no Rashi in the corpus' because round one scored other material higher and the self-fetch loop only ran on a COMPLETELY empty retrieval."}
+{"qid": "reg-outofcorpus-01", "question": "מה פוסק הרב עובדיה יוסף על שימוש במדיח כלים בשבת", "lang": "he", "expected_refs": [], "intent": "qa", "note": "honesty guard: Yabia Omer is not in the commercial corpus. Naming a posek we do not hold must yield an honest no-source, never a similar-sounding substitute (Principle I)."}
