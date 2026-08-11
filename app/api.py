@@ -16,7 +16,6 @@ import sys
 import threading
 import time
 from contextvars import ContextVar
-from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -625,40 +624,6 @@ def _resolve_topic(question: str, history) -> str:
     return subs[-1] if subs else question
 
 
-def _prefer_hebrew_edition(hit):
-    """For a Hebrew source sheet: if this hit is the ENGLISH edition of a work, return the Hebrew
-    edition of the same ref instead (when the corpus has one); otherwise return the hit unchanged.
-
-    The corpus stores a work's Hebrew and English editions as separate chunks sharing one `ref`, and
-    retrieval returns whichever scored — so an English-language chunk can win even for a work whose
-    Hebrew is right there. On a Hebrew source sheet that reads as a bug: the sheet is what gets
-    printed and taught from. Falling back to English stays correct for the works that genuinely have
-    no Hebrew in the corpus (several responsa exist only as translations).
-
-    Best-effort and non-fatal: any store failure just keeps the original hit — a source sheet that
-    shows the English text it already had beats a request that 500s over a cosmetic preference.
-    """
-    if (getattr(hit, "lang", "he") or "he").lower().startswith("he"):
-        return hit
-    try:
-        pipeline = _get_pipeline()
-        found = pipeline.store.fetch_by_refs(pipeline.profile.collection, [hit.ref], limit=20)
-    except Exception:
-        _log.warning("Hebrew-edition lookup failed for %s; keeping the retrieved text", hit.ref,
-                     exc_info=True)
-        return hit
-    for h in found or []:
-        p = getattr(h, "payload", None) or {}
-        if p.get("ref") != hit.ref or not (p.get("text") or "").strip():
-            continue
-        if (p.get("lang") or "").lower().startswith("he"):
-            return replace(hit, text=p["text"], lang="he",
-                           license=p.get("license") or p.get("license_he") or hit.license,
-                           version_title=p.get("version_title") or p.get("version_he")
-                           or hit.version_title)
-    return hit
-
-
 # Tolerate the model bolding/indenting the delimiter (**===FULL_LESSON===**, leading spaces, RTL marks).
 def _source_sheet_entry(n: int, c: CitationOut) -> str:
     """One source on the sheet: the verbatim text, plus credit where the licence requires it.
@@ -683,6 +648,35 @@ def _source_sheet_entry(n: int, c: CitationOut) -> str:
             license_str=c.license, deep_link=c.deep_link,
         )
     return entry
+
+
+# Public-domain licence names, for a reader rather than a lawyer. Everything else is shown as the
+# licence's own identifier (CC-BY-SA, CC0…), which is the string people actually search for.
+_LICENSE_HE = {"public domain": "נחלת הכלל", "cc0": "CC0 (ויתור על זכויות)"}
+
+
+def _license_table(used: list[CitationOut], he: bool) -> str:
+    """Every source on the sheet with its edition and licence, numbered to match the sheet above.
+
+    Distinct from the per-source credit line in _source_sheet_entry, which appears ONLY where a
+    licence legally demands attribution — Public Domain and CC0 are the overwhelming majority of the
+    corpus and demand nothing, so on a typical sheet that mechanism prints nothing at all and the
+    reader is left with no idea what any of it is. A teacher handing out a sheet, or an operator
+    answering "where is this text from and may I reproduce it", needs the whole list in one place.
+    """
+    if not used:
+        return ""
+    head = "## מקורות ורישיונות" if he else "## Sources and licences"
+    lines = [head]
+    for n, c in enumerate(used, 1):
+        lic = (c.license or "").strip()
+        shown = _LICENSE_HE.get(lic.lower(), lic) if he else lic
+        parts = [f"{n}. {(c.ref_he or c.ref) if he else c.ref}"]
+        if c.version_title:
+            parts.append(c.version_title)
+        parts.append(shown or ("רישיון לא ידוע" if he else "licence unknown"))
+        lines.append(" — ".join(parts))
+    return "\n".join(lines)
 
 
 _LESSON_SPLIT_RE = re.compile(r"^[ \t>*‏‎]*===\s*(SOURCE_SHEET|LESSON_FLOW|FULL_LESSON|ORDER)\s*===[ \t*]*$", re.M)
@@ -919,15 +913,17 @@ def _generate_lesson_from_hits(topic: str, hits, lang: str, he: bool, *, audienc
     for i in nums:
         if 1 <= i <= len(hits) and i not in seen:
             seen.add(i)
-            h = _prefer_hebrew_edition(hits[i - 1]) if he else hits[i - 1]
-            # Route the text by the chunk's ACTUAL language, so _source_sheet_entry's
-            # "Hebrew, else English" fallback is a real language choice rather than a field name:
-            # everything used to be dropped into text_he regardless of what language it was.
-            is_he_text = (getattr(h, "lang", "he") or "he").lower().startswith("he")
-            text = getattr(h, "text", "") or ""
+            h = hits[i - 1]
+            # The corpus keeps the Hebrew and the English of a passage in their own payload fields;
+            # `text` is the indexed blob that concatenates a header line, the Hebrew AND the English.
+            # Reading `text` is what printed every source twice on a Hebrew sheet. Fall back to it
+            # only if neither split field is populated.
+            he_text = (getattr(h, "text_he", "") or "").strip()
+            en_text = (getattr(h, "text_en", "") or "").strip()
+            if not he_text and not en_text:
+                he_text = getattr(h, "text", "") or ""
             used.append(CitationOut(ref=h.ref, ref_he=(hebrew_display_ref(h.ref) or "") if he else "",
-                                    text_he=text if is_he_text else "",
-                                    text_en="" if is_he_text else text,
+                                    text_he=he_text, text_en=en_text,
                                     commentator=(getattr(h, "commentator_id", "") or ""),
                                     deep_link=(getattr(h, "deep_link", "") or ""),
                                     license=(getattr(h, "license", "") or ""),
@@ -952,6 +948,11 @@ def _generate_lesson_from_hits(topic: str, hits, lang: str, he: bool, *, audienc
     # licences, and nothing generated by us should be sent through a check for fabricated quotes.
     from chavruta.generation.grounded import unverified_quotes
     bad_q = unverified_quotes(fl + "\n" + ss, hits)
+
+    # Every source's edition and licence, in one numbered list matching the sheet. This is the part
+    # a reader can act on; the notice below is the part a licence legally compels.
+    if used:
+        ss += "\n\n" + _license_table(used, he)
 
     # Per-source credit answers who wrote a passage; this answers what the teacher holding the
     # downloaded file may do with it. Empty unless something on the sheet is CC-BY or CC-BY-SA,
