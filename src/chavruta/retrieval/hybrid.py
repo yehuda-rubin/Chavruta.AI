@@ -89,6 +89,11 @@ def _to_hit(h) -> RankedHit:
 # see the tier counts in docs/CORPUS.md.
 _FOUNDATIONAL_WORKS = ("tanakh", "mishnah", "gemara", "halacha", "midrash")
 
+# How many slots of a result set are kept for base texts when the ranking would otherwise return
+# commentary only. Small on purpose: the commentary IS usually what answers the question — the base
+# text is what makes the answer checkable, and one or two of them is enough for that.
+_BASE_SLOTS = 2
+
 
 class HybridRetriever:
     def __init__(self, embedding, store, profile, *, reranker=None, link_expander=None):
@@ -273,7 +278,26 @@ class HybridRetriever:
 
         hits = self._dedup(hits)
         hits.sort(key=lambda h: h.score, reverse=True)
-        hits = hits[:top_k]
+        # Actually RESERVE the base-text slots, rather than hoping they rank.
+        #
+        # The floor above finds the base source and appends it at its own score, which is usually
+        # low precisely because commentary discusses a topic in the querier's words while the sugya
+        # states it in its own. The sort then drops it: for "מה זה יאוש שלא מדעת", Bava_Metzia.42.1
+        # sat at 0.211 behind nine commentaries and fell outside top_k — the base text losing to its
+        # own commentaries, which is the exact thing this floor exists to prevent. Capping the score
+        # (min(score, 0.99)) never helped: it bounds from ABOVE, and the problem is from below.
+        #
+        # So take the top slots by score, then give back up to _BASE_SLOTS of them to base texts that
+        # made the candidate pool. No score is invented — the ordering the caller sees is still by
+        # score; only the membership of the final list is adjusted.
+        chosen = hits[:top_k]
+        if len(hits) > top_k and not query.work_ids and not query.commentator_ids:
+            if not any(not is_commentary_ref(h.ref) for h in chosen):
+                spare = [h for h in hits[top_k:] if not is_commentary_ref(h.ref)][:_BASE_SLOTS]
+                if spare:
+                    chosen = chosen[:top_k - len(spare)] + spare
+                    chosen.sort(key=lambda h: h.score, reverse=True)
+        hits = chosen
 
         # Relevance / honesty gate. hits[0].score is never a clean cosine here (hybrid → RRF fusion
         # score; dense-only → possibly floor-boosted/capped), so both non-anchor branches probe the raw
