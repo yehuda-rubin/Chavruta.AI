@@ -1,0 +1,52 @@
+# Chavruta.AI — TORAH QUESTIONS eval v1: real questions, phrased the way a person actually asks.
+#
+# WHY THIS EXISTS
+#   The other sets ask in terms already close to the corpus. This one deliberately does not. Every
+#   question here is worded like a person speaking — "what's the argument between Rashi and Tosafot
+#   about…", "may I… on Shabbat" — while the corpus is written in the language of the sugya. That
+#   gap is the system's dominant failure mode, measured 2026-08-12 on one chunk (Rashi on Sukkah
+#   41a, the מקדש העתיד comment):
+#
+#       "מקדש העתיד בנוי ומשוכלל…"        → rank 2
+#       "אין בנין בית המקדש בלילה…"       → rank 12
+#       "מה המחלוקת בין רש"י לתוספות…"    → not in the top 50
+#
+#   Same chunk, same index, same embedding. So this set measures the bridge, not the corpus.
+#
+# HOW THE expected_refs WERE CHOSEN
+#   Not guessed. Each was found by probing the live collection in the SOURCE's own wording and
+#   recording what came back — so every ref here is known to exist and known to be reachable. A
+#   failure is therefore always a query-understanding failure, never a missing text.
+#
+# FORMAT  {"qid","question","lang","expected_refs":[…],"intent","note","history":[…]}
+#   expected_refs are segment-prefix matched, so "Rashi_on_Sukkah.81" matches ".81.11.2".
+#   expected_refs == []  ⇒  honest no-source must hold (the work is genuinely not in the corpus).
+#
+# RUN  python scripts/run_eval.py --dataset eval/torah_questions_v1.jsonl --retrieval-only
+#
+{"qid": "tq-01", "question": "מה המחלוקת בין רש\"י לתוספות לגבי בניית בית המקדש ואיך אפשר ליישב אותה", "lang": "he", "expected_refs": ["Rashi_on_Sukkah.81"], "intent": "explain", "note": "the reported failure. Rashi ד\"ה אי נמי: המקדש העתיד יורד בנוי משמים."}
+{"qid": "tq-02", "question": "למה תיקנו ליטול לולב שבעה ימים אחרי החורבן", "lang": "he", "expected_refs": ["Sukkah.81", "Ritva_on_Sukkah", "Melekhet_Shelomoh_on_Mishnah_Sukkah"], "intent": "qa", "note": "זכר למקדש — תקנת רבן יוחנן בן זכאי"}
+{"qid": "tq-03", "question": "שניים מחזיקים בטלית ושניהם טוענים שהיא שלהם, מה הדין", "lang": "he", "expected_refs": ["Bava_Metzia.3", "Rambam_on_Mishnah_Bava_Metzia.1.1"], "intent": "qa", "note": "the opening mishnah of Bava Metzia, asked as a case rather than by name"}
+{"qid": "tq-04", "question": "מה זה יאוש שלא מדעת ומה נפסק בו", "lang": "he", "expected_refs": ["Bava_Metzia.42", "Rashi_on_Bava_Metzia.42"], "intent": "explain", "note": "אביי ורבא"}
+{"qid": "tq-05", "question": "מי צריך להביא ראיה כששניים חלוקים על ממון", "lang": "he", "expected_refs": ["Bava_Batra", "Rashbam_on_Bava_Batra"], "intent": "qa", "note": "המוציא מחבירו עליו הראיה — asked as the practical question"}
+{"qid": "tq-06", "question": "האם מותר להזיז כלי שאסור להשתמש בו בשבת", "lang": "he", "expected_refs": ["Mishnah_Berurah.325", "Peri_Megadim_on_Orach_Chayim,_Eshel_Avraham"], "intent": "qa", "note": "מוקצה, asked without using the word"}
+{"qid": "tq-07", "question": "האם מותר לשחק במחשב בשבת", "lang": "he", "expected_refs": ["B'Mareh_HaBazak", "Shulchan_Arukh,_Orach_Chayim.310"], "intent": "qa", "note": "2026-08-07: modern device must reach the electricity/muktzeh sources, not the שחוק sugya"}
+{"qid": "tq-08", "question": "מותר לדבר בטלפון בשבת?", "lang": "he", "expected_refs": ["B'Mareh_HaBazak", "Shulchan_Arukh,_Orach_Chayim.310"], "intent": "qa", "note": "same class as tq-07, different device — guards the fix generalising"}
+{"qid": "tq-09", "question": "האם מותר להשתמש בחשמל בשבת", "lang": "he", "expected_refs": ["B'Mareh_HaBazak"], "intent": "qa", "note": "control for tq-07: the same halachic question phrased directly always worked"}
+{"qid": "tq-10", "question": "מה מברכים לפני שאוכלים ולמה חייבים לברך בכלל", "lang": "he", "expected_refs": ["Berakhot.69", "Rif_Berakhot", "Ein_Yaakov_(Glick_Edition),_Berakhot"], "intent": "qa", "note": "כל הנהנה מן העולם הזה בלא ברכה"}
+{"qid": "tq-11", "question": "איך נוטלים ידיים לפני הסעודה", "lang": "he", "expected_refs": ["Kol_Bo", "Shibbolei_HaLeket"], "intent": "qa", "note": "practical halacha, everyday phrasing"}
+{"qid": "tq-12", "question": "מאיזה שופר צריך לתקוע בראש השנה", "lang": "he", "expected_refs": ["Rosh_Hashanah.52", "Rashi_on_Rosh_Hashanah.52"], "intent": "qa", "note": "שופר של ראש השנה של יעל פשוט"}
+{"qid": "tq-13", "question": "מתי ואיך בודקים חמץ לפני פסח", "lang": "he", "expected_refs": ["Pesachim.5", "Rambam_on_Mishnah_Pesachim.1.1", "Rosh_on_Pesachim.1.1"], "intent": "qa", "note": "אור לארבעה עשר בודקין את החמץ לאור הנר"}
+{"qid": "tq-14", "question": "אילו מלאכות אסורות בשבת וכמה הן", "lang": "he", "expected_refs": ["Shabbat.137", "Tosafot_Yom_Tov_on_Mishnah_Shabbat.7.2", "Rif_Shabbat"], "intent": "qa", "note": "אבות מלאכות ארבעים חסר אחת"}
+{"qid": "tq-15", "question": "מותר לחלל שבת כדי להציל חיים?", "lang": "he", "expected_refs": ["Tur,_Orach_Chayim.329", "Chokhmat_Shlomo_on_Shulchan_Arukh,_Orach_Chayim.329"], "intent": "qa", "note": "פיקוח נפש דוחה את השבת"}
+{"qid": "tq-16", "question": "למה מניחים תפילין ומה המקור לזה", "lang": "he", "expected_refs": ["Mishneh_Torah,_Tefillin", "Rabbeinu_Bahya,_Shemot.13"], "intent": "qa", "note": "קדש לי כל בכור"}
+{"qid": "tq-17", "question": "איזה לולב פסול ולמה", "lang": "he", "expected_refs": ["Rambam_on_Mishnah_Sukkah.3.1", "Rif_Sukkah", "Shibbolei_HaLeket"], "intent": "qa", "note": "לולב הגזול והיבש פסול"}
+{"qid": "tq-18", "question": "מה הפסוק הראשון בתורה ומה למדו ממנו", "lang": "he", "expected_refs": ["Genesis.1.1"], "intent": "explain", "note": "landmark resolution + base pasuk"}
+{"qid": "tq-19", "question": "מה הפירוש של קריאת שמע", "lang": "he", "expected_refs": ["Deuteronomy.6.4"], "intent": "explain", "note": "landmark"}
+{"qid": "tq-20", "question": "תסביר את עשרת הדיברות", "lang": "he", "expected_refs": ["Exodus.20"], "intent": "explain", "note": "landmark"}
+{"qid": "tq-21", "question": "למה ה' ניסה את אברהם בעקידה", "lang": "he", "expected_refs": ["Genesis.22", "Rabbeinu_Bahya,_Bereshit.22", "Malbim_on_Genesis.22"], "intent": "explain", "note": "the test of Avraham — asked by theme, not by ref"}
+{"qid": "tq-22", "question": "מה אומר הירושלמי על זה", "lang": "he", "expected_refs": ["Jerusalem_Talmud_Shabbat", "Penei_Moshe_on_Jerusalem_Talmud_Shabbat"], "intent": "qa", "history": ["אילו מלאכות אסורות בשבת"], "note": "follow-up AND a Yerushalmi request — needs the conversation to know what 'this' is"}
+{"qid": "tq-23", "question": "תנסה", "lang": "he", "expected_refs": ["Rashi_on_Sukkah.81", "Sukkah.81"], "intent": "qa", "history": ["מה המחלוקת בין רש\"י לתוספות לגבי בניית בית המקדש"], "note": "2026-08-11: a bare follow-up retrieved the literal word and returned sources about the CONCEPT of a test"}
+{"qid": "tq-24", "question": "למה?", "lang": "he", "expected_refs": ["B'Mareh_HaBazak", "Shulchan_Arukh,_Orach_Chayim.310"], "intent": "qa", "history": ["האם מותר לטלטל מחשב בשבת"], "note": "the shortest possible follow-up — carries no retrievable content at all"}
+{"qid": "tq-25", "question": "עכשיו שאלה אחרת לגמרי — איך בודקים חמץ", "lang": "he", "expected_refs": ["Pesachim.5", "Rambam_on_Mishnah_Pesachim.1.1"], "intent": "qa", "history": ["מה המחלוקת בין רש\"י לתוספות לגבי בניית בית המקדש"], "note": "NEGATIVE case for follow-up anchoring: a full question mid-conversation must retrieve on its own topic"}
+{"qid": "tq-26", "question": "מה פוסק הרב עובדיה יוסף על שימוש במדיח כלים בשבת", "lang": "he", "expected_refs": [], "intent": "qa", "note": "honesty guard: Yabia Omer is not in the commercial corpus — naming a posek we don't hold must yield an honest no-source (Principle I)"}

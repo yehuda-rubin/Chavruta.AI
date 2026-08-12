@@ -1619,3 +1619,26 @@ def test_followup_without_history_is_unchanged():
                                               router=SimpleNamespace(route=lambda q: q))
     q = Query(text="תנסה", lang="he", intent=Intent.QA, search_text="תנסה")
     assert pipeline._anchor_followup(q, None).search_text == "תנסה"
+
+
+def test_base_source_floor_filters_commentary_by_ref_not_unit_type():
+    """The floor exists to reserve slots for the BASE text (pasuk/mishnah/daf) against its own
+    commentaries. It filtered on unit_type="source" believing commentary couldn't satisfy that — but
+    every point in this corpus carries unit_type="source", and Rashi_on_Bava_Metzia.42.1.1 and
+    Bava_Metzia.42.1 are identical on both work_id and unit_type. The ref shape is the only signal.
+    """
+    from chavruta.corpus.refs import is_commentary_ref
+
+    assert is_commentary_ref("Rashi_on_Bava_Metzia.42.1.1")
+    assert is_commentary_ref("Tosafot_on_Sukkah.81.11.1")
+    assert not is_commentary_ref("Bava_Metzia.42.1")
+    assert not is_commentary_ref("Genesis.1.1")
+
+    import inspect
+
+    from chavruta.retrieval import hybrid
+    src = inspect.getsource(hybrid.HybridRetriever.retrieve)
+    assert 'unit_type": "source"' not in src, (
+        "the base-source floor must not filter on unit_type — it is 'source' for every point"
+    )
+    assert "is_commentary_ref" in src

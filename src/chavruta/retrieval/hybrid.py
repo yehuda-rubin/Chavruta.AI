@@ -16,6 +16,7 @@ from dataclasses import replace
 from chavruta.corpus.refs import (
     commentary_refs,
     commentator_from_ref,
+    is_commentary_ref,
     license_for_ref,
     with_ref_variants,
 )
@@ -202,24 +203,39 @@ class HybridRetriever:
                 hits.append(rh)
 
         # Base-source floor: within the foundational works, COMMENTARY chunks vastly outnumber base
-        # (unit_type=source) chunks, so a thematic / free-form / English query can fill every
-        # foundational slot with derush and never surface the actual pasuk/mishnah/daf. Reserve a few
-        # slots specifically for base texts (a filter commentary cannot satisfy) — but ONLY ones that
-        # are genuinely relevant (dense cosine ≥ threshold): the filtered sub-search's RRF is not a
-        # cosine and would otherwise promote off-topic pesukim un-prunably.
+        # ones, so a thematic / free-form / English query can fill every foundational slot with
+        # commentary and never surface the actual pasuk/mishnah/daf. Reserve a few slots for the base
+        # text — but ONLY where it is genuinely relevant (dense cosine ≥ threshold): the filtered
+        # sub-search's RRF is not a cosine and would otherwise promote off-topic pesukim un-prunably.
+        #
+        # The filter used to be `unit_type: "source"`, on the belief that commentary could not satisfy
+        # it. In this corpus it can: EVERY point carries unit_type="source" — 516,854 of 516,854 in
+        # the gemara tier — and `Rashi_on_Bava_Metzia.42.1.1` and `Bava_Metzia.42.1` are identical on
+        # both work_id and unit_type. So the floor reserved nothing and the base text kept losing to
+        # its own commentaries, which is the dominant failure in eval/torah_questions_v1.jsonl:
+        # "found Rashi on the sugya, missed the sugya".
+        #
+        # The one reliable signal is the ref shape — a commentary ref carries `_on_`. It isn't a
+        # server-side filter, so over-fetch and drop commentary here.
         if not query.work_ids and not query.commentator_ids:
             try:
-                bfilt = {"work_id": list(_FOUNDATIONAL_WORKS), "unit_type": "source"}
+                bfilt = {"work_id": list(_FOUNDATIONAL_WORKS)}
                 with _timed(t, "floors"):
-                    base = self.store.search(self.profile.collection, hquery, top_k=3, filters=bfilt)
-                    bmap = self.store.dense_scores(self.profile.collection, emb.dense, bfilt, top_k=3) \
+                    base = self.store.search(self.profile.collection, hquery, top_k=24, filters=bfilt)
+                    bmap = self.store.dense_scores(self.profile.collection, emb.dense, bfilt, top_k=24) \
                         if use_sparse else {}
                 thr = self.profile.relevance_threshold
+                kept = 0
                 for h in base:
+                    if kept >= 3:
+                        break
                     rh = _to_hit(h)
+                    if is_commentary_ref(rh.ref):      # the point of this floor is the base text
+                        continue
                     if not use_sparse or bmap.get(rh.chunk_id, 0.0) >= thr:
                         rh.score = min(rh.score, 0.99)   # never masquerade as a named-ref anchor
                         hits.append(rh)
+                        kept += 1
             except Exception:
                 pass
 
