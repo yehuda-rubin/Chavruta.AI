@@ -89,10 +89,29 @@ def _to_hit(h) -> RankedHit:
 # see the tier counts in docs/CORPUS.md.
 _FOUNDATIONAL_WORKS = ("tanakh", "mishnah", "gemara", "halacha", "midrash")
 
+# ── Tunable constants ─────────────────────────────────────────────────────────────────────────
+#
+# Every number below was chosen by judgement, not measurement — there was no eval set large enough
+# to tell a real 3% gain from noise (three consecutive retrieval changes all measured 52%). They are
+# named module constants rather than inline literals SO THAT they can be measured:
+# scripts/tune_retrieval.py sets them and scores the result against harvested ground truth, with the
+# human-written eval sets held back as a veto. Read them at call time; do not copy into locals.
+
 # How many slots of a result set are kept for base texts when the ranking would otherwise return
 # commentary only. Small on purpose: the commentary IS usually what answers the question — the base
 # text is what makes the answer checkable, and one or two of them is enough for that.
 _BASE_SLOTS = 2
+
+# The foundational-works floor: how many candidates to pull, and how hard to lift them. The boost is
+# capped below the named-ref anchor sentinel so a floor hit can never masquerade as something the
+# user pointed at by name.
+_FOUNDATIONAL_TOP_K = 6
+_FOUNDATIONAL_BOOST = 0.05
+
+# The named-tractate floor. Same shape, but capped lower still: naming a masechet is weaker evidence
+# than naming a ref, and the ranking must keep saying so.
+_TRACTATE_TOP_K = 6
+_TRACTATE_BOOST = 0.05
 
 
 class HybridRetriever:
@@ -251,11 +270,13 @@ class HybridRetriever:
         if not query.work_ids and not query.commentator_ids:
             try:
                 with _timed(t, "floors"):
-                    found = self.store.search(self.profile.collection, hquery, top_k=6,
+                    found = self.store.search(self.profile.collection, hquery,
+                                              top_k=_FOUNDATIONAL_TOP_K,
                                               filters={"work_id": list(_FOUNDATIONAL_WORKS)})
                 for h in found:
                     rh = _to_hit(h)
-                    rh.score = min(rh.score + 0.05, 0.99)   # boost, but never reach the anchor sentinel
+                    # boost, but never reach the anchor sentinel
+                    rh.score = min(rh.score + _FOUNDATIONAL_BOOST, 0.99)
                     hits.append(rh)
             except Exception:
                 pass
@@ -268,13 +289,14 @@ class HybridRetriever:
         for tractate in (query.tractates or [])[:2]:
             try:
                 with _timed(t, "tractate"):
-                    scoped = self.store.search(self.profile.collection, hquery, top_k=6,
+                    scoped = self.store.search(self.profile.collection, hquery,
+                                               top_k=_TRACTATE_TOP_K,
                                                filters={"ref": {"$text": tractate}})
                 for h in scoped:
                     rh = _to_hit(h)
                     # Below the named-ref anchor sentinel: the question named a tractate, not a ref,
                     # so this must not masquerade as something the user pointed at exactly.
-                    rh.score = min(rh.score + 0.05, 0.98)
+                    rh.score = min(rh.score + _TRACTATE_BOOST, 0.98)
                     hits.append(rh)
             except Exception as exc:
                 logger.warning("tractate-scoped search failed for %s (%s)", tractate, exc)

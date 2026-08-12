@@ -11,6 +11,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from collections.abc import Collection
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -680,6 +681,52 @@ def set_session_excluded(sid: str, owner_id: str, excluded: bool) -> bool:
             (1 if excluded else 0, sid, owner_id),
         )
     return cur.rowcount > 0
+
+
+# ── The single gate on reading user conversations for review/improvement ──────────────────────
+#
+# Privacy policy 1.8 / Terms 1.10 permit the operator to review conversation content to improve the
+# service — but only under three conditions, all of which were promised to users in the notice email
+# and all of which are enforced HERE and nowhere else. A second enforcement point is how one of them
+# eventually gets forgotten.
+#
+#   1. NOT RETROACTIVE. Only conversations created from 2026-08-10 00:00 Israel time onward. Anything
+#      older was collected under the previous promise ("used only to operate the service") and is
+#      permanently out of scope — not "probably fine", out of scope.
+#   2. The per-chat opt-out (sessions.excluded_from_review).
+#   3. The account-wide opt-out, which lives in Supabase user_metadata (data_review_opt_out) and so
+#      cannot be read from here — the caller passes the opted-out owner ids in. It OVERRIDES the
+#      per-chat setting, which is why it is applied as an exclusion rather than merged.
+#
+# Passing opted_out_owners=None means "the caller has not established who opted out", which is
+# treated as ALL owners opted out rather than none: failing closed on a privacy gate is the only
+# safe default, and a caller that genuinely has no opt-outs passes an empty collection.
+REVIEW_EFFECTIVE_FROM = "2026-08-09T21:00:00"   # 2026-08-10 00:00 Israel time, in UTC
+
+
+def reviewable_questions(*, since: str | None = None, limit: int = 200,
+                         opted_out_owners: Collection[str] | None = ()) -> list[dict[str, Any]]:
+    """User questions the operator is permitted to review, oldest first.
+
+    The ONLY sanctioned way to read conversation text for review, evaluation or model improvement.
+    Do not hand-roll a query over `messages` for those purposes — see the conditions above.
+    """
+    if opted_out_owners is None:
+        return []
+    cutoff = max(since or REVIEW_EFFECTIVE_FROM, REVIEW_EFFECTIVE_FROM)   # never before the promise
+    with _LOCK:
+        rows = get_conn().execute(
+            """SELECT m.id, m.text, m.intent, m.created_at, s.id AS session_id, s.owner_id
+               FROM messages m JOIN sessions s ON s.id = m.session_id
+               WHERE m.role = 'user'
+                 AND s.excluded_from_review = 0
+                 AND s.created_at >= ?
+               ORDER BY m.id ASC
+               LIMIT ?""",
+            (cutoff, max(1, int(limit))),
+        ).fetchall()
+    excluded = {o for o in opted_out_owners}
+    return [dict(r) for r in rows if r["owner_id"] not in excluded]
 
 
 MAX_PINNED_SESSIONS = 3

@@ -16,12 +16,17 @@ import app.api as api
 import app.db as db
 import app.plans as plans
 
-# A daily cap of exactly ONE qa turn's reservation — the smallest cap under which the first turn is
-# admitted and the pool is then spent. DERIVED, not hardcoded: these tests pin the BEHAVIOUR (one
-# turn fits, the next is refused unless a key is supplied), and a hardcoded 25,000 silently became a
-# cap smaller than one turn the moment the generation budgets and their reservations were raised
-# (2026-08-12), turning every one of these into a false 429.
+# A daily cap that fits ONE qa turn and not two. DERIVED, not hardcoded: these tests pin the
+# BEHAVIOUR (one turn fits, the next is refused unless a key is supplied), and the hardcoded 25,000
+# they used to carry silently became a cap SMALLER than one turn the moment the generation budgets
+# and their reservations were raised (2026-08-12), turning every one of them into a false 429.
+#
+# The 1.5x headroom is not cosmetic. A cap of exactly one reservation leaves zero slack, so any
+# stray token already metered against the owner makes even the FIRST turn fail — which showed up as
+# an intermittent failure that passed when the file was run alone. The old pair (25,000 against a
+# 20,000 estimate) had the same 1.25x slack; keeping it is what makes these tests deterministic.
 _ONE_TURN = plans.token_estimate("qa")
+_DAY_CAP = int(_ONE_TURN * 1.5)
 
 
 @pytest.fixture
@@ -59,7 +64,7 @@ def test_byok_supported_false_when_profile_missing(monkeypatch):
 
 # ── _reserve_tokens (conversation pool) ───────────────────────────────────────
 def test_no_key_behaves_exactly_as_before(fresh_db, api_backend, monkeypatch):
-    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", str(_ONE_TURN))
+    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", str(_DAY_CAP))
     monkeypatch.setenv("CHAVRUTA_TOKENS_WEEK_FREE", "0")
     reserved, used_byok = api._reserve_tokens("u1", "he", "qa")
     assert reserved > 0 and used_byok is False
@@ -68,7 +73,7 @@ def test_no_key_behaves_exactly_as_before(fresh_db, api_backend, monkeypatch):
 
 def test_key_unused_while_the_plan_quota_still_has_room(fresh_db, api_backend, monkeypatch):
     """A key is only ever spent as a FALLBACK — never touched while the plan's own pool has room."""
-    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", str(_ONE_TURN))
+    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", str(_DAY_CAP))
     monkeypatch.setenv("CHAVRUTA_TOKENS_WEEK_FREE", "0")
     reserved, used_byok = api._reserve_tokens("u2", "he", "qa", user_key="sk-user")
     assert used_byok is False
@@ -76,23 +81,23 @@ def test_key_unused_while_the_plan_quota_still_has_room(fresh_db, api_backend, m
 
 
 def test_key_admits_a_second_allowance_once_the_plan_quota_is_spent(fresh_db, api_backend, monkeypatch):
-    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", str(_ONE_TURN))
+    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", str(_DAY_CAP))
     monkeypatch.setenv("CHAVRUTA_TOKENS_WEEK_FREE", "0")
-    db.bump_usage("u3", _ONE_TURN, units=_ONE_TURN, meter=db.TOKENS)   # spend the plan's own pool outright
+    db.bump_usage("u3", _DAY_CAP, units=_DAY_CAP, meter=db.TOKENS)   # spend the plan's own pool outright
 
     reserved, used_byok = api._reserve_tokens("u3", "he", "qa", user_key="sk-user")
     assert used_byok is True and reserved > 0
     assert db.usage_today("u3", meter=db.BYOK_TOKENS) == reserved
-    assert db.usage_today("u3", meter=db.TOKENS) == _ONE_TURN     # the plan's own pool untouched
+    assert db.usage_today("u3", meter=db.TOKENS) == _DAY_CAP     # the plan's own pool untouched
 
 
 def test_no_key_still_refuses_once_the_plan_quota_is_spent(fresh_db, api_backend, monkeypatch):
     from fastapi import HTTPException
 
-    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", str(_ONE_TURN))
+    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", str(_DAY_CAP))
     monkeypatch.setenv("CHAVRUTA_TOKENS_WEEK_FREE", "0")
     monkeypatch.setattr(db, "spend_credits", lambda owner, cost: (False, 0))
-    db.bump_usage("u4", _ONE_TURN, units=_ONE_TURN, meter=db.TOKENS)
+    db.bump_usage("u4", _DAY_CAP, units=_DAY_CAP, meter=db.TOKENS)
 
     with pytest.raises(HTTPException) as exc:
         api._reserve_tokens("u4", "he", "qa")
@@ -103,11 +108,11 @@ def test_key_also_refused_once_both_pools_are_spent(fresh_db, api_backend, monke
     """A key is not an unlimited escape hatch — it is exactly one more allowance the same size."""
     from fastapi import HTTPException
 
-    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", str(_ONE_TURN))
+    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", str(_DAY_CAP))
     monkeypatch.setenv("CHAVRUTA_TOKENS_WEEK_FREE", "0")
     monkeypatch.setattr(db, "spend_credits", lambda owner, cost: (False, 0))
-    db.bump_usage("u5", _ONE_TURN, units=_ONE_TURN, meter=db.TOKENS)
-    db.bump_usage("u5", _ONE_TURN, units=_ONE_TURN, meter=db.BYOK_TOKENS)
+    db.bump_usage("u5", _DAY_CAP, units=_DAY_CAP, meter=db.TOKENS)
+    db.bump_usage("u5", _DAY_CAP, units=_DAY_CAP, meter=db.BYOK_TOKENS)
 
     with pytest.raises(HTTPException) as exc:
         api._reserve_tokens("u5", "he", "qa", user_key="sk-user")
@@ -120,10 +125,10 @@ def test_key_ignored_when_backend_does_not_support_byok(fresh_db, monkeypatch):
 
     fake = SimpleNamespace(profile=SimpleNamespace(llm_backend="bridge"))
     monkeypatch.setattr(api, "_get_pipeline", lambda: fake)
-    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", str(_ONE_TURN))
+    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", str(_DAY_CAP))
     monkeypatch.setenv("CHAVRUTA_TOKENS_WEEK_FREE", "0")
     monkeypatch.setattr(db, "spend_credits", lambda owner, cost: (False, 0))
-    db.bump_usage("u6", _ONE_TURN, units=_ONE_TURN, meter=db.TOKENS)
+    db.bump_usage("u6", _DAY_CAP, units=_DAY_CAP, meter=db.TOKENS)
 
     with pytest.raises(HTTPException):
         api._reserve_tokens("u6", "he", "qa", user_key="sk-user")
@@ -174,7 +179,7 @@ def test_lesson_unit_never_raises_even_fully_exhausted(fresh_db, api_backend, mo
 
 # ── _resolve_llm_for_request (route-level wiring) ─────────────────────────────
 def test_resolve_llm_for_request_builds_a_llm_override_only_on_byok(fresh_db, api_backend, monkeypatch):
-    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", str(_ONE_TURN))
+    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", str(_DAY_CAP))
     monkeypatch.setenv("CHAVRUTA_TOKENS_WEEK_FREE", "0")
     sentinel = object()
     monkeypatch.setattr(api, "_byok_llm", lambda key, base_url="", model="": sentinel)
@@ -193,7 +198,7 @@ def test_resolve_llm_for_request_tolerates_the_fastapi_header_marker(fresh_db, a
     """A handful of existing tests call route functions directly, bypassing FastAPI's dependency
     injection — the Header(...) marker object itself lands in user_key rather than a str/None. Must
     not crash, and must behave exactly like "no key supplied"."""
-    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", str(_ONE_TURN))
+    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", str(_DAY_CAP))
     monkeypatch.setenv("CHAVRUTA_TOKENS_WEEK_FREE", "0")
 
     class _NotAString:
