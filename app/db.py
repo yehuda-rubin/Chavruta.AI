@@ -1861,13 +1861,39 @@ def due_deletions(now_iso: str) -> list[str]:
     return [r["owner_id"] for r in rows]
 
 
+class OwnsOrganisation(Exception):
+    """This account owns a live organisation, so it cannot be deleted yet."""
+
+
+# Stands in for a purged account wherever a NOT NULL column named one. Never a real owner id:
+# Supabase ids are UUIDs and the offline single-user id is 'local'.
+DELETED_OWNER = "deleted-account"
+
+
+def owns_org(owner_id: str) -> bool:
+    """Does this account own (pay for, administer) an organisation?"""
+    with _LOCK:
+        return get_conn().execute(
+            "SELECT 1 FROM orgs WHERE owner_id=? LIMIT 1", (owner_id,)).fetchone() is not None
+
+
 def purge_owner(owner_id: str) -> None:
     """Irreversibly delete ALL of an owner's data: sessions (messages cascade), saved lessons, usage
     counters, and the account row itself. Used by the deletion sweeper once the grace period lapses.
-    Guarded against the shared single-user 'local' id so a misconfigured call can't wipe local dev."""
+    Guarded against the shared single-user 'local' id so a misconfigured call can't wipe local dev.
+
+    Raises OwnsOrganisation if the account still owns a school. `orgs.owner_id` is the only link
+    between an institution and the person who paid for it, so purging them would leave a live org
+    pointing at a dead account: the members keep spending a pool nobody can administer, and nothing
+    anywhere would error. The sweeper logs and skips (run_due_purges catches per row), and
+    /account/delete refuses up front so the user hears about it instead of the deletion silently
+    never happening.
+    """
     if owner_id == "local":
         return
     conn = get_conn()
+    if owns_org(owner_id):
+        raise OwnsOrganisation(owner_id)
     with _LOCK, _tx(conn):
         conn.execute("DELETE FROM sessions WHERE owner_id=?", (owner_id,))         # messages cascade
         conn.execute("DELETE FROM saved_lessons WHERE owner_id=?", (owner_id,))
@@ -1879,10 +1905,25 @@ def purge_owner(owner_id: str) -> None:
         # never decremented, so a spent code stays spent whether or not this row survives. (Nor
         # would keeping it stop re-redemption — a re-registered person gets a new owner_id anyway.)
         conn.execute("DELETE FROM coupon_redemptions WHERE owner_id=?", (owner_id,))
+        # School membership goes with the account. The seat must be freed too — leaving the row would
+        # hold a seat for someone who no longer exists, and a 20-seat school would slowly run out of
+        # room it is still paying for.
+        conn.execute("DELETE FROM org_members WHERE owner_id=?", (owner_id,))
         # Telemetry is anonymised rather than deleted: the rows carry no content, only measurements,
         # and dropping them would silently rewrite history for every aggregate that has already been
         # reported. Detaching the identity satisfies the deletion request; the counts stay true.
         conn.execute("UPDATE usage_events SET owner_id=NULL WHERE owner_id=?", (owner_id,))
+        # Same treatment for the org audit trail and invite provenance: both name a person but carry
+        # no content of theirs. Deleting the log outright would let a departing administrator erase
+        # the record of what they looked at, which is the one thing that trail exists to prevent.
+        # A sentinel rather than NULL — those columns are NOT NULL, and "the account was deleted"
+        # is a truer reading of the row than "unknown".
+        conn.execute("UPDATE org_access_log SET actor_owner_id=? WHERE actor_owner_id=?",
+                     (DELETED_OWNER, owner_id))
+        conn.execute("UPDATE org_access_log SET target_owner_id=? WHERE target_owner_id=?",
+                     (DELETED_OWNER, owner_id))
+        conn.execute("UPDATE org_invites SET created_by=? WHERE created_by=?",
+                     (DELETED_OWNER, owner_id))
 
 
 # ── Calendar cache (Parshat HaShavua / Daf Yomi) ───────────────────────────────

@@ -2507,6 +2507,14 @@ def request_account_deletion(owner: str = Depends(current_owner)):
     if owner == "local":
         # No account to delete in local/offline mode (the single-user store isn't an account).
         raise HTTPException(status_code=400, detail="no account in local mode")
+    # Refused here rather than at the deadline, so the user finds out now instead of discovering
+    # weeks later that the deletion they scheduled never happened. db.purge_owner guards the same
+    # condition again — this is the message, that is the safety net.
+    if db.owns_org(owner):
+        raise HTTPException(
+            status_code=409,
+            detail="החשבון הזה מנהל מוסד. כדי למחוק אותו, יש לסגור תחילה את המוסד — מחיקה עכשיו "
+                   "הייתה משאירה את חברי המוסד בלי מי שמנהל את המכסה שלהם. פנו אלינו ונסייע.")
     return DeletionOut(deletion_scheduled_for=accounts.schedule(owner))
 
 
@@ -2578,6 +2586,10 @@ _REDEEM_MESSAGES = {
     "throttled": ("יותר מדי ניסיונות. נסה שוב בעוד שעה.", "Too many attempts. Try again in an hour."),
     "downgrade": ("הקוד נותן רמה נמוכה מזו שיש לך כבר.",
                   "That code grants a lower tier than you already have."),
+    "org_member": ("החשבון הזה משויך למוסד ומשתמש במכסה המשותפת שלו, ולכן אי אפשר להוסיף לו מנוי "
+                   "או קרדיטים. אפשר לצאת מהמוסד בהגדרות ואז לממש את הקוד.",
+                   "This account belongs to an institution and draws on its shared quota, so a plan "
+                   "or credits can't be added to it. Leave the institution in Settings first."),
 }
 _REDEEM_STATUS = {"throttled": 429, "sign_in_required": 401}
 

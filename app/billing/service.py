@@ -14,6 +14,7 @@ import time
 from datetime import UTC, datetime, timedelta
 
 import app.db as db
+import app.orgs as orgs
 from app import plans
 from app.billing import greeninvoice, payplus
 
@@ -47,6 +48,12 @@ def start_checkout(owner_id: str, email: str, name: str, *,
     cyc = plans.canonical_cycle(cycle)
     if tier == "free":
         raise ValueError("cannot check out the free tier")
+    # Refused BEFORE the payment page exists, not after the charge: a school member draws on the
+    # org's pool, so a personal subscription would take real money and grant nothing at all. The
+    # check is here rather than in the route so it holds for every caller of this function.
+    if orgs.membership(owner_id):
+        raise ValueError("החשבון משויך למוסד ומשתמש במכסה המשותפת שלו — מנוי אישי לא יוסיף לו כלום. "
+                         "כדי לרכוש מנוי משלך, צא מהמוסד בהגדרות תחילה.")
     db.upsert_subscription(owner_id, provider="payplus", status="pending", plan=tier, cycle=cyc,
                            updated_at=datetime.now(UTC).isoformat())
     return payplus.create_payment_page(owner_id, email, name,

@@ -22,6 +22,7 @@ import time
 from datetime import UTC, datetime, timedelta
 
 import app.db as db
+import app.orgs as orgs
 from app import plans
 
 _log = logging.getLogger("chavruta.coupons")
@@ -147,6 +148,14 @@ def redeem(owner_id: str, code: str, *, now: datetime | None = None,
     """
     if owner_id == "local":
         raise RedeemError("sign_in_required")
+    # A school member spends the org's pool and nothing else — there is no personal allowance, no
+    # credit fallback and no BYOK path behind it (app/api.py::_reserve_tokens branches on
+    # orgs.quota_context BEFORE any of those). So a plan coupon here would grant a tier that changes
+    # nothing, and a credits coupon would hand out credits that can never be spent. Refusing is the
+    # honest answer; granting silently would look like it worked. This also covers /admin/grant,
+    # which mints a code and redeems it on the account's behalf through this same function.
+    if orgs.membership(owner_id):
+        raise RedeemError("org_member")
     stored = normalize(code)
     if not _VALID.match(stored):
         raise RedeemError("invalid")

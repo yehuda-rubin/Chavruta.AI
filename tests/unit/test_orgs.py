@@ -223,3 +223,95 @@ def test_opening_the_panel_is_recorded(school):
             "SELECT actor_owner_id, target_owner_id, action FROM org_access_log WHERE org_id=?",
             (school,)).fetchall()
     assert [tuple(r) for r in rows] == [("boss", "pupil", "view_panel")]
+
+
+# ── A member has no personal wallet ───────────────────────────────────────────
+# Everything below defends the same invariant from a different door: a school member spends the
+# org's pool and NOTHING else. app/api.py::_reserve_tokens branches on orgs.quota_context before it
+# ever reaches credits or a personal plan, so anything sold or granted to a member personally is
+# money (or operator goodwill) that buys literally nothing. Silence would look like success.
+
+def test_a_member_cannot_check_out_a_personal_plan(school, monkeypatch):
+    from app.billing import payplus, service as billing
+
+    monkeypatch.setattr(payplus, "enabled", lambda: True)
+    _join(school, "pupil")
+    with pytest.raises(ValueError):
+        billing.start_checkout("pupil", "p@example.com", "Pupil", plan="pro")
+
+
+def test_a_non_member_can_still_check_out(school, monkeypatch):
+    """The guard must not touch the path every existing paying user takes."""
+    from app.billing import payplus, service as billing
+
+    monkeypatch.setattr(payplus, "enabled", lambda: True)
+    monkeypatch.setattr(payplus, "create_payment_page",
+                        lambda *a, **k: {"link": "https://pay.example/x"})
+    assert billing.start_checkout("outsider", "o@example.com", "O", plan="pro")
+
+
+def test_a_member_cannot_redeem_a_plan_coupon(school):
+    import app.coupons as coupons
+
+    _join(school, "pupil")
+    code = coupons.issue_plan_coupon(plan="pro", days=30, max_redemptions=1)
+    with pytest.raises(coupons.RedeemError) as exc:
+        coupons.redeem("pupil", code)
+    assert exc.value.reason == "org_member"
+
+
+def test_a_member_cannot_be_granted_credits_either(school):
+    """Same door as /admin/grant, which mints a code and redeems it on the account's behalf — so the
+    refusal has to live in redeem() to cover the operator path too."""
+    import app.coupons as coupons
+
+    _join(school, "pupil")
+    code = coupons.issue_credit_coupon(credits=100, max_redemptions=1)
+    with pytest.raises(coupons.RedeemError) as exc:
+        coupons.redeem("pupil", code, bypass_throttle=True)
+    assert exc.value.reason == "org_member"
+    assert db.get_credits("pupil") == 0
+
+
+def test_leaving_the_org_restores_the_ability_to_buy(school):
+    import app.coupons as coupons
+
+    _join(school, "pupil")
+    orgs.remove_member(school, "pupil")
+    code = coupons.issue_plan_coupon(plan="pro", days=30, max_redemptions=1)
+    assert coupons.redeem("pupil", code)["kind"] == "plan"
+
+
+# ── Deletion ──────────────────────────────────────────────────────────────────
+def test_deleting_a_member_frees_the_seat(school):
+    _join(school, "pupil")
+    assert orgs.seats_used(school) == 2
+    db.purge_owner("pupil")
+    assert orgs.seats_used(school) == 1
+    assert orgs.membership("pupil") is None
+
+
+def test_deleting_a_member_keeps_the_audit_trail_but_not_their_name(school):
+    """A departing administrator must not be able to erase the record of what they looked at — the
+    one thing that trail exists to prevent."""
+    _join(school, "teach", orgs.TEACHER)
+    orgs.log_access(school, "teach", "view_panel", "pupil")
+    db.purge_owner("teach")
+    with db._LOCK:
+        rows = db.get_conn().execute(
+            "SELECT actor_owner_id, action FROM org_access_log WHERE org_id=?", (school,)).fetchall()
+    assert [tuple(r) for r in rows] == [(db.DELETED_OWNER, "view_panel")]
+
+
+def test_the_org_owner_cannot_be_purged(school):
+    """orgs.owner_id is the only link between a school and the person who pays for it. Purging them
+    would leave a live org pointing at a dead account: the members keep spending a pool nobody can
+    administer, and nothing anywhere would error."""
+    with pytest.raises(db.OwnsOrganisation):
+        db.purge_owner("boss")
+    assert orgs.get_org(school) is not None
+
+
+def test_purging_an_unrelated_account_is_unaffected(school):
+    db.purge_owner("stranger")     # must not raise
+    assert orgs.get_org(school) is not None
