@@ -162,6 +162,16 @@ def evaluate(pipeline, items: list[EvaluationItem], *, dataset_name: str = "",
         if item.expected_refs:
             report.n_answerable += 1
             got_refs = [h.ref for h in result.hits] + (result.anchor_refs or [])
+            # In generation mode, count what the ANSWER actually rested on, not only round one.
+            # Most sources now arrive through the agentic loop, which runs during generation — so
+            # scoring `result.hits` alone measures the first retrieval attempt and calls the loop's
+            # work a miss. That is why the full run reproduced the retrieval-only numbers to the
+            # decimal: the instrument could not see the mechanism under test.
+            answer = None
+            if not retrieval_only:
+                answer = pipeline.ask(Query(text=item.question, lang=item.lang,
+                                            intent=Intent(item.intent)), history=turns)
+                got_refs = got_refs + [c.ref for c in (answer.citations or [])]
             found = [e for e in item.expected_refs if any(_ref_matches(e, g) for g in got_refs)]
             hit = bool(found)
             if hit:
@@ -185,8 +195,6 @@ def evaluate(pipeline, items: list[EvaluationItem], *, dataset_name: str = "",
                 if hit:
                     report.grounded_ok += 1   # retrieval-only proxy
             else:
-                answer = pipeline.ask(Query(text=item.question, lang=item.lang,
-                                            intent=Intent(item.intent)), history=turns)
                 if answer.grounded and answer.citations:
                     report.grounded_ok += 1
                 else:
@@ -196,8 +204,15 @@ def evaluate(pipeline, items: list[EvaluationItem], *, dataset_name: str = "",
                 # Citation FAITHFULNESS, separate from citation presence: a quoted line that appears
                 # in no retrieved source is the failure grounding-rate cannot see, because such an
                 # answer still carries valid [S#] markers and counts as grounded.
+                #
+                # Check against the answer's CITATIONS as well as the first-round hits. Most sources
+                # now arrive through the agentic loop, and they are absent from `result.hits` — so
+                # checking those alone flags faithful quotes from correctly-fetched sources as
+                # fabricated. Measured: this reported "quote fidelity 16.7%" on a shard whose
+                # flagged lines included text verbatim from B'Mareh HaBazak VII.29.17. pipeline.py
+                # already carries this exact warning for the live path; the harness repeated the bug.
                 report.n_quote_checked += 1
-                bad = unverified_quotes(answer.text, list(result.hits))
+                bad = unverified_quotes(answer.text, list(result.hits) + list(answer.citations or []))
                 if bad:
                     report.fabricated_quotes += 1
                     report.failures.append({"qid": item.qid, "kind": "quote",
