@@ -49,6 +49,12 @@ def _estimate_tokens(text: str) -> int:
 class BridgeLLM:
     profile = "bridge"
     model_id = "claude-in-session"
+    # This backend answers through ONE human-in-the-loop job at a time: a job is written to a file,
+    # Claude reads it in-session, and the answer comes back on a matching path. Two overlapping calls
+    # would put two jobs in front of one reader with no way to tell which answer belongs to which.
+    # Callers that would otherwise fan work out in threads (see api._fix_bleeding_sentences) check
+    # this flag and stay serial. Cloud backends carry no such flag — their clients are thread-safe.
+    serial_only = True
 
     def __init__(self, timeout: float = 600.0, poll: float = 1.0,
                  source_fetcher: Callable[[list[str]], list[SourceBlock]] | None = None):

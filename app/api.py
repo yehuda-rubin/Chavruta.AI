@@ -15,6 +15,7 @@ import re
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -101,11 +102,17 @@ def _has_bleed(text: str) -> bool:
 
 
 _SENTENCE_SPLIT_RE = re.compile(r"([.!?]\s+|\n+)")   # captured so separators are preserved verbatim
-_MAX_BLEED_FIXES = 8    # bound worst-case latency/cost if something is very wrong with one answer.
-# Was 3 — caught live (2026-08-07): a responsa answer with several long quoted English source
-# excerpts had 6 distinct bleeding sentences; the cap silently left half of them unfixed. A
-# lesson/responsa answer can legitimately quote many sources, so it needs more headroom than a
-# short QA turn ever did.
+_MAX_BLEED_FIXES = 20   # bound worst-case latency/cost if something is very wrong with one answer.
+# Was 3, then 8 — both were still too low in practice. A long lesson or responsa answer quoting many
+# sources can bleed in a dozen-plus sentences, and every sentence over the cap reaches the user in
+# broken Hebrew, which is exactly the defect this whole mechanism exists to prevent. The cap's job is
+# to stop a runaway answer from costing unbounded time and money, not to ration the fix — 20 covers
+# every real answer seen so far while still bounding the pathological case.
+_BLEED_FIX_WORKERS = 4
+# Raising the cap without this would have made the worst case 20 sentences x 2 attempts = 40 model
+# calls IN SERIES, all of them blocking the user's response. The rewrites are independent of each
+# other (each sees one sentence and nothing else), so they parallelise exactly. Small pool: this runs
+# alongside other users' generation calls, and the point is to cut the tail, not to burst the provider.
 
 _BLEED_FIX_SYSTEM = (
     "Rewrite the given Hebrew sentence so it contains NO English or other non-Hebrew words or "
@@ -118,48 +125,62 @@ _BLEED_FIX_SYSTEM = (
 )
 
 
-def _fix_bleeding_sentences(text: str, he: bool, llm) -> str:
-    """Best-effort: a failed or degenerate rewrite call keeps the ORIGINAL sentence rather than
-    raising or blanking it — a language-cleanup pass must never be the reason a real answer breaks.
+def _rewrite_bleeding_sentence(sentence: str, llm) -> str | None:
+    """One sentence → its Hebrew-only rewrite, or None if no attempt produced a clean one.
 
-    Caught live (2026-08-04): a bleeding sentence ("...שNERואה כמשתחוה...", a bad mid-word
-    transliteration) reached a real user unfixed. The first cut of this function accepted WHATEVER
-    the rewrite call returned as long as it was non-empty, never checking whether the rewrite had
-    actually removed the Latin text — so a call that failed outright (caught below, kept the
-    original) and a call that succeeded but produced an equally-bleeding rewrite were both dead
-    ends after one try. One retry, on either failure mode, is cheap (bounded by _MAX_BLEED_FIXES
-    sentences) and gives the model a real second chance before we give up and keep the original."""
+    Returning None (rather than raising or returning something degenerate) is what lets the caller
+    keep the ORIGINAL sentence — a language-cleanup pass must never be the reason a real answer
+    breaks. Caught live (2026-08-04): a bleeding sentence ("...שNERואה כמשתחוה...", a bad mid-word
+    transliteration) reached a real user unfixed. The first cut accepted WHATEVER the rewrite call
+    returned as long as it was non-empty, never checking whether the rewrite had actually removed
+    the Latin text — so a call that failed outright and a call that succeeded but produced an
+    equally-bleeding rewrite were both dead ends after one try.
+    """
+    # A retry at the SAME low temperature on the SAME model tends to reproduce the SAME mistake
+    # (caught live: "sugya"/"mixture" survived two identical-temperature attempts) — the second
+    # try uses a higher temperature so it's a genuinely different roll, not a near-duplicate.
+    for attempt, temperature in enumerate((0.2, 0.6)):
+        try:
+            prompt = GroundedPrompt(system=_BLEED_FIX_SYSTEM, sources=[], question=sentence, bare=True)
+            res = llm.generate(prompt, lang="he", max_tokens=200, temperature=temperature)
+            candidate = (res.text or "").strip()
+        except Exception:
+            _log.warning("bleed sentence-fix call failed (attempt %d/2)", attempt + 1, exc_info=True)
+            continue
+        if candidate and not _has_bleed(candidate):
+            return candidate
+        if candidate:
+            _log.warning("bleed sentence-fix rewrite still contained Latin text (attempt %d/2)",
+                         attempt + 1)
+    return None
+
+
+def _fix_bleeding_sentences(text: str, he: bool, llm) -> str:
+    """Rewrite every sentence carrying foreign-script bleed, up to _MAX_BLEED_FIXES of them.
+
+    Sentences are rewritten CONCURRENTLY (see _BLEED_FIX_WORKERS) because each rewrite sees one
+    sentence and nothing else, so they are genuinely independent — but only when the backend can
+    take concurrent calls. The bridge answers in-session through a single job file, so overlapping
+    calls there would interleave into each other; it opts out via `serial_only`.
+    """
     if not he or not text or llm is None or not _has_bleed(text):
         return text
     parts = _SENTENCE_SPLIT_RE.split(text)   # alternates: sentence, separator, sentence, separator, …
-    fixed = 0
-    for i in range(0, len(parts), 2):
-        if fixed >= _MAX_BLEED_FIXES:
-            break
-        sentence = parts[i]
-        if not _has_bleed(sentence):
-            continue
-        rewritten = None
-        # A retry at the SAME low temperature on the SAME model tends to reproduce the SAME mistake
-        # (caught live: "sugya"/"mixture" survived two identical-temperature attempts) — the second
-        # try uses a higher temperature so it's a genuinely different roll, not a near-duplicate.
-        for attempt, temperature in enumerate((0.2, 0.6)):
-            try:
-                prompt = GroundedPrompt(system=_BLEED_FIX_SYSTEM, sources=[], question=sentence, bare=True)
-                res = llm.generate(prompt, lang="he", max_tokens=200, temperature=temperature)
-                candidate = (res.text or "").strip()
-            except Exception:
-                _log.warning("bleed sentence-fix call failed (attempt %d/2)", attempt + 1, exc_info=True)
-                continue
-            if candidate and not _has_bleed(candidate):
-                rewritten = candidate
-                break
-            if candidate:
-                _log.warning("bleed sentence-fix rewrite still contained Latin text (attempt %d/2)",
-                            attempt + 1)
+    # The cap is applied HERE, on the selection, so which sentences get fixed does not depend on how
+    # the work is scheduled: it is always the first _MAX_BLEED_FIXES bleeding sentences, in order.
+    targets = [i for i in range(0, len(parts), 2) if _has_bleed(parts[i])][:_MAX_BLEED_FIXES]
+    if not targets:
+        return text
+
+    if len(targets) == 1 or getattr(llm, "serial_only", False):
+        rewrites = [_rewrite_bleeding_sentence(parts[i], llm) for i in targets]
+    else:
+        with ThreadPoolExecutor(max_workers=min(_BLEED_FIX_WORKERS, len(targets))) as pool:
+            rewrites = list(pool.map(lambda i: _rewrite_bleeding_sentence(parts[i], llm), targets))
+
+    for i, rewritten in zip(targets, rewrites):
         if rewritten:
             parts[i] = rewritten
-            fixed += 1
     return "".join(parts)
 
 

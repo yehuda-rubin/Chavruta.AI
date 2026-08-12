@@ -8,6 +8,9 @@ helpers (audience / clarify-answer detection).
 
 from __future__ import annotations
 
+import threading
+import time
+
 import pytest
 
 from chavruta.corpus.registry import default_registry
@@ -311,6 +314,72 @@ def test_fix_bleeding_sentences_caps_the_number_of_fixes():
     out = api._fix_bleeding_sentences(text, True, llm)
     assert len(llm.calls) == api._MAX_BLEED_FIXES
     assert words[-1] in out                        # the extra bleeding sentence was left untouched
+
+
+# ── Fix (2026-08-12): the cap rose to 20 (a long lesson/responsa answer bleeds in far more than the
+# 8 sentences the previous cap allowed, and every sentence over the cap reached the user in broken
+# Hebrew). Raising it alone would have put up to 20 sentences x 2 attempts = 40 model calls IN SERIES
+# in front of the user, so the rewrites now run concurrently — they are independent by construction,
+# each seeing one sentence and nothing else.
+class _ConcurrencyProbeLLM:
+    """Records the high-water mark of simultaneously in-flight rewrite calls."""
+
+    def __init__(self, serial_only=False):
+        if serial_only:
+            self.serial_only = True
+        self._lock = threading.Lock()
+        self.in_flight = 0
+        self.max_in_flight = 0
+        self.calls: list[str] = []
+
+    def generate(self, prompt, *, lang, max_tokens, temperature):
+        with self._lock:
+            self.calls.append(prompt.question)
+            self.in_flight += 1
+            self.max_in_flight = max(self.max_in_flight, self.in_flight)
+        time.sleep(0.05)          # long enough that serial execution could not overlap
+        with self._lock:
+            self.in_flight -= 1
+        return SimpleNamespace(text="תוקן")
+
+
+def _text_with_bleeding_sentences(n: int) -> str:
+    # Zero-padded so no marker is a substring of another ("W2" would match inside "W20").
+    return " ".join(f"משפט W{i:03d} מספר {i}." for i in range(n))
+
+
+def test_fix_bleeding_sentences_rewrites_concurrently():
+    llm = _ConcurrencyProbeLLM()
+    out = api._fix_bleeding_sentences(_text_with_bleeding_sentences(8), True, llm)
+    assert len(llm.calls) == 8
+    assert llm.max_in_flight > 1                   # the whole point: not one-at-a-time
+    assert not api._has_bleed(out)
+
+
+def test_fix_bleeding_sentences_stays_serial_for_a_serial_only_backend():
+    # The bridge answers through a single job file — overlapping calls would put two jobs in front
+    # of one reader with no way to match answers back to jobs.
+    llm = _ConcurrencyProbeLLM(serial_only=True)
+    api._fix_bleeding_sentences(_text_with_bleeding_sentences(6), True, llm)
+    assert llm.calls and llm.max_in_flight == 1
+
+
+def test_bridge_backend_declares_itself_serial_only():
+    from chavruta.llm.bridge import BridgeLLM
+
+    assert BridgeLLM.serial_only is True
+
+
+def test_fix_bleeding_sentences_caps_the_FIRST_n_sentences_regardless_of_scheduling():
+    # With the rewrites running in a pool, "which sentences get fixed" must not depend on which
+    # thread finishes first: the cap is applied to the SELECTION, in document order.
+    llm = _FakeLLM(reply="תוקן")
+    text = _text_with_bleeding_sentences(api._MAX_BLEED_FIXES + 3)
+    out = api._fix_bleeding_sentences(text, True, llm)
+    for i in range(api._MAX_BLEED_FIXES):
+        assert f"W{i:03d}" not in out               # the first N were rewritten
+    for i in range(api._MAX_BLEED_FIXES, api._MAX_BLEED_FIXES + 3):
+        assert f"W{i:03d}" in out                   # the tail was left untouched
 
 
 # Fix (caught live 2026-08-04): a bleeding sentence reached a real user unfixed
