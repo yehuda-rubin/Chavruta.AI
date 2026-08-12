@@ -103,7 +103,14 @@ def _matches(got: str, expected: str) -> bool:
 def score(retriever, items: list[dict], *, top_k: int) -> dict:
     """recall@k and MRR over an eval set. Both are reported because they answer different questions:
     recall asks whether the source was there at all, MRR whether it was near the top where a bounded
-    prompt will actually include it."""
+    prompt will actually include it.
+
+    A harvested query is the verbatim text of a chunk that lives in the collection, so it retrieves
+    ITSELF — measured at 25/25 on the first live sample. That hit is worthless as evidence (it says
+    only that identical text embeds identically) and it consumes a top-k slot the real answer needed,
+    so it is dropped. `source_ref` is present only on harvested items; human-written questions have
+    no such chunk and are unaffected.
+    """
     hits_at_k, rr = 0, []
     for item in items:
         q = Query(text=item["question"], lang="he", intent=Intent.QA)
@@ -112,7 +119,8 @@ def score(retriever, items: list[dict], *, top_k: int) -> dict:
         except Exception:
             rr.append(0.0)
             continue
-        refs = [h.ref for h in result.hits]
+        source = item.get("source_ref")
+        refs = [h.ref for h in result.hits if h.ref != source]
         rank = next((i + 1 for i, got in enumerate(refs)
                      if any(_matches(got, exp) for exp in item["expected_refs"])), None)
         hits_at_k += 1 if rank else 0

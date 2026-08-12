@@ -153,3 +153,46 @@ def test_only_self_contained_questions_are_harvested(text, useful):
     from harvest_user_questions import _is_useful
 
     assert _is_useful(text) is useful
+
+
+# ── The scorer must not credit (or be crowded out by) the query retrieving itself ─────────────
+# A harvested query is the verbatim text of a chunk in the collection, so it retrieves itself every
+# time — measured 25/25 on the first live sample. That hit proves only that identical text embeds
+# identically, and it occupies a top-k slot the real answer needed.
+def test_scoring_ignores_the_chunk_the_query_was_taken_from():
+    from types import SimpleNamespace
+
+    from tune_retrieval import score
+
+    item = {"question": "טקסט הפירוש", "expected_refs": ["Sukkah.81.11"],
+            "source_ref": "Rashi_on_Sukkah.81.11.2"}
+
+    class _Retriever:
+        def __init__(self, refs):
+            self.refs = refs
+
+        def retrieve(self, query, top_k):
+            return SimpleNamespace(hits=[SimpleNamespace(ref=r) for r in self.refs])
+
+    # Self-hit first, real answer second: the self-hit must not push the answer to rank 2.
+    got = score(_Retriever(["Rashi_on_Sukkah.81.11.2", "Sukkah.81.11"]), [item], top_k=8)
+    assert got["recall"] == 1.0 and got["mrr"] == 1.0
+
+    # Self-hit alone is not a hit at all.
+    missed = score(_Retriever(["Rashi_on_Sukkah.81.11.2"]), [item], top_k=8)
+    assert missed["recall"] == 0.0 and missed["mrr"] == 0.0
+
+
+def test_scoring_is_unaffected_for_items_with_no_source_chunk():
+    """Human-written questions carry no source_ref — they must score exactly as before."""
+    from types import SimpleNamespace
+
+    from tune_retrieval import score
+
+    item = {"question": "האם מותר לשחק בשבת?", "expected_refs": ["Shabbat.1.1"]}
+
+    class _Retriever:
+        def retrieve(self, query, top_k):
+            return SimpleNamespace(hits=[SimpleNamespace(ref="Shabbat.1.1")])
+
+    assert score(_Retriever(), [item], top_k=8)["recall"] == 1.0
