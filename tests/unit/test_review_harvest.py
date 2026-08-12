@@ -383,3 +383,56 @@ def test_the_free_tier_is_the_unit_the_subsidy_is_priced_in():
         f"a fully-used free account now costs ₪{free_cost:.2f}/month; the paid ladder was derived "
         f"at ~₪2.04, so re-check every price in TIERS"
     )
+
+
+# ── Credits must never undercut a subscription ────────────────────────────────
+# A credit is an overflow valve, not a cheaper plan. If one costs less than a tier's implied
+# per-turn price, the arithmetic tells every user to buy credits instead of subscribing — and the
+# recurring revenue that pays for a server which costs the same whether anyone subscribes or not
+# disappears. The cheapest rate we sell at all is institution-100 (~₪0.146/turn).
+def test_a_credit_costs_more_than_any_subscription_per_turn_rate():
+    import app.plans as plans
+
+    turn = 23_512                       # measured mean normalized tokens per turn
+    for tier in plans.TIERS:
+        if not tier.price_ils:
+            continue
+        turns_per_month = tier.weekly_tokens * (30 / 7) / turn
+        implied = tier.price_ils / turns_per_month
+        assert plans.CREDIT_PRICE_ILS > implied, (
+            f"a credit at ₪{plans.CREDIT_PRICE_ILS} is cheaper than {tier.id}'s implied "
+            f"₪{implied:.3f}/turn — buying credits would beat subscribing"
+        )
+
+
+def test_the_lesson_credit_cost_is_at_least_its_measured_token_ratio():
+    """A lesson averages ~58,000 normalized tokens against ~23,512 for a question (2.5×). Charging
+    it as one credit would let 1,000 credits buy ~2,500 questions' worth of compute."""
+    import app.plans as plans
+
+    assert plans.credit_cost("lesson") >= round(58_000 / 23_512)
+
+
+# ── The institution ladder ────────────────────────────────────────────────────
+def test_the_institution_tiers_scale_pool_with_seats_not_against_them():
+    """Seats, pool and lessons scale together, so per-member capacity is identical across the three
+    sizes. The first cut of this plan split ONE fixed pool by seat count, which meant the largest
+    school got the smallest allowance per person — less than its members already had for free."""
+    import app.plans as plans
+
+    schools = [t for t in plans.TIERS if t.seats > 1]
+    assert [t.seats for t in schools] == [20, 50, 100]
+
+    per_member = {round(t.weekly_tokens / t.seats) for t in schools}
+    assert len(per_member) == 1, f"per-member weekly allowance differs across sizes: {per_member}"
+
+    per_member_lessons = {t.weekly_lessons / t.seats for t in schools}
+    assert len(per_member_lessons) == 1
+
+
+def test_a_bigger_school_never_pays_more_per_seat():
+    import app.plans as plans
+
+    schools = sorted((t for t in plans.TIERS if t.seats > 1), key=lambda t: t.seats)
+    rates = [t.price_ils / t.seats for t in schools]
+    assert rates == sorted(rates, reverse=True), f"per-seat price should fall with size: {rates}"

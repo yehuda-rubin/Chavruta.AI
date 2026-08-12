@@ -70,6 +70,11 @@ class Tier:
                               # ANNUAL_INSTALMENTS and price_ils().
     name_he: str
     name_en: str
+    # How many accounts may share this subscription. 1 for a personal plan; the institution tiers
+    # carry 20 / 50 / 100. The pool scales WITH the seat count so the per-member allowance stays
+    # constant — split a fixed pool three ways and the biggest school gets the least per person,
+    # which is how the first cut of this was wrong (see specs/004-school-accounts/plan.md).
+    seats: int = 1
 
 
 # Order matters: rank() uses it to decide whether a coupon is an upgrade or a downgrade.
@@ -127,11 +132,22 @@ class Tier:
 # subscribers — the number to actually aim at.
 PROFIT_TARGET = 0.30
 
+# The rule above yields a FLOOR, not a price. Institution-20's floor is ~₪275; it is sold at ₪649
+# because ₪32 per member per month is still cheap for a school, and the margin over the floor is what
+# funds the ~₪740/month server and the work. Do not "correct" the paid tiers down to their floors —
+# the floor answers "would this lose money", not "what is this worth".
+#
+# The three institution tiers share one per-member allowance and differ only in size: seats, pool and
+# lesson count all scale together (×1 / ×2.5 / ×5 from institution-20), so a bigger school gets more
+# capacity rather than a thinner slice of the same pool. Per-seat price drops gently with size —
+# ₪32.45 → ₪29.98 → ₪27.99 — a real volume discount that still clears the floor at every step.
 TIERS: tuple[Tier, ...] = (
-    Tier("free",          200_000,    525_000,  2,  1,   0.0,    0.0, "חינם",   "Free"),
-    Tier("basic",         600_000,  1_575_000,  6,  3,  49.0,  490.0, "בסיסי",  "Basic"),
-    Tier("pro",         2_000_000,  5_250_000, 20, 10, 169.0, 1690.0, "מלא",    "Pro"),
-    Tier("institution", 8_000_000, 21_000_000, 80, 40, 649.0, 6490.0, "מוסדי",  "Institution"),
+    Tier("free",             200_000,     525_000,   2,   1,    0.0,     0.0, "חינם",         "Free"),
+    Tier("basic",            600_000,   1_575_000,   6,   3,   49.0,   490.0, "בסיסי",        "Basic"),
+    Tier("pro",            2_000_000,   5_250_000,  20,  10,  169.0,  1690.0, "מלא",          "Pro"),
+    Tier("institution",    8_000_000,  21_000_000,  80,  40,  649.0,  6490.0, "מוסדי 20",     "Institution 20", 20),
+    Tier("institution_50", 20_000_000,  52_500_000, 200, 100, 1499.0, 14990.0, "מוסדי 50",    "Institution 50", 50),
+    Tier("institution_100", 40_000_000, 105_000_000, 400, 200, 2799.0, 27990.0, "מוסדי 100",  "Institution 100", 100),
 )
 
 # Output costs several times input everywhere; 3x is the round figure that holds across the models
@@ -378,6 +394,29 @@ def refund_quote(amount: float, *, days_used: int = 0, cycle: str | None = MONTH
 
 
 # ── Credits ──────────────────────────────────────────────────────────────────
+#
+# A credit is one generation, spent ONLY after a plan's cap is hit. Pricing it has almost nothing to
+# do with what it costs us and everything to do with not undercutting the subscriptions:
+#
+#     marginal cost of one turn          ₪0.017
+#     implied per-turn price, basic      ₪0.171
+#     implied per-turn price, pro        ₪0.177
+#     implied per-turn price, inst-100   ₪0.146   (the cheapest rate we sell at all)
+#
+# So a credit priced below ~₪0.15 is not an overflow valve, it is a cheaper subscription with extra
+# steps — anyone doing arithmetic buys credits instead of a plan, and the recurring revenue that
+# actually funds the server evaporates. ₪0.50 sits ~3x above the cheapest subscription rate and ~29x
+# marginal cost, which is what makes it worth topping up in a pinch and never worth living on.
+#
+# Not yet sold: credits are granted by coupon today (db.add_credits), and a pack purchase would
+# write the same column. This constant is here so the first person to build that flow inherits the
+# reasoning rather than picking a round number.
+CREDIT_PRICE_ILS = 0.50
+
+# A credit costs more for the expensive intents. Measured: a lesson averages ~58,000 normalized
+# tokens against ~23,512 for a question — 2.5x. It is charged 5x, deliberately above the measured
+# ratio, because a lesson also runs the agentic loop over a much larger source pool and its variance
+# is far wider than a question's.
 _DEFAULT_COSTS = {"lesson": 5, "halacha": 2, "shut": 2}
 _FALLBACK_COST = 1
 
