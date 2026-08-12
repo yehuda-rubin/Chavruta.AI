@@ -79,8 +79,11 @@ MISHNAH = Work(
     attribution="Sefaria (sefaria.org)",
 )
 
+# NOTE: work_id is the value the CORPUS carries in its payload, which for the Talmud Bavli is
+# `gemara` — not the descriptive name. Anything that filters Qdrant by work_id must match the data,
+# and the two silently diverged once already (see hybrid.py::_FOUNDATIONAL_WORKS).
 TALMUD_BAVLI = Work(
-    work_id="talmud_bavli",
+    work_id="gemara",
     title_he="תלמוד בבלי",
     title_en="Talmud Bavli",
     kind="talmud",
@@ -92,10 +95,11 @@ TALMUD_BAVLI = Work(
 )
 
 # Responsa (שו"ת) — the full Sefaria responsa library (גאונים · ראשונים · אחרונים · מודרני),
-# ingested into the SAME collection. Each chunk carries work_id="responsa" and its halachic
-# `period`; segments span many authors, so the reference scheme is the work's own segment path.
+# ingested into the SAME collection. Each chunk carries work_id="shut" (the corpus's own tag) and
+# its halachic `period`; segments span many authors, so the reference scheme is the work's own
+# segment path.
 RESPONSA = Work(
-    work_id="responsa",
+    work_id="shut",
     title_he="שו\"ת",
     title_en="Responsa",
     kind="responsa",
@@ -113,11 +117,14 @@ RESPONSA = Work(
 _LOADED_CATEGORIES: dict[str, tuple[str, str, str]] = {
     "tanakh": ("תנ\"ך", "Tanakh", "scripture"),
     "mishnah": ("משנה", "Mishnah", "mishnah"),
-    "talmud_bavli": ("תלמוד בבלי", "Talmud Bavli", "talmud"),
+    # `gemara` / `shut` / `yerushalmi` are the corpus's OWN tags — these keys are matched against
+    # Qdrant payloads, so a prettier name here is a filter that silently matches nothing.
+    "gemara": ("תלמוד בבלי", "Talmud Bavli", "talmud"),
+    "yerushalmi": ("תלמוד ירושלמי", "Jerusalem Talmud", "talmud"),
     "tosefta": ("תוספתא", "Tosefta", "talmud"),
     "midrash": ("מדרש", "Midrash", "midrash"),
     "halacha": ("הלכה", "Halacha", "halacha"),
-    "responsa": ("שו\"ת", "Responsa", "responsa"),
+    "shut": ("שו\"ת", "Responsa", "responsa"),
     "kabbalah": ("קבלה", "Kabbalah", "kabbalah"),
     "chasidut": ("חסידות", "Chasidut", "chasidut"),
     "musar": ("מוסר", "Musar", "musar"),
@@ -129,7 +136,10 @@ _LOADED_CATEGORIES: dict[str, tuple[str, str, str]] = {
 # router WORK_ALIASES key → the loaded category it actually lives in, so the honesty gate recognizes
 # 'הגמרא', 'שולחן ערוך', 'רמב"ם', 'זוהר' as present (they're inside these categories).
 _ALIAS_CATEGORY: dict[str, str] = {
-    "talmud": "talmud_bavli",
+    "talmud": "gemara",
+    # The router's own alias for responsa is the word "responsa"; the corpus tags that tier `shut`.
+    # Without this the honesty gate answers "שו\"ת is not loaded" over 96,493 loaded points.
+    "responsa": "shut",
     "shulchan_aruch": "halacha", "mishneh_torah": "halacha", "mishnah_berurah": "halacha", "tur": "halacha",
     "zohar": "kabbalah",
 }

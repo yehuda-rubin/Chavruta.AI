@@ -70,14 +70,15 @@ def test_masechet_does_not_force_mishnah_work():
 # for genuinely-unloaded works couldn't tell a loaded corpus from a missing one.
 
 @pytest.mark.parametrize("cat", [
-    "tanakh", "mishnah", "talmud_bavli", "halacha", "responsa", "midrash", "kabbalah",
+    "tanakh", "mishnah", "gemara", "yerushalmi", "halacha", "shut", "midrash", "kabbalah",
 ])
 def test_registry_has_loaded_categories(cat):
     assert default_registry().has(cat)
 
 
 @pytest.mark.parametrize("alias,canonical", [
-    ("talmud", "talmud_bavli"),
+    ("talmud", "gemara"),
+    ("responsa", "shut"),
     ("shulchan_aruch", "halacha"),
     ("mishneh_torah", "halacha"),
     ("zohar", "kabbalah"),
@@ -85,6 +86,37 @@ def test_registry_has_loaded_categories(cat):
 def test_registry_resolves_aliases(alias, canonical):
     r = default_registry()
     assert r.has(alias) and r.has(canonical)
+
+
+# Fix (2026-08-12): these two tests used to assert 'talmud_bavli' and 'responsa' as CATEGORY names,
+# which is what the code believed — and what the corpus never carried. The live collection tags
+# those tiers `gemara` (516,854 points) and `shut` (96,493), so every filter built on the old names
+# matched 0 of 2,403,599 points, silently. The tests were locking the mismatch in place.
+#
+# The category keys are matched against Qdrant payloads, so they are DATA, not naming taste. This
+# guard pins them to the values counted in the live collection; if an ingest ever renames a tier,
+# it fails here rather than in a filter that quietly returns nothing.
+_CORPUS_WORK_IDS = {
+    "tanakh", "mishnah", "gemara", "yerushalmi", "tosefta", "midrash", "halacha", "shut",
+    "kabbalah", "chasidut", "musar", "jewish_thought", "liturgy", "reference", "second_temple",
+}
+
+
+def test_registry_categories_are_real_corpus_work_ids():
+    from chavruta.corpus.registry import _LOADED_CATEGORIES
+
+    unknown = set(_LOADED_CATEGORIES) - _CORPUS_WORK_IDS
+    assert not unknown, f"registry names no corpus tier holds: {sorted(unknown)}"
+
+
+def test_foundational_floor_targets_real_tiers_including_the_gemara():
+    """The floors reserve result slots for the foundational works. Filtering them on a work_id the
+    corpus doesn't use means the floor reserves nothing — which is what happened to the Gemara, the
+    largest tier in the corpus."""
+    from chavruta.retrieval.hybrid import _FOUNDATIONAL_WORKS
+
+    assert "gemara" in _FOUNDATIONAL_WORKS
+    assert not set(_FOUNDATIONAL_WORKS) - _CORPUS_WORK_IDS
 
 
 def test_registry_rejects_unloaded_work():

@@ -77,7 +77,16 @@ def _to_hit(h) -> RankedHit:
 
 
 # The load-bearing sources a grounded answer should always be able to reach.
-_FOUNDATIONAL_WORKS = ("tanakh", "mishnah", "talmud_bavli", "halacha", "midrash")
+#
+# These MUST be the `work_id` values the corpus actually carries, not the names the registry uses
+# for them. They diverged: the collection tags the Talmud Bavli `gemara` and the responsa `shut`,
+# so the floors below filtered on `talmud_bavli` — a value held by 0 of 2,403,599 points — and the
+# single largest tier in the corpus (516,854 points) never had a reserved slot. A question whose
+# answer lives in a sugya was competing for space against derush with no floor protecting it, which
+# is exactly the shape of the failure reported 2026-08-12 (the Rashi/Tosafot machloket on Sukkah
+# 41a: both sides sitting in the corpus, neither retrieved). Verified against the live collection —
+# see the tier counts in docs/CORPUS.md.
+_FOUNDATIONAL_WORKS = ("tanakh", "mishnah", "gemara", "halacha", "midrash")
 
 
 class HybridRetriever:
