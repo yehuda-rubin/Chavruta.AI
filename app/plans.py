@@ -89,11 +89,17 @@ class Tier:
 # Free raised 2026-08-03 (+50% on both token pools, +1 lesson/week — real usage was routinely
 # maxing the old 350k/week pool inside a single heavy day) — every paid tier recomputed at its SAME
 # multiple against the new free baseline, preserving the honest-ratio invariant above.
+#
+# Free's DAILY pool raised again 2026-08-12 (user decision): 180k → 200k, alongside the per-intent
+# generation budgets roughly doubling in pipeline.py. A bigger answer costs more per turn, so
+# leaving the daily pool where it was would have quietly cut how many turns a free day buys. Every
+# paid tier is recomputed at its SAME multiple (x3 / x10 / x40) so "3x the usage" stays literally
+# true — that invariant is the whole reason the UI can state a ratio and never a number.
 TIERS: tuple[Tier, ...] = (
-    Tier("free",          180_000,    525_000,  2,  1,   0.0,    0.0, "חינם",   "Free"),
-    Tier("basic",         540_000,  1_575_000,  6,  3,  29.0,  290.0, "בסיסי",  "Basic"),
-    Tier("pro",         1_800_000,  5_250_000, 20, 10,  49.9,  499.0, "מלא",    "Pro"),
-    Tier("institution", 7_200_000, 21_000_000, 80, 40, 199.0, 1990.0, "מוסדי",  "Institution"),
+    Tier("free",          200_000,    525_000,  2,  1,   0.0,    0.0, "חינם",   "Free"),
+    Tier("basic",         600_000,  1_575_000,  6,  3,  29.0,  290.0, "בסיסי",  "Basic"),
+    Tier("pro",         2_000_000,  5_250_000, 20, 10,  49.9,  499.0, "מלא",    "Pro"),
+    Tier("institution", 8_000_000, 21_000_000, 80, 40, 199.0, 1990.0, "מוסדי",  "Institution"),
 )
 
 # Output costs several times input everywhere; 3x is the round figure that holds across the models
@@ -188,8 +194,13 @@ def token_estimate(intent: str | None) -> int:
     # explain/chavruta, not like a full lesson; the rare turn that escalates into one still
     # settles against its real usage (see _metered), so under-reserving here just means a
     # slightly late top-up, not an unpaid lesson.
-    return {"compare": 40_000, "halacha": 40_000, "shut": 40_000, "explain": 25_000,
-            "parsha": 25_000, "dafyomi": 25_000}.get((intent or "").strip().lower(), 20_000)
+    #
+    # Raised 2026-08-12 with the per-intent generation budgets in pipeline.py. These have to move
+    # together: a completion is weighted x3 (COMPLETION_WEIGHT), so a 6k-token answer alone is 18k
+    # normalized — an estimate of 20k for a whole qa turn stopped covering even the output, let
+    # alone the prompt, the moment the budget doubled.
+    return {"compare": 80_000, "halacha": 80_000, "shut": 80_000, "explain": 40_000,
+            "parsha": 40_000, "dafyomi": 40_000}.get((intent or "").strip().lower(), 30_000)
 
 
 def canonical_cycle(cycle: str | None) -> str:

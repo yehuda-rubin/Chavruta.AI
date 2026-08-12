@@ -151,6 +151,30 @@ def list_models(base_url: str, api_key: str, *, timeout_s: float = 15.0) -> list
     return sorted(m.id for m in client.models.list().data)
 
 
+def _cached_prompt_tokens(usage) -> int:
+    """How many prompt tokens the provider served from its own cache, or 0 if it doesn't say.
+
+    Answers a question that can't be settled from documentation: whether this provider does prompt
+    caching at all, and if so how much of our prompt actually hits. Our message order is already the
+    cache-friendly one — a stable system prompt, then history, then the retrieved sources and the
+    question last — and the agentic loop re-sends a strictly growing prefix on every extra round,
+    which is exactly the shape caching pays off on. The field is OpenAI's
+    `usage.prompt_tokens_details.cached_tokens`; a provider that doesn't implement it simply omits
+    it, so a steady 0 in the logs is itself the answer. Reading it costs nothing — it rides along on
+    responses we already make.
+    """
+    details = getattr(usage, "prompt_tokens_details", None)
+    if details is None:
+        return 0
+    got = getattr(details, "cached_tokens", None)
+    if got is None and isinstance(details, dict):
+        got = details.get("cached_tokens")
+    try:
+        return max(0, int(got or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 class CloudLLM:
     profile = "cloud"
     source_fetcher = None       # injected by the pipeline for agentic retrieval
@@ -226,11 +250,12 @@ class CloudLLM:
         choice = resp.choices[0]
         _log.info(
             "llm call ok what=%s model=%s elapsed=%.1fs prompt_tokens=%s completion_tokens=%s "
-            "total_tokens=%s finish=%s",
+            "total_tokens=%s cached_tokens=%s finish=%s",
             what, self.model_id, elapsed,
             getattr(usage, "prompt_tokens", "?"),
             getattr(usage, "completion_tokens", "?"),
             getattr(usage, "total_tokens", "?"),
+            _cached_prompt_tokens(usage),
             choice.finish_reason,
         )
         # The single metering point for this backend: every provider call passes through here, so the

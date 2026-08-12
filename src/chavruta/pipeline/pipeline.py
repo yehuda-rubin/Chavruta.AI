@@ -35,12 +35,19 @@ def _detect_lang(text: str) -> str:
 # kept working; 'api' and 'openai' say what it actually is.
 _API_BACKENDS = frozenset({"api", "openai", "nebius"})
 
+# Raised across the board 2026-08-12 (user decision). Thorough, step-by-step answers are a
+# deliberate product choice, not a bug to trim (see the "long answers are a feature" decision), and
+# the agentic loop spends part of this budget on its own ===NEED_SOURCES=== rounds — so the old
+# figures were being split between fetching sources and writing the answer. Every intent roughly
+# doubles; the ORDER between them (qa < explain < compare < halacha < lesson) is what matters and is
+# preserved. A budget is a ceiling, not a target: a short question still gets a short answer, so
+# this raises what a long answer MAY use rather than what a typical turn does use.
 _INTENT_MAX_TOKENS = {
-    Intent.QA: 3000,
-    Intent.EXPLAIN: 3000,
-    Intent.LESSON: 30000,
-    Intent.COMPARE: 10000,
-    Intent.HALACHA: 12000,     # a teshuva: source → poskim → pesak, can be substantial
+    Intent.QA: 6000,
+    Intent.EXPLAIN: 8000,
+    Intent.LESSON: 48000,
+    Intent.COMPARE: 20000,
+    Intent.HALACHA: 24000,     # a teshuva: source → poskim → pesak, can be substantial
 }
 
 

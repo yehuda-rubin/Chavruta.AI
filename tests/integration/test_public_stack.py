@@ -15,6 +15,11 @@ from fastapi.testclient import TestClient
 
 import app.api as api
 import app.db as db
+import app.plans as plans
+
+# One qa turn's reservation — derived, not hardcoded, so raising the generation budgets cannot turn
+# these quota tests into false 429s. See the same constant in tests/unit/test_byok_quota.py.
+_ONE_TURN = plans.token_estimate("qa")
 
 
 @pytest.fixture
@@ -139,7 +144,7 @@ def test_free_quota_blocks_over_limit_and_me_reflects_it(client, monkeypatch):
     absent: the integration surface that proves a free account can be cut off had no cover at all.
     """
     monkeypatch.setenv("CHAVRUTA_API_KEYS", "k")
-    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", "25000")
+    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", str(_ONE_TURN))
     h = {"Authorization": "Bearer k"}
     owner = client.get("/me", headers=h).json()["owner"]
 
@@ -150,7 +155,7 @@ def test_free_quota_blocks_over_limit_and_me_reflects_it(client, monkeypatch):
     # turn is admitted against an ESTIMATE and _settle_tokens corrects it to the real cost once the
     # job finishes, which under a stubbed LLM is nearly nothing — so the reservation is handed back
     # before the next request arrives and nothing appears to be metered at all.
-    db.bump_usage(owner, 25_000, weekly_limit=0, units=25_000, meter=db.TOKENS)
+    db.bump_usage(owner, _ONE_TURN, weekly_limit=0, units=_ONE_TURN, meter=db.TOKENS)
 
     blocked = client.post("/query/async", headers=h, json={"question": "b"})
     assert blocked.status_code == 429, "a free account past its daily tokens must be refused"
@@ -170,17 +175,17 @@ def test_byok_header_grants_a_second_allowance_over_http(client, monkeypatch):
     monkeypatch.setattr(api, "_byok_supported", lambda: True)
     monkeypatch.setattr(api, "_byok_llm", lambda key, base_url="", model="": _NS())
     monkeypatch.setenv("CHAVRUTA_API_KEYS", "k")
-    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", "25000")
+    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", str(_ONE_TURN))
     h = {"Authorization": "Bearer k"}
     owner = client.get("/me", headers=h).json()["owner"]
 
-    db.bump_usage(owner, 25_000, weekly_limit=0, units=25_000, meter=db.TOKENS)
+    db.bump_usage(owner, _ONE_TURN, weekly_limit=0, units=_ONE_TURN, meter=db.TOKENS)
     assert client.post("/query/async", headers=h, json={"question": "a"}).status_code == 429
 
     hk = {**h, "X-User-LLM-Key": "user-owns-this-key"}
     assert client.post("/query/async", headers=hk, json={"question": "a"}).status_code == 202
 
-    db.bump_usage(owner, 25_000, weekly_limit=0, units=25_000, meter=db.BYOK_TOKENS)
+    db.bump_usage(owner, _ONE_TURN, weekly_limit=0, units=_ONE_TURN, meter=db.BYOK_TOKENS)
     blocked = client.post("/query/async", headers=hk, json={"question": "b"})
     assert blocked.status_code == 429, "a key is a second allowance, not unlimited"
 

@@ -1806,3 +1806,122 @@ def test_base_source_floor_filters_commentary_by_ref_not_unit_type():
         "the base-source floor must not filter on unit_type — it is 'source' for every point"
     )
     assert "is_commentary_ref" in src
+
+
+# ── Fix (2026-08-12): a chavruta conversation lost the sugya it had been studying. The tractate fix
+# above recovers the MASECHET from the wording of earlier turns, but not the daf — and a follow-up
+# like "האם הם חולקים?" names nothing at all, so there is nothing to parse. The surest record of
+# which sugya is live is what the earlier ANSWERS already cited: those refs are known-relevant,
+# because the answers were grounded in them. api._prepare_continue was decoding citations out of the
+# DB and then dropping them on the floor when it built Turn(role, text).
+def test_turn_carries_the_refs_it_cited():
+    from chavruta.corpus.schema import Turn
+
+    assert Turn(role="user", text="שאלה").refs == []          # default stays empty
+    assert Turn(role="assistant", text="ת", refs=["Sukkah.81"]).refs == ["Sukkah.81"]
+
+
+def test_carried_refs_are_most_recent_first_and_deduplicated():
+    from chavruta.corpus.schema import Turn
+
+    history = [
+        Turn(role="user", text="q1"),
+        Turn(role="assistant", text="a1", refs=["Genesis.1.1", "Rashi_on_Genesis.1.1.1"]),
+        Turn(role="user", text="q2"),
+        Turn(role="assistant", text="a2", refs=["Sukkah.81", "Genesis.1.1"]),  # repeat must not double
+    ]
+    assert api._carried_refs(history) == ["Sukkah.81", "Genesis.1.1", "Rashi_on_Genesis.1.1.1"]
+
+
+def test_carried_refs_ignores_user_turns_and_missing_refs():
+    from chavruta.corpus.schema import Turn
+
+    assert api._carried_refs([Turn(role="user", text="בסוכה מא")]) == []
+    assert api._carried_refs([]) == []
+    assert api._carried_refs(None) == []
+
+
+def test_carried_refs_is_bounded():
+    from chavruta.corpus.schema import Turn
+
+    many = [f"Sukkah.{i}" for i in range(api._MAX_CARRIED_REFS + 5)]
+    history = [Turn(role="assistant", text="a", refs=many)]
+    assert len(api._carried_refs(history)) == api._MAX_CARRIED_REFS
+
+
+def test_conversation_signals_prefers_cited_refs_over_refs_parsed_from_prose():
+    """A ref the conversation actually grounded an answer in beats one inferred from wording."""
+    from chavruta.corpus.schema import Intent, Query, Turn
+
+    rq = Query(text="האם הם חולקים?", lang="he", intent=Intent.QA)
+    history = [Turn(role="assistant", text="a", refs=["Rashi_on_Sukkah.81.11.2"])]
+    api._conversation_signals(["ומה בבראשית א:א?"], "האם הם חולקים?", rq, history)
+    assert rq.named_refs == ["Rashi_on_Sukkah.81.11.2"]
+
+
+def test_conversation_signals_falls_back_to_parsed_refs_with_no_cited_ones():
+    from chavruta.corpus.schema import Intent, Query
+
+    rq = Query(text="x", lang="he", intent=Intent.QA)
+    api._conversation_signals(["ומה בבראשית א:א?"], "האם הם חולקים?", rq, history=[])
+    assert rq.named_refs == ["Genesis.1.1"]
+
+
+# ── The per-intent generation budgets and the quota RESERVATIONS that pay for them have to move
+# together: a completion is weighted x3, so a budget bigger than a third of its own reservation
+# means a single answer can overspend what was reserved for the whole turn (2026-08-12).
+def test_every_intent_reservation_covers_its_own_generation_budget():
+    import app.plans as plans
+    from chavruta.config.profile import Profile
+    from chavruta.corpus.schema import Intent
+    from chavruta.pipeline.pipeline import _max_tokens_for
+
+    profile = Profile()
+    for intent, name in ((Intent.QA, "qa"), (Intent.EXPLAIN, "explain"),
+                         (Intent.COMPARE, "compare"), (Intent.HALACHA, "halacha")):
+        budget = _max_tokens_for(intent, profile)
+        reserved = plans.token_estimate(name)
+        assert reserved >= budget * plans.COMPLETION_WEIGHT, (
+            f"{name}: reserving {reserved} cannot cover a {budget}-token answer "
+            f"(x{plans.COMPLETION_WEIGHT} = {budget * plans.COMPLETION_WEIGHT})"
+        )
+
+
+def test_every_paid_tier_is_exactly_its_stated_multiple_of_free():
+    """The UI states a RATIO ('3x the usage') and never a number, so the ratio must be literally
+    true in every dimension. Raising the free tier without recomputing the paid ones breaks it."""
+    import app.plans as plans
+
+    free = plans.TIERS[0]
+    assert free.id == "free" and free.multiple == 1
+    for t in plans.TIERS[1:]:
+        assert t.daily_tokens == free.daily_tokens * t.multiple, t.id
+        assert t.weekly_tokens == free.weekly_tokens * t.multiple, t.id
+        assert t.weekly_lessons == free.weekly_lessons * t.multiple, t.id
+
+
+# ── Provider prompt-caching visibility (2026-08-12). Nebius does not document prompt caching, and
+# the question "does it cache, and does OUR prompt shape actually hit" cannot be settled from docs —
+# so read the figure the OpenAI-compatible response already carries. A provider that does not
+# implement it omits the field, and a steady 0 in the logs is itself the answer.
+def test_cached_prompt_tokens_reads_the_openai_field():
+    from types import SimpleNamespace
+    from chavruta.llm.cloud import _cached_prompt_tokens
+
+    usage = SimpleNamespace(prompt_tokens_details=SimpleNamespace(cached_tokens=1024))
+    assert _cached_prompt_tokens(usage) == 1024
+    assert _cached_prompt_tokens(SimpleNamespace(prompt_tokens_details={"cached_tokens": 7})) == 7
+
+
+@pytest.mark.parametrize("usage", [
+    None,                                                     # no usage at all
+    SimpleNamespace(prompt_tokens=10),                        # provider omits the details block
+    SimpleNamespace(prompt_tokens_details=None),
+    SimpleNamespace(prompt_tokens_details=SimpleNamespace(cached_tokens=None)),
+    SimpleNamespace(prompt_tokens_details=SimpleNamespace(cached_tokens="nonsense")),
+])
+def test_cached_prompt_tokens_is_zero_when_unreported(usage):
+    """Reading this must never be able to break a real call — it is diagnostics riding along."""
+    from chavruta.llm.cloud import _cached_prompt_tokens
+
+    assert _cached_prompt_tokens(usage) == 0

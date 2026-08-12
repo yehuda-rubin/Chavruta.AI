@@ -1221,20 +1221,49 @@ def _generate_qa_turn_from_hits(question: str, hits, lang: str, he: bool, histor
     )
 
 
-def _conversation_signals(user_turns: list[str], question: str, rq: Query) -> None:
+_MAX_CARRIED_REFS = 12
+# Bounded because named_refs anchors retrieval: every ref carried costs a lookup and takes a slot
+# that fresh retrieval could have used. Twelve is roughly the last two answers' worth — enough to
+# hold the sugya, few enough that a conversation which has genuinely moved on is not dragged back.
+
+
+def _carried_refs(history) -> list[str]:
+    """Refs the conversation's own earlier ANSWERS already cited, most recent first.
+
+    This is the strongest available signal for "which sugya are we in", and it is free: the answers
+    were grounded in these refs, so they are known-relevant rather than guessed. Re-deriving the
+    sugya from the words of a follow-up cannot match it — "האם הם חולקים?" names nothing at all.
+    """
+    out: list[str] = []
+    for turn in reversed(list(history or [])):
+        if getattr(turn, "role", "") != "assistant":
+            continue
+        for ref in getattr(turn, "refs", None) or []:
+            if ref and ref not in out:
+                out.append(ref)
+                if len(out) >= _MAX_CARRIED_REFS:
+                    return out
+    return out
+
+
+def _conversation_signals(user_turns: list[str], question: str, rq: Query, history=None) -> None:
     """Harvest structural signals from the WHOLE conversation (all user turns + current question)
     to preserve context that a multi-turn discussion established (e.g. a tractate named in turn 2
     that should still scope retrieval in turn 5). The embedding text stays anchored on the first
     turn + current question to avoid diluting the semantic signal with conversational noise.
     Only fill in signals that the current turn did NOT already provide, so an explicit signal
-    in the current question always wins over historical context. Modifies rq in-place."""
+    in the current question always wins over historical context. Modifies rq in-place.
+
+    Refs the earlier ANSWERS cited outrank refs parsed out of the user's own wording: they are what
+    the conversation was actually grounded in, whereas a parsed ref is an inference from prose.
+    """
     convo = " ".join(user_turns + [question])
     if not rq.tractates:
         rq.tractates = detect_tractates(convo)
     if not rq.commentator_ids:
         rq.commentator_ids = detect_commentators(convo)
     if not rq.named_refs:
-        rq.named_refs = detect_hebrew_refs(convo)
+        rq.named_refs = _carried_refs(history) or detect_hebrew_refs(convo)
 
 
 def _run_chavruta(question: str, lang: str, history=None, llm=None) -> QueryResponse:
@@ -1249,7 +1278,7 @@ def _run_chavruta(question: str, lang: str, history=None, llm=None) -> QueryResp
     anchor = (user_turns[0] + " " + question) if user_turns else question   # keep retrieval on the topic
     q = Query(text=anchor, lang=lang or None, intent=Intent.QA)
     rq = pipeline._resolve_query(q)
-    _conversation_signals(user_turns, question, rq)
+    _conversation_signals(user_turns, question, rq, history)
     lang = rq.lang or lang or "he"
     he = lang != "en"
     result = pipeline.retriever.retrieve(rq, top_k=10)
@@ -2673,7 +2702,12 @@ def _prepare_continue(session_id: str, req: QueryRequest, owner: str) -> tuple[l
         # A session the caller doesn't own reads as not-found — no history leak, no writing into
         # someone else's chat.
         raise HTTPException(status_code=404, detail="session not found")
-    history = [Turn(role=m["role"], text=m["text"]) for m in history_rows[-8:]]
+    # Carry each assistant turn's CITED refs, not just its prose. db.get_messages already decodes
+    # them; dropping them here is what let a five-turn discussion of a sugya lose the sugya (see
+    # _conversation_signals).
+    history = [Turn(role=m["role"], text=m["text"],
+                    refs=[r for c in (m.get("citations") or []) if (r := (c or {}).get("ref"))])
+               for m in history_rows[-8:]]
     db.save_message(session_id, "user", req.question)
     # Sticky mode: a chat stays in the mode chosen on its first turn — ignore any intent the client
     # sends on later turns. Legacy sessions (mode=NULL) fall back to the per-request intent.
