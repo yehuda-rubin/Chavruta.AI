@@ -2249,6 +2249,13 @@ class MeOut(BaseModel):
     # Admin dashboard link — see _is_admin. UI convenience only, same as the field above; the real
     # enforcement is the 404 every /admin/* route raises for a non-admin owner.
     is_admin: bool = False
+    # Organisation membership, for the school panel link. `org_role` is what decides whether the UI
+    # shows the button at all — students are members but have nothing to manage, so they never see
+    # it. UI convenience again: /orgs/* enforces the role itself and 404s regardless of what the
+    # client renders.
+    org_id: str = ""
+    org_name: str = ""
+    org_role: str = ""               # admin | teacher | student | "" (not in one)
 
 
 @app.get("/me", response_model=MeOut)
@@ -2303,6 +2310,9 @@ def me(owner: str = Depends(current_owner)):
         blocked_reason=ban["reason"] if ban else "",
         calendar_modes_enabled=_calendar_modes_enabled(owner),
         is_admin=_is_admin(owner),
+        org_id=(_org := orgs.membership(owner) or {}).get("org_id", "") or "",
+        org_name=_org.get("name", "") or "",
+        org_role=_org.get("role", "") or "",
     )
 
 

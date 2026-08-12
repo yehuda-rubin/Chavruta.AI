@@ -249,6 +249,34 @@ export const api = {
       body: JSON.stringify({ model, base_url: baseUrl }),
     }),
 
+  // School panel (spec 004). `demo` is the OPERATOR's inspection path — a fixed synthetic school,
+  // gated on _is_admin server-side. It deliberately takes no org id: there is nothing here that can
+  // be pointed at a real school, which is what makes it a simulator rather than impersonation.
+  orgs: {
+    panel: (demo = false) => req<OrgPanel>(`/orgs/panel${demo ? "?demo=true" : ""}`),
+    invite: (role: string, maxUses = 1) =>
+      req<{ code: string; role: string; max_uses: number }>("/orgs/invite", {
+        method: "POST",
+        body: JSON.stringify({ role, max_uses: maxUses }),
+      }),
+    join: (code: string) =>
+      req<{ org_id: string; name: string; role: string }>("/orgs/join", {
+        method: "POST",
+        body: JSON.stringify({ code }),
+      }),
+    leave: () => req<{ left: boolean }>("/orgs/leave", { method: "POST" }),
+    removeMember: (ownerId: string) =>
+      req<{ removed: boolean }>("/orgs/members/remove", {
+        method: "POST",
+        body: JSON.stringify({ owner_id: ownerId }),
+      }),
+    setCap: (ownerId: string, dailyCap: number) =>
+      req<{ owner_id: string; daily_cap: number }>("/orgs/members/cap", {
+        method: "POST",
+        body: JSON.stringify({ owner_id: ownerId, daily_cap: dailyCap }),
+      }),
+  },
+
   // Owner-only admin dashboard (see app/api.py's /admin/* routes and _is_admin). Goes through req()
   // (not a bare fetch, unlike /billing/limits) so the bearer token is attached — this data is gated.
   admin: {
@@ -359,6 +387,43 @@ export interface Me {
   // Admin dashboard link — see app/api.py::_is_admin. UI convenience only; the real gate is the
   // 404 every /admin/* route raises for a non-admin owner.
   is_admin: boolean;
+  // Organisation membership. `org_role` decides whether the school-panel button is rendered at all:
+  // students belong to a school but have nothing to manage, so they never see it. UI convenience —
+  // /orgs/* enforces the role server-side and 404s whatever the client draws.
+  org_id: string;
+  org_name: string;
+  org_role: string;                         // 'admin' | 'teacher' | 'student' | '' (not in one)
+}
+
+export interface OrgMember {
+  owner_id: string;
+  role: string;
+  daily_cap: number;
+  accepted: boolean;
+  tokens_today: number;
+  tokens_week: number;
+}
+
+export interface OrgPanel {
+  org_id: string;
+  name: string;
+  role: string;                             // the CALLER's role in this org
+  plan: string;
+  seats: number;
+  seats_used: number;
+  is_demo: boolean;
+  pool_daily: number;
+  pool_weekly: number;
+  pool_used_today: number;
+  pool_used_week: number;
+  pool_pct_today: number;
+  warn_80: boolean;
+  weekly_lessons: number;
+  lessons_used_week: number;
+  members: OrgMember[];
+  // Mode counts only. There is deliberately no field here that could carry the text of anything a
+  // member wrote — see spec 004 decision 1.
+  topics: { intent: string; requests: number; tokens: number }[];
 }
 
 export interface Tier {

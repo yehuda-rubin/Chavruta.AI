@@ -341,6 +341,82 @@ function CouponField({ lang, onRedeem }: { lang: Lang; onRedeem: (c: string) => 
   );
 }
 
+/* Join an institution by CODE. Deliberately the member's own action: a school never attaches an
+ * account by typing its id, so this field is the only way in. Mirrors CouponField because it is the
+ * same interaction — paste a short code, get one line back — and reusing the shape means a user who
+ * has redeemed a coupon already knows how this works. */
+function OrgJoinField({ lang, orgName, onJoin }: {
+  lang: Lang; orgName?: string; onJoin: (c: string) => Promise<string>;
+}) {
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const he = lang === "he";
+
+  async function submit() {
+    const c = code.trim();
+    if (!c || busy) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      setResult({ ok: true, msg: await onJoin(c) });
+      setCode("");
+    } catch (e) {
+      setResult({ ok: false, msg: e instanceof Error ? e.message : (he ? "ההצטרפות נכשלה" : "Could not join") });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (orgName) {
+    return (
+      <div className="mt-2 flex flex-col gap-1">
+        <span className="text-xs text-ink/60">{he ? "מוסד" : "Institution"}</span>
+        <p className="text-sm text-tekhelet font-semibold">{orgName}</p>
+        <p className="text-[11px] text-ink/45 leading-relaxed">
+          {he
+            ? "המכסה שלך מגיעה מהמוסד. המוסד רואה את היקף השימוש ואת סוגי הפעילות שלך — ולעולם לא את תוכן השיחות."
+            : "Your allowance comes from the institution. It can see how much you use and which modes — never the content of your conversations."}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 flex flex-col gap-2">
+      <span className="text-xs text-ink/60">{he ? "קוד הצטרפות למוסד" : "Institution join code"}</span>
+      <div className="flex gap-2">
+        <input
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+          placeholder={he ? "קוד מהמוסד" : "Code from your institution"}
+          aria-label={he ? "קוד הצטרפות למוסד" : "Institution join code"}
+          disabled={busy}
+          spellCheck={false}
+          autoComplete="off"
+          className="flex-1 min-w-0 px-3 py-2 rounded-2xl glass text-sm tracking-wider uppercase
+                     outline-none focus:ring-2 focus:ring-brand/40 disabled:opacity-50"
+        />
+        <button
+          onClick={submit}
+          disabled={busy || !code.trim()}
+          className="px-4 py-2 rounded-2xl grad text-white font-semibold text-sm shrink-0
+                     hover:opacity-95 transition disabled:opacity-40"
+        >
+          {busy ? (he ? "מצטרף…" : "Joining…") : (he ? "הצטרפות" : "Join")}
+        </button>
+      </div>
+      {result && (
+        <p role="status" aria-live="polite"
+           className={"text-xs leading-relaxed " + (result.ok ? "text-emerald-600" : "text-red-500")}>
+          {result.msg}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5">
@@ -380,6 +456,8 @@ export function SettingsModal({
   onUpgrade,
   onCancelSubscription,
   onRedeemCoupon,
+  onJoinOrg,
+  orgName,
   byokSupported,
 }: {
   open: boolean;
@@ -409,6 +487,9 @@ export function SettingsModal({
   onUpgrade?: () => void;
   onCancelSubscription?: () => void;
   onRedeemCoupon?: (code: string) => Promise<string>;   // resolves with a message to show
+  onJoinOrg?: (code: string) => Promise<string>;        // institution join code (spec 004)
+  orgName?: string;                                    // set ⇒ already a member, show what
+                                                       // the school can and cannot see
   byokSupported?: boolean;   // /me: whether this deployment's backend accepts a provider key at all
 }) {
   const auth = useAuth();
@@ -592,6 +673,9 @@ export function SettingsModal({
                 signed-in user, including when billing is off: coupons are the one way to get paid
                 access on a deployment with no payment provider configured. */}
             {onRedeemCoupon && <CouponField lang={lang} onRedeem={onRedeemCoupon} />}
+
+            {/* Institution membership — join by code, or, once in, what the school can see. */}
+            {onJoinOrg && <OrgJoinField lang={lang} orgName={orgName} onJoin={onJoinOrg} />}
 
             {/* BYOK — only offered when the backend has a provider-key concept at all (not 'bridge'). */}
             {byokSupported && <ByokKeyField lang={lang} />}

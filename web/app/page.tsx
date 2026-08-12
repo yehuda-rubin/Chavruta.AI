@@ -262,6 +262,14 @@ export default function Home() {
     return res.message;
   }, [refreshMe]);
 
+  // Joining changes both the quota this account spends and whether the header shows the school
+  // button, so /me is refreshed the same way a coupon redemption does it.
+  const joinOrg = useCallback(async (code: string) => {
+    const joined = await api.orgs.join(code);
+    refreshMe();
+    return `הצטרפת ל${joined.name}`;
+  }, [refreshMe]);
+
   const deleteAccount = useCallback(async () => {
     try {
       await api.deleteAccount();
@@ -430,6 +438,7 @@ export default function Home() {
         onOpenSources={() => setMobileSources(true)}
         onNewChat={newDiscussion}
         isAdmin={me?.is_admin}
+        orgRole={me?.org_role}
       />
       <div className="flex flex-1 overflow-hidden px-4 pb-4 gap-4">
         {/* Sessions — desktop inline only (hidden on mobile, opened as a drawer). lg:contents keeps

@@ -14,6 +14,7 @@ export function Header({
   onOpenSources,
   onNewChat,
   isAdmin = false,
+  orgRole = "",
 }: {
   lang: Lang;
   theme: "light" | "dark";
@@ -24,7 +25,12 @@ export function Header({
   onNewChat?: () => void;       // mobile only — starts a new chat directly, no drawer detour
   isAdmin?: boolean;            // from me.is_admin (app/api.py::_is_admin) — hidden entirely, not
                                 // just disabled, for the near-everyone who isn't the admin account.
+  orgRole?: string;             // from me.org_role. The school button shows for 'admin' and
+                                // 'teacher' ONLY: a student belongs to a school but has nothing to
+                                // manage there, so a button leading to a page of other people's
+                                // usage would be a confusing dead end at best.
 }) {
+  const canManageOrg = orgRole === "admin" || orgRole === "teacher";
   return (
     <header className="h-[70px] flex items-center justify-between px-4 lg:px-8 shrink-0">
       <div className="flex items-center gap-2 lg:gap-3">
@@ -74,6 +80,15 @@ export function Header({
         >
           <Icon name={theme === "dark" ? "light_mode" : "dark_mode"} />
         </button>
+        {canManageOrg && (
+          <Link
+            href="/school"
+            className="h-10 w-10 rounded-full glass grid place-items-center text-tekhelet"
+            title="פאנל המוסד"
+          >
+            <Icon name="school" />
+          </Link>
+        )}
         {isAdmin && (
           <Link
             href="/admin"
