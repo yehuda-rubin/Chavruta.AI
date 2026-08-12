@@ -1,234 +1,325 @@
 # 004 — School accounts (organisations, shared quota, three roles)
 
-Status: **planned, not built.** Decisions below were taken with the founder on 2026-08-12.
+Status: **BLOCKED pending a founder decision.** Planned 2026-08-12, then reviewed by four agents
+(adversarial, security, feasibility, legal) the same day. The review found two hard blockers and
+three errors in the original plan. Everything below is rewritten to reflect that; the earlier
+version documented decisions that cannot be implemented as written.
 
 ## What this is
 
-A school buys one institution subscription and attaches its people to it. Those people study on the
-school's quota instead of buying their own, and the person who paid can see how it is being used and
-cap anyone who is burning too much of it.
-
-Three roles, each strictly containing the next:
+A school buys one institution subscription and attaches its people to it. They study on the school's
+quota instead of buying their own, and whoever paid can see how it is being used and cap anyone
+burning too much of it.
 
 | role | Hebrew | can |
 |---|---|---|
-| admin | מנהל | everything a teacher can, plus: manage teachers, set per-member caps, transfer ownership, billing |
-| teacher | מורה | open the school panel, invite and remove students, see usage |
+| admin | מנהל | everything a teacher can, plus manage teachers, set caps, transfer ownership, billing |
+| teacher | מורה | open the panel, invite and remove students, see usage |
 | student | תלמיד | study on the shared pool; sees only their own usage |
 
-## Decisions taken (do not relitigate without the founder)
+---
 
-**1. Topics only. The panel NEVER shows the text of anyone's conversation.**
+# BLOCKERS — read before doing anything
 
-The original request was for the admin to read students' messages. That was dropped in favour of
-showing *what subjects* a student has been asking about and how much, never the conversations
-themselves. This is the single most important decision in this document, for two reasons:
+## B1. Minors are not permitted users of this service, in the contract and in the code
 
-- *Legal.* Privacy policy 1.8 permits the OPERATOR to review conversations to improve the service. It
-  says nothing about a third party — a school — reading them. Shipping that would have contradicted a
-  published promise, required a 1.9 with its own notice period, and, because many students are
-  minors, put the most sensitive category of personal data under Israel's Privacy Protection Law
-  (amendment 13, in force since August 2025) in the hands of whoever bought a subscription.
-- *Product.* The need behind the request is supervision — is this being used, and for learning? Topic
-  and volume answer that. Message text answers a different question nobody asked, and a teacher who
-  can read a student's private questions changes what the student is willing to ask. That would
-  quietly damage the thing the product is for.
+`docs/legal/terms-he.md` §5 and `terms-en.md` §5:
 
-If content access is ever revisited it needs: a distinct in-product disclosure at join time, the
-student's explicit acceptance, a privacy policy section, a written warranty from the school that it
-holds parental consent for minors, and a per-open access log. Not a line in the terms.
+> **The Service is intended for users aged 18 and over, and is not intended for minors.** An account
+> found to have been opened by a minor **will be closed**.
 
-**2. Joining is by INVITATION, accepted by the member. Never by an admin typing an ID.**
+And on institutional accounts specifically: *"the pupil is **not** a user of the Service"*, with
+`privacy-he.md` §7 adding *"we neither ask for nor need pupil data of any kind, and there are no
+pupil accounts."*
 
-The ID is how an invitation is addressed, not how a link is completed. As originally specified, an
-admin could type any user id in the system and attach that account — and a typo would attach a
-stranger. Membership changes what quota a person spends and exposes their usage to someone else;
-that cannot happen without them agreeing to it.
+It is enforced server-side. `app/security.py::_has_consented` gates every authenticated request:
 
-**3. A member cannot hold their own paid subscription — and we never cancel one for them.**
-
-An invitation to an account with an active paid plan is REFUSED, showing the date it lapses. We do
-not auto-cancel: that is touching someone's money, and it collides with the statutory cancellation
-and refund rules already implemented in `app/plans.py`. The mirror case is blocked too — a current
-member trying to buy a personal plan is stopped with an explanation and told to leave the school
-first.
-
-**4. Per-member caps ship in v1, not as a later feature.**
-
-One student can spend a school's entire day in an hour. Every member gets a default cap that is a
-fraction of the pool, which the admin can raise or lower. The admin is warned when the school passes
-~80% of its daily pool — after it is exhausted, the warning has no value.
-
-**5. Seats: up to 40 members per institution subscription.**
-
-Chosen against the existing allowance: institution is ×40 the free tier (8M tokens/day), which
-supports roughly 40–80 active students. Beyond 40 members the school buys another seat. Without this
-a 1,000-pupil school buys one ₪199 subscription and every pupil starves.
-
-**6. The operator panel gets a ROLE SIMULATOR, not user impersonation.**
-
-The founder asked to be able to "see the states of every account type" from the operator panel. Two
-different things hide behind that:
-
-- *Role simulation* — render the app as an admin/teacher/student sees it, against a synthetic demo
-  school. Answers "does the teacher panel look right", costs nothing, exposes nobody. **This is what
-  we build.**
-- *Impersonating a real user* — open a specific person's account and see their real data. This would
-  be a complete bypass of decision 1: the panel would show, through the back door, exactly the
-  conversation text we just decided no school administrator may see. **Not built.**
-
-If a real support case ever needs the second, it is its own feature with the user's consent and a
-log, not a switch on the operator panel.
-
-## Data model
-
-Three new tables. Nothing in the existing schema changes shape.
-
-```
-orgs            id, name, owner_id (the admin), plan, seats, created_at
-org_members     org_id, owner_id, role, daily_cap, invited_at, accepted_at, invited_by
-org_access_log  org_id, actor_owner_id, target_owner_id, action, at
+```python
+return bool(meta.get("age_confirmed_18")) and bool(str(meta.get("terms_version") or "").strip())
 ```
 
-- `org_members` rows exist from the moment of invitation, with `accepted_at` NULL. A pending row
-  grants nothing — membership is `accepted_at IS NOT NULL`, checked in one place.
-- `org_access_log` is written even though v1 shows no message text. It records who opened whose usage
-  and when. Cheap now, and if the topic view is ever widened it is already there — an audit trail
-  added after the fact cannot describe what happened before it existed.
-- Quota resolution becomes: owner → accepted membership → org pool, falling back to the member's own
-  plan when they belong to no org. It must live in ONE function, next to `plans.daily_tokens`, or
-  personal and school quota will drift apart.
+So a 15-year-old accepting an invitation must first tick a box declaring she is 18 — the exact
+declaration Terms §5 makes grounds for closing her account. The service would then hold two
+contradictory records of one child's age, and the legally load-bearing one (her own declaration,
+which the Terms lean on entirely) is the false one, produced by a flow we built.
 
-## Access control
+**Everything in the original "Minors" section was a careful answer to a question the contract says
+may not be asked yet.** Admitting minors is its own project: Terms §5 rewrite, Privacy §7 rewrite
+(it currently promises the opposite), a guardian-consent mechanism, a signup path that does not
+assert 18+, changes to `_has_consented`, and a re-notice to existing users.
 
-**Do not reuse `app/api.py::_is_admin`.** That is an environment allowlist for the OPERATOR of the
-whole service. School roles are per-org data and must be read from the database. Reusing that gate
-would make every school admin an operator, or force operator ids into a school table; both are wrong.
+## B2. "Nothing belonging to a minor is used for training" is false as designed
 
-Every school endpoint answers three questions in order: is the caller an accepted member of this org,
-does their role permit this action, and is the target of the action in the same org. A missing third
-check is how an admin of school A edits a member of school B.
+This was the original plan's flagship protection, and it was wired to `db.reviewable_questions` —
+which is only the OPERATOR's path. `docs/legal/privacy-he.md` §3:
 
-Teachers do NOT get message topics for students by default — only aggregate usage. Topic visibility
-is an admin capability the admin may grant to a named teacher. Least privilege: it costs nothing to
-start narrow, and widening later is easy where narrowing after the fact is not.
+> **ייתכן ש-Nebius ישתמש בנתונים שנשלחו אליו — שאלותיך והמקורות שצירפת — גם לצורך שיפור ואימון
+> מודלי הבינה המלאכותית שלו**
+>
+> **אין בשירות מסלול "ללא אימון", גם לא בתשלום ולא לחשבון מוסדי.**
 
-## Minors
+Every question a pupil types is sent to Nebius and may train Nebius's models, and the policy states
+there is no tier — explicitly including an institutional account — that changes this. The
+`reviewable_questions` exclusion does not touch it.
 
-Most students at a school are children, which changes what we may hold and for how long. Decision 1
-(topics, never content) already removes the largest exposure. What remains:
+Worse, the same section names the only mitigation: *"מה שלא הוזן, לא נשלח — הוא **ההגנה היחידה**
+הקיימת כאן."* That rule was written for an adult who read the policy. It cannot be the only
+protection for a child typing their own questions unsupervised.
 
-**An under-18 flag, defaulting to MINOR.**
+**Three exits, all requiring a founder decision before anything ships:**
 
-A single boolean, not a birth date — we need to know which protections apply, not how old anyone is,
-and a date of birth would mean holding more sensitive data about children in order to protect
-children. It is set by the SCHOOL at invitation for a linked student, because the school is what
-actually knows; a child's self-declaration is not a basis to relax anything. On a personal account
-the holder sets their own.
+1. Narrow the promise in writing and tell schools their pupils' questions go to a provider that may
+   train on them. Honest, possibly unsellable to a school.
+2. Obtain a no-training or zero-retention arrangement from the provider and rewrite Privacy §3.
+3. Do not let a minor's turns reach the default provider at all.
 
-The default is minor, and that direction matters more than the flag itself: an unanswered question
-must never quietly downgrade someone's protection. An unset flag gets the strict treatment.
+## The fork
 
-**Nothing belonging to a minor is used for training, tuning or evaluation.**
+**Option A — v1 is 18+ only: teachers and admins, no student role.** Exactly what the contract
+already sells. Removes both blockers and most of the review's findings. Roughly a week of work.
 
-This covers what they wrote and what was recorded about them. It does NOT touch the corpus — the
-Torah texts the RAG retrieves are public works, not anyone's personal data, and are unaffected by
-any of this.
+**Option B — minors in v1.** Requires B1's whole legal and signup project AND an answer to B2 first.
 
-Mechanically this is the `db.reviewable_questions` exclusion below: that gate is the only sanctioned
-path from conversation text to evaluation, so excluding minors there excludes them from everything
-downstream of it.
+**Recommendation: A now, B as a separate track if and when.** Not because B is wrong, but because A
+is a complete sellable product and B is a legal-commercial decision deserving its own time and the
+lawyer's signature. And B must never be discovered halfway: once 400 pupils have accounts you cannot
+un-collect them, and the remedy your own Terms promise is to close those accounts.
 
-**Three-month retention on a minor's own data.**
+---
 
-Their messages and sessions are purged three months after they are written, on a rolling basis.
+# Corrections to the original plan
 
-What survives is the aggregate, not the person — the same split `purge_owner` already makes and
-documents: `usage_events` rows stay (they are how quota and business metrics work and carry no
-conversation text), with `owner_id` NULLed at the same three-month boundary. A row saying a question
-was asked, when, and how much it cost is not information about a child; the question they asked is.
+**C1. The seat number was arithmetically empty.** 40 seats was chosen because institution is ×40 the
+free tier — but ÷40 lands exactly on free:
 
-Worth stating plainly because it is a real product cost: **a student loses their study history after
-three months.** For a study tool that is not nothing — someone will want to reopen a shiur from last
-term. It is a deliberate trade of usefulness for holding less of a child's data, and it should be
-said in the school's onboarding rather than discovered.
+| | institution | ÷40 | free |
+|---|---|---|---|
+| daily tokens | 8,000,000 | **200,000** | **200,000** |
+| weekly tokens | 21,000,000 | **525,000** | **525,000** |
+| weekly lessons | 80 | **2** | **2** |
 
-**Saved lessons** follow the same rule when the owner is a minor. A teacher's own lesson is the
-teacher's, and is unaffected.
+A 40-member school would pay ₪199 so each member receives, to the token, what they already have for
+free. What ₪199 actually buys is **pooling, caps and visibility** — statistical multiplexing, not
+per-person capacity. That is a defensible product and it must be said in one honest sentence rather
+than discovered by the first school that asks. It also makes the default per-member cap a deliberate
+over-subscription (2–4× the even share), which is exactly why the 80% warning matters.
 
-**Minors are EXCLUDED from `db.reviewable_questions`.**
+Worse in combination with the no-personal-plan rule: a teacher on `pro` today has 2,000,000/day.
+Joining the school drops them to ~200,000 — a **10× downgrade** — and they are then forbidden from
+buying their own plan. The one person with a real reason to want more is strictly worse off inside
+the org. Either teachers keep a higher cap, or the rule needs an exception.
 
-That gate (built 2026-08-12) lets the operator read conversation text for evaluation, under the
-notice sent to users on 2026-08-10. That notice went to adult account holders who could accept it for
-themselves; a minor cannot. Reading children's conversations is a categorically heavier act than the
-one users were told about, so the under-18 flag must exclude an account from review — a fourth
-condition alongside the three already enforced there, and it fails closed like the others. This is a
-small change and it must land BEFORE the first student joins, not after.
+**C2. The retention rule is a DIFFERENT rule, not a shorter one.** `app/accounts.py::run_retention`
+already deletes chats after `CHAVRUTA_CHAT_RETENTION_DAYS` (default **90**) for everyone — keyed on
+**inactivity**, and `privacy-he.md` promises *"שיחה שאתה ממשיך לחזור אליה לא תימחק"*. The proposed
+minor rule is three months **from writing**, regardless of activity. For an active student these
+produce opposite outcomes. Whoever implements it must NOT reuse the existing inactivity sweeper, and
+the published promise has to be amended, not merely tightened.
 
-**No marketing to a minor, regardless of consent.** The under-18 flag overrides `marketing_consent`
-in both directions: a minor who ticked the box still receives nothing. Consent to marketing is not
-something a child gives validly, so the flag has to win over the checkbox rather than sit beside it.
+**C3. "Nothing in the existing schema changes shape" was wrong.** A shared pool with per-member caps
+means two counters checked and charged in ONE transaction. `db.bump_usage` is single-row by
+construction (PK `(owner_id, day, meter)`) and its atomicity is the point. Two sequential calls are
+not equivalent: another request interleaves, and `settle_usage` floors at zero per counter so the
+compensation is not reversible. This needs a new `bump_pooled` / `settle_pooled` pair — the real cost
+centre of the feature. Everything else is CRUD.
 
-**Deletion.** Account deletion must work for a linked account, and leaving a school must not orphan
-data. The school bought quota; it never owned the person's work.
+---
 
-### Privacy officer
+# Requirements the review added
 
-**Yehuda Rubin is the designated privacy officer (ממונה על הגנת הפרטיות), from 2026-08-12.** He also
-set the three-month retention period above — which is the appointment working as intended: that is a
-call for the privacy officer to make, not for engineering to guess at.
+## Authorization
 
-Two things follow from it, neither optional:
+- **The gate needs a fourth check: `rank(target.role) <= rank(actor.role)`.** Without it a teacher
+  can remove the org's admin — all three originally-stated checks pass. Either the org goes headless
+  or the teacher inherits it.
+- **`org_members.role` is authoritative for permissions; `orgs.owner_id` for billing only.** Two
+  sources of truth for "is admin" is where the second escalation lives. Written in one transaction.
+- **Mount the router with the gate as a dependency**, not per-route: `APIRouter(dependencies=[...])`.
+  A route nobody remembered to test still cannot skip it.
+- **Fail with 404, not 403**, following `_require_admin`'s existing convention — a 403 confirms org
+  ids and memberships to an outsider.
+- **Unique constraint on `org_members.owner_id` where `accepted_at IS NOT NULL`.** Nothing otherwise
+  stops two accepted memberships, and quota resolution has no answer for which pool a turn charges.
 
-- **The name and a contact address go in the privacy policy.** The role is, in large part, an
-  address: a user exercising a right, or the Privacy Protection Authority, has to know who to reach.
-  A privacy officer nobody can contact is not performing the function.
-- **The structural tension should stay visible.** The officer is meant to hold some independence from
-  the party doing the processing, and here they are the same person. At a one-person company that is
-  unavoidable and unremarkable, but it stops being either the moment there are partners or staff, and
-  it should be revisited then rather than inherited.
+## The under-18 flag
 
-Amendment 13 also carries duties around data about minors beyond what is written above. That remains
-an item for the sign-off already pending on the other legal findings; nothing in this document is
-legal advice.
+- **It must be a column in `chavruta.db`, never read from Supabase JWT metadata.** The two functions
+  that must honour it cannot read metadata: `db.reviewable_questions` is pure SQL, and the retention
+  sweeper is a background thread with no HTTP caller. Put it in metadata and the protection fails
+  **open**, silently.
+- **Do not let "default minor" mean "everyone".** Every existing account lacks the flag; a literal
+  default-minor rule makes `reviewable_questions` return `[]` for the whole user base and
+  `harvest_user_questions.py` goes to zero **with nobody noticing**, because a privacy gate returning
+  nothing looks exactly like "no new questions". Derive adult from the `age_confirmed_18` claim that
+  already exists; set `is_minor` explicitly on the membership row.
+- **The school may only set the flag TO minor.** Clearing it must require the account holder or the
+  operator, and every change goes to `org_access_log`. Otherwise one teacher toggling a roster
+  un-protects 40 children across three mechanisms at once (review, marketing, retention).
+- **The flag persists after the student leaves.** Otherwise leaving silently downgrades them.
 
-## Why this is NOT a separate service
+## Keeping conversation text out
 
-The question came up. It should be one module (`app/orgs.py`) inside the existing API, not its own
-container:
+- **The panel reads exclusively from `usage_events`.** `db.record_usage_event` has a fixed column
+  list of measurements — no text ever reaches it. `sessions` and `messages` are off-limits to
+  `app/orgs.py`, including exports.
+- **`sessions.first_q` holds the raw question.** Building the topic view by joining `sessions` — the
+  intuitive place, since that is where per-chat rows live — hands every teacher the verbatim opening
+  sentence of every conversation. This is the single most likely way decision 1 gets broken, because
+  the column is not called "message".
+- **"Topic" is a closed vocabulary**, not a generated label. A label derived from the question echoes
+  the sensitive part by construction, and costs money per turn.
+- **Moderation flags go to the operator, never to the school.** A "your student was flagged"
+  notification is content by another name, and it is the first thing a school will ask for.
 
-- The school code's entire job is to read and write the SAME data as the main app — accounts, quota,
-  usage_events, sessions. A separate container isolates none of that; it adds a network hop to the
-  same database and buys the complexity of a distributed system with none of the isolation.
-- The conversation store is SQLite, which is a file. Two containers writing one SQLite file over a
-  shared volume is a real corruption hazard — its locking does not hold across containers.
-- The actual risk here is not "school code crashes the app", it is "a permission check is missing" —
-  and a container boundary does not add a permission check. The isolation this feature genuinely
-  needs is authorization, which is code.
+## Invitations
 
-What does help, and is cheap: one membership/permission gate that every endpoint goes through, the
-access log, and tests that deliberately attempt cross-org access.
+- **Invite by CODE, not by owner id.** The admin generates a school-scoped, expiring, N-use join
+  code; the student pastes it in Settings beside the existing coupon field. This satisfies "the
+  member performs the act" exactly, and it removes three problems at once: the UUID-copying UX, the
+  email directory we do not have (`owner_id` is a Supabase UUID; the app DB stores no email), and the
+  enumeration oracle below. It reuses `coupons.generate_code`, its throttle, and `redeem_coupon`'s
+  one-transaction pattern.
+- **The refusal must be uniform to the inviter.** "Refused, showing the date it lapses" turns the
+  invite endpoint into an oracle: buy one subscription and you can learn, for any account id, whether
+  it exists, whether it holds a paid plan, and when that plan ends. The reason and the date belong to
+  the *invitee*.
+- **The precondition tests the wrong property.** It must be "no active paid plan AND owns no org AND
+  holds no accepted membership" — and a coupon-granted plan is stored as `status='canceled'` with a
+  future `current_period_end`, so test `plans.canonical(db.get_plan(x)) != 'free'`, not the
+  subscription status.
+- **Three enforcement points, not one**: `/billing/checkout`, `coupons.redeem`, and `/admin/grant`.
+  Re-check at webhook time too — a checkout in flight while an invite is accepted reaches the
+  forbidden state with no rule broken.
+- Invite expiry, per-org rate limit, and revocation of pending invites on removal.
 
-## Scope
+## Quota
 
-**v1** — org creation on institution checkout · invitation + acceptance · roles · shared pool with
-per-member caps · usage view (counts, tokens, topics) · 80% warning · leave/remove · ownership
-transfer.
+- **The per-member cap has two documented bypasses right beside it.** `_reserve_tokens` falls through
+  to `db.spend_credits` and then to `db.BYOK_TOKENS` sized from the plan tier. A member inheriting
+  `institution` silently gets an 8M/day BYOK allowance. State that the cap binds on every admission
+  path, or disable credits and BYOK for members.
+- **The lesson pool is a separate meter and the plan never mentioned it.** If a member's effective
+  plan becomes the org's, each of 40 members gets 80 lessons/week — 3,200 lessons from one ₪199
+  subscription, each running the agentic loop over a large source pool.
+- **Resolve the pool identity once per request and carry it through settlement.** `_reserve_tokens`
+  and `_settle_tokens` resolve the owner independently; a member removed in between settles against
+  their personal counter and the school's reservation is never released. The async paths widen that
+  window to minutes.
+- **Model the pool as a synthetic owner id** (`org:<uuid>`) in `usage_counters` — the PK already
+  indexes it and `_counts`/`week_days` work unchanged, so the pool itself needs no schema change.
+- **Seat admission must be check-and-increment in one transaction**, following `bump_usage`'s own
+  pattern, or concurrent accepts each see room and overrun the cap.
 
-**Explicitly out** — message text (decision 1), user impersonation (decision 6), per-student pricing,
-cross-org anything.
+## Lifecycle
 
-**Do first, before any of it** — exclude org members from `db.reviewable_questions`. It is one
-condition in a gate that already exists, and it is the only item here that gets harder to do
-honestly once real students are using the product.
+- **`db.purge_owner` knows nothing about orgs.** An admin deleting their account leaves
+  `orgs.owner_id` dangling and 40 members resolving quota to a dead owner. Refuse deletion while the
+  account owns an org — the same shape as decision 3 (block and explain, never touch it silently).
+- **`subscriptions.owner_id` is a PRIMARY KEY and the PayPlus token belongs to the person who
+  checked out.** "Transfer ownership" cannot move the money: the ex-principal's card keeps being
+  charged, invoices keep carrying their name, and only they can cancel. Defer transfer from v1 — it
+  is a one-row UPDATE an operator can run — or scope it explicitly to roster control, not billing.
+- **`orgs.plan` would be a second copy of `accounts.plan` that the lapse path never writes.**
+  `sweep_downgrades` calls `db.set_plan(owner, "free")` and nothing touches `orgs`. Derive the org's
+  entitlement from the owner's account, or accept a reconciliation job.
+- **`usage_events` has no `org_id`.** Joining by *current* membership means a student who used the
+  product privately for a year has that personal usage appear in a teacher's panel retroactively, and
+  a student who leaves erases the term's numbers. Stamp membership at write time.
+- **`org_access_log` needs a retention rule.** An indefinite log of which teacher looked at which
+  child sits badly three paragraphs below a decision to purge that child's data at three months.
+- **`feedback` and `message_reports` are not covered by `purge_owner`** — free text and safety flags
+  about a child, retained forever, with the messages they point at cascaded away.
 
-## Open questions
+## Deployment
 
-- What does "topic" mean concretely — the intent (qa/lesson/halacha), the work the sources came from
-  (Gemara, Halacha), or a label derived from the question? The first two are free from data we
-  already record in `usage_events`; the third needs generation and therefore costs money per turn.
-- Does removing a member delete their conversations? Proposed: no — the account and its history stay
-  with the person, they simply revert to the free tier. The school bought quota, not the student's
-  work.
-- What happens to members when the school's subscription lapses? Proposed: everyone reverts to free,
-  nobody is deleted, and the admin can re-subscribe to restore the pool.
+- **Rate limiting is per-IP** (`app/security.py`, 20/min). A class of 30 behind one school NAT shares
+  one bucket: three active students exhaust it and the rest get 429s. This is the first deployment
+  shape where many paying users share an egress IP. Key admission on owner id for authenticated
+  traffic; keep the IP window for anonymous.
+- **Decide which frontend.** `web/` (Next.js) and the static `app/frontend/public/ui/chavruta.html`
+  both exist. Clone `web/app/admin/page.tsx` — a working, `me()`-gated, RTL dashboard — rather than
+  fitting tables into `SettingsModal`.
+
+## Reuse rather than build
+
+- `db.usage_by_owner` / `usage_by_intent` / `usage_by_hour` are the panel's three charts already;
+  they need one `owner_ids` filter.
+- The 80% warning needs no machinery: `db._counts` already returns day and week totals.
+- The invite/accept flow is `app/coupons.py` with the nouns changed.
+- `_require_admin`'s 404-not-403 shape is the right model for `require_member(org_id, min_role)`.
+- **Cut the role simulator from v1.** It means seeding a synthetic school with synthetic members and
+  usage and threading a simulated role through the gate, `/me` and the panel — the whole surface, for
+  a fixture only the operator sees. Creating a real test school with two throwaway accounts takes
+  five minutes. Highest cost-to-value item in the original plan.
+
+---
+
+# Legal work required
+
+Two releases, because the first two items must not be held behind an unbuilt feature.
+
+**Release A — now, independent of school accounts. Privacy 1.8 → 1.9:**
+
+- Appoint the privacy officer: **Yehuda Rubin, ממונה על הגנת הפרטיות, from 2026-08-12**, with a
+  contact address. §11 currently states that no appointment has been made and that the obligation
+  does not apply.
+- **Fix a statement that is already false**: §11 says the service *"רושם מדדים ולא תוכן"*. Version
+  1.8 (10.8.2026) granted the operator the right to review conversation content. This is a
+  pre-existing inaccuracy, unrelated to schools.
+- Fix the §12/§13 cross-reference in `privacy-he.md` (the Hebrew says 12, the English says 13; 13 is
+  correct) — the officer's contact goes in that exact clause.
+
+**Release B — with the feature. Privacy 1.9 → 1.10, Terms 1.10 → 1.11.** Six published sentences
+must be **reversed**, not extended: "there are no pupil accounts", "the pupil is not a user", "we
+neither ask for nor need pupil data of any kind", "we do not knowingly collect personal information
+from minors", "an account found to be a minor's will be closed", "lessons you create are not deleted
+automatically". The changelog must name them as reversals — the 1.4→1.10 lineage said the opposite
+four times, and a regulator reads the whole file.
+
+Also required in B: the organisation as a named recipient in §4 (the current list is sub-processors
+plus legal compulsion; a school is neither); a ninth purpose in §11, whose *"למטרות אלה בלבד"*
+framing is self-executing and requires advance notice; §1 itemisation of membership, role, caps, the
+flag and the access log; and a new section stating what the institution sees and what it never sees.
+
+**Every change lands in five places**: the four `docs/legal/*.md` files and `web/lib/legal.ts`. There
+is no test enforcing parity — worth adding. Note also that bumping `TERMS_VERSION` does **not**
+currently force re-acceptance (`web/app/page.tsx` checks only that a version is present), which is a
+deliberate decision to make given that release B changes who may see a user's data.
+
+**A missing document, not a clause:** there is no institution contract and no processing/outsourcing
+agreement in `docs/legal/`. If a school determines the purposes for its pupils' processing it may be
+a בעל מאגר with us as a מחזיק, which triggers a written agreement under the Data Security
+Regulations. Likely a hard prerequisite to signing the first school.
+
+## For the lawyer
+
+Not legal advice; flags only. Whether the service now falls within amendment 13's triggers with pupil
+accounts and per-member reporting (the published text asserts three negatives, at least one already
+stale) · whether a record of a person's Torah study questions is מידע רגיש, and more so for a child ·
+whether adding minors moves the database's security level · parental consent and a minor's capacity,
+and whether a school can consent on a pupil's behalf · school as בעל מאגר vs מחזיק and the agreement
+above · Ministry of Education circulars on pupil privacy and ed-tech suppliers · whether a minor's
+continued use binds them to amended terms · whether an institutional purchase is a consumer
+transaction at all (Terms §10's 14-day right and the cancellation-fee cap are consumer provisions,
+and `plans.refund_quote` deliberately does not deduct consumed value — calibrated for one person and
+inherited unchanged at 40×) · cross-border transfer resting on consent where the data subject is a
+child · whether the no-marketing-to-minors rule should refuse the `marketing_consent` write rather
+than override it at send time.
+
+---
+
+# Scope, once the fork is decided
+
+**Option A v1 (18+ only)** — org creation on institution checkout · join codes · roles · shared pool
+with per-member caps · usage view from `usage_events` · 80% warning · leave/remove. No student role,
+no minors work, no B2 question.
+
+**Explicitly out either way** — conversation text · user impersonation · per-student pricing ·
+cross-org anything · ownership transfer in v1 · the role simulator.
+
+**Ordering** — the pooled counter (`bump_pooled`/`settle_pooled`) first, since everything else
+depends on where the counter lives and it is the only part where correctness costs money. Then the
+resolver in `app/orgs.py` (NOT in `plans.py`, which is pure and DB-free by design), rewiring
+`_reserve_tokens`, `_charge_lesson_unit`, `_record_event` and `/me`. Green `test_quota.py` and
+`test_byok_quota.py` is the definition of "existing single users unchanged". Then the gate and
+endpoints with the cross-org tests written alongside, then billing/coupon refusals, then UI.
