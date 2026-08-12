@@ -98,6 +98,10 @@ services:
 
       # Chat history — persisted to the named volume below.
       CHAVRUTA_DB_PATH: /app-data/chavruta.db
+
+      # Where the nightly evaluation writes what it generates (harvested pairs, per-night logs).
+      # Separate from /app/eval, which is the read-only curated question sets — see the volumes below.
+      CHAVRUTA_EVAL_OUT: /app/eval-out
     volumes:
       - chavruta_db:/app-data             # SQLite conversation history (persists)
       - hf_cache:/root/.cache/huggingface # bge-m3 / model cache
@@ -106,14 +110,18 @@ services:
       # scripts/build_corpus_links.py against the live corpus; read-only since the app never writes
       # to it. Absent ⇒ pipeline.py falls back to no link expansion at all (not an error).
       - ./data/linkgraph:/app/data:ro
-      # Nightly retrieval evaluation (scripts/nightly_eval.py, woken by cron on the host). Mounted
-      # rather than baked into the image so a change to the eval tooling does not require rebuilding
-      # and restarting the serving container. scripts/ is read-only — the container runs them and
-      # never edits them; eval/ is writable because the harvested pairs and each night's log land
-      # there. Neither is on the request path, so a missing mount degrades the nightly job and
-      # nothing else.
+      # Nightly retrieval evaluation (scripts/nightly_eval.py, woken by a systemd timer on the host).
+      # Mounted rather than baked into the image so a change to the eval tooling does not require
+      # rebuilding and restarting the serving container. Read-only: the container runs these, it
+      # never edits them. None of this is on the request path, so a missing mount degrades the
+      # nightly job and nothing else.
       - ./scripts:/app/scripts:ro
-      - ./eval:/app/eval
+      # The hand-written question sets are curated, version-controlled INPUT — read-only, so the job
+      # cannot edit the very set it is being judged against. Generated artefacts (harvested pairs,
+      # nightly logs) go to their own writable volume instead; the container runs as uid 10001 and
+      # cannot write into the repo checkout anyway.
+      - ./eval:/app/eval:ro
+      - eval_out:/app/eval-out
     depends_on:
       - qdrant
     expose:
@@ -224,3 +232,4 @@ volumes:
   chavruta_db:
   hf_cache:
   qdrant_storage:
+  eval_out:                             # nightly evaluation output (see api.volumes)

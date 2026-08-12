@@ -44,8 +44,14 @@ ISRAEL = ZoneInfo("Asia/Jerusalem")
 SATURDAY_WINDOW = (0, 16, 6)     # 00:00-16:00 on six cores
 NIGHTLY_WINDOW = (0, 5, 2)       # 00:00-05:00 on two cores
 
-LOG_DIR = ROOT / "eval" / "nightly"
-PAIRS = "eval/harvested_pairs_v1.jsonl"
+# Where GENERATED artefacts go — harvested pairs and each night's log. Deliberately separable from
+# eval/, which holds the hand-written question sets: in the container those are mounted READ-ONLY
+# (curated input, version-controlled) while this points at a writable volume. Sharing one directory
+# would mean either making the curated sets writable by the job or having no output at all — the
+# first run failed with exactly that permission error, which is the right thing to have hit.
+OUT_ROOT = Path(os.environ.get("CHAVRUTA_EVAL_OUT") or (ROOT / "eval"))
+LOG_DIR = OUT_ROOT / "nightly"
+PAIRS = str(OUT_ROOT / "harvested_pairs_v1.jsonl")
 # Re-harvesting every night would burn the window re-deriving pairs that have not changed — the
 # corpus is static between loads. Refresh only when the file is missing or older than this.
 PAIRS_MAX_AGE_DAYS = 14
@@ -89,7 +95,7 @@ def _run(cmd: list[str], *, cpus: int, deadline_s: int, log) -> int:
 
 
 def _pairs_are_stale() -> bool:
-    path = ROOT / PAIRS
+    path = Path(PAIRS)
     if not path.exists():
         return True
     age = datetime.now().timestamp() - path.stat().st_mtime
