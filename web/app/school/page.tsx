@@ -102,9 +102,21 @@ export default function SchoolPanel() {
   }
 
   async function removeMember(ownerId: string) {
+    if (!window.confirm("להסיר את החבר? הוא לא יוכל לחזור עם קוד הכיתה — רק אתם תוכלו להחזיר אותו."))
+      return;
     setBusy(true);
     try {
       await api.orgs.removeMember(ownerId);
+      load(demo);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function readmit(ownerId: string) {
+    setBusy(true);
+    try {
+      await api.orgs.readmitMember(ownerId);
       load(demo);
     } finally {
       setBusy(false);
@@ -285,7 +297,10 @@ export default function SchoolPanel() {
             {panel.members.map((m) => (
               <tr key={m.owner_id} className="border-t border-ink/10">
                 <td className="py-2 font-mono text-[11px] text-ink/70">{m.owner_id}</td>
-                <td className="py-2">{ROLE_HE[m.role] ?? m.role}</td>
+                <td className="py-2">
+                  {ROLE_HE[m.role] ?? m.role}
+                  {!m.accepted && <span className="text-ink/40 text-[11px]"> · הוסר</span>}
+                </td>
                 <td className="py-2">{num(asTurns(m.tokens_today))}</td>
                 <td className="py-2">{num(asTurns(m.tokens_week))}</td>
                 <td className="py-2 text-ink/60">
@@ -299,20 +314,32 @@ export default function SchoolPanel() {
                 </td>
                 {isAdminRole && (
                   <td className="py-2 flex gap-2">
-                    <button
-                      disabled={busy}
-                      onClick={() => setCap(m.owner_id, m.daily_cap)}
-                      className="text-[11px] px-2 py-1 rounded-lg glass text-tekhelet disabled:opacity-40"
-                    >
-                      תקרה
-                    </button>
-                    <button
-                      disabled={busy || m.role === "admin"}
-                      onClick={() => removeMember(m.owner_id)}
-                      className="text-[11px] px-2 py-1 rounded-lg glass text-ink/60 disabled:opacity-30"
-                    >
-                      הסרה
-                    </button>
+                    {m.accepted ? (
+                      <>
+                        <button
+                          disabled={busy}
+                          onClick={() => setCap(m.owner_id, m.daily_cap)}
+                          className="text-[11px] px-2 py-1 rounded-lg glass text-tekhelet disabled:opacity-40"
+                        >
+                          תקרה
+                        </button>
+                        <button
+                          disabled={busy || m.role === "admin"}
+                          onClick={() => removeMember(m.owner_id)}
+                          className="text-[11px] px-2 py-1 rounded-lg glass text-ink/60 disabled:opacity-30"
+                        >
+                          הסרה
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        disabled={busy}
+                        onClick={() => readmit(m.owner_id)}
+                        className="text-[11px] px-2 py-1 rounded-lg glass text-tekhelet disabled:opacity-40"
+                      >
+                        החזרה
+                      </button>
+                    )}
                   </td>
                 )}
               </tr>

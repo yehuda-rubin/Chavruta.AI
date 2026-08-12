@@ -279,6 +279,13 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ owner_id: ownerId }),
       }),
+    // A removal sticks — the person cannot re-enter on the class code every classmate holds — so
+    // there has to be a way back for an administrator who removed the wrong account.
+    readmitMember: (ownerId: string) =>
+      req<{ readmitted: boolean }>("/orgs/members/readmit", {
+        method: "POST",
+        body: JSON.stringify({ owner_id: ownerId }),
+      }),
     setCap: (ownerId: string, dailyCap: number) =>
       req<{ owner_id: string; daily_cap: number }>("/orgs/members/cap", {
         method: "POST",

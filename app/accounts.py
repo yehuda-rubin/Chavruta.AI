@@ -180,8 +180,14 @@ def run_due_purges(now_iso: str | None = None) -> int:
                        "transfer the school, then the deletion will proceed.", owner_id)
             continue
         try:
-            _delete_supabase_user(owner_id)     # remove the login first (best-effort)
-            db.purge_owner(owner_id)            # then irreversibly drop all their data
+            # DATA first, login second. The login is the recoverable half — a person locked out can
+            # be helped, data that was supposed to be gone and isn't cannot be un-kept. In the old
+            # order any failure at all (a lock, an org created inside the window, an FK error) left
+            # an account that could not sign in whose data was fully intact, retried and re-logged
+            # every sweep forever. That is the worst of both, and it was reachable by more than the
+            # org case the check above catches.
+            db.purge_owner(owner_id)
+            _delete_supabase_user(owner_id)     # best-effort; swallows its own errors
             purged += 1
             _log.info("account %s purged", owner_id)
         except Exception:                       # noqa: BLE001 — one bad row must not stop the rest

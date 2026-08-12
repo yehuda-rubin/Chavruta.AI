@@ -491,3 +491,100 @@ def test_closing_a_school_frees_its_members(school):
     assert orgs.get_org(school) is None
     assert orgs.membership("pupil") is None
     db.purge_owner("boss")           # the owner is deletable again — must not raise
+
+
+# ── Every writer of a plan has to reach the school ───────────────────────────
+def test_a_coupon_granted_plan_reaches_the_school(school):
+    """Only the PAID path synced the org, while a coupon's EXPIRY did degrade it — so grants were
+    invisible to the school and revocations were not. The asymmetry ran only in the direction that
+    takes capacity away, and the operator's own provisioning route was the one that could not give
+    it back."""
+    import app.coupons as coupons
+    code = coupons.issue_plan_coupon(plan="institution_100", days=30, max_redemptions=1)
+    coupons.redeem("boss", code, bypass_throttle=True)
+    assert orgs.get_org(school)["plan"] == "institution_100"
+    assert plans.tier(orgs.get_org(school)["plan"]).seats == 100
+
+
+def test_the_billing_webhook_moves_the_school(school):
+    from app.billing import service as billing
+    db.upsert_subscription("boss", provider="payplus", status="pending", plan="institution_50",
+                           updated_at=db._now())
+    billing.handle_event({"owner_id": "boss", "success": True, "amount": 1499.0})
+    assert orgs.get_org(school)["plan"] == "institution_50"
+
+
+def test_the_downgrade_sweep_degrades_the_school(school, monkeypatch):
+    from datetime import UTC, datetime, timedelta
+    from app.billing import service as billing
+    past = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+    db.upsert_subscription("boss", provider="payplus", status="canceled", plan="institution",
+                           current_period_end=past, cancel_at_period_end=True, updated_at=past)
+    billing.sweep_downgrades()
+    assert orgs.get_org(school)["plan"] == "free"
+
+
+def test_a_personal_tier_never_becomes_a_schools_tier(school):
+    """'pro' has seats=1, so writing it through would refuse every new member with "no seats left"
+    while the panel printed "1 seat, 21 used" — and member_cap would exceed the whole pool."""
+    orgs.sync_plan_from_owner("boss", "pro")
+    assert orgs.get_org(school)["plan"] == "free"
+
+
+def test_a_member_ceiling_never_exceeds_the_pool_it_bounds(fresh_db):
+    """A school degraded to free has a one-seat pool; the un-floored formula gave every member three
+    times the entire school's day, so the first person to ask two questions took all of it."""
+    for tier_id in ("free", "institution", "institution_50", "institution_100"):
+        assert orgs.member_cap(tier_id) <= plans.daily_tokens(tier_id)
+
+
+# ── What a purge and a close leave behind ────────────────────────────────────
+def test_purging_a_member_removes_their_school_counters_too(school):
+    """The member meter embeds the account id (`org:<org>:<owner>`), which an exact-match delete
+    misses — so the identifier survived erasure joined to a per-day record of how much they studied.
+    Introduced by the very change that separated the two counters."""
+    _join(school, "pupil")
+    ctx = orgs.quota_context("pupil")
+    db.bump_pooled(ctx["member_id"], ctx["pool_id"], member_cap=0, pool_daily=0, pool_weekly=0,
+                   units=1234)
+    db.purge_owner("pupil")
+    with db._LOCK:
+        rows = db.get_conn().execute(
+            "SELECT owner_id FROM usage_counters WHERE owner_id LIKE '%pupil%'").fetchall()
+    assert rows == []
+    # The POOL's own row survives: `org:<id>` names nobody, and deleting it would rewrite reported
+    # aggregates.
+    assert db.usage_today(ctx["pool_id"]) == 1234
+
+
+def test_closing_a_school_takes_the_records_that_name_people(school):
+    _join(school, "pupil")
+    ctx = orgs.quota_context("pupil")
+    db.bump_pooled(ctx["member_id"], ctx["pool_id"], member_cap=0, pool_daily=0, pool_weekly=0,
+                   units=500)
+    orgs.log_access(school, "boss", "view_panel", "pupil")
+    orgs.close_org(school)
+    with db._LOCK:
+        conn = db.get_conn()
+        assert conn.execute("SELECT COUNT(*) FROM org_access_log WHERE org_id=?",
+                            (school,)).fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM usage_counters WHERE owner_id LIKE ?",
+                            (f"org:{school}:%",)).fetchone()[0] == 0
+
+
+# ── An abandoned payment page must not bar someone for good ──────────────────
+def test_a_stale_pending_checkout_no_longer_blocks_joining(school):
+    """Nothing expires a 'pending' row, and the remedy the refusal named — cancel it — has nothing
+    to cancel: their plan is still free, so the client shows no subscription at all."""
+    from datetime import UTC, datetime, timedelta
+    old = (datetime.now(UTC) - timedelta(days=3)).isoformat()
+    db.upsert_subscription("browser", provider="payplus", status="pending", plan="pro",
+                           updated_at=old)
+    assert _join(school, "browser")["role"] == orgs.STUDENT
+
+
+def test_a_checkout_started_moments_ago_still_blocks(school):
+    db.upsert_subscription("shopper2", provider="payplus", status="pending", plan="pro",
+                           updated_at=db._now())
+    with pytest.raises(orgs.JoinRefused):
+        _join(school, "shopper2")

@@ -151,13 +151,20 @@ def test_free_quota_blocks_over_limit_and_me_reflects_it(client, monkeypatch):
     owner = client.get("/me", headers=h).json()["owner"]
 
     # One turn is admitted…
-    assert client.post("/query/async", headers=h, json={"question": "a"}).status_code == 202
+    admitted = client.post("/query/async", headers=h, json={"question": "a"})
+    assert admitted.status_code == 202
+    # …and its job must FINISH before we touch the counter it settles against. With the reservation
+    # still outstanding the seeding bump below is itself refused (estimate + cap > cap), and the
+    # worker's refund then drops the counter back to nearly zero — so the request that must be 429
+    # sails through. Passes alone, fails under a full-suite run.
+    _poll(client, admitted.json()["job_id"], headers=h)
 
     # …then spend the day's budget outright. Counting requests instead would race the worker: the
     # turn is admitted against an ESTIMATE and _settle_tokens corrects it to the real cost once the
     # job finishes, which under a stubbed LLM is nearly nothing — so the reservation is handed back
     # before the next request arrives and nothing appears to be metered at all.
-    db.bump_usage(owner, _DAY_CAP, weekly_limit=0, units=_DAY_CAP, meter=db.TOKENS)
+    allowed, _d, _w = db.bump_usage(owner, _DAY_CAP, weekly_limit=0, units=_DAY_CAP, meter=db.TOKENS)
+    assert allowed, "the seeding bump must actually land, or this test proves nothing"
 
     blocked = client.post("/query/async", headers=h, json={"question": "b"})
     assert blocked.status_code == 429, "a free account past its daily tokens must be refused"

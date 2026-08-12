@@ -67,7 +67,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 27
+SCHEMA_VERSION = 28
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -181,6 +181,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
             invited_by  TEXT,
             invited_at  TEXT NOT NULL,
             accepted_at TEXT,
+            -- Set when an ADMIN removed this person; NULL if they left of their own accord. The row
+            -- survives either way (accepted_at goes NULL, freeing the seat) so the decision outlives
+            -- the membership: deleting it made both of an administrator's controls self-reversible.
+            -- A blocked student could leave and rejoin with the class code every classmate holds,
+            -- and come back at the tier default — the largest per-member allowance in the system.
+            removed_at  TEXT,
             PRIMARY KEY (org_id, owner_id)
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_org_members_one_accepted
@@ -558,6 +564,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
     # v26: feedback is a brand-new table (see CREATE TABLE IF NOT EXISTS above) — no ALTER needed.
     # v27: orgs / org_members / org_access_log are likewise brand-new — nothing to migrate.
+
+    # v28: org_members.removed_at. A database created at v27 has the table without it.
+    if _table_exists(conn, "org_members"):
+        mcols = {r[1] for r in conn.execute("PRAGMA table_info(org_members)")}
+        if "removed_at" not in mcols:
+            conn.execute("ALTER TABLE org_members ADD COLUMN removed_at TEXT")
 
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
@@ -1923,6 +1935,11 @@ def purge_owner(owner_id: str) -> None:
         conn.execute("DELETE FROM sessions WHERE owner_id=?", (owner_id,))         # messages cascade
         conn.execute("DELETE FROM saved_lessons WHERE owner_id=?", (owner_id,))
         conn.execute("DELETE FROM usage_counters WHERE owner_id=?", (owner_id,))
+        # A member's school spending is counted under `org:<org_id>:<owner_id>` (orgs.member_meter_id),
+        # which an exact-match delete misses — so the account id survived erasure inside a composite
+        # key, joined to a per-day record of how much that person studied. Introduced by the very
+        # change that separated the two counters; the identifier has to go with the account.
+        conn.execute("DELETE FROM usage_counters WHERE owner_id LIKE 'org:%:' || ?", (owner_id,))
         conn.execute("DELETE FROM subscriptions WHERE owner_id=?", (owner_id,))
         conn.execute("DELETE FROM accounts WHERE owner_id=?", (owner_id,))
         # Coupon redemptions too. Keeping them would leave a user identifier behind after an account

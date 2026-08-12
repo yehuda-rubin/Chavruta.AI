@@ -272,3 +272,31 @@ def test_supabase_user_emails_network_failure_returns_empty(monkeypatch):
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ── An org owner's deletion must not half-happen ─────────────────────────────
+def test_the_sweeper_skips_an_org_owner_without_destroying_their_login(monkeypatch, tmp_path):
+    """The two steps used to run in the other order: the Supabase user was deleted, purge_owner then
+    refused, and the result was an account that could not sign in whose data was fully intact —
+    retried and re-logged every sweep, forever. An unfulfilled erasure that LOOKS fulfilled is the
+    worst of both."""
+    import app.accounts as accounts
+    import app.orgs as orgs
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "purge.db")
+    monkeypatch.setattr(db, "_conn", None)
+    db.get_conn()
+    deleted_logins = []
+    monkeypatch.setattr(accounts, "_delete_supabase_user", lambda o: deleted_logins.append(o))
+
+    school = orgs.create_org("headmaster", "בית ספר", "institution")
+    db.create_session("a question", owner_id="headmaster")
+    db.schedule_deletion("headmaster", "2000-01-01T00:00:00", "2000-01-08T00:00:00")
+    db.create_session("another", owner_id="ordinary")
+    db.schedule_deletion("ordinary", "2000-01-01T00:00:00", "2000-01-08T00:00:00")
+
+    assert accounts.run_due_purges("2026-01-01T00:00:00") == 1   # the count is what really happened
+    assert deleted_logins == ["ordinary"]                        # the owner's login was NOT touched
+    assert orgs.get_org(school) is not None
+    assert db.list_sessions("headmaster")                        # ...and neither was their data
+    assert db.list_sessions("ordinary") == []

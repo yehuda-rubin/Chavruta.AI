@@ -112,8 +112,15 @@ def member_cap(org_plan: str) -> int:
     allowance — a school seat that buys less than no school seat would be absurd.
     """
     t = plans.tier(org_plan)
-    share = plans.daily_tokens(org_plan) // max(1, t.seats)
-    return max(plans.daily_tokens("free"), share * MEMBER_CAP_MULTIPLE)
+    pool = plans.daily_tokens(org_plan)
+    if pool <= 0:                      # 0 means "uncapped pool" (plans.daily_tokens) — so is the cap
+        return 0
+    share = pool // max(1, t.seats)
+    # Never above the pool it bounds. A school degraded to `free` (its payer lapsed) has a one-seat
+    # pool of 200,000, and the un-floored formula gave every member a 600,000 ceiling — three times
+    # the entire school's day. A ceiling larger than the thing it is capping is not a ceiling, and it
+    # meant the first member to ask two questions took the whole school's allowance.
+    return min(pool, max(plans.daily_tokens("free"), share * MEMBER_CAP_MULTIPLE))
 
 
 def quota_context(owner_id: str) -> dict[str, Any] | None:
@@ -230,12 +237,17 @@ def log_access(org_id: str, actor: str, action: str, target: str | None = None) 
 def create_org(owner_id: str, name: str, plan: str, *, is_demo: bool = False) -> str:
     org_id = DEMO_ORG_ID if is_demo else f"org-{secrets.token_hex(8)}"
     now = db._now()
-    with db._tx(db.get_conn()) as conn:
-        conn.execute("INSERT INTO orgs (id, name, owner_id, plan, created_at, is_demo) "
+    # OR IGNORE, and the whole thing under the lock: ensure_demo_org is check-then-act on a FIXED id,
+    # so two first loads of the demo panel (a double-click, or React's development double-effect)
+    # both read "absent" and the second INSERT hit the primary key — a 500 on the operator's own
+    # inspection tool at the one moment it is first used. A real org's id is random, so this costs
+    # nothing there.
+    with db._LOCK, db._tx(db.get_conn()) as conn:
+        conn.execute("INSERT OR IGNORE INTO orgs (id, name, owner_id, plan, created_at, is_demo) "
                      "VALUES (?,?,?,?,?,?)",
                      (org_id, name, owner_id, plans.canonical(plan), now, 1 if is_demo else 0))
-        conn.execute("INSERT INTO org_members (org_id, owner_id, role, invited_at, accepted_at) "
-                     "VALUES (?,?,?,?,?)", (org_id, owner_id, ADMIN, now, now))
+        conn.execute("INSERT OR IGNORE INTO org_members (org_id, owner_id, role, invited_at, "
+                     "accepted_at) VALUES (?,?,?,?,?)", (org_id, owner_id, ADMIN, now, now))
     return org_id
 
 
@@ -262,7 +274,14 @@ def sync_plan_from_owner(owner_id: str, plan: str) -> str | None:
     org = owned_org(owner_id)
     if not org:
         return None
+    # Only an INSTITUTIONAL tier can size a school. Anything else means the school is not currently
+    # paid for, and degrades the pool — writing the tier through unguarded would have stamped a
+    # personal plan onto the org row: 'pro' has seats=1, so every new member is refused with "no
+    # seats left" while the panel prints "1 seat, 21 used", and member_cap would exceed the entire
+    # pool, letting one person drain the school in a day.
     target = plans.canonical(plan)
+    if not plans.is_institutional(target):
+        target = "free"
     if target == plans.canonical(org["plan"]):
         return org["id"]
     with db._tx(db.get_conn()) as conn:
@@ -294,6 +313,23 @@ class JoinRefused(Exception):
     """Why a join could not happen — the message is shown to the JOINER, never to the inviter."""
 
 
+# How long a 'pending' checkout is treated as live. Nothing ever expires one, so without a bound an
+# abandoned payment page would bar an account from ever joining a school.
+PENDING_CHECKOUT_HOURS = 24
+
+
+def _is_recent(iso: str | None, hours: int = PENDING_CHECKOUT_HOURS) -> bool:
+    if not iso:
+        return False
+    try:
+        when = datetime.fromisoformat(iso)
+    except ValueError:
+        return False
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    return when > datetime.now(UTC) - timedelta(hours=hours)
+
+
 def accept_invite(code: str, owner_id: str) -> dict[str, Any]:
     """Redeem a join code. Eligibility and the seat check happen in ONE transaction.
 
@@ -320,8 +356,15 @@ def accept_invite(code: str, owner_id: str) -> dict[str, Any]:
         # charge on an account whose spending goes to the pool instead. That is money taken monthly
         # for an entitlement the system deliberately ignores.
         sub = db.get_subscription(owner_id) or {}
-        if sub.get("status") in ("pending", "active"):
-            raise JoinRefused("this account has a subscription in progress; finish or cancel it first")
+        if sub.get("status") == "active":
+            raise JoinRefused("this account has an active subscription; cancel it first")
+        # A 'pending' row is someone sitting on the payment page — but nothing ever expires one, so
+        # an ABANDONED checkout would have barred them from joining a school forever, and the remedy
+        # the refusal named (cancel it) has nothing to cancel: their plan is still free, so the
+        # client shows no subscription and offers no cancel button. Only a recent one blocks.
+        if sub.get("status") == "pending" and _is_recent(sub.get("updated_at")):
+            raise JoinRefused("a payment for this account is still in progress; finish or abandon "
+                              "it, then try again in a day")
         # Credits are unspendable for a member (no fallback behind the pool), so joining with a
         # balance would quietly strand something they paid for.
         if db.get_credits(owner_id) > 0:
@@ -340,6 +383,15 @@ def accept_invite(code: str, owner_id: str) -> dict[str, Any]:
         if taken >= seats:
             raise JoinRefused("this organisation has no seats left")
 
+        # An admin's removal is not undone by the code that admitted them in the first place.
+        prior = conn.execute("SELECT removed_at FROM org_members WHERE org_id=? AND owner_id=?",
+                             (org["id"], owner_id)).fetchone()
+        if prior and prior["removed_at"]:
+            raise JoinRefused("this organisation removed your account; its administrator must "
+                              "re-admit you")
+
+        # daily_cap is deliberately NOT in the DO UPDATE list: a cap the administrator set is a
+        # decision about this person, and rejoining is not the moment to discard it.
         conn.execute(
             "INSERT INTO org_members (org_id, owner_id, role, invited_by, invited_at, accepted_at) "
             "VALUES (?,?,?,?,?,?) ON CONFLICT(org_id, owner_id) DO UPDATE SET "
@@ -369,20 +421,40 @@ def revoke_invite(org_id: str, code: str) -> bool:
     return cur.rowcount > 0
 
 
-def remove_member(org_id: str, owner_id: str) -> bool:
-    """Delete the row rather than nulling accepted_at — a revoked membership that still exists is
-    one re-POST away from being live again.
+def remove_member(org_id: str, owner_id: str, *, by_admin: bool = True) -> bool:
+    """End a membership. The seat is freed immediately; the ROW stays.
 
-    Their unspent codes die with the membership. Otherwise removal was advisory: a dismissed teacher
-    walks back in with a code they minted while employed (every precondition in accept_invite passes
-    again the moment they are removed), and the admin has no route to stop it. This is the only lever
-    an admin has, so it has to actually hold.
+    Deleting the row was the obvious thing and it made both of an administrator's controls
+    self-reversible. A class code is multi-use and every student in the class holds it, so a student
+    who had been blocked (`CAP_BLOCKED`) could leave and rejoin seconds later — their stored cap went
+    with the deleted row and they came back at the tier default, the largest per-member allowance in
+    the system. An expelled student could do the same. In a school these are safeguarding controls,
+    not just quota controls, and they have to actually hold.
+
+    Keeping the row preserves `daily_cap`, and `removed_at` (set only for an ADMIN removal) makes the
+    expulsion stick: `accept_invite` refuses a row that carries one, so returning takes an admin.
+    Someone who simply left may come back — with whatever cap they had.
+
+    Their own unspent codes are revoked either way: a dismissed teacher must not walk back in on a
+    code they minted while employed.
     """
+    now = db._now()
     with db._tx(db.get_conn()) as conn:
         conn.execute("UPDATE org_invites SET revoked_at=? WHERE org_id=? AND created_by=? "
-                     "AND revoked_at IS NULL", (db._now(), org_id, owner_id))
-        cur = conn.execute("DELETE FROM org_members WHERE org_id=? AND owner_id=?",
-                           (org_id, owner_id))
+                     "AND revoked_at IS NULL", (now, org_id, owner_id))
+        cur = conn.execute(
+            "UPDATE org_members SET accepted_at=NULL, removed_at=? WHERE org_id=? AND owner_id=? "
+            "AND accepted_at IS NOT NULL",
+            (now if by_admin else None, org_id, owner_id))
+    return cur.rowcount > 0
+
+
+def readmit(org_id: str, owner_id: str) -> bool:
+    """Lift an admin removal so the person may join again. The cap they had is left in place."""
+    with db._tx(db.get_conn()) as conn:
+        cur = conn.execute(
+            "UPDATE org_members SET removed_at=NULL WHERE org_id=? AND owner_id=? "
+            "AND accepted_at IS NULL", (org_id, owner_id))
     return cur.rowcount > 0
 
 
@@ -395,10 +467,16 @@ def close_org(org_id: str) -> None:
     undeletable through the product and support had only raw SQL. Members revert to their own free
     accounts untouched, which is what they had before joining.
 
-    The pool's usage_counters rows are deliberately left: they are measurements under a synthetic id
-    that names no person, and deleting them would rewrite history for aggregates already reported.
+    The POOL's usage_counters rows are deliberately left: `org:<id>` names no person, and deleting
+    them would rewrite history for aggregates already reported. Everything that does name a person
+    goes — the per-member counters (which embed the account id) and the access log, whose purpose is
+    accountability inside a school and does not outlive the school. Leaving those would have kept a
+    roster of members, indefinitely, attached to an org that no longer exists and readable through
+    no route at all.
     """
     with db._tx(db.get_conn()) as conn:
+        conn.execute("DELETE FROM usage_counters WHERE owner_id LIKE 'org:' || ? || ':%'", (org_id,))
+        conn.execute("DELETE FROM org_access_log WHERE org_id=?", (org_id,))
         conn.execute("DELETE FROM org_invites WHERE org_id=?", (org_id,))
         conn.execute("DELETE FROM org_members WHERE org_id=?", (org_id,))
         conn.execute("DELETE FROM orgs WHERE id=?", (org_id,))

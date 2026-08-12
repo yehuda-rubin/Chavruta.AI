@@ -224,6 +224,13 @@ def redeem(owner_id: str, code: str, *, now: datetime | None = None,
         raise RedeemError({"not_found": "invalid", "inactive": "invalid"}.get(status, status))
 
     _clear_throttle(owner_id)
+    # A school provisioned or extended by coupon — the path refuse_personal_purchase deliberately
+    # allows — has to reach the org row too. Only the PAID path synced it, while the coupon's expiry
+    # DID degrade the org (a grant is stored as 'canceled' with a future period end, which is exactly
+    # what the downgrade sweep selects). So grants were invisible to the school and revocations were
+    # not: the asymmetry ran only in the direction that takes capacity away.
+    if set_plan_to:
+        orgs.sync_plan_from_owner(owner_id, set_plan_to)
     _log.info("coupon %s redeemed by %s (%s)", stored, owner_id, granted)
     return {
         "kind": kind,
@@ -283,6 +290,7 @@ def _redeem_against_active_subscription(owner_id: str, stored: str, kind: str, *
         revert_plan = current
         revert_at = (now + timedelta(days=days)).isoformat()
     db.set_plan(owner_id, target)
+    orgs.sync_plan_from_owner(owner_id, target)      # same reason as the grant path above
     db.set_coupon_boost(owner_id, revert_plan=revert_plan, revert_at=revert_at,
                         updated_at=now.isoformat())
     _log.info("coupon %s redeemed by %s (boost to %s until %s, reverts to %s)",

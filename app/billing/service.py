@@ -52,7 +52,12 @@ def start_checkout(owner_id: str, email: str, name: str, *,
     # org's pool, so a personal subscription would take real money and grant nothing at all. The
     # check is here rather than in the route so it holds for every caller of this function. The
     # school's own OWNER buying an institutional tier is not this case — see orgs.refuse_personal_purchase.
-    if orgs.refuse_personal_purchase(owner_id, tier):
+    # The reason matters: an owner told to "leave the institution" is being sent to a route that
+    # refuses them (an owner closes their school rather than leaving it), which is a dead end.
+    if (why := orgs.refuse_personal_purchase(owner_id, tier)) == "owner":
+        raise ValueError("החשבון הזה מנהל מוסד ומשתמש במכסה המשותפת שלו, ולכן מנוי אישי לא יוסיף לו "
+                         "כלום. אפשר לשדרג את מסלול המוסד, או לסגור אותו מפאנל המוסד.")
+    if why:
         raise ValueError("החשבון משויך למוסד ומשתמש במכסה המשותפת שלו — מנוי אישי לא יוסיף לו כלום. "
                          "כדי לרכוש מנוי משלך, צא מהמוסד בהגדרות תחילה.")
     db.upsert_subscription(owner_id, provider="payplus", status="pending", plan=tier, cycle=cyc,
@@ -90,7 +95,7 @@ def handle_event(normalized: dict, *, now: datetime | None = None) -> None:
     # RECURRING charge that fires months after the holder joined one. The money has already moved by
     # the time this callback arrives, so there is nothing to refuse: what matters is that it is
     # LOGGED loudly rather than silently granting a plan the request path will never consult.
-    elif orgs.membership(owner):
+    if orgs.membership(owner) and not plans.is_institutional(tier):
         _log.error("BILLING/ORG CONFLICT: %s paid for %s but belongs to a school and spends its pool "
                    "— this charge grants nothing; refund or remove the membership", owner, tier)
     _log.info("subscription active for %s: %s/%s (renewal=%s) until %s",
@@ -293,6 +298,7 @@ def sweep_coupon_reverts(now: datetime | None = None) -> int:
     due = db.due_coupon_reverts(now.isoformat())
     for row in due:
         db.set_plan(row["owner_id"], row["revert_plan"])
+        orgs.sync_plan_from_owner(row["owner_id"], row["revert_plan"])   # keep the school in step
         db.clear_coupon_revert(row["owner_id"], updated_at=now.isoformat())
         _log.info("coupon boost ended for %s → reverted to %s", row["owner_id"], row["revert_plan"])
     return len(due)

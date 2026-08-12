@@ -184,3 +184,32 @@ def test_lessons_are_isolated_by_owner(tmp_path, monkeypatch):
     assert db.get_lesson("L2", "bob") is not None
     assert db.delete_lesson("L2", "alice") is False                # can't delete bob's
     assert db.get_lesson("L2", "bob") is not None
+
+
+# ── The middleware itself, not just the key function ─────────────────────────
+def test_the_limiter_still_limits_through_the_middleware(monkeypatch, tmp_path):
+    """_limit_key now runs via run_in_threadpool. The three tests above call it directly and would
+    pass identically if the middleware forgot to await it — which would use a coroutine as the dict
+    key, giving every request a unique bucket and switching the limiter off entirely."""
+    from types import SimpleNamespace
+
+    from fastapi.testclient import TestClient
+
+    import app.api as api
+    import app.db as db
+    from app import security
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "rl.db")
+    monkeypatch.setattr(db, "_conn", None)
+    monkeypatch.setattr(api, "_assert_config_usable", lambda: None)
+    monkeypatch.setattr(api, "_get_pipeline", lambda: SimpleNamespace(
+        embedding=SimpleNamespace(embed_query=lambda q: SimpleNamespace(dense=[0.0], sparse={}))))
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_JWKS_URL", raising=False)
+    monkeypatch.setattr(security, "_minute", security._SlidingWindow(3, 60.0))
+    monkeypatch.setattr(security, "_hour", security._SlidingWindow(100, 3600.0))
+
+    with TestClient(api.app) as c:
+        codes = [c.post("/query/async", json={"question": "x"}).status_code for _ in range(5)]
+    assert 429 in codes, "the middleware must actually reach the window"
+    assert codes.count(202) == 3

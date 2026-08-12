@@ -1926,3 +1926,42 @@ def test_cached_prompt_tokens_is_zero_when_unreported(usage):
     from chavruta.llm.cloud import _cached_prompt_tokens
 
     assert _cached_prompt_tokens(usage) == 0
+
+
+# ── The session-creation envelope hid every lesson and every citation ─────────
+# _first_query_work returns {"id", "first_q", "created_at", "result": <the answer>}, and both
+# _lesson_id_of and _record_event read the OUTER dict. Every key they wanted was simply absent, so
+# lesson_id came back "" and the lesson pool was never charged — and since the UI starts a new chat
+# per lesson, that was most lessons in the product. grounded/citations came back None too, which is
+# the figure the admin dashboard reports as the product's grounding rate.
+def _lesson_answer():
+    return api.QueryResponse(answer="שיעור", citations=[{"ref": "Genesis.1.1", "text": "t"}],
+                             grounded=True, intent="lesson",
+                             files=[{"name": "a.docx", "title": "t", "content": "c"}],
+                             lesson_id="L1")
+
+
+def test_a_lesson_built_on_the_first_turn_of_a_new_chat_is_still_a_lesson():
+    envelope = {"id": "s1", "first_q": "q", "created_at": "now", "result": _lesson_answer()}
+    assert api._lesson_id_of(envelope) == "L1"
+    assert api._lesson_id_of(_lesson_answer()) == "L1"          # the follow-up shape still works
+
+
+def test_the_envelope_does_not_report_a_grounded_answer_as_ungrounded():
+    envelope = {"id": "s1", "first_q": "q", "created_at": "now", "result": _lesson_answer()}
+    got = api._answer_payload(envelope)
+    assert got["grounded"] is True and len(got["citations"]) == 1
+
+
+def test_a_new_chat_that_produces_a_lesson_charges_the_lesson_pool(monkeypatch, tmp_path):
+    """The end-to-end invariant the two unit tests above only approach from either side."""
+    monkeypatch.setattr(api.db, "DB_PATH", tmp_path / "lessons.db")
+    monkeypatch.setattr(api.db, "_conn", None)
+    api.db.get_conn()
+    monkeypatch.setattr(api, "_record_event", lambda *a, **k: None)
+    monkeypatch.setenv("CHAVRUTA_LESSONS_WEEK_FREE", "5")
+
+    api._metered("teacher1", api.Reservation(20_000), "lesson",
+                 lambda: {"id": "s1", "first_q": "q", "created_at": "now",
+                          "result": _lesson_answer()})()
+    assert api.db.usage_this_week("teacher1", meter=api.db.LESSON) == 1

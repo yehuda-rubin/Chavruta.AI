@@ -66,17 +66,17 @@ def test_byok_supported_false_when_profile_missing(monkeypatch):
 def test_no_key_behaves_exactly_as_before(fresh_db, api_backend, monkeypatch):
     monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", str(_DAY_CAP))
     monkeypatch.setenv("CHAVRUTA_TOKENS_WEEK_FREE", "0")
-    reserved, used_byok, _ctx, _day = api._reserve_tokens("u1", "he", "qa")
-    assert reserved > 0 and used_byok is False
-    assert db.usage_today("u1", meter=db.TOKENS) == reserved
+    res = api._reserve_tokens("u1", "he", "qa")
+    assert res.tokens > 0 and res.used_byok is False
+    assert db.usage_today("u1", meter=db.TOKENS) == res.tokens
 
 
 def test_key_unused_while_the_plan_quota_still_has_room(fresh_db, api_backend, monkeypatch):
     """A key is only ever spent as a FALLBACK — never touched while the plan's own pool has room."""
     monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", str(_DAY_CAP))
     monkeypatch.setenv("CHAVRUTA_TOKENS_WEEK_FREE", "0")
-    reserved, used_byok, _ctx, _day = api._reserve_tokens("u2", "he", "qa", user_key="sk-user")
-    assert used_byok is False
+    res = api._reserve_tokens("u2", "he", "qa", user_key="sk-user")
+    assert res.used_byok is False
     assert db.usage_today("u2", meter=db.BYOK_TOKENS) == 0
 
 
@@ -85,9 +85,9 @@ def test_key_admits_a_second_allowance_once_the_plan_quota_is_spent(fresh_db, ap
     monkeypatch.setenv("CHAVRUTA_TOKENS_WEEK_FREE", "0")
     db.bump_usage("u3", _DAY_CAP, units=_DAY_CAP, meter=db.TOKENS)   # spend the plan's own pool outright
 
-    reserved, used_byok, _ctx, _day = api._reserve_tokens("u3", "he", "qa", user_key="sk-user")
-    assert used_byok is True and reserved > 0
-    assert db.usage_today("u3", meter=db.BYOK_TOKENS) == reserved
+    res = api._reserve_tokens("u3", "he", "qa", user_key="sk-user")
+    assert res.used_byok is True and res.tokens > 0
+    assert db.usage_today("u3", meter=db.BYOK_TOKENS) == res.tokens
     assert db.usage_today("u3", meter=db.TOKENS) == _DAY_CAP     # the plan's own pool untouched
 
 
@@ -305,3 +305,121 @@ def test_a_lesson_within_the_count_still_costs_no_tokens(school, api_backend):
     api._settle_tokens("pupil", res, {}, "lesson")
     assert db.usage_today(ctx["pool_id"]) == 0
     assert db.usage_this_week(ctx["pool_id"], meter=db.LESSON) == 1
+
+
+# ── Two pools, one generation: it must not be paid for twice ─────────────────
+def test_one_lesson_does_not_cost_two_credit_charges(fresh_db, api_backend, monkeypatch):
+    """When BOTH pools are exhausted, _reserve_tokens spent credits to admit the turn and
+    _charge_lesson_unit spent the same amount again — ten credits for one lesson, twice its
+    documented price, and told nobody."""
+    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", str(_DAY_CAP))
+    monkeypatch.setenv("CHAVRUTA_TOKENS_WEEK_FREE", "0")
+    monkeypatch.setenv("CHAVRUTA_LESSONS_WEEK_FREE", "1")
+    db.add_credits("u10", 10)
+    db.bump_usage("u10", _DAY_CAP, units=_DAY_CAP, meter=db.TOKENS)      # tokens gone
+    db.bump_usage("u10", 0, weekly_limit=1, units=1, meter=db.LESSON)    # lessons gone
+
+    res = api._reserve_tokens("u10", "he", "lesson")
+    assert res.paid_with_credits is True
+    after_entry = db.get_credits("u10")
+
+    assert api._charge_lesson_unit("u10", res, used_byok=False) is False   # already paid for
+    assert db.get_credits("u10") == after_entry
+    assert after_entry == 10 - plans.credit_cost("lesson")
+
+
+def test_a_lesson_nobody_could_pay_for_reports_itself_unpaid(fresh_db, api_backend, monkeypatch):
+    """The personal mirror of the org case: over the weekly lesson count with no credits left. Its
+    return value is what makes _metered settle the turn at real usage instead of refunding it."""
+    monkeypatch.setenv("CHAVRUTA_LESSONS_WEEK_FREE", "1")
+    monkeypatch.setattr(db, "spend_credits", lambda owner, cost: (False, 0))
+    db.bump_usage("u11", 0, weekly_limit=1, units=1, meter=db.LESSON)
+    assert api._charge_lesson_unit("u11", api.Reservation(0), used_byok=False) is True
+
+
+def test_a_lesson_within_quota_reports_itself_paid(fresh_db, api_backend, monkeypatch):
+    monkeypatch.setenv("CHAVRUTA_LESSONS_WEEK_FREE", "3")
+    assert api._charge_lesson_unit("u12", api.Reservation(0), used_byok=False) is False
+    assert api._charge_lesson_unit("local", api.Reservation(0), used_byok=False) is False
+
+
+def test_metered_settles_an_unpayable_lesson_at_real_usage(fresh_db, api_backend, monkeypatch):
+    """The other half of the seam: _charge_lesson_unit returning True only matters if _metered acts
+    on it. Inverting the ternary there makes the most expensive operation free again."""
+    from chavruta.llm import metering as metering_mod
+
+    monkeypatch.setenv("CHAVRUTA_LESSONS_WEEK_FREE", "1")
+    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", "500000")
+    monkeypatch.setenv("CHAVRUTA_TOKENS_WEEK_FREE", "0")
+    monkeypatch.setattr(db, "spend_credits", lambda owner, cost: (False, 0))
+    monkeypatch.setattr(api, "_record_event", lambda *a, **k: None)
+    db.bump_usage("u13", 0, weekly_limit=1, units=1, meter=db.LESSON)
+    res = api._reserve_tokens("u13", "he", "lesson")     # a REAL reservation, really charged
+
+    def _lesson():
+        metering_mod.record(40_000, 6_000)
+        return api.QueryResponse(answer="a", citations=[], grounded=True, intent="lesson",
+                                 files=[{"name": "f", "title": "t", "content": "c"}],
+                                 lesson_id="L9")
+
+    api._metered("u13", res, "lesson", _lesson)()
+    assert db.usage_today("u13") == plans.normalized_tokens(40_000, 6_000)
+
+
+# ── What a refused member is actually told ───────────────────────────────────
+@pytest.fixture
+def _school(fresh_db):
+    import app.orgs as orgs
+    oid = orgs.create_org("boss", "ישיבת דוגמה", "institution")
+    orgs.accept_invite(orgs.create_invite(oid, "boss", orgs.STUDENT), "pupil")
+    return oid
+
+
+def _refusal(intent="qa", lang="he"):
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as exc:
+        api._reserve_tokens("pupil", lang, intent)
+    assert exc.value.status_code == 429
+    return exc.value.detail
+
+
+def test_an_exhausted_week_does_not_claim_it_resets_tomorrow(_school, api_backend, monkeypatch):
+    """The old message said 'tomorrow' whichever of the three ceilings bit, and closed by telling
+    the reader to upgrade their plan or redeem a coupon — two things the server refuses a member."""
+    import app.orgs as orgs
+    monkeypatch.setenv("CHAVRUTA_TOKENS_WEEK_INSTITUTION", "1000")
+    orgs.set_member_cap(_school, "pupil", 10_000_000)
+    ctx = orgs.quota_context("pupil")
+    db.bump_pooled(ctx["member_id"], ctx["pool_id"], member_cap=0, pool_daily=0, pool_weekly=0,
+                   units=999)
+    detail = _refusal()
+    assert "ראשון" in detail and "מחר" not in detail
+    assert "קופון" not in detail and "שדרג" not in detail
+
+
+def test_a_blocked_member_is_told_they_were_paused_by_their_school(_school, api_backend):
+    import app.orgs as orgs
+    orgs.set_member_cap(_school, "pupil", orgs.CAP_BLOCKED)
+    assert "מנהל המוסד" in _refusal()
+
+
+def test_a_member_over_their_own_cap_is_told_it_is_theirs(_school, api_backend):
+    import app.orgs as orgs
+    orgs.set_member_cap(_school, "pupil", 100)
+    ctx = orgs.quota_context("pupil")
+    db.bump_pooled(ctx["member_id"], ctx["pool_id"], member_cap=0, pool_daily=0, pool_weekly=0,
+                   units=100)
+    detail = _refusal()
+    assert "מנהל המוסד" in detail and "מחר" in detail          # their own ceiling, renewed daily
+
+
+def test_the_schools_exhausted_day_names_the_school(_school, api_backend, monkeypatch):
+    import app.orgs as orgs
+    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_INSTITUTION", "1000")
+    # An explicit ceiling well above the pool, so it is the POOL that refuses and not the member cap
+    # (which is floored at the pool size — see orgs.member_cap).
+    orgs.set_member_cap(_school, "pupil", 10_000_000)
+    ctx = orgs.quota_context("pupil")
+    db.bump_pooled(ctx["member_id"], ctx["pool_id"], member_cap=0, pool_daily=0, pool_weekly=0,
+                   units=999)
+    assert "ישיבת דוגמה" in _refusal()
