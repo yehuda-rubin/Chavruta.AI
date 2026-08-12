@@ -138,7 +138,12 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--pairs", default="eval/harvested_pairs_v1.jsonl")
-    ap.add_argument("--sample", type=int, default=150, help="harvested pairs per candidate value")
+    # 400, not 150. Measured on the live box: a query costs about a second, so 400 harvested pairs
+    # plus the human veto set is ~7 minutes per candidate and ~2.5 hours for the whole descent —
+    # comfortably inside the 5-hour weeknight window. At a ~12% hit rate 400 pairs yield around 50
+    # answered ones, which is enough for a difference between two settings to mean something; 150
+    # would leave ~19 and most of the run would be reading noise.
+    ap.add_argument("--sample", type=int, default=400, help="harvested pairs per candidate value")
     ap.add_argument("--top-k", type=int, default=8)
     ap.add_argument("--holdout", type=float, default=0.5,
                     help="fraction of the harvested pairs kept back to confirm the winner")
@@ -171,6 +176,17 @@ def main() -> int:
     base_human = score(retriever, human, top_k=args.top_k)
     print(f"baseline  harvested recall={base_tuned['recall']:.3f} mrr={base_tuned['mrr']:.3f}"
           f" | human recall={base_human['recall']:.3f} mrr={base_human['mrr']:.3f}\n")
+
+    # A search needs something to search ON. Harvested hit rates run around 12%, so a small sample
+    # can score a flat zero for EVERY candidate — and coordinate descent over an all-zero objective
+    # is not a tuning run that found nothing, it is twenty candidates evaluated against no signal at
+    # all. Caught on the first live run at --sample 6. Say so instead of printing a page of "no
+    # gain" that reads like a result.
+    if base_tuned["mrr"] <= 0:
+        print(f"NO SIGNAL: none of the {len(tune_set)} harvested pairs is answered at all, so every\n"
+              f"candidate will score 0.000 and nothing can be compared. Raise --sample (harvested\n"
+              f"hit rates run near 12%, so a few hundred pairs are needed before differences show).")
+        return 1
 
     best = dict(baseline)
     best_score, best_human = base_tuned["mrr"], base_human["mrr"]

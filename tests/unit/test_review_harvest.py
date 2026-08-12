@@ -267,3 +267,50 @@ def test_the_window_follows_israel_dst_not_a_fixed_utc_offset():
     winter = datetime(2026, 1, 14, 2, 30, tzinfo=timezone.utc).astimezone(_IL)
     assert window_for(summer) is None          # 05:30 local — past the window
     assert window_for(winter) is not None      # 04:30 local — still inside it
+
+
+# ── An all-zero objective is not a result ─────────────────────────────────────
+# Caught on the first live run: at --sample 6, every one of the 20 candidates scored harvested
+# mrr=0.000, and coordinate descent dutifully printed a page of "no gain" that reads exactly like a
+# finding. It was not one — nothing was being compared. Harvested hit rates run near 12%, so a small
+# sample can miss on every pair.
+def test_tuner_refuses_to_search_an_all_zero_objective(monkeypatch, tmp_path, capsys):
+    import tune_retrieval as tr
+
+    pairs = tmp_path / "pairs.jsonl"
+    pairs.write_text("\n".join(
+        '{"question": "q%d", "expected_refs": ["Sukkah.81.11"], "source_ref": "R_on_Sukkah.81.11.1"}'
+        % i for i in range(10)), encoding="utf-8")
+    human = tmp_path / "human.jsonl"
+    human.write_text('{"question": "h", "expected_refs": ["Genesis.1.1"]}\n', encoding="utf-8")
+
+    monkeypatch.setattr(tr, "ROOT", tmp_path)
+    monkeypatch.setattr(tr, "HUMAN_SETS", ("human.jsonl",))
+    # Scores nothing — the shape that used to produce twenty misleading "no gain" lines.
+    monkeypatch.setattr(tr, "score", lambda *a, **k: {"n": 0, "recall": 0.0, "mrr": 0.0})
+    monkeypatch.setattr(sys, "argv", ["tune_retrieval.py", "--pairs", "pairs.jsonl"])
+
+    class _P:
+        retriever = object()
+
+    monkeypatch.setitem(sys.modules, "chavruta.pipeline.pipeline",
+                        type(sys)("chavruta.pipeline.pipeline"))
+    sys.modules["chavruta.pipeline.pipeline"].ChavrutaPipeline = lambda: _P()
+
+    assert tr.main() == 1                       # refuses rather than reporting a non-result
+    assert "NO SIGNAL" in capsys.readouterr().out
+
+
+def test_tuner_refuses_to_run_without_a_human_veto_set(monkeypatch, tmp_path, capsys):
+    """Tuning on harvested pairs alone optimises for rabbinic-Hebrew phrasing — the opposite of the
+    measured failure. Without a veto set the run must not happen at all."""
+    import tune_retrieval as tr
+
+    pairs = tmp_path / "pairs.jsonl"
+    pairs.write_text('{"question": "q", "expected_refs": ["Sukkah.81.11"]}\n', encoding="utf-8")
+    monkeypatch.setattr(tr, "ROOT", tmp_path)
+    monkeypatch.setattr(tr, "HUMAN_SETS", ("does_not_exist.jsonl",))
+    monkeypatch.setattr(sys, "argv", ["tune_retrieval.py", "--pairs", "pairs.jsonl"])
+
+    assert tr.main() == 1
+    assert "REFUSING to tune" in capsys.readouterr().out

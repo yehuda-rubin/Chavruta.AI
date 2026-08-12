@@ -107,7 +107,7 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--force", action="store_true", help="run regardless of the window (for testing)")
     ap.add_argument("--cpus", type=int, default=0, help="override the window's CPU budget")
-    ap.add_argument("--sample", type=int, default=150)
+    ap.add_argument("--sample", type=int, default=400)   # see tune_retrieval.py for why 400
     ap.add_argument("--target", type=int, default=5000, help="pairs to harvest when refreshing")
     args = ap.parse_args()
 
