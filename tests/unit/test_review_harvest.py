@@ -314,3 +314,50 @@ def test_tuner_refuses_to_run_without_a_human_veto_set(monkeypatch, tmp_path, ca
 
     assert tr.main() == 1
     assert "REFUSING to tune" in capsys.readouterr().out
+
+
+# ── Unit economics: the tier must not lose money at full utilisation ──────────
+# Nebius charges $0.20 per million input tokens and 3x for output, which is exactly
+# COMPLETION_WEIGHT — so a normalized token IS the cost unit and the check below needs no conversion
+# factor. Institution was ₪199 until 2026-08-12, at which point this test would have FAILED: ₪199
+# gross is ~₪169 after VAT against ~₪193/month of tokens and lessons at the cap. A tier that loses
+# money precisely when a customer uses what they bought is invisible until one does.
+_USD_PER_M_NORMALIZED = 0.20
+_ILS_PER_USD = 3.7          # approximate on purpose; the margin is not close enough for it to matter
+_VAT = 1.18                 # published prices include VAT (Terms §10)
+
+
+def _monthly_cost_ils(tier) -> float:
+    """Worst case: the daily token pool maxed every day, plus the SEPARATE weekly lesson pool.
+
+    Lessons are their own meter and do not draw on the token pool at all (see plans.py), so their
+    cost is additional — the easiest line to forget when pricing a tier.
+    """
+    from chavruta.corpus.schema import Intent  # noqa: F401  (kept for symmetry with pipeline budgets)
+
+    tokens = tier.daily_tokens * 30
+    lessons = tier.weekly_lessons * (30 / 7) * 58_000      # measured mean for a lesson turn
+    return (tokens + lessons) / 1e6 * _USD_PER_M_NORMALIZED * _ILS_PER_USD
+
+
+@pytest.mark.parametrize("tier_id", [
+    "basic",
+    pytest.param("pro", marks=pytest.mark.xfail(strict=True, reason=(
+        "KNOWN, not accepted: pro is ₪49.90 gross = ₪42 net against ~₪48/month at the cap — "
+        "underwater by ~₪6. Left unchanged deliberately: it is a published price with a real "
+        "paying subscriber, so raising it is a founder decision about an existing customer, not a "
+        "test fix. Note the cap PERMITS the loss rather than causing it — real usage sits far "
+        "below it — but a subscriber who uses what they bought costs more than they pay. "
+        "strict=True so this flips to a failure the moment the price or the pools change."))),
+    "institution",
+])
+def test_every_paid_tier_is_profitable_at_full_utilisation(tier_id):
+    import app.plans as plans
+
+    tier = plans.tier(tier_id)
+    net_revenue = plans.price_ils(tier_id) / _VAT
+    cost = _monthly_cost_ils(tier)
+    assert net_revenue > cost, (
+        f"{tier_id}: ₪{plans.price_ils(tier_id):.0f} gross = ₪{net_revenue:.0f} net, "
+        f"but a fully-used month costs ₪{cost:.0f}"
+    )

@@ -349,7 +349,51 @@ This means `TIERS` and `public_catalogue` need a per-seat notion the current mod
 The invariant they enforce today ("every paid tier is a clean multiple of free across every
 dimension") still holds per member; the code has to express which figure it is stating.
 
-## Before setting prices: these caps are the cost ceiling
+## Prices, and what production actually costs
+
+**Tier A is ₪499** (raised from ₪199 on 2026-08-12; no institution subscriber existed, so it touched nobody).
+**It is otherwise the shipped institution tier** — it needs a seat cap and a name, nothing else. B and C scale linearly with the pool (~₪25/seat): **₪1,249** and **₪2,499**. Linear rather than volume-discounted on purpose — the pool scales linearly so cost does
+too, and a discount comes straight out of a margin nobody has measured yet. Cutting a price later is
+easy; raising one is not.
+
+Measured on 166 production turns (2026-08-12), from `usage_events`:
+
+| | per turn |
+|---|---|
+| prompt tokens | **19,566** |
+| completion tokens | **1,315** |
+| normalized (prompt + 3×completion) | 23,512 |
+
+Nebius charges **$0.20 per million input tokens and 3× that for output** — which is exactly
+COMPLETION_WEIGHT, so a normalized token IS the cost unit: `billed_tokens × $0.20 / 1e6` is the real
+dollar figure, with no conversion to get wrong. A turn costs **$0.0047**.
+
+Tier A at full utilisation: 8M/day × 30 = 240M normalized = **$48/month ≈ ₪178**, plus the SEPARATE
+lesson pool (80/week at ~58,000 normalized each ≈ ₪15) — the line easiest to forget, because lessons
+never draw on the token pool.
+
+| | ₪199 (old) | ₪499 |
+|---|---|---|
+| net of VAT (published prices include it) | ₪169 | **₪423** |
+| tokens + lessons at the cap | ₪193 | ₪193 |
+| **result** | **loses ₪24** | **+₪230** |
+
+So ₪199 was underwater at full use, and the raise was not a margin improvement but a fix. Margins
+hold at ~55% across all three tiers, and these are worst cases — no school maxes its pool daily.
+
+Two findings from the same numbers, both wider than school pricing:
+
+- **The prompt is ~94% of the cost.** We send 8–48 retrieved chunks per turn, and that dwarfs the
+  answer. So the per-intent generation budgets raised on 2026-08-12 (qa 3k→6k, etc.) cost almost
+  nothing in practice — the average completion is 1,315 tokens and the ceiling is rarely approached.
+  That decision is now measured rather than assumed.
+- **Provider prompt caching, if it exists, hits exactly that 94%.** The `cached_tokens` logging added
+  the same day is therefore worth considerably more than it looked; production traffic will answer it.
+
+Caveat: 166 turns is a small sample, and `lesson` alone averages 58,019 normalized — 2.5× a plain
+question. The average will climb as lesson use grows.
+
+## These caps are the cost ceiling
 
 A 100-seat school that maxes its pool consumes 40M normalized tokens a day. Whether that is
 profitable at any given price is not something to reason about — **it is already being measured.**

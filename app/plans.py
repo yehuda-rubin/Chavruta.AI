@@ -99,11 +99,18 @@ TIERS: tuple[Tier, ...] = (
     Tier("free",          200_000,    525_000,  2,  1,   0.0,    0.0, "חינם",   "Free"),
     Tier("basic",         600_000,  1_575_000,  6,  3,  29.0,  290.0, "בסיסי",  "Basic"),
     Tier("pro",         2_000_000,  5_250_000, 20, 10,  49.9,  499.0, "מלא",    "Pro"),
-    Tier("institution", 8_000_000, 21_000_000, 80, 40, 199.0, 1990.0, "מוסדי",  "Institution"),
+    Tier("institution", 8_000_000, 21_000_000, 80, 40, 499.0, 4990.0, "מוסדי",  "Institution"),
 )
 
 # Output costs several times input everywhere; 3x is the round figure that holds across the models
 # this runs on. Only the RATIO matters — it decides whether a long paste or a long answer dominates.
+#
+# It also happens to be EXACTLY the provider's own structure: Nebius charges $0.20 per million input
+# tokens and 3x that for output. So a normalized token is not merely proportional to cost, it IS the
+# cost unit — `billed_tokens * $0.20 / 1e6` is the real dollar figure for any account, tier or turn,
+# with no conversion factor to get wrong. Measured 2026-08-12 over 166 production turns: 19,566
+# prompt + 1,315 completion per turn = 23,512 normalized ≈ $0.0047. If the provider or its pricing
+# ratio ever changes, this constant is where that shows up.
 COMPLETION_WEIGHT = 3
 
 
