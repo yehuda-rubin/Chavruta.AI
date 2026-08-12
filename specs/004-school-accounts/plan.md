@@ -118,38 +118,79 @@ start narrow, and widening later is easy where narrowing after the fact is not.
 Most students at a school are children, which changes what we may hold and for how long. Decision 1
 (topics, never content) already removes the largest exposure. What remains:
 
-**Every school-linked student is treated as a minor. We do not ask anyone's age.**
+**An under-18 flag, defaulting to MINOR.**
 
-Age-specific protections need to know who is a minor, but collecting birth dates means holding more
-sensitive personal data about children in order to protect children. Applying the strictest handling
-to every linked student instead collects nothing new and leaves no one mis-classified.
+A single boolean, not a birth date — we need to know which protections apply, not how old anyone is,
+and a date of birth would mean holding more sensitive data about children in order to protect
+children. It is set by the SCHOOL at invitation for a linked student, because the school is what
+actually knows; a child's self-declaration is not a basis to relax anything. On a personal account
+the holder sets their own.
 
-**School-linked students are EXCLUDED from `db.reviewable_questions`.**
+The default is minor, and that direction matters more than the flag itself: an unanswered question
+must never quietly downgrade someone's protection. An unset flag gets the strict treatment.
+
+**Nothing belonging to a minor is used for training, tuning or evaluation.**
+
+This covers what they wrote and what was recorded about them. It does NOT touch the corpus — the
+Torah texts the RAG retrieves are public works, not anyone's personal data, and are unaffected by
+any of this.
+
+Mechanically this is the `db.reviewable_questions` exclusion below: that gate is the only sanctioned
+path from conversation text to evaluation, so excluding minors there excludes them from everything
+downstream of it.
+
+**Three-month retention on a minor's own data.**
+
+Their messages and sessions are purged three months after they are written, on a rolling basis.
+
+What survives is the aggregate, not the person — the same split `purge_owner` already makes and
+documents: `usage_events` rows stay (they are how quota and business metrics work and carry no
+conversation text), with `owner_id` NULLed at the same three-month boundary. A row saying a question
+was asked, when, and how much it cost is not information about a child; the question they asked is.
+
+Worth stating plainly because it is a real product cost: **a student loses their study history after
+three months.** For a study tool that is not nothing — someone will want to reopen a shiur from last
+term. It is a deliberate trade of usefulness for holding less of a child's data, and it should be
+said in the school's onboarding rather than discovered.
+
+**Saved lessons** follow the same rule when the owner is a minor. A teacher's own lesson is the
+teacher's, and is unaffected.
+
+**Minors are EXCLUDED from `db.reviewable_questions`.**
 
 That gate (built 2026-08-12) lets the operator read conversation text for evaluation, under the
 notice sent to users on 2026-08-10. That notice went to adult account holders who could accept it for
 themselves; a minor cannot. Reading children's conversations is a categorically heavier act than the
-one users were told about, so membership of an org must exclude an account from review — a fourth
-condition alongside the three already enforced there. This is a small change and it must land BEFORE
-the first student joins, not after.
+one users were told about, so the under-18 flag must exclude an account from review — a fourth
+condition alongside the three already enforced there, and it fails closed like the others. This is a
+small change and it must land BEFORE the first student joins, not after.
 
-**Retention.** Conversations belonging to linked students get a defined retention limit rather than
-being kept indefinitely. The exact period is a legal question, not an engineering one.
-
-**No marketing, ever.** Linked accounts are excluded from `marketing_consent` and from any future
-mailing, regardless of what the flag says.
+**No marketing to a minor, regardless of consent.** The under-18 flag overrides `marketing_consent`
+in both directions: a minor who ticked the box still receives nothing. Consent to marketing is not
+something a child gives validly, so the flag has to win over the checkbox rather than sit beside it.
 
 **Deletion.** Account deletion must work for a linked account, and leaving a school must not orphan
 data. The school bought quota; it never owned the person's work.
 
-### For the lawyer, not for us to decide
+### Privacy officer
 
-Amendment 13 to the Privacy Protection Law (in force August 2025) may require a designated privacy
-officer (ממונה על הגנת הפרטיות) for a body processing sensitive data about many people, and imposes
-duties around data about minors that go beyond what is written above. This is a new item for the
-sign-off already pending on the other legal findings. Nothing in this section should be read as
-legal advice, and the retention period in particular needs a real answer from someone qualified to
-give one.
+**Yehuda Rubin is the designated privacy officer (ממונה על הגנת הפרטיות), from 2026-08-12.** He also
+set the three-month retention period above — which is the appointment working as intended: that is a
+call for the privacy officer to make, not for engineering to guess at.
+
+Two things follow from it, neither optional:
+
+- **The name and a contact address go in the privacy policy.** The role is, in large part, an
+  address: a user exercising a right, or the Privacy Protection Authority, has to know who to reach.
+  A privacy officer nobody can contact is not performing the function.
+- **The structural tension should stay visible.** The officer is meant to hold some independence from
+  the party doing the processing, and here they are the same person. At a one-person company that is
+  unavoidable and unremarkable, but it stops being either the moment there are partners or staff, and
+  it should be revisited then rather than inherited.
+
+Amendment 13 also carries duties around data about minors beyond what is written above. That remains
+an item for the sign-off already pending on the other legal findings; nothing in this document is
+legal advice.
 
 ## Why this is NOT a separate service
 
