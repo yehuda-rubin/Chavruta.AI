@@ -1,6 +1,7 @@
 # 004 — School accounts (organisations, shared quota, three roles)
 
-Status: **BLOCKED pending a founder decision.** Planned 2026-08-12, then reviewed by four agents
+Status: **Option A decided 2026-08-12** (18+ only, three school tiers — see "Decided" below).
+The minors track remains blocked on B1/B2. Planned 2026-08-12, then reviewed by four agents
 (adversarial, security, feasibility, legal) the same day. The review found two hard blockers and
 three errors in the original plan. Everything below is rewritten to reflect that; the earlier
 version documented decisions that cannot be implemented as written.
@@ -308,11 +309,70 @@ than override it at send time.
 
 ---
 
-# Scope, once the fork is decided
+# Decided 2026-08-12: Option A, with three school tiers
 
-**Option A v1 (18+ only)** — org creation on institution checkout · join codes · roles · shared pool
+The founder took Option A (18+ only — teachers and adult students, no minor role) and set three
+school sizes: **up to 20 · up to 50 · up to 100 members.**
+
+## The pool must grow with the seats, or bigger schools get less per person
+
+This is C1 again, sharper. Three tiers sharing today's single institution pool (8M/day) would give:
+
+| seats | per member/day | vs free (200,000) |
+|---|---|---|
+| 20 | 400,000 | **2×** |
+| 50 | 160,000 | **0.8×** |
+| 100 | 80,000 | **0.4×** |
+
+A larger school would pay more and receive less per person than its members already get for free.
+So the pool scales with the seat count. Targeting **2× the free allowance per member**:
+
+| tier | seats | daily pool | weekly pool | lessons/week |
+|---|---|---|---|---|
+| A | 20 | 8,000,000 | 21,000,000 | 80 |
+| B | 50 | 20,000,000 | 52,500,000 | 200 |
+| C | 100 | 40,000,000 | 105,000,000 | 400 |
+
+Conveniently, **tier A is exactly the institution tier that already ships** (8M / 21M / 80) — it
+needs a seat cap and a name, nothing else. The lesson meter scales on the same rule; leaving it at 80
+for all three would repeat the identical mistake in the pool that actually costs the most per unit.
+
+## What the school is shown is the PER-MEMBER figure
+
+`public_catalogue` states a ratio and never an absolute, and the `multiple` field is what carries it.
+For a pooled tier that field stops being meaningful: tier C is ×200 the free tier in total and ×2 per
+person. **×200 is true and useless.** The honest sentence, and the one that actually sells, is *"each
+member gets about twice the free allowance, and unused capacity goes to whoever needs it"* — pooling
+is the product, so say so rather than printing a number that flatters and misleads.
+
+This means `TIERS` and `public_catalogue` need a per-seat notion the current model has no room for.
+The invariant they enforce today ("every paid tier is a clean multiple of free across every
+dimension") still holds per member; the code has to express which figure it is stating.
+
+## Before setting prices: these caps are the cost ceiling
+
+A 100-seat school that maxes its pool consumes 40M normalized tokens a day. Whether that is
+profitable at any given price is not something to reason about — **it is already being measured.**
+`usage_events` records real `prompt_tokens` and `completion_tokens` for every production turn, so
+cost per turn is a query, not an estimate. Multiply out before pricing tier C. A tier that loses
+money precisely when it succeeds is the worst shape a plan can have, and it is invisible until a
+school actually uses what it bought.
+
+Related, and still unresolved from the review: `plans.refund_quote` deliberately declines to deduct
+consumed value, reasoning that on one monthly instalment the pro-rata share is a few shekels not
+worth arguing over. At 100 seats a school can study for 13 days against a 40M/day pool and exercise
+the 14-day cancellation for a near-full refund. Cheap to fix now, expensive after the first school
+does it, because by then it is a precedent.
+
+# Scope
+
+**v1 (18+ only)** — org creation on institution checkout · join codes · roles · shared pool
 with per-member caps · usage view from `usage_events` · 80% warning · leave/remove. No student role,
 no minors work, no B2 question.
+
+The default per-member cap is a deliberate over-subscription — around 3–4× the free allowance against
+an even share of 2× — so a heavy user can exceed their share while the pool still holds. That is
+what makes pooling worth buying, and it is why the 80% warning is not decoration.
 
 **Explicitly out either way** — conversation text · user impersonation · per-student pricing ·
 cross-org anything · ownership transfer in v1 · the role simulator.
