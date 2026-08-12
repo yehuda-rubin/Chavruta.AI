@@ -143,6 +143,32 @@ def harvest(store: QdrantStore, collection: str, *, target: int, per_work_cap: i
     return pairs
 
 
+def verify(store: QdrantStore, collection: str, pairs: list[dict], *, batch: int = 200) -> list[dict]:
+    """Drop pairs whose label does not name a real point in the collection.
+
+    Necessary, not belt-and-braces. Measured on a live sample before this existed: only 30 of 40
+    derived labels resolved. `_base_ref` assumes Sefaria appends exactly one comment index, which
+    holds for most works and not for all — and a label that resolves to nothing is a guaranteed miss
+    that drags every candidate setting down by the same amount, adding noise to the very measurement
+    this whole eval set exists to make less noisy.
+
+    So the shape is not argued about, it is checked. Anything that fails is dropped rather than
+    repaired: a mislabelled pair punishes the retriever for being right, which is worse than a
+    smaller set.
+    """
+    kept: list[dict] = []
+    for i in range(0, len(pairs), batch):
+        chunk = pairs[i:i + batch]
+        refs = [p["expected_refs"][0] for p in chunk]
+        try:
+            hits = store.fetch_by_refs(collection, refs, limit=len(refs) * 2)
+        except Exception:
+            continue                      # a failed batch drops that batch, never a bad label
+        present = {(h.payload or {}).get("ref") for h in hits}
+        kept.extend(p for p in chunk if p["expected_refs"][0] in present)
+    return kept
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -152,6 +178,9 @@ def main() -> int:
                     help="max pairs from any one work_id — keeps Talmud from swamping the set")
     ap.add_argument("--scan-limit", type=int, default=400_000, help="points to scan at most")
     ap.add_argument("--seed", type=int, default=17)
+    ap.add_argument("--no-verify", action="store_true",
+                    help="skip checking each label against the collection (faster, but ~25%% of "
+                         "the emitted pairs will be unresolvable — see verify())")
     args = ap.parse_args()
 
     profile = Profile.from_env()
@@ -159,6 +188,11 @@ def main() -> int:
                         url=profile.qdrant_url, api_key=profile.qdrant_api_key)
     pairs = harvest(store, profile.collection, target=args.target,
                     per_work_cap=args.per_work_cap, seed=args.seed, scan_limit=args.scan_limit)
+    if not args.no_verify:
+        derived = len(pairs)
+        pairs = verify(store, profile.collection, pairs)
+        print(f"verified {len(pairs)}/{derived} labels against the collection "
+              f"({derived - len(pairs)} dropped as unresolvable)")
 
     out = ROOT / args.out
     out.parent.mkdir(parents=True, exist_ok=True)
