@@ -292,10 +292,18 @@ class HybridRetriever:
         # score; only the membership of the final list is adjusted.
         chosen = hits[:top_k]
         if len(hits) > top_k and not query.work_ids and not query.commentator_ids:
-            if not any(not is_commentary_ref(h.ref) for h in chosen):
-                spare = [h for h in hits[top_k:] if not is_commentary_ref(h.ref)][:_BASE_SLOTS]
+            # Fires when base texts are UNDER-REPRESENTED, not only when absent. Gating on "none at
+            # all" was useless in practice: with eight slots over this corpus some base text nearly
+            # always sneaks in, so the gate never opened while the base text that mattered stayed out.
+            have = sum(1 for h in chosen if not is_commentary_ref(h.ref))
+            want = max(0, _BASE_SLOTS - have)
+            if want:
+                spare = [h for h in hits[top_k:] if not is_commentary_ref(h.ref)][:want]
                 if spare:
-                    chosen = chosen[:top_k - len(spare)] + spare
+                    # Drop the lowest-scoring COMMENTARY to make room; never evict a base text.
+                    keep = [h for h in chosen if not is_commentary_ref(h.ref)]
+                    comm = [h for h in chosen if is_commentary_ref(h.ref)]
+                    chosen = keep + comm[:max(0, top_k - len(keep) - len(spare))] + spare
                     chosen.sort(key=lambda h: h.score, reverse=True)
         hits = chosen
 
