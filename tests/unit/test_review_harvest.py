@@ -328,15 +328,19 @@ _VAT = 1.18                 # published prices include VAT (Terms §10)
 
 
 def _monthly_cost_ils(tier) -> float:
-    """Worst case: the daily token pool maxed every day, plus the SEPARATE weekly lesson pool.
+    """The most a tier can cost in a month: its WEEKLY caps, four and a bit times over.
 
-    Lessons are their own meter and do not draw on the token pool at all (see plans.py), so their
-    cost is additional — the easiest line to forget when pricing a tier.
+    Weekly, not daily×30 — a first cut of this used the daily pool every day and overstated every
+    figure by ~2.3×. The weekly cap sits deliberately near 3× the daily one rather than 7× (see the
+    TIERS comment), precisely so a user can have two or three heavy days without a permanently maxed
+    week. `bump_usage` enforces both, so the WEEKLY limit is what actually bounds a month.
+
+    Lessons are a separate meter that draws no tokens at all, so their cost is additional — the
+    easiest line to forget when pricing a tier.
     """
-    from chavruta.corpus.schema import Intent  # noqa: F401  (kept for symmetry with pipeline budgets)
-
-    tokens = tier.daily_tokens * 30
-    lessons = tier.weekly_lessons * (30 / 7) * 58_000      # measured mean for a lesson turn
+    months = 30 / 7
+    tokens = tier.weekly_tokens * months
+    lessons = tier.weekly_lessons * months * 58_000        # measured mean for a lesson turn
     return (tokens + lessons) / 1e6 * _USD_PER_M_NORMALIZED * _ILS_PER_USD
 
 
@@ -375,7 +379,7 @@ def test_the_free_tier_is_the_unit_the_subsidy_is_priced_in():
     import app.plans as plans
 
     free_cost = _monthly_cost_ils(plans.tier("free"))
-    assert 3.0 < free_cost < 8.0, (
+    assert 1.0 < free_cost < 4.0, (
         f"a fully-used free account now costs ₪{free_cost:.2f}/month; the paid ladder was derived "
-        f"at ~₪4.81, so re-check every price in TIERS"
+        f"at ~₪2.04, so re-check every price in TIERS"
     )
