@@ -196,3 +196,74 @@ def test_scoring_is_unaffected_for_items_with_no_source_chunk():
             return SimpleNamespace(hits=[SimpleNamespace(ref="Shabbat.1.1")])
 
     assert score(_Retriever(), [item], top_k=8)["recall"] == 1.0
+
+
+# ── The nightly window ────────────────────────────────────────────────────────
+# Requested schedule (Israel local time): every night 00:00-05:00 on 2 CPUs, Saturday 00:00-16:00 on
+# 6 CPUs. The window is computed from Asia/Jerusalem rather than a UTC offset because the server runs
+# on UTC and Israel moves between UTC+2 and UTC+3 — a hardcoded offset would slide by an hour twice a
+# year and start a heavy batch job in the evening, while users are awake.
+from datetime import datetime  # noqa: E402
+from zoneinfo import ZoneInfo  # noqa: E402
+
+_IL = ZoneInfo("Asia/Jerusalem")
+
+
+def _at(y, m, d, hour):
+    from nightly_eval import window_for
+
+    return window_for(datetime(y, m, d, hour, tzinfo=_IL))
+
+
+@pytest.mark.parametrize("hour,cpus", [(0, 2), (3, 2), (4, 2)])
+def test_weeknight_window_runs_on_two_cpus(hour, cpus):
+    got = _at(2026, 8, 12, hour)          # a Wednesday
+    assert got is not None and got[1] == cpus
+
+
+@pytest.mark.parametrize("hour", [5, 6, 12, 18, 23])
+def test_outside_the_weeknight_window_nothing_runs(hour):
+    """05:00 is the END of the window and must already be outside it — a job admitted at 04:59 is
+    bounded by the deadline, but one admitted at 05:00 would run into the morning."""
+    assert _at(2026, 8, 12, hour) is None
+
+
+@pytest.mark.parametrize("hour", [0, 5, 9, 15])
+def test_saturday_runs_until_16_00_on_six_cpus(hour):
+    got = _at(2026, 8, 15, hour)          # a Saturday
+    assert got is not None and got[1] == 6
+
+
+def test_saturday_takes_precedence_where_the_windows_overlap():
+    """Saturday 02:00 is inside both windows; the Saturday budget (6) must win over the nightly (2)."""
+    assert _at(2026, 8, 15, 2)[1] == 6
+
+
+@pytest.mark.parametrize("hour", [16, 17, 23])
+def test_saturday_stops_at_16_00(hour):
+    assert _at(2026, 8, 15, hour) is None
+
+
+def test_the_window_end_is_the_deadline_the_run_is_bounded_by():
+    from nightly_eval import window_for
+
+    ends, _ = window_for(datetime(2026, 8, 12, 3, 30, tzinfo=_IL))
+    assert (ends.hour, ends.minute, ends.day) == (5, 0, 12)
+
+    ends_sat, _ = window_for(datetime(2026, 8, 15, 3, 30, tzinfo=_IL))
+    assert (ends_sat.hour, ends_sat.day) == (16, 15)
+
+
+def test_the_window_follows_israel_dst_not_a_fixed_utc_offset():
+    """The same UTC instant falls in the window in winter and outside it in summer. Reading Israel
+    local time is what makes that come out right without a twice-yearly cron edit."""
+    from datetime import timezone
+
+    from nightly_eval import window_for
+
+    # 03:30 UTC → 06:30 IDT (summer, outside) but 05:30 IST (winter, also outside); the informative
+    # pair is 02:30 UTC → 05:30 IDT (outside) vs 04:30 IST (inside).
+    summer = datetime(2026, 8, 12, 2, 30, tzinfo=timezone.utc).astimezone(_IL)
+    winter = datetime(2026, 1, 14, 2, 30, tzinfo=timezone.utc).astimezone(_IL)
+    assert window_for(summer) is None          # 05:30 local — past the window
+    assert window_for(winter) is not None      # 04:30 local — still inside it

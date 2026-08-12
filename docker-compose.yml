@@ -106,6 +106,14 @@ services:
       # scripts/build_corpus_links.py against the live corpus; read-only since the app never writes
       # to it. Absent ⇒ pipeline.py falls back to no link expansion at all (not an error).
       - ./data/linkgraph:/app/data:ro
+      # Nightly retrieval evaluation (scripts/nightly_eval.py, woken by cron on the host). Mounted
+      # rather than baked into the image so a change to the eval tooling does not require rebuilding
+      # and restarting the serving container. scripts/ is read-only — the container runs them and
+      # never edits them; eval/ is writable because the harvested pairs and each night's log land
+      # there. Neither is on the request path, so a missing mount degrades the nightly job and
+      # nothing else.
+      - ./scripts:/app/scripts:ro
+      - ./eval:/app/eval
     depends_on:
       - qdrant
     expose:
