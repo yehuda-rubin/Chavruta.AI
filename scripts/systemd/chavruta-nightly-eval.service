@@ -1,0 +1,40 @@
+# Nightly retrieval evaluation — see scripts/nightly_eval.py.
+#
+# A systemd timer rather than cron because the `chavruta` user is not in /etc/cron.allow on this
+# host, and because this gives the job the things cron does not: `systemctl status` to see whether
+# last night ran, journalctl for its output, and a hard resource cap the kernel enforces rather than
+# one the job politely asks for.
+#
+# Install (from the repo root on the VM):
+#     sudo cp scripts/systemd/chavruta-nightly-eval.* /etc/systemd/system/
+#     sudo systemctl daemon-reload
+#     sudo systemctl enable --now chavruta-nightly-eval.timer
+#
+# Check:  systemctl list-timers chavruta-nightly-eval.timer
+#         journalctl -u chavruta-nightly-eval.service --since today
+
+[Unit]
+Description=Chavruta.AI nightly retrieval evaluation (harvest + tune)
+# Nothing to do if Docker is not up; the script exits quietly if the container is not running.
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+User=chavruta
+WorkingDirectory=/home/chavruta/chavruta
+ExecStart=/home/chavruta/chavruta/scripts/nightly_eval_cron.sh
+
+# The window and the per-step CPU pinning are decided inside nightly_eval.py (they depend on Israel
+# local time and on which window is active). These are the belt-and-braces the kernel enforces on
+# the wrapper itself, so a bug in that logic still cannot take the box away from the API.
+CPUWeight=10
+IOWeight=10
+Nice=19
+
+# A run is bounded by its own window; this only catches a wedged process that ignored that. Slightly
+# longer than the longest window (Saturday, 16h) so it never cuts a legitimate run short.
+TimeoutStartSec=17h
+
+[Install]
+WantedBy=multi-user.target
