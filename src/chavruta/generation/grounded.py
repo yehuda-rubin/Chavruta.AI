@@ -348,6 +348,14 @@ def _quoted_spans(masked: str) -> list[tuple[int, int]]:
         inner = masked[inner_start:inner_end]
         if "\n" in inner or _MARKER_RE.search(inner):
             continue
+        # An ELLIPSIS means the writer abridged — the span is deliberately not verbatim, so holding
+        # it to a verbatim-containment check reports honest abridgement as fabrication.
+        if "…" in inner or "..." in inner:
+            continue
+        # A span opening on punctuation or markdown is a mis-pairing, not a quotation: no one starts
+        # a quote with a comma or a dash. (", בניגוד לניסיונות האחרים…", "– כלומר, די בהשערה…")
+        if inner.lstrip()[:1] in {",", "–", "-", ":", ";", ".", "*", ")"}:
+            continue
         spans.append((inner_start, inner_end))
     return spans
 
