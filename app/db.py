@@ -67,7 +67,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 26
+SCHEMA_VERSION = 27
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -147,6 +147,73 @@ def _migrate(conn: sqlite3.Connection) -> None:
             reviewed_at TEXT,
             created_at  TEXT NOT NULL
         );
+
+        -- ── Organisations (schools) — spec 004 ──────────────────────────────────────────────
+        -- A school buys one subscription and its members study on that pool instead of their own.
+        --
+        -- `owner_id` is who PAYS (it keys `subscriptions`, whose owner_id is a PRIMARY KEY and whose
+        -- PayPlus token belongs to the person who checked out). It is deliberately NOT the source of
+        -- truth for permissions — org_members.role is. Two sources of truth for "is admin" is where
+        -- privilege escalation lives, so: role decides what you may do, owner_id decides who is
+        -- billed, and they are written together.
+        --
+        -- No FK on owner_id: `accounts` only gets a row when a plan changes or credits are granted,
+        -- so most real people have none, exactly as sessions/usage_events already assume.
+        CREATE TABLE IF NOT EXISTS orgs (
+            id          TEXT PRIMARY KEY,
+            name        TEXT NOT NULL,
+            owner_id    TEXT NOT NULL,       -- who pays; see above
+            plan        TEXT NOT NULL,       -- institution | institution_50 | institution_100
+            created_at  TEXT NOT NULL,
+            is_demo     INTEGER NOT NULL DEFAULT 0
+                        -- the operator's read-only sample school (spec 004 decision 6): a fixed
+                        -- synthetic org so the panel can be inspected without impersonating anyone.
+        );
+
+        -- Membership. A row exists from the moment of invitation; `accepted_at IS NULL` grants
+        -- NOTHING. The unique index below is the constraint that makes quota resolution decidable:
+        -- with two accepted memberships there is no answer to "which pool does this turn charge".
+        CREATE TABLE IF NOT EXISTS org_members (
+            org_id      TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+            owner_id    TEXT NOT NULL,
+            role        TEXT NOT NULL,       -- admin | teacher | student
+            daily_cap   INTEGER NOT NULL DEFAULT 0,   -- 0 = the tier default; see orgs.member_cap
+            invited_by  TEXT,
+            invited_at  TEXT NOT NULL,
+            accepted_at TEXT,
+            PRIMARY KEY (org_id, owner_id)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_org_members_one_accepted
+            ON org_members(owner_id) WHERE accepted_at IS NOT NULL;
+
+        -- Join codes. Membership is never conferred by an admin typing someone's account id: that
+        -- would let any org owner attach any account in the system, and a typo attach a stranger.
+        -- The code is how an invitation is ADDRESSED; the member performs the act of joining.
+        -- It also avoids turning the invite endpoint into an account-enumeration oracle.
+        CREATE TABLE IF NOT EXISTS org_invites (
+            code        TEXT PRIMARY KEY,
+            org_id      TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+            role        TEXT NOT NULL,
+            max_uses    INTEGER NOT NULL DEFAULT 1,
+            used_count  INTEGER NOT NULL DEFAULT 0,
+            expires_at  TEXT,
+            created_by  TEXT NOT NULL,
+            created_at  TEXT NOT NULL,
+            revoked_at  TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_org_invites_org ON org_invites(org_id);
+
+        -- Who looked at whom. Written even though v1 shows no conversation text: an audit trail
+        -- added after the fact cannot describe what happened before it existed.
+        CREATE TABLE IF NOT EXISTS org_access_log (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            org_id          TEXT NOT NULL,
+            actor_owner_id  TEXT NOT NULL,
+            target_owner_id TEXT,
+            action          TEXT NOT NULL,
+            at              TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_org_access_log_org ON org_access_log(org_id, id DESC);
 
         -- 'My Shiurim' library: generated lessons persisted on their own (not just inside a chat),
         -- so teachers can browse, reopen and reuse them. CREATE IF NOT EXISTS is idempotent.
@@ -490,6 +557,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
                 "ALTER TABLE sessions ADD COLUMN excluded_from_review INTEGER NOT NULL DEFAULT 0")
 
     # v26: feedback is a brand-new table (see CREATE TABLE IF NOT EXISTS above) — no ALTER needed.
+    # v27: orgs / org_members / org_access_log are likewise brand-new — nothing to migrate.
 
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
@@ -994,6 +1062,25 @@ def usage_by_intent(since: str | None = None) -> list[dict[str, Any]]:
         ((since,) if since else ()))
 
 
+def usage_by_intent_for(owner_ids: Collection[str]) -> list[dict[str, Any]]:
+    """What an organisation's members have been studying — as MODE COUNTS, never as text.
+
+    This is the whole "topics" view a school gets (spec 004 decision 1), and it reads `usage_events`
+    for a reason: that table's columns are a fixed list of measurements, so there is no path from it
+    to anything a member wrote. The intuitive alternative — joining `sessions` — would hand a teacher
+    `first_q`, the verbatim opening question of every conversation.
+    """
+    ids = [o for o in (owner_ids or []) if o]
+    if not ids:
+        return []
+    marks = ",".join("?" * len(ids))
+    return _agg(
+        f"SELECT intent, COUNT(*) AS requests, SUM(billed_tokens) AS tokens "      # noqa: S608
+        f"FROM usage_events WHERE owner_id IN ({marks}) "
+        f"GROUP BY intent ORDER BY requests DESC",
+        tuple(ids))
+
+
 def usage_by_hour(since: str | None = None) -> list[dict[str, Any]]:
     """When the product is used, in local time — what a maintenance window has to avoid."""
     where = "WHERE at >= ?" if since else ""
@@ -1287,6 +1374,72 @@ def bump_usage(owner_id: str, limit: int, day: str | None = None, *, weekly_limi
                 "ON CONFLICT(owner_id, day, meter) DO UPDATE SET count = count + excluded.count",
                 (owner_id, day, meter, units))
         return True, day_count + units, week_count + units
+
+
+def bump_pooled(member_id: str, pool_id: str, *, member_cap: int, pool_daily: int, pool_weekly: int,
+                units: int = 1, meter: str = TOKENS, day: str | None = None) -> tuple[bool, int, int]:
+    """Charge one turn to BOTH a member's own counter and their organisation's shared pool.
+
+    Returns (allowed, pool_day_total, pool_week_total).
+
+    This exists because calling `bump_usage` twice is not equivalent, in two ways that both cost
+    money. First, they are separate transactions, so another request interleaves between them and the
+    atomicity that makes the single-row version correct is gone. Second, if the pool refuses after
+    the member row was already charged, the compensation is not exact — `settle_usage` floors each
+    counter at zero, so a refund can be silently swallowed and the member's counter drifts upward
+    against them forever.
+
+    Both rows are therefore checked and written under one lock and one transaction: either the turn
+    is admitted and both counters move, or nothing moves at all.
+
+    `member_cap` bounds one person's share of a shared pool — without it a single student can spend
+    a school's entire day in an hour. 0 disables it (usage is still counted, so it stays visible).
+    """
+    day = day or today_il()
+    units = max(0, int(units))
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        m_day, _m_week = _counts(conn, member_id, day, meter)
+        p_day, p_week = _counts(conn, pool_id, day, meter)
+        if member_cap > 0 and m_day + units > member_cap:
+            return False, p_day, p_week
+        if pool_daily > 0 and p_day + units > pool_daily:
+            return False, p_day, p_week
+        if pool_weekly > 0 and p_week + units > pool_weekly:
+            return False, p_day, p_week
+        if units:
+            for who in (member_id, pool_id):
+                conn.execute(
+                    "INSERT INTO usage_counters (owner_id, day, meter, count) VALUES (?,?,?,?) "
+                    "ON CONFLICT(owner_id, day, meter) DO UPDATE SET count = count + excluded.count",
+                    (who, day, meter, units))
+        return True, p_day + units, p_week + units
+
+
+def settle_pooled(member_id: str, pool_id: str, reserved: int, actual: int,
+                  day: str | None = None, meter: str = TOKENS) -> None:
+    """Correct a pooled reservation to what was actually spent, on both counters together.
+
+    The pool identity must be the one resolved at RESERVATION time and carried through — resolving
+    it again here would settle against whatever the member's situation is now, and a member removed
+    between reserve and settle would leave the school's reservation permanently unreleased. The async
+    paths make that window minutes long, not milliseconds.
+    """
+    delta = int(actual) - int(reserved)
+    if not delta:
+        return
+    day = day or today_il()
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        for who in (member_id, pool_id):
+            row = conn.execute(
+                "SELECT count FROM usage_counters WHERE owner_id=? AND day=? AND meter=?",
+                (who, day, meter)).fetchone()
+            new = max(0, (int(row["count"]) if row else 0) + delta)
+            conn.execute(
+                "INSERT INTO usage_counters (owner_id, day, meter, count) VALUES (?,?,?,?) "
+                "ON CONFLICT(owner_id, day, meter) DO UPDATE SET count = excluded.count",
+                (who, day, meter, new))
 
 
 def settle_usage(owner_id: str, reserved: int, actual: int, day: str | None = None,

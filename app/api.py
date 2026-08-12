@@ -259,6 +259,7 @@ from chavruta.intents.hebrew_refs import detect_tractates, detect_hebrew_refs
 from chavruta.intents.router import detect_commentators
 
 import app.accounts as accounts
+import app.orgs as orgs
 import app.auth_supabase as sb
 import app.billing.service as billing
 import app.coupons as coupons
@@ -1937,6 +1938,19 @@ def _charge_lesson_unit(owner: str, used_byok: bool) -> None:
     """
     if owner == "local":
         return
+    # A member's lessons come out of the SCHOOL's weekly count, not a personal one. If each member
+    # simply inherited the org's plan, 20 members would each get its full lesson allowance — 1,600
+    # lessons a week from one subscription, each running the agentic loop over a large source pool.
+    # The lesson meter is entirely separate from tokens, so the pooled token counter does not bound
+    # it and this has to be pooled explicitly.
+    ctx = orgs.quota_context(owner)
+    if ctx:
+        allowed, _d, _w = db.bump_usage(ctx["pool_id"], 0, weekly_limit=ctx["weekly_lessons"],
+                                        units=1, meter=db.LESSON)
+        if not allowed:
+            _log.warning("org=%s produced a lesson beyond its weekly pool (member=%s)",
+                         ctx["org_id"], owner)
+        return
     limit = plans.weekly_lessons(db.get_plan(owner))
     if limit <= 0:
         return
@@ -1966,6 +1980,23 @@ def _reserve_tokens(owner: str, lang: str, intent: str, user_key: str = "") -> t
     back to credits — see the module docstring above _byok_supported.
     """
     estimate = plans.token_estimate(intent)
+
+    # An organisation member spends the SCHOOL's pool, bounded by their own per-member cap, and both
+    # counters move in one transaction (db.bump_pooled). Resolved once here and returned to the
+    # caller so settlement uses the same pool — re-resolving later would settle against whatever the
+    # member's situation is by then, and a member removed mid-request would leave the school's
+    # reservation permanently unreleased. Non-members take the original path untouched.
+    ctx = orgs.quota_context(owner)
+    if ctx:
+        allowed, _pd, _pw = db.bump_pooled(
+            owner, ctx["pool_id"], member_cap=ctx["member_cap"], pool_daily=ctx["pool_daily"],
+            pool_weekly=ctx["pool_weekly"], units=estimate, meter=db.TOKENS)
+        if allowed:
+            return estimate, False
+        # Deliberately no credit or BYOK fallback for a member: both would let one person spend past
+        # the cap the school set for them, which is the single control an admin has over the pool.
+        raise HTTPException(status_code=429, detail=_quota_message("day", lang, 0, 0))
+
     plan = db.get_plan(owner)
     daily, weekly = plans.daily_tokens(plan), plans.weekly_tokens(plan)
     if daily <= 0 and weekly <= 0:
@@ -2008,6 +2039,14 @@ def _settle_tokens(owner: str, reserved: int, usage: dict, intent: str, meter: s
         return
     actual = plans.normalized_tokens(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
     if not actual and not reserved:
+        return
+    ctx = orgs.quota_context(owner)
+    if ctx and meter == db.TOKENS:
+        # Both counters, together — settling only the member's row would leave the school charged the
+        # generous ESTIMATE for every turn, burning the pool several times faster than real use.
+        db.settle_pooled(owner, ctx["pool_id"], reserved, actual)
+        _log.info("owner=%s org=%s tokens reserved=%d actual=%d calls=%d",
+                  owner, ctx["org_id"], reserved, actual, usage.get("calls", 0))
         return
     total = db.settle_usage(owner, reserved, actual, meter=meter)
     _log.info("owner=%s meter=%s tokens reserved=%d actual=%d calls=%d total=%d",
@@ -2974,3 +3013,203 @@ def get_lesson(lesson_id: str, owner: str = Depends(current_owner)):
 def delete_lesson(lesson_id: str, owner: str = Depends(current_owner)):
     if not db.delete_lesson(lesson_id, owner):
         raise HTTPException(status_code=404, detail="lesson not found")
+
+
+# ── Organisations (schools) — spec 004 ────────────────────────────────────────
+#
+# No route here takes an org id from the client. A caller belongs to at most one organisation (a
+# unique index enforces it), so accepting an id would only create the opportunity to pass someone
+# else's. The operator's sample school is the single exception, handled inside _org_for.
+#
+# Failures are 404, never 403 — the convention _require_admin already sets, so an outsider cannot
+# tell "you lack the role" from "no such thing".
+
+class OrgMemberOut(BaseModel):
+    owner_id: str
+    role: str
+    daily_cap: int = 0
+    accepted: bool = True
+    tokens_today: int = 0
+    tokens_week: int = 0
+
+
+class OrgPanelOut(BaseModel):
+    org_id: str
+    name: str
+    role: str                    # the CALLER's role
+    plan: str
+    seats: int
+    seats_used: int
+    is_demo: bool = False
+    pool_daily: int = 0
+    pool_weekly: int = 0
+    pool_used_today: int = 0
+    pool_used_week: int = 0
+    pool_pct_today: float = 0.0
+    warn_80: bool = False        # the admin is told BEFORE the pool is gone, not after
+    weekly_lessons: int = 0
+    lessons_used_week: int = 0
+    members: list[OrgMemberOut] = []
+    topics: list[dict] = []      # intent counts only — never conversation text (decision 1)
+
+
+def _org_for(owner: str, demo: bool = False) -> dict:
+    """The organisation this caller may act on, and their role in it.
+
+    demo=True is the operator's inspection path (spec 004 decision 6): a fixed synthetic school, so
+    the panel can be seen and tested without opening a real one. Gated on _is_admin and taking no id
+    from the client — there is nothing to point at another org, which is what keeps this a simulator
+    rather than impersonation.
+    """
+    if demo:
+        if not _is_admin(owner):
+            raise HTTPException(status_code=404, detail="not found")
+        org_id = orgs.ensure_demo_org()
+        org = orgs.get_org(org_id) or {}
+        return {"org_id": org_id, "role": orgs.ADMIN, "name": org.get("name", ""),
+                "plan": org.get("plan", "institution"), "org_owner": org.get("owner_id", owner),
+                "owner_id": owner, "is_demo": True}
+    m = orgs.membership(owner)
+    if not m:
+        raise HTTPException(status_code=404, detail="not found")
+    return m
+
+
+@app.get("/orgs/panel", response_model=OrgPanelOut)
+def org_panel(demo: bool = False, owner: str = Depends(current_owner)):
+    """Usage and topics for the caller's organisation. NEVER conversation text (spec 004 decision 1).
+
+    Everything is read from usage_events and the usage counters, whose columns are measurements
+    only. `sessions` and `messages` are deliberately untouched: sessions.first_q holds the verbatim
+    opening question of every chat, and joining that table is the obvious, innocent-looking way this
+    promise gets broken.
+    """
+    m = _org_for(owner, demo)
+    org_id = m["org_id"]
+    tier = plans.tier(m["plan"])
+    is_admin_role = orgs.rank(m["role"]) >= orgs.rank(orgs.ADMIN)
+    pool = orgs.pool_id(org_id)
+
+    day = db.usage_today(pool, meter=db.TOKENS)
+    week = db.usage_this_week(pool, meter=db.TOKENS)
+    lessons = db.usage_this_week(pool, meter=db.LESSON)
+    daily_cap = plans.daily_tokens(m["plan"])
+
+    rows = orgs.members(org_id)
+    out_members: list[OrgMemberOut] = []
+    for r in rows:
+        # A teacher sees the roster; per-member figures are an admin view. Least privilege: starting
+        # narrow costs nothing, and widening later is easy where narrowing after the fact is not.
+        show = is_admin_role or r["owner_id"] == owner
+        out_members.append(OrgMemberOut(
+            owner_id=r["owner_id"], role=r["role"], daily_cap=r["daily_cap"] or 0,
+            accepted=bool(r["accepted_at"]),
+            tokens_today=db.usage_today(r["owner_id"], meter=db.TOKENS) if show else 0,
+            tokens_week=db.usage_this_week(r["owner_id"], meter=db.TOKENS) if show else 0,
+        ))
+
+    topics: list[dict] = []
+    if is_admin_role:
+        topics = db.usage_by_intent_for([r["owner_id"] for r in rows])
+
+    orgs.log_access(org_id, owner, "view_panel")
+    return OrgPanelOut(
+        org_id=org_id, name=m.get("name", ""), role=m["role"], plan=m["plan"],
+        seats=tier.seats, seats_used=orgs.seats_used(org_id), is_demo=bool(m.get("is_demo")),
+        pool_daily=daily_cap, pool_weekly=plans.weekly_tokens(m["plan"]),
+        pool_used_today=day, pool_used_week=week,
+        pool_pct_today=round(day / daily_cap, 3) if daily_cap else 0.0,
+        warn_80=bool(daily_cap and day >= daily_cap * 0.8),
+        weekly_lessons=plans.weekly_lessons(m["plan"]), lessons_used_week=lessons,
+        members=out_members, topics=topics,
+    )
+
+
+class InviteIn(BaseModel):
+    role: str = Field(default="student", max_length=16)
+    max_uses: int = Field(default=1, ge=1, le=200)
+
+
+@app.post("/orgs/invite", status_code=201)
+def org_invite(req: InviteIn, owner: str = Depends(current_owner)):
+    """Mint a join CODE.
+
+    Deliberately not "invite this account id": that would let an org owner attach any account in the
+    system, let a typo attach a stranger, and turn the endpoint into an oracle answering whether an
+    arbitrary account exists and what plan it holds.
+    """
+    m = _org_for(owner)
+    try:
+        actor = orgs.require_member(owner, m["org_id"], orgs.TEACHER)
+    except orgs.OrgAccessError:
+        raise HTTPException(status_code=404, detail="not found") from None
+    role = (req.role or orgs.STUDENT).strip().lower()
+    if role not in (orgs.STUDENT, orgs.TEACHER, orgs.ADMIN):
+        raise HTTPException(status_code=422, detail="unknown role")
+    if orgs.rank(role) > orgs.rank(actor["role"]):
+        raise HTTPException(status_code=404, detail="not found")   # never mint above your own rank
+    code = orgs.create_invite(m["org_id"], owner, role, max_uses=req.max_uses)
+    orgs.log_access(m["org_id"], owner, "invite:" + role)
+    return {"code": code, "role": role, "max_uses": req.max_uses}
+
+
+class JoinIn(BaseModel):
+    code: str = Field(max_length=32)
+
+
+@app.post("/orgs/join")
+def org_join(req: JoinIn, owner: str = Depends(current_owner)):
+    """Redeem a join code. The refusal reason goes to the JOINER — the person it is about — and
+    never back to whoever minted the code."""
+    try:
+        joined = orgs.accept_invite(req.code, owner)
+    except orgs.JoinRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    orgs.log_access(joined["org_id"], owner, "join")
+    return joined
+
+
+@app.post("/orgs/leave")
+def org_leave(owner: str = Depends(current_owner)):
+    """Leave. The account, its conversations and its lessons stay — the school bought quota, not the
+    person's work — and the member reverts to the free tier."""
+    m = _org_for(owner)
+    org = orgs.get_org(m["org_id"]) or {}
+    if org.get("owner_id") == owner:
+        raise HTTPException(status_code=409,
+                            detail="transfer ownership before leaving your own organisation")
+    orgs.remove_member(m["org_id"], owner)
+    return {"left": True}
+
+
+class MemberActionIn(BaseModel):
+    owner_id: str = Field(max_length=128)
+    daily_cap: int | None = Field(default=None, ge=0)
+
+
+@app.post("/orgs/members/remove")
+def org_remove_member(req: MemberActionIn, owner: str = Depends(current_owner)):
+    m = _org_for(owner)
+    try:
+        actor = orgs.require_member(owner, m["org_id"], orgs.TEACHER)
+        orgs.require_can_act_on(actor, req.owner_id)   # the rank check the first plan was missing:
+    except orgs.OrgAccessError:                        # without it a teacher removes the paying admin
+        raise HTTPException(status_code=404, detail="not found") from None
+    if (orgs.get_org(m["org_id"]) or {}).get("owner_id") == req.owner_id:
+        raise HTTPException(status_code=409, detail="the organisation owner cannot be removed")
+    orgs.remove_member(m["org_id"], req.owner_id)
+    orgs.log_access(m["org_id"], owner, "remove_member", req.owner_id)
+    return {"removed": True}
+
+
+@app.post("/orgs/members/cap")
+def org_set_cap(req: MemberActionIn, owner: str = Depends(current_owner)):
+    m = _org_for(owner)
+    try:
+        actor = orgs.require_member(owner, m["org_id"], orgs.ADMIN)
+        orgs.require_can_act_on(actor, req.owner_id)
+    except orgs.OrgAccessError:
+        raise HTTPException(status_code=404, detail="not found") from None
+    orgs.set_member_cap(m["org_id"], req.owner_id, req.daily_cap or 0)
+    orgs.log_access(m["org_id"], owner, "set_cap", req.owner_id)
+    return {"owner_id": req.owner_id, "daily_cap": req.daily_cap or 0}
