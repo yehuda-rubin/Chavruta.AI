@@ -113,6 +113,61 @@ Teachers do NOT get message topics for students by default — only aggregate us
 is an admin capability the admin may grant to a named teacher. Least privilege: it costs nothing to
 start narrow, and widening later is easy where narrowing after the fact is not.
 
+## Minors
+
+Most students at a school are children, which changes what we may hold and for how long. Decision 1
+(topics, never content) already removes the largest exposure. What remains:
+
+**Every school-linked student is treated as a minor. We do not ask anyone's age.**
+
+Age-specific protections need to know who is a minor, but collecting birth dates means holding more
+sensitive personal data about children in order to protect children. Applying the strictest handling
+to every linked student instead collects nothing new and leaves no one mis-classified.
+
+**School-linked students are EXCLUDED from `db.reviewable_questions`.**
+
+That gate (built 2026-08-12) lets the operator read conversation text for evaluation, under the
+notice sent to users on 2026-08-10. That notice went to adult account holders who could accept it for
+themselves; a minor cannot. Reading children's conversations is a categorically heavier act than the
+one users were told about, so membership of an org must exclude an account from review — a fourth
+condition alongside the three already enforced there. This is a small change and it must land BEFORE
+the first student joins, not after.
+
+**Retention.** Conversations belonging to linked students get a defined retention limit rather than
+being kept indefinitely. The exact period is a legal question, not an engineering one.
+
+**No marketing, ever.** Linked accounts are excluded from `marketing_consent` and from any future
+mailing, regardless of what the flag says.
+
+**Deletion.** Account deletion must work for a linked account, and leaving a school must not orphan
+data. The school bought quota; it never owned the person's work.
+
+### For the lawyer, not for us to decide
+
+Amendment 13 to the Privacy Protection Law (in force August 2025) may require a designated privacy
+officer (ממונה על הגנת הפרטיות) for a body processing sensitive data about many people, and imposes
+duties around data about minors that go beyond what is written above. This is a new item for the
+sign-off already pending on the other legal findings. Nothing in this section should be read as
+legal advice, and the retention period in particular needs a real answer from someone qualified to
+give one.
+
+## Why this is NOT a separate service
+
+The question came up. It should be one module (`app/orgs.py`) inside the existing API, not its own
+container:
+
+- The school code's entire job is to read and write the SAME data as the main app — accounts, quota,
+  usage_events, sessions. A separate container isolates none of that; it adds a network hop to the
+  same database and buys the complexity of a distributed system with none of the isolation.
+- The conversation store is SQLite, which is a file. Two containers writing one SQLite file over a
+  shared volume is a real corruption hazard — its locking does not hold across containers.
+- The actual risk here is not "school code crashes the app", it is "a permission check is missing" —
+  and a container boundary does not add a permission check. The isolation this feature genuinely
+  needs is authorization, which is code.
+
+What does help, and is cheap: one membership/permission gate that every endpoint goes through, the
+access log, and tests that deliberately attempt cross-org access.
+
 ## Scope
 
 **v1** — org creation on institution checkout · invitation + acceptance · roles · shared pool with
@@ -121,6 +176,10 @@ transfer.
 
 **Explicitly out** — message text (decision 1), user impersonation (decision 6), per-student pricing,
 cross-org anything.
+
+**Do first, before any of it** — exclude org members from `db.reviewable_questions`. It is one
+condition in a gate that already exists, and it is the only item here that gets harder to do
+honestly once real students are using the product.
 
 ## Open questions
 
