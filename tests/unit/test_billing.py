@@ -133,9 +133,14 @@ def test_checkout_records_tier_and_cycle_before_redirecting(fresh_db, monkeypatc
     monkeypatch.setattr(service.payplus, "create_payment_page", fake_page)
     service.start_checkout("u-a", "a@b.c", "A", plan="pro", cycle="annual")
 
+    # Derived, not hardcoded. These were literals (41.58 and 499.0) tied to the pro price of the
+    # day, so the 2026-08-12 repricing broke a test that is really about an INVARIANT: the customer
+    # is charged one floored twelfth, and twelve of those never exceed the advertised year.
+    import app.plans as plans
+
     assert seen["cycle"] == "annual"
-    assert seen["amount"] == 41.58            # one instalment, not the year up front
-    assert seen["amount"] * 12 <= 499.0       # and twelve of them never exceed the headline
+    assert seen["amount"] == plans.price_ils("pro", plans.ANNUAL)   # an instalment, not the year
+    assert seen["amount"] * 12 <= plans._annual_headline_ils("pro")  # never more than the headline
     sub = fresh_db.get_subscription("u-a")
     assert sub["plan"] == "pro" and sub["cycle"] == "annual" and sub["status"] == "pending"
 

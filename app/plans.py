@@ -95,11 +95,43 @@ class Tier:
 # leaving the daily pool where it was would have quietly cut how many turns a free day buys. Every
 # paid tier is recomputed at its SAME multiple (x3 / x10 / x40) so "3x the usage" stays literally
 # true — that invariant is the whole reason the UI can state a ratio and never a number.
+# Repriced 2026-08-12. The old ladder (₪29 / ₪49.90 / ₪199) was set before anyone measured what a
+# turn costs, and two of its three tiers lost money at their own cap — see the profitability test in
+# tests/unit. Nothing was grandfathered because nothing had to be: the only paid accounts in
+# production were a coupon grant and a test.
+#
+# Every paid tier must cover THREE things, and the price is derived from them rather than guessed:
+#
+#   1. its own worst case — the daily pool maxed every day, PLUS the separate weekly lesson pool,
+#      which draws no tokens at all and is the line easiest to forget when pricing;
+#   2. the free users it carries — a paid tier subsidises `multiple` free accounts (basic 3, pro 10,
+#      institution 40), so a larger customer funds proportionally more of the free tier rather than a
+#      flat amount that would crush the small tier;
+#   3. a PROFIT_TARGET margin on top of both.
+#
+# Every figure is the FULL-utilisation worst case, deliberately: a price that only works when
+# customers under-use their allowance is not a price, it is a hope. Real usage sits far below, so
+# these are floors.
+#
+#     tier      own cost   free users   subsidy   total   net needed   gross (incl. VAT)
+#     basic         ₪14        3           ₪14      ₪29       ₪41            ₪49
+#     pro           ₪48       10           ₪48      ₪96      ₪137           ₪169
+#     institution  ₪192       40          ₪192     ₪385      ₪549           ₪649
+#
+# Derived at $0.20 per million normalized tokens (= COMPLETION_WEIGHT matches the provider's own
+# input:output ratio, so a normalized token IS the cost unit), ~3.7 ILS/USD, 18% VAT, and a measured
+# 23,512 normalized tokens per turn / ~58,000 per lesson.
+#
+# NOT included, because no per-seat price can carry it alone: the server costs ~₪740/month whether
+# anyone subscribes or not. At realistic usage that is roughly two institutions or eight pro
+# subscribers — the number to actually aim at.
+PROFIT_TARGET = 0.30
+
 TIERS: tuple[Tier, ...] = (
     Tier("free",          200_000,    525_000,  2,  1,   0.0,    0.0, "חינם",   "Free"),
-    Tier("basic",         600_000,  1_575_000,  6,  3,  29.0,  290.0, "בסיסי",  "Basic"),
-    Tier("pro",         2_000_000,  5_250_000, 20, 10,  49.9,  499.0, "מלא",    "Pro"),
-    Tier("institution", 8_000_000, 21_000_000, 80, 40, 499.0, 4990.0, "מוסדי",  "Institution"),
+    Tier("basic",         600_000,  1_575_000,  6,  3,  49.0,  490.0, "בסיסי",  "Basic"),
+    Tier("pro",         2_000_000,  5_250_000, 20, 10, 169.0, 1690.0, "מלא",    "Pro"),
+    Tier("institution", 8_000_000, 21_000_000, 80, 40, 649.0, 6490.0, "מוסדי",  "Institution"),
 )
 
 # Output costs several times input everywhere; 3x is the round figure that holds across the models

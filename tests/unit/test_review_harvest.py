@@ -340,24 +340,42 @@ def _monthly_cost_ils(tier) -> float:
     return (tokens + lessons) / 1e6 * _USD_PER_M_NORMALIZED * _ILS_PER_USD
 
 
-@pytest.mark.parametrize("tier_id", [
-    "basic",
-    pytest.param("pro", marks=pytest.mark.xfail(strict=True, reason=(
-        "KNOWN, not accepted: pro is ₪49.90 gross = ₪42 net against ~₪48/month at the cap — "
-        "underwater by ~₪6. Left unchanged deliberately: it is a published price with a real "
-        "paying subscriber, so raising it is a founder decision about an existing customer, not a "
-        "test fix. Note the cap PERMITS the loss rather than causing it — real usage sits far "
-        "below it — but a subscriber who uses what they bought costs more than they pay. "
-        "strict=True so this flips to a failure the moment the price or the pools change."))),
-    "institution",
-])
-def test_every_paid_tier_is_profitable_at_full_utilisation(tier_id):
+@pytest.mark.parametrize("tier_id", ["basic", "pro", "institution"])
+def test_every_paid_tier_covers_itself_its_free_users_and_a_margin(tier_id):
+    """The pricing rule, pinned. A tier must pay for its own worst case, for the free accounts it
+    carries, AND leave PROFIT_TARGET on top — all at FULL utilisation, because a price that only
+    works when customers under-use their allowance is not a price.
+
+    This is what caught the old ladder: ₪199 institution and ₪49.90 pro were both underwater on
+    their own cost alone, before any free user or margin was considered.
+    """
     import app.plans as plans
 
     tier = plans.tier(tier_id)
+    free = plans.tier("free")
+
+    own = _monthly_cost_ils(tier)
+    # A paid tier carries `multiple` free accounts, so a bigger customer funds proportionally more of
+    # the free tier — a flat number would be swallowed whole by the smallest tier.
+    subsidy = tier.multiple * _monthly_cost_ils(free)
     net_revenue = plans.price_ils(tier_id) / _VAT
-    cost = _monthly_cost_ils(tier)
-    assert net_revenue > cost, (
-        f"{tier_id}: ₪{plans.price_ils(tier_id):.0f} gross = ₪{net_revenue:.0f} net, "
-        f"but a fully-used month costs ₪{cost:.0f}"
+    required = (own + subsidy) / (1 - plans.PROFIT_TARGET)
+
+    assert net_revenue >= required, (
+        f"{tier_id}: ₪{plans.price_ils(tier_id):.0f} gross = ₪{net_revenue:.0f} net, but it must "
+        f"cover ₪{own:.0f} own + ₪{subsidy:.0f} for {tier.multiple} free users, with "
+        f"{plans.PROFIT_TARGET:.0%} margin → ₪{required:.0f} net (₪{required * _VAT:.0f} gross)"
+    )
+
+
+def test_the_free_tier_is_the_unit_the_subsidy_is_priced_in():
+    """If the free allowance grows, every paid price must be re-derived — the subsidy is a multiple
+    of it. This pins the dependency so a free-tier raise cannot quietly make the ladder unprofitable
+    (the free pool was raised twice already: 2026-08-03 and again 2026-08-12)."""
+    import app.plans as plans
+
+    free_cost = _monthly_cost_ils(plans.tier("free"))
+    assert 3.0 < free_cost < 8.0, (
+        f"a fully-used free account now costs ₪{free_cost:.2f}/month; the paid ladder was derived "
+        f"at ~₪4.81, so re-check every price in TIERS"
     )
