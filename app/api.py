@@ -25,7 +25,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 # Source markers ([S1], [S1, S5], (S1), 【S1】, …) are the grounding mechanism — the pipeline maps them
 # to citations, then we strip them from the DISPLAYED text so the answer reads cleanly.
-_MARKER_RE = re.compile(r"\s*[\[(（【]\s*S\d+(?:\s*,\s*S\d+)*\s*[\])）】]")
+_MARKER_BODY = r"[\[(（【]\s*S\d+(?:\s*,\s*S\d+)*\s*[\])）】]"
+_MARKER_RE = re.compile(rf"\s*{_MARKER_BODY}")
+
+# A marker the model used as a NOUN rather than as a trailing footnote — "ב[S2] יש דיון" ("in
+# [source 2] there is a discussion"), "את [S3]: שם נאמר". Deleting only the marker strands the
+# preposition that introduced it, and real users saw the result: "כי באמת, ב יש דיון", "הבא נבדוק
+# את: שם נאמר". This is the same trap the English-word path avoids by REWRITING rather than
+# deleting, since the word is grammatically load-bearing — markers just got blind deletion.
+#
+# The repair is keyed on ADJACENCY to the marker, which is what makes it safe. A blind "drop
+# orphaned one-letter words" pass cannot be: in a Torah corpus a lone Hebrew letter is usually a
+# chapter or section number ("פרק ב.", "הסעיפים א, ב, ג", "ובסעיף ה"), and stripping those would
+# silently corrupt citations across the product. Nothing here fires unless a marker was actually
+# removed at that exact spot.
+#
+# The lookbehind is load-bearing too: without it, "הכתוב[S1]" would match its own final ב and
+# leave "הכתו". A one-letter prefix only counts when it is not the tail of a Hebrew word.
+_CARRIER_PREFIX = r"(?<![א-ת])(?:את\s+|[בכלמשוהד])"
+_CARRIER_MARKER_RE = re.compile(rf"\s*{_CARRIER_PREFIX}{_MARKER_BODY}")
 
 # Caught live (2026-08-04): the model occasionally emits a literal backslash before a quote mark when
 # it quotes source text that itself contains a Hebrew abbreviation gershayim (e.g. verbatim-quoting a
@@ -62,18 +80,25 @@ def _strip_foreign(text: str) -> str:
 # aside like '(1)' is untouched, and requires NO Hebrew letter so a mixed aside is left alone.
 _HE_CHAR_RE = re.compile(r"[֐-׿]")
 _LATIN_LETTER_RE = re.compile(r"[A-Za-z]")
-_PAREN_RE = re.compile(r"[ \t]*[(（][^()（）]*[)）]")
+# An optional Hebrew preposition introducing the aside is consumed WITH it, for the same reason as
+# _CARRIER_MARKER_RE above: "ראינו זאת ב(Chatam Sofer on Sukkah 41a) בהרחבה" must not become
+# "ראינו זאת ב בהרחבה". The keep/drop decision is made on the ASIDE ALONE — including the Hebrew
+# preposition in that test would make every prefixed aside look "mixed", so none would ever strip.
+_PAREN_RE = re.compile(rf"[ \t]*(?:{_CARRIER_PREFIX})?(?P<aside>[(（][^()（）]*[)）])")
 
 
 def _strip_foreign_parens(text: str) -> str:
     def repl(m: re.Match) -> str:
-        inner = m.group(0)
-        return "" if _LATIN_LETTER_RE.search(inner) and not _HE_CHAR_RE.search(inner) else inner
+        aside = m.group("aside")
+        latin_only = _LATIN_LETTER_RE.search(aside) and not _HE_CHAR_RE.search(aside)
+        return "" if latin_only else m.group(0)   # drop the preposition with it, or restore both
     return _PAREN_RE.sub(repl, text)
 
 
 def _strip_markers(text: str, he: bool = False) -> str:
-    t = _MARKER_RE.sub("", text or "")
+    # Load-bearing markers first ("ב[S2]" → nothing, not "ב"), then every remaining plain marker.
+    t = _CARRIER_MARKER_RE.sub("", text or "")
+    t = _MARKER_RE.sub("", t)
     t = _STRAY_ESCAPE_RE.sub("", t)           # drop a leaked escape backslash before a quote mark
     t = _strip_foreign(t)                    # drop stray foreign-script tokens (model multilingual bleed)
     if he:
@@ -230,6 +255,8 @@ from chavruta.llm import metering
 from chavruta.llm.agentic import is_degrade_message
 from chavruta.llm.base import GroundedPrompt
 from chavruta.pipeline.pipeline import _max_tokens_for
+from chavruta.intents.hebrew_refs import detect_tractates, detect_hebrew_refs
+from chavruta.intents.router import detect_commentators
 
 import app.accounts as accounts
 import app.auth_supabase as sb
@@ -1194,6 +1221,22 @@ def _generate_qa_turn_from_hits(question: str, hits, lang: str, he: bool, histor
     )
 
 
+def _conversation_signals(user_turns: list[str], question: str, rq: Query) -> None:
+    """Harvest structural signals from the WHOLE conversation (all user turns + current question)
+    to preserve context that a multi-turn discussion established (e.g. a tractate named in turn 2
+    that should still scope retrieval in turn 5). The embedding text stays anchored on the first
+    turn + current question to avoid diluting the semantic signal with conversational noise.
+    Only fill in signals that the current turn did NOT already provide, so an explicit signal
+    in the current question always wins over historical context. Modifies rq in-place."""
+    convo = " ".join(user_turns + [question])
+    if not rq.tractates:
+        rq.tractates = detect_tractates(convo)
+    if not rq.commentator_ids:
+        rq.commentator_ids = detect_commentators(convo)
+    if not rq.named_refs:
+        rq.named_refs = detect_hebrew_refs(convo)
+
+
 def _run_chavruta(question: str, lang: str, history=None, llm=None) -> QueryResponse:
     """Socratic study-partner mode: retrieve on the topic, then Claude plays a chavruta that asks
     questions and learns WITH the user (grounded), rather than lecturing. When retrieval confidence
@@ -1206,6 +1249,7 @@ def _run_chavruta(question: str, lang: str, history=None, llm=None) -> QueryResp
     anchor = (user_turns[0] + " " + question) if user_turns else question   # keep retrieval on the topic
     q = Query(text=anchor, lang=lang or None, intent=Intent.QA)
     rq = pipeline._resolve_query(q)
+    _conversation_signals(user_turns, question, rq)
     lang = rq.lang or lang or "he"
     he = lang != "en"
     result = pipeline.retriever.retrieve(rq, top_k=10)

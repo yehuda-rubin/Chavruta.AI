@@ -450,6 +450,101 @@ def test_strip_markers_drops_a_leaked_escape_backslash_before_a_quote(raw, expec
     assert api._strip_markers(raw, he=True) == expected
 
 
+# ── Fix (2026-08-12, caught live): the model uses a marker as the NOUN, not as a trailing footnote
+# — "ב[S2] יש דיון" ("in [source 2] there is a discussion") — so deleting only the marker stranded
+# the preposition that introduced it. Real users saw "כי באמת, ב יש דיון" and "הבא נבדוק את: שם
+# נאמר". Same trap the English-word path avoids by rewriting instead of deleting; markers were
+# getting blind deletion. All four cases below are reproduced verbatim from production output.
+@pytest.mark.parametrize("raw,expected", [
+    ("כי באמת, ב[S2] יש דיון מעניין.", "כי באמת, יש דיון מעניין."),
+    ("הבא נבדוק את [S3]: שם נאמר...", "הבא נבדוק: שם נאמר..."),
+    ("כמו שמציע החסיד נתן אדלער ב[S4], או...", "כמו שמציע החסיד נתן אדלער, או..."),
+    # Same failure shape via the all-Latin parenthetical stripper rather than the marker regex.
+    ("ראינו זאת ב(Chatam Sofer on Sukkah 41a).", "ראינו זאת."),
+])
+def test_strip_markers_repairs_a_load_bearing_marker(raw, expected):
+    assert api._strip_markers(raw, he=True) == expected
+
+
+# The repair MUST be anchored to an actual deletion site. A blind "drop orphaned one-letter words"
+# pass corrupts this corpus specifically: in Torah text a lone Hebrew letter is normally a chapter
+# or section NUMBER. A first cut of this fix turned "פרק ב." into "פרק" and "א, ב, ג" into "א, ג" —
+# silent citation corruption, far worse than the dangling preposition it set out to fix.
+@pytest.mark.parametrize("raw", [
+    "נלמד במסכת סוכה פרק ב.",
+    "הסעיפים הם א, ב, ג.",
+    "עיין בסימן ג, ובסעיף ה.",
+])
+def test_strip_markers_never_touches_a_lone_letter_with_no_marker(raw):
+    assert api._strip_markers(raw, he=True) == raw
+
+
+# A one-letter prefix only counts when it is not the tail of a Hebrew word — without that guard,
+# "הכתוב[S1]" matches its own final ב and leaves "הכתו".
+def test_strip_markers_does_not_eat_the_last_letter_of_the_preceding_word():
+    assert api._strip_markers("הכתוב[S1] אומר כך.", he=True) == "הכתוב אומר כך."
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("וכך נאמר [S1].", "וכך נאמר."),                  # ordinary trailing marker, unchanged behaviour
+    ("שני מקורות [S1, S5] כאן.", "שני מקורות כאן."),
+    ("הערה (עיין שם) חשובה.", "הערה (עיין שם) חשובה."),  # mixed-Hebrew aside still survives
+    ("סעיף (1) ברשימה.", "סעיף (1) ברשימה."),            # numeric aside still survives
+])
+def test_strip_markers_leaves_the_existing_behaviour_intact(raw, expected):
+    assert api._strip_markers(raw, he=True) == expected
+
+
+# ── Fix (2026-08-12): chavruta follow-up loses the tractate the conversation established.
+# Bug: only user_turns[0] (the FIRST question) was carried into the anchor, so a tractate named
+# in turn 2 was lost by turn 5. Now structural signals are harvested from the WHOLE conversation.
+def test_conversation_signals_harvests_tractate_from_full_history():
+    """The 5-turn conversation from the bug report should yield tractates == ['Sukkah']."""
+    from chavruta.corpus.schema import Query
+
+    user_turns = [
+        "מה רשי אומר על בניית בית המקדש?",
+        "ומה לגבי מה שהוא אומר במסכת סוכה בעניין הזה",
+        "מה תוספות סובר על כך?",
+        "האם תוספות חולק על רשי?",
+        "האם יש מחלוקת בין רשי לתוספות על בניית המקדש",
+    ]
+    question = user_turns[-1]
+    user_turns = user_turns[:-1]
+
+    # Simulate the query after _resolve_query (which would have only turn1 + turn5 signals)
+    rq = Query(text=user_turns[0] + " " + question, lang="he", intent=Intent.QA)
+    # At this point, tractates would be empty (turn1 has no tractate, turn5 has no tractate)
+    assert not rq.tractates
+
+    # Apply the conversation signal harvesting
+    api._conversation_signals(user_turns, question, rq)
+
+    # Now tractates should include Sukkah from turn 2
+    assert rq.tractates == ["Sukkah"]
+
+
+def test_conversation_signals_explicit_current_tractate_wins_over_history():
+    """An explicit tractate in the CURRENT question should win over one from earlier history."""
+    from chavruta.corpus.schema import Query
+
+    user_turns = [
+        "מה אומר רשי על סוגיית השבת?",
+        "ומה לגבי מה שהוא אומר במסכת סוכה בעניין הזה",
+    ]
+    question = "ומה אומר רשי במסכת ברכות על כך?"
+
+    # Simulate _resolve_query already detecting the current question's tractate
+    rq = Query(text=user_turns[0] + " " + question, lang="he", intent=Intent.QA)
+    rq.tractates = ["Berakhot"]  # Explicit from current question
+
+    # Apply conversation signal harvesting
+    api._conversation_signals(user_turns, question, rq)
+
+    # Current question's tractate should win, history should not override
+    assert rq.tractates == ["Berakhot"]
+
+
 # ── Fix (2026-08-02, caught live): a genuinely-grounded 'explain' answer still contained the bare
 # sentence "אין תשובה במקורות — אמור זאת ואל תמציא" in the middle of real content — the model
 # echoing a fragment of its own grounding instruction (pipeline.py::_agentic_generate's
