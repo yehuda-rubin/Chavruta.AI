@@ -78,3 +78,34 @@ def test_two_letter_abbreviation_is_still_masked():
     """Abbreviations ending in two letters (מהדו"ק-style) must remain masked, not read as quotes."""
     text = 'עיין בשו"ע ובמהדו"ק ובאבה"ע לענין זה, ואין כאן ציטוט כלל ועיקר בכלל.'
     assert unverified_quotes(text, [_hit(_SOURCE)]) == []
+
+
+# ── Fix (2026-08-12): the guard reported the model's OWN prose as fabricated quotes ─────────────
+# Found in a 26-question run: the regex let any quote mark pair with any later one, so a single
+# short quoted word threw the parity off and every following pair was wrong. Spans are now paired
+# in order, and a span containing a [S#] marker is never a quote — markers are written around
+# sources, never inside one.
+
+def test_short_quoted_word_does_not_throw_off_the_pairing():
+    """ה\"ייאוש\" (…) — one quoted word, then ordinary prose that must not be read as a quote."""
+    text = 'ה"ייאוש" (ויתור על החפץ) כבר קיים באופן עקרוני, גם אם לא התבטא בפועל אצל הבעלים.'
+    assert unverified_quotes(text, [_hit("טקסט מקור כלשהו שאין בו קשר")]) == []
+
+
+def test_span_containing_a_citation_marker_is_not_a_quote():
+    text = 'הכלל הוא "מתייחסת לכל ערי ארץ ישראל [S14], והתקנה הורחבה" לדעת רבים ועוד.'
+    assert unverified_quotes(text, [_hit("טקסט מקור כלשהו שאין בו קשר")]) == []
+
+
+def test_a_quote_spanning_a_line_break_is_not_treated_as_one():
+    text = 'פתח "מילה אחת כאן בשורה\nושורה חדשה לגמרי ממשיכה" וסיים.'
+    assert unverified_quotes(text, [_hit("טקסט מקור כלשהו שאין בו קשר")]) == []
+
+
+def test_the_guard_still_catches_a_fabrication_after_a_short_quoted_word():
+    """The parity fix must not become a way for a real fabrication to hide."""
+    source = "אסור לטלטל מוקצה בשבת אלא לצורך גופו או מקומו"
+    text = ('ה"ייאוש" הוא מושג נפרד, אבל כאן נאמר '
+            '"מותר לטלטל כל מוקצה בשבת בלי שום הגבלה כלל ועיקר" וזה לא נמצא.')
+    flagged = unverified_quotes(text, [_hit(source)])
+    assert flagged and "מותר לטלטל כל מוקצה" in flagged[0]

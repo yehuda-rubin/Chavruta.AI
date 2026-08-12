@@ -319,12 +319,37 @@ def unverified_quotes(text: str, sources, min_len: int = 14) -> list[str]:
         return []
     text = text or ""
     bad = []
-    for m in _QUOTE_RE.finditer(_protect_abbreviations(text)):
-        raw = text[m.start(1):m.end(1)]   # same span, original characters (abbreviation marks intact)
+    for start, end in _quoted_spans(_protect_abbreviations(text)):
+        raw = text[start:end]             # same span, original characters (abbreviation marks intact)
         q = _heb_skeleton(raw)
         if len(q) >= min_len and q[:min_len] not in corpus:   # opening not found in any source
             bad.append(raw.strip()[:60])
     return bad
+
+
+def _quoted_spans(masked: str) -> list[tuple[int, int]]:
+    """Spans between quote marks, paired IN ORDER — 1st with 2nd, 3rd with 4th, and so on.
+
+    The regex this replaces let any mark pair with any later mark, so one short quoted word threw
+    the parity off and every following pair was wrong: the guard then reported the model's OWN prose
+    as a fabricated quote. Real examples from a 26-question run —
+        "(ייאוש, ויתור על החפץ) כבר קיים באופן עקרוני"      ← not a quote at all
+        "מתייחסת לכל ערי ארץ ישראל חוץ מירושלים [S14], והתקנה הורחבה"
+    Sequential pairing is how quotation actually nests in a sentence, and it keeps the parity honest.
+
+    A span containing a citation marker is never a quote: [S#] markers are written by the model
+    AROUND its sources, never inside one, so a span that swallows one is a mis-pairing by
+    construction. Same for a span crossing a line break.
+    """
+    marks = [i for i, ch in enumerate(masked) if ch in '"“”„״']
+    spans: list[tuple[int, int]] = []
+    for a, b in zip(marks[0::2], marks[1::2]):
+        inner_start, inner_end = a + 1, b
+        inner = masked[inner_start:inner_end]
+        if "\n" in inner or _MARKER_RE.search(inner):
+            continue
+        spans.append((inner_start, inner_end))
+    return spans
 
 
 def work_not_loaded_answer(lang: str, missing_works: list[str], intent: Intent) -> Answer:
