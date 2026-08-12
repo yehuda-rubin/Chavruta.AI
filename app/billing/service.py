@@ -50,8 +50,9 @@ def start_checkout(owner_id: str, email: str, name: str, *,
         raise ValueError("cannot check out the free tier")
     # Refused BEFORE the payment page exists, not after the charge: a school member draws on the
     # org's pool, so a personal subscription would take real money and grant nothing at all. The
-    # check is here rather than in the route so it holds for every caller of this function.
-    if orgs.membership(owner_id):
+    # check is here rather than in the route so it holds for every caller of this function. The
+    # school's own OWNER buying an institutional tier is not this case — see orgs.refuse_personal_purchase.
+    if orgs.refuse_personal_purchase(owner_id, tier):
         raise ValueError("החשבון משויך למוסד ומשתמש במכסה המשותפת שלו — מנוי אישי לא יוסיף לו כלום. "
                          "כדי לרכוש מנוי משלך, צא מהמוסד בהגדרות תחילה.")
     db.upsert_subscription(owner_id, provider="payplus", status="pending", plan=tier, cycle=cyc,
@@ -79,6 +80,19 @@ def handle_event(normalized: dict, *, now: datetime | None = None) -> None:
                            status="active", plan=tier, cycle=cycle, current_period_end=period_end,
                            cancel_at_period_end=False, updated_at=now.isoformat())
     db.set_plan(owner, tier)
+    # A school's tier lives on the org row, and nothing used to write it after creation — so a school
+    # that upgraded could not be given what it had just paid for, and one that stopped paying kept its
+    # full pool forever while the panel cheerfully rendered it. Both directions run through here.
+    if org_id := orgs.sync_plan_from_owner(owner, tier):
+        _log.info("org %s now on %s (paid by %s)", org_id, tier, owner)
+    # The reverse of the guard in start_checkout. That one refuses at the payment page; this one is
+    # for the orders that were already in flight — a checkout started before joining a school, or a
+    # RECURRING charge that fires months after the holder joined one. The money has already moved by
+    # the time this callback arrives, so there is nothing to refuse: what matters is that it is
+    # LOGGED loudly rather than silently granting a plan the request path will never consult.
+    elif orgs.membership(owner):
+        _log.error("BILLING/ORG CONFLICT: %s paid for %s but belongs to a school and spends its pool "
+                   "— this charge grants nothing; refund or remove the membership", owner, tier)
     _log.info("subscription active for %s: %s/%s (renewal=%s) until %s",
               owner, tier, cycle, normalized.get("is_renewal"), period_end)
     amount = float(normalized.get("amount") or 0.0)
@@ -262,6 +276,12 @@ def sweep_downgrades(now: datetime | None = None) -> int:
     for owner in due:
         db.set_plan(owner, "free")
         db.upsert_subscription(owner, status="expired", updated_at=now.isoformat())
+        # A school whose payer lapses degrades its pool — it does NOT dissolve. Members keep their
+        # accounts, their history and their seats, and the tier comes straight back when payment
+        # resumes: nobody is locked out of their own study by a billing failure. Before this, an
+        # unpaid school simply kept its full institution pool, indefinitely and invisibly.
+        if org_id := orgs.sync_plan_from_owner(owner, "free"):
+            _log.warning("org %s degraded to free — its subscription (%s) lapsed", org_id, owner)
         _log.info("subscription expired → free plan for %s", owner)
     return len(due)
 

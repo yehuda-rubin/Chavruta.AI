@@ -148,14 +148,6 @@ def redeem(owner_id: str, code: str, *, now: datetime | None = None,
     """
     if owner_id == "local":
         raise RedeemError("sign_in_required")
-    # A school member spends the org's pool and nothing else — there is no personal allowance, no
-    # credit fallback and no BYOK path behind it (app/api.py::_reserve_tokens branches on
-    # orgs.quota_context BEFORE any of those). So a plan coupon here would grant a tier that changes
-    # nothing, and a credits coupon would hand out credits that can never be spent. Refusing is the
-    # honest answer; granting silently would look like it worked. This also covers /admin/grant,
-    # which mints a code and redeems it on the account's behalf through this same function.
-    if orgs.membership(owner_id):
-        raise RedeemError("org_member")
     stored = normalize(code)
     if not _VALID.match(stored):
         raise RedeemError("invalid")
@@ -168,6 +160,19 @@ def redeem(owner_id: str, code: str, *, now: datetime | None = None,
         raise RedeemError("invalid")
 
     kind = c["kind"]
+    # A school member spends the org's pool and nothing else — there is no personal allowance, no
+    # credit fallback and no BYOK path behind it (app/api.py::_reserve_tokens branches on
+    # orgs.quota_context BEFORE any of those). So a personal plan here would grant a tier that
+    # changes nothing, and credits would be handed out that can never be spent. Refusing is the
+    # honest answer; granting silently would look like it worked. This also covers /admin/grant,
+    # which mints a code and redeems it on the account's behalf through this same function.
+    #
+    # Checked HERE rather than at the top because the answer depends on what the coupon grants: the
+    # account that owns the school must be able to receive the school's own institutional plan, which
+    # is exactly how the operator provisions or extends one.
+    if orgs.refuse_personal_purchase(owner_id, c["plan"] if kind == "plan" else None):
+        raise RedeemError("org_member")
+
     set_plan_to = period_end = None
     add_credits = 0
 

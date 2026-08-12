@@ -255,9 +255,15 @@ export const api = {
   orgs: {
     panel: (demo = false) => req<OrgPanel>(`/orgs/panel${demo ? "?demo=true" : ""}`),
     invite: (role: string, maxUses = 1) =>
-      req<{ code: string; role: string; max_uses: number }>("/orgs/invite", {
+      req<{ code: string; role: string; max_uses: number; expires_days: number }>("/orgs/invite", {
         method: "POST",
         body: JSON.stringify({ role, max_uses: maxUses }),
+      }),
+    invites: () => req<{ invites: OrgInvite[] }>("/orgs/invites"),
+    revokeInvite: (code: string) =>
+      req<{ revoked: boolean }>("/orgs/invite/revoke", {
+        method: "POST",
+        body: JSON.stringify({ code }),
       }),
     join: (code: string) =>
       req<{ org_id: string; name: string; role: string }>("/orgs/join", {
@@ -265,6 +271,9 @@ export const api = {
         body: JSON.stringify({ code }),
       }),
     leave: () => req<{ left: boolean }>("/orgs/leave", { method: "POST" }),
+    // The owner closes their school rather than leaving it — there is no ownership transfer, and
+    // without this the paying admin could neither leave, nor delete their account, nor wind up.
+    close: () => req<{ closed: boolean; org_id: string }>("/orgs/close", { method: "POST" }),
     removeMember: (ownerId: string) =>
       req<{ removed: boolean }>("/orgs/members/remove", {
         method: "POST",
@@ -398,10 +407,23 @@ export interface Me {
 export interface OrgMember {
   owner_id: string;
   role: string;
+  // -1 blocks this member outright, 0 is the tier default, >0 is an explicit ceiling. The first two
+  // were one value until it turned out an admin setting 0 to stop a student was handing them the
+  // largest cap in the system.
   daily_cap: number;
   accepted: boolean;
   tokens_today: number;
   tokens_week: number;
+}
+
+export interface OrgInvite {
+  code: string;
+  role: string;
+  max_uses: number;
+  used_count: number;
+  created_by: string;
+  created_at: string;
+  expires_at: string | null;
 }
 
 export interface OrgPanel {

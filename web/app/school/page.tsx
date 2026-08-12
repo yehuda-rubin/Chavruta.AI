@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Icon } from "@/components/Icon";
-import { api, type OrgPanel } from "@/lib/api";
+import { api, type OrgInvite, type OrgPanel } from "@/lib/api";
 
 // The school panel. Same Client-Component reasoning as /admin: it needs state for the fetch and the
 // actions, and there is no SEO upside to a page nobody should find.
@@ -16,13 +16,22 @@ import { api, type OrgPanel } from "@/lib/api";
 // — joining `sessions` to list "recent chats" — would surface `first_q`, the verbatim opening
 // question of every conversation. See specs/004-school-accounts/plan.md decision 1.
 
+// Tokens mean nothing to a reader, so everything here is shown as questions — the unit people think
+// in. 23,512 normalized tokens is the measured mean of a real turn (166 production turns, 2026-08-12).
+const TURN = 23512;
+
 export default function SchoolPanel() {
   const [loading, setLoading] = useState(true);
   const [panel, setPanel] = useState<OrgPanel | null>(null);
   const [denied, setDenied] = useState(false);
   const [demo, setDemo] = useState(false);
   const [code, setCode] = useState<string | null>(null);
+  const [invites, setInvites] = useState<OrgInvite[]>([]);
   const [busy, setBusy] = useState(false);
+
+  const loadInvites = useCallback(() => {
+    api.orgs.invites().then((r) => setInvites(r.invites)).catch(() => setInvites([]));
+  }, []);
 
   const load = useCallback((asDemo: boolean) => {
     setLoading(true);
@@ -32,7 +41,8 @@ export default function SchoolPanel() {
       .then(setPanel)
       .catch(() => setDenied(true))
       .finally(() => setLoading(false));
-  }, []);
+    loadInvites();
+  }, [loadInvites]);
 
   useEffect(() => {
     // Try the caller's own school first; the operator, who belongs to none, falls back to the
@@ -60,6 +70,32 @@ export default function SchoolPanel() {
     try {
       const res = await api.orgs.invite(role, role === "student" ? 30 : 1);
       setCode(res.code);
+      loadInvites();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function revoke(c: string) {
+    if (!window.confirm("לבטל את הקוד? מי שכבר הצטרף איתו נשאר; הקוד עצמו יפסיק לעבוד.")) return;
+    setBusy(true);
+    try {
+      await api.orgs.revokeInvite(c);
+      if (code === c) setCode(null);
+      loadInvites();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function closeSchool() {
+    if (!window.confirm(
+      "לסגור את המוסד? כל החברים יחזרו לחשבון חינמי משלהם — השיחות והשיעורים שלהם נשמרים. " +
+      "המנוי עצמו לא מבוטל כאן; לביטול חיוב יש לגשת להגדרות המנוי.")) return;
+    setBusy(true);
+    try {
+      await api.orgs.close();
+      window.location.href = "/";
     } finally {
       setBusy(false);
     }
@@ -76,13 +112,23 @@ export default function SchoolPanel() {
   }
 
   async function setCap(ownerId: string, current: number) {
-    const raw = window.prompt("תקרה יומית בטוקנים (0 = ברירת המחדל של המסלול)", String(current));
+    // Stated in questions, because that is the unit an administrator thinks in — and the two special
+    // values are spelled out. Until recently 0 meant "tier default" here and "no ceiling at all" one
+    // layer down, so an admin who typed 0 to stop a disruptive student silently gave them the
+    // largest allowance in the system.
+    const raw = window.prompt(
+      "מכסת שאלות ליום לחבר הזה:\n" +
+        "• מספר — התקרה שתחול\n" +
+        "• 0 — ברירת המחדל של המוסד\n" +
+        "• ‎-1 — חסימה (החבר לא יוכל לשאול כלל)",
+      String(current > 0 ? Math.round(current / TURN) : current),
+    );
     if (raw === null) return;
-    const value = Number(raw);
-    if (!Number.isFinite(value) || value < 0) return;
+    const asked = Number(raw);
+    if (!Number.isFinite(asked) || asked < -1) return;
     setBusy(true);
     try {
-      await api.orgs.setCap(ownerId, value);
+      await api.orgs.setCap(ownerId, asked > 0 ? Math.round(asked * TURN) : asked);
       load(demo);
     } finally {
       setBusy(false);
@@ -109,9 +155,7 @@ export default function SchoolPanel() {
 
   const isAdminRole = panel.role === "admin";
   const num = (n: number) => n.toLocaleString("he-IL");
-  // Tokens mean nothing to a reader, so the pool is shown as questions — the unit people think in.
-  // 23,512 normalized tokens is the measured mean of a real turn (166 production turns, 2026-08-12).
-  const asTurns = (tokens: number) => Math.round(tokens / 23512);
+  const asTurns = (tokens: number) => Math.round(tokens / TURN);
   const ROLE_HE: Record<string, string> = { admin: "מנהל", teacher: "מורה", student: "תלמיד" };
 
   return (
@@ -197,8 +241,31 @@ export default function SchoolPanel() {
         ) : null}
         <p className="text-[11px] text-ink/50 leading-relaxed">
           החבר מזין את הקוד בהגדרות שלו ומצטרף בעצמו. אנחנו לא מצרפים חשבון לפי מזהה — כדי שאף אחד
-          לא יצורף בלי שביקש, וכדי שלא נחשוף מידע על חשבונות שאינם שלך.
+          לא יצורף בלי שביקש, וכדי שלא נחשוף מידע על חשבונות שאינם שלך. כל קוד פג תוקף מעצמו לאחר
+          שבועיים, וניתן לבטל אותו כאן בכל רגע.
         </p>
+
+        {invites.length > 0 && (
+          <div className="flex flex-col gap-1 border-t border-ink/10 pt-3">
+            <div className="text-[11px] text-ink/50">קודים פעילים</div>
+            {invites.map((inv) => (
+              <div key={inv.code} className="flex items-center gap-2 flex-wrap text-xs">
+                <code className="font-mono tracking-widest text-tekhelet">{inv.code}</code>
+                <span className="text-ink/50">
+                  {ROLE_HE[inv.role] ?? inv.role} · נוצל {inv.used_count} מתוך {inv.max_uses}
+                  {inv.expires_at ? ` · עד ${inv.expires_at.slice(0, 10)}` : ""}
+                </span>
+                <button
+                  disabled={busy}
+                  onClick={() => revoke(inv.code)}
+                  className="text-[11px] px-2 py-1 rounded-lg glass text-ink/60 disabled:opacity-40"
+                >
+                  ביטול
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="glass rounded-2xl p-4 overflow-x-auto">
@@ -222,7 +289,13 @@ export default function SchoolPanel() {
                 <td className="py-2">{num(asTurns(m.tokens_today))}</td>
                 <td className="py-2">{num(asTurns(m.tokens_week))}</td>
                 <td className="py-2 text-ink/60">
-                  {m.daily_cap ? num(asTurns(m.daily_cap)) : "ברירת מחדל"}
+                  {m.daily_cap < 0 ? (
+                    <span className="text-gold-soft font-semibold">חסום</span>
+                  ) : m.daily_cap > 0 ? (
+                    num(asTurns(m.daily_cap))
+                  ) : (
+                    "ברירת מחדל"
+                  )}
                 </td>
                 {isAdminRole && (
                   <td className="py-2 flex gap-2">
@@ -267,6 +340,25 @@ export default function SchoolPanel() {
           ) : (
             <p className="text-xs text-ink/40">אין עדיין שימוש לדווח עליו.</p>
           )}
+        </section>
+      )}
+
+      {/* Only the owner, and only on a real school. The way out of an otherwise closed loop: an
+          owner cannot leave their own org and cannot delete their account while it exists. */}
+      {isAdminRole && !panel.is_demo && (
+        <section className="glass rounded-2xl p-4 border border-gold/30">
+          <h2 className="font-serif font-bold text-tekhelet mb-1">סגירת המוסד</h2>
+          <p className="text-[11px] text-ink/50 mb-3 leading-relaxed">
+            כל החברים יחזרו לחשבון חינמי משלהם, והשיחות והשיעורים שלהם נשמרים — המוסד רכש מכסה, לא
+            את העבודה של אף אחד. החיוב עצמו לא מבוטל כאן: לביטול המנוי יש לגשת להגדרות המנוי.
+          </p>
+          <button
+            disabled={busy}
+            onClick={closeSchool}
+            className="text-xs px-3 py-2 rounded-xl glass text-gold-soft font-semibold disabled:opacity-40"
+          >
+            סגירת המוסד
+          </button>
         </section>
       )}
     </div>

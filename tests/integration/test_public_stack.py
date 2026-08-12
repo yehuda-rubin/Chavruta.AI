@@ -185,7 +185,14 @@ def test_byok_header_grants_a_second_allowance_over_http(client, monkeypatch):
     assert client.post("/query/async", headers=h, json={"question": "a"}).status_code == 429
 
     hk = {**h, "X-User-LLM-Key": "user-owns-this-key"}
-    assert client.post("/query/async", headers=hk, json={"question": "a"}).status_code == 202
+    admitted = client.post("/query/async", headers=hk, json={"question": "a"})
+    assert admitted.status_code == 202
+
+    # Wait for that job to finish before touching the meter it settles against. The job refunds its
+    # own reservation from a worker thread, so a test that bumps the counter first races it — the
+    # refund lands afterwards, undoes the bump, and the third request is admitted. Rare enough to
+    # pass alone and fail under a full-suite run, which is the worst kind of flake to leave behind.
+    _poll(client, admitted.json()["job_id"], headers=hk)
 
     db.bump_usage(owner, _DAY_CAP, weekly_limit=0, units=_DAY_CAP, meter=db.BYOK_TOKENS)
     blocked = client.post("/query/async", headers=hk, json={"question": "b"})

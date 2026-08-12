@@ -11,8 +11,8 @@ import uuid
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from collections.abc import Collection
-from typing import Any
+from collections.abc import Collection, Mapping
+from typing import Any, NamedTuple
 from zoneinfo import ZoneInfo
 
 from app import moderation
@@ -1062,23 +1062,30 @@ def usage_by_intent(since: str | None = None) -> list[dict[str, Any]]:
         ((since,) if since else ()))
 
 
-def usage_by_intent_for(owner_ids: Collection[str]) -> list[dict[str, Any]]:
+def usage_by_intent_for(joined_at: Mapping[str, str]) -> list[dict[str, Any]]:
     """What an organisation's members have been studying — as MODE COUNTS, never as text.
 
     This is the whole "topics" view a school gets (spec 004 decision 1), and it reads `usage_events`
     for a reason: that table's columns are a fixed list of measurements, so there is no path from it
     to anything a member wrote. The intuitive alternative — joining `sessions` — would hand a teacher
     `first_q`, the verbatim opening question of every conversation.
+
+    Takes {owner_id: accepted_at} and bounds EACH member to their OWN join date — not one cutoff for
+    the group, which would still hand the school everything a late joiner did before they arrived. A
+    school is entitled to see what it is paying for; it is not entitled to the year of private study
+    someone did on their own free account beforehand. Without the bound, the first panel load after a
+    teacher joins reports their entire personal history as "what this member has been studying".
     """
-    ids = [o for o in (owner_ids or []) if o]
-    if not ids:
+    pairs = [(o, s) for o, s in (joined_at or {}).items() if o and s]
+    if not pairs:
         return []
-    marks = ",".join("?" * len(ids))
+    clause = " OR ".join("(owner_id = ? AND at >= ?)" for _ in pairs)
+    args = tuple(v for pair in pairs for v in pair)
     return _agg(
         f"SELECT intent, COUNT(*) AS requests, SUM(billed_tokens) AS tokens "      # noqa: S608
-        f"FROM usage_events WHERE owner_id IN ({marks}) "
+        f"FROM usage_events WHERE {clause} "
         f"GROUP BY intent ORDER BY requests DESC",
-        tuple(ids))
+        args)
 
 
 def usage_by_hour(since: str | None = None) -> list[dict[str, Any]]:
@@ -1376,11 +1383,21 @@ def bump_usage(owner_id: str, limit: int, day: str | None = None, *, weekly_limi
         return True, day_count + units, week_count + units
 
 
+class PoolCharge(NamedTuple):
+    """The outcome of a pooled charge. A NamedTuple so the existing 3-tuple unpacking still works
+    while `refused` gives callers the reason they need to write an honest refusal message."""
+
+    allowed: bool
+    pool_day: int
+    pool_week: int
+    refused: str = ""      # "" | blocked | member_cap | day | week
+
+
 def bump_pooled(member_id: str, pool_id: str, *, member_cap: int, pool_daily: int, pool_weekly: int,
-                units: int = 1, meter: str = TOKENS, day: str | None = None) -> tuple[bool, int, int]:
+                units: int = 1, meter: str = TOKENS, day: str | None = None) -> PoolCharge:
     """Charge one turn to BOTH a member's own counter and their organisation's shared pool.
 
-    Returns (allowed, pool_day_total, pool_week_total).
+    Returns (allowed, pool_day_total, pool_week_total, refused).
 
     This exists because calling `bump_usage` twice is not equivalent, in two ways that both cost
     money. First, they are separate transactions, so another request interleaves between them and the
@@ -1393,7 +1410,13 @@ def bump_pooled(member_id: str, pool_id: str, *, member_cap: int, pool_daily: in
     is admitted and both counters move, or nothing moves at all.
 
     `member_cap` bounds one person's share of a shared pool — without it a single student can spend
-    a school's entire day in an hour. 0 disables it (usage is still counted, so it stays visible).
+    a school's entire day in an hour. 0 disables it (usage is still counted, so it stays visible);
+    a NEGATIVE cap blocks the member outright, which is the one thing an admin most wants to express
+    and could not (see orgs.CAP_BLOCKED).
+
+    `refused` names which of the three ceilings said no. The caller needs it to tell the user the
+    truth: a school that has exhausted its WEEK was being told its limit "resets tomorrow", and a
+    member stopped by their own admin-set cap got a message identical to a school-wide outage.
     """
     day = day or today_il()
     units = max(0, int(units))
@@ -1401,19 +1424,21 @@ def bump_pooled(member_id: str, pool_id: str, *, member_cap: int, pool_daily: in
     with _LOCK, _tx(conn):
         m_day, _m_week = _counts(conn, member_id, day, meter)
         p_day, p_week = _counts(conn, pool_id, day, meter)
+        if member_cap < 0:
+            return PoolCharge(False, p_day, p_week, "blocked")
         if member_cap > 0 and m_day + units > member_cap:
-            return False, p_day, p_week
+            return PoolCharge(False, p_day, p_week, "member_cap")
         if pool_daily > 0 and p_day + units > pool_daily:
-            return False, p_day, p_week
+            return PoolCharge(False, p_day, p_week, "day")
         if pool_weekly > 0 and p_week + units > pool_weekly:
-            return False, p_day, p_week
+            return PoolCharge(False, p_day, p_week, "week")
         if units:
             for who in (member_id, pool_id):
                 conn.execute(
                     "INSERT INTO usage_counters (owner_id, day, meter, count) VALUES (?,?,?,?) "
                     "ON CONFLICT(owner_id, day, meter) DO UPDATE SET count = count + excluded.count",
                     (who, day, meter, units))
-        return True, p_day + units, p_week + units
+        return PoolCharge(True, p_day + units, p_week + units, "")
 
 
 def settle_pooled(member_id: str, pool_id: str, reserved: int, actual: int,
@@ -1923,6 +1948,10 @@ def purge_owner(owner_id: str) -> None:
         conn.execute("UPDATE org_access_log SET target_owner_id=? WHERE target_owner_id=?",
                      (DELETED_OWNER, owner_id))
         conn.execute("UPDATE org_invites SET created_by=? WHERE created_by=?",
+                     (DELETED_OWNER, owner_id))
+        # invited_by is the same kind of residue one statement up: a teacher who deletes their
+        # account was still named on the row of every student they ever admitted.
+        conn.execute("UPDATE org_members SET invited_by=? WHERE invited_by=?",
                      (DELETED_OWNER, owner_id))
 
 

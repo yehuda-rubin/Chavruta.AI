@@ -164,17 +164,29 @@ def list_supabase_user_emails() -> list[str]:
 
 
 def run_due_purges(now_iso: str | None = None) -> int:
-    """Purge every account whose grace period has lapsed. Returns how many were purged."""
+    """Purge every account whose grace period has lapsed. Returns how many were actually purged."""
     now_iso = now_iso or datetime.now(UTC).isoformat()
     due = db.due_deletions(now_iso)
+    purged = 0
     for owner_id in due:
+        # Checked BEFORE the login is deleted. purge_owner refuses an account that owns a school, and
+        # the two steps used to run in the other order: the Supabase user was destroyed, the purge
+        # then raised, and the result was an account that could not sign in, whose data was not
+        # deleted, retried and re-logged every sweep forever. An unfulfilled deletion request that
+        # LOOKS fulfilled is the worst of both. /account/delete refuses this case up front, so
+        # reaching here means the org was created after the request was filed.
+        if db.owns_org(owner_id):
+            _log.error("account %s is due for deletion but owns an organisation — skipped. Close or "
+                       "transfer the school, then the deletion will proceed.", owner_id)
+            continue
         try:
             _delete_supabase_user(owner_id)     # remove the login first (best-effort)
             db.purge_owner(owner_id)            # then irreversibly drop all their data
+            purged += 1
             _log.info("account %s purged", owner_id)
         except Exception:                       # noqa: BLE001 — one bad row must not stop the rest
             _log.exception("failed to purge account %s", owner_id)
-    return len(due)
+    return purged
 
 
 # ── Chat retention ────────────────────────────────────────────────────────────

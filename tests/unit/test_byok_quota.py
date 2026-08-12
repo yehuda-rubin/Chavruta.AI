@@ -66,7 +66,7 @@ def test_byok_supported_false_when_profile_missing(monkeypatch):
 def test_no_key_behaves_exactly_as_before(fresh_db, api_backend, monkeypatch):
     monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", str(_DAY_CAP))
     monkeypatch.setenv("CHAVRUTA_TOKENS_WEEK_FREE", "0")
-    reserved, used_byok = api._reserve_tokens("u1", "he", "qa")
+    reserved, used_byok, _ctx, _day = api._reserve_tokens("u1", "he", "qa")
     assert reserved > 0 and used_byok is False
     assert db.usage_today("u1", meter=db.TOKENS) == reserved
 
@@ -75,7 +75,7 @@ def test_key_unused_while_the_plan_quota_still_has_room(fresh_db, api_backend, m
     """A key is only ever spent as a FALLBACK — never touched while the plan's own pool has room."""
     monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", str(_DAY_CAP))
     monkeypatch.setenv("CHAVRUTA_TOKENS_WEEK_FREE", "0")
-    reserved, used_byok = api._reserve_tokens("u2", "he", "qa", user_key="sk-user")
+    reserved, used_byok, _ctx, _day = api._reserve_tokens("u2", "he", "qa", user_key="sk-user")
     assert used_byok is False
     assert db.usage_today("u2", meter=db.BYOK_TOKENS) == 0
 
@@ -85,7 +85,7 @@ def test_key_admits_a_second_allowance_once_the_plan_quota_is_spent(fresh_db, ap
     monkeypatch.setenv("CHAVRUTA_TOKENS_WEEK_FREE", "0")
     db.bump_usage("u3", _DAY_CAP, units=_DAY_CAP, meter=db.TOKENS)   # spend the plan's own pool outright
 
-    reserved, used_byok = api._reserve_tokens("u3", "he", "qa", user_key="sk-user")
+    reserved, used_byok, _ctx, _day = api._reserve_tokens("u3", "he", "qa", user_key="sk-user")
     assert used_byok is True and reserved > 0
     assert db.usage_today("u3", meter=db.BYOK_TOKENS) == reserved
     assert db.usage_today("u3", meter=db.TOKENS) == _DAY_CAP     # the plan's own pool untouched
@@ -144,14 +144,14 @@ def test_lesson_unit_goes_to_the_byok_pool_when_the_turn_ran_on_byok(fresh_db, a
     monkeypatch.setenv("CHAVRUTA_LESSONS_WEEK_FREE", "1")
     db.bump_usage("u7", 0, weekly_limit=1, units=1, meter=db.LESSON)   # the plan's own lesson already spent
 
-    api._charge_lesson_unit("u7", used_byok=True)
+    api._charge_lesson_unit("u7", api.Reservation(0), used_byok=True)
     assert db.usage_this_week("u7", meter=db.BYOK_LESSON) == 1
     assert db.usage_this_week("u7", meter=db.LESSON) == 1    # unchanged
 
 
 def test_lesson_unit_goes_to_the_plan_pool_by_default(fresh_db, api_backend, monkeypatch):
     monkeypatch.setenv("CHAVRUTA_LESSONS_WEEK_FREE", "3")
-    api._charge_lesson_unit("u7b", used_byok=False)
+    api._charge_lesson_unit("u7b", api.Reservation(0), used_byok=False)
     assert db.usage_this_week("u7b", meter=db.LESSON) == 1
     assert db.usage_this_week("u7b", meter=db.BYOK_LESSON) == 0
 
@@ -163,7 +163,7 @@ def test_lesson_unit_falls_back_to_credits_once_the_plan_pool_is_spent(fresh_db,
     monkeypatch.setattr(db, "spend_credits",
                         lambda owner, cost: (spent_calls.append((owner, cost)), (True, 3))[1])
 
-    api._charge_lesson_unit("u7c", used_byok=False)
+    api._charge_lesson_unit("u7c", api.Reservation(0), used_byok=False)
     assert spent_calls == [("u7c", api.plans.credit_cost("lesson"))]
 
 
@@ -174,7 +174,7 @@ def test_lesson_unit_never_raises_even_fully_exhausted(fresh_db, api_backend, mo
     db.bump_usage("u7d", 0, weekly_limit=1, units=1, meter=db.LESSON)
     monkeypatch.setattr(db, "spend_credits", lambda owner, cost: (False, 0))
 
-    api._charge_lesson_unit("u7d", used_byok=False)   # must not raise
+    api._charge_lesson_unit("u7d", api.Reservation(0), used_byok=False)   # must not raise
 
 
 # ── _resolve_llm_for_request (route-level wiring) ─────────────────────────────
@@ -191,7 +191,7 @@ def test_resolve_llm_for_request_builds_a_llm_override_only_on_byok(fresh_db, ap
     # Plan quota spent: override present, BYOK_TOKENS meter.
     db.bump_usage("u8", 25_000, units=25_000, meter=db.TOKENS)
     reserved, llm, meter = api._resolve_llm_for_request("u8", "he", "qa", "sk-user")
-    assert llm is sentinel and meter == db.BYOK_TOKENS and reserved > 0
+    assert llm is sentinel and meter == db.BYOK_TOKENS and reserved.tokens > 0
 
 
 def test_resolve_llm_for_request_tolerates_the_fastapi_header_marker(fresh_db, api_backend, monkeypatch):
@@ -210,3 +210,98 @@ def test_resolve_llm_for_request_tolerates_the_fastapi_header_marker(fresh_db, a
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ── The reservation is carried, not re-resolved (spec 004) ───────────────────
+# Both docstrings claimed this and neither implementation did it: _reserve_tokens discarded the
+# context it had just resolved and _settle_tokens looked it up again. Everything below is a way for
+# the world to change between those two moments, which the async paths make minutes long.
+
+@pytest.fixture
+def school(fresh_db):
+    import app.orgs as orgs
+    oid = orgs.create_org("boss", "בית ספר", "institution")
+    orgs.accept_invite(orgs.create_invite(oid, "boss", orgs.STUDENT), "pupil")
+    return oid
+
+
+def test_removing_a_member_mid_request_still_releases_the_schools_reservation(school, api_backend):
+    """Otherwise the pool keeps the full estimate for that turn, permanently — nothing left in the
+    world knows it is owed. An admin removing a class at end of term does this once per in-flight
+    turn, and the school's day and week drift upward forever."""
+    import app.orgs as orgs
+    res = api._reserve_tokens("pupil", "he", "qa")
+    pool = res.ctx["pool_id"]
+    reserved_total = db.usage_today(pool)
+    assert reserved_total == res.tokens
+
+    orgs.remove_member(school, "pupil")
+    api._settle_tokens("pupil", res, {"prompt_tokens": 100, "completion_tokens": 10}, "qa")
+
+    assert db.usage_today(pool) == plans.normalized_tokens(100, 10)
+
+
+def test_joining_mid_request_does_not_refund_a_stranger_into_the_pool(school, api_backend):
+    """The mirror direction: a non-member reserves on their own counter, joins while the job runs,
+    and settlement credited the SCHOOL capacity it had never spent."""
+    import app.orgs as orgs
+    res = api._reserve_tokens("newcomer", "he", "qa")
+    assert res.ctx is None
+    ctx = orgs.quota_context("pupil")
+    db.bump_pooled(ctx["member_id"], ctx["pool_id"], member_cap=0, pool_daily=0, pool_weekly=0,
+                   units=50_000)
+
+    orgs.remove_member(school, "pupil")
+    orgs.accept_invite(orgs.create_invite(school, "boss", orgs.STUDENT), "newcomer")
+    api._settle_tokens("newcomer", res, {"prompt_tokens": 100, "completion_tokens": 10}, "qa")
+
+    assert db.usage_today(ctx["pool_id"]) == 50_000       # untouched by a turn it never admitted
+    assert db.usage_today("newcomer") == plans.normalized_tokens(100, 10)
+
+
+def test_a_turn_that_crosses_midnight_settles_against_the_day_it_reserved(fresh_db, api_backend,
+                                                                          monkeypatch):
+    """Reserve at 23:59, settle at 00:01: yesterday used to keep the full estimate forever while
+    today was credited usage it never had — both counters drifting, in opposite directions."""
+    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", str(_DAY_CAP))
+    monkeypatch.setenv("CHAVRUTA_TOKENS_WEEK_FREE", "0")
+    res = api._reserve_tokens("owl", "he", "qa")
+    assert db.usage_today("owl") == res.tokens
+
+    monkeypatch.setattr(db, "today_il", lambda: "2999-01-01")     # the clock rolls over
+    api._settle_tokens("owl", res, {"prompt_tokens": 100, "completion_tokens": 10}, "qa")
+
+    assert db.usage_today("owl") == 0                             # the new day was never charged
+    with db._LOCK:
+        row = db.get_conn().execute(
+            "SELECT count FROM usage_counters WHERE owner_id=? AND day=? AND meter=?",
+            ("owl", res.day, db.TOKENS)).fetchone()
+    assert row["count"] == plans.normalized_tokens(100, 10)       # the reserving day was corrected
+
+
+# ── A lesson nobody could pay for is not free ────────────────────────────────
+def test_a_lesson_past_the_schools_weekly_count_is_paid_for_in_tokens(school, api_backend):
+    """It used to cost NOTHING: the refused lesson bump left the counter pinned, and the turn's token
+    reservation was refunded in full — so lesson #81 and every one after it was free and unbounded,
+    at the most expensive operation in the product, with the panel still reporting '80 of 80'."""
+    import app.orgs as orgs
+    ctx = orgs.quota_context("pupil")
+    db.bump_usage(ctx["pool_id"], 0, weekly_limit=0, units=ctx["weekly_lessons"], meter=db.LESSON)
+
+    res = api._reserve_tokens("pupil", "he", "lesson")
+    unpaid = api._charge_lesson_unit("pupil", res, used_byok=False)
+    assert unpaid is True
+
+    api._settle_tokens("pupil", res, {"prompt_tokens": 40_000, "completion_tokens": 6_000}, "lesson")
+    assert db.usage_today(ctx["pool_id"]) == plans.normalized_tokens(40_000, 6_000)
+
+
+def test_a_lesson_within_the_count_still_costs_no_tokens(school, api_backend):
+    """The rule that must survive the fix above: a lesson is paid for by the lesson pool, once."""
+    import app.orgs as orgs
+    ctx = orgs.quota_context("pupil")
+    res = api._reserve_tokens("pupil", "he", "lesson")
+    assert api._charge_lesson_unit("pupil", res, used_byok=False) is False
+    api._settle_tokens("pupil", res, {}, "lesson")
+    assert db.usage_today(ctx["pool_id"]) == 0
+    assert db.usage_this_week(ctx["pool_id"], meter=db.LESSON) == 1

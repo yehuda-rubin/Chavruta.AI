@@ -187,6 +187,12 @@ def rank(plan: str | None) -> int:
     return next(i for i, t in enumerate(TIERS) if t.id == canonical(plan))
 
 
+def is_institutional(plan: str | None) -> bool:
+    """Whether this tier is sold to an organisation rather than to a person. Read off `seats` rather
+    than an id prefix so adding a tier can't quietly land on the wrong side of the rule."""
+    return tier(plan).seats > 1
+
+
 def is_valid_plan(plan: str) -> bool:
     """Whether a string names a real tier — for validating operator input before issuing a coupon."""
     p = (plan or "").strip().lower()

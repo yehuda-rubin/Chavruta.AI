@@ -20,6 +20,7 @@ import uuid
 
 from fastapi import Header, HTTPException, Request
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from app import accounts as accts
 from app import auth_supabase as sb
@@ -246,7 +247,13 @@ async def rate_limit_middleware(request: Request, call_next):
     path = request.url.path
     metered = request.method == "POST" and path.startswith(_METERED_PREFIXES) and path not in _EXEMPT
     if metered:
-        key = _limit_key(request)
+        # _limit_key verifies a JWT, and on a cache miss PyJWKClient fetches the JWKS over the network
+        # with a blocking urllib call. This middleware is async, so doing that inline would park the
+        # event loop and stall every other in-flight request in the worker — not just this one — at
+        # exactly the two moments it happens: the first metered request after a restart, and a
+        # Supabase key rotation. Steady state is a local signature check and the threadpool hop is
+        # noise next to the LLM call this request is about to make.
+        key = await run_in_threadpool(_limit_key, request)
         now = time.monotonic()
         if now - _last_sweep[0] > 300:
             _last_sweep[0] = now

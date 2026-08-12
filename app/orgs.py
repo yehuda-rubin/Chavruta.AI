@@ -13,9 +13,9 @@ without it a teacher can remove the org's admin and all three of those pass.
 
 from __future__ import annotations
 
-import os
 import secrets
 import string
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import app.db as db
@@ -31,7 +31,12 @@ _RANK = {STUDENT: 0, TEACHER: 1, ADMIN: 2}
 # being decoration.
 MEMBER_CAP_MULTIPLE = 3
 
+# How long a join code lives. See create_invite.
+INVITE_DAYS = 14
+
 DEMO_ORG_ID = "org-demo"
+# The sample school's owner. Synthetic on purpose — see ensure_demo_org.
+DEMO_OWNER = "demo-admin"
 _CODE_ALPHABET = string.ascii_uppercase + string.digits
 
 
@@ -46,6 +51,24 @@ def pool_id(org_id: str) -> str:
     existing primary key indexes this for free and `_counts` / week summing work unchanged.
     """
     return f"org:{org_id}"
+
+
+def member_meter_id(org_id: str, owner_id: str) -> str:
+    """The identity a member's SHARE of the pool is counted under — deliberately not their own.
+
+    The first cut charged the member's share to their real owner id, which is the same row the free
+    tier reads. Two things fell out of that, both invisible until someone complains:
+
+    A student who spent 600,000 tokens of the school's pool on Sunday and left the school on Monday
+    was locked out of the free product for the rest of the week — their personal weekly allowance is
+    525,000, and the school's spending had already filled it. And in the other direction, a free user
+    who had spent 200,000 that morning joined at noon and got 400,000 of a 600,000 cap, for a reason
+    nobody could see.
+
+    Separate identities keep the two allowances from ever touching. It also makes leaving a school a
+    clean boundary: the org rows stay with the org, the personal row is untouched throughout.
+    """
+    return f"org:{org_id}:{owner_id}"
 
 
 # ── membership ────────────────────────────────────────────────────────────────
@@ -67,9 +90,30 @@ def effective_plan(owner_id: str) -> str:
     return plans.canonical(m["plan"]) if m else plans.canonical(db.get_plan(owner_id))
 
 
+# What a stored `daily_cap` means. The column is NOT NULL DEFAULT 0 and the two sides of the
+# boundary read 0 differently — quota_context treats it as "use the tier default", db.bump_pooled
+# treats it as "no ceiling at all" — so an admin who set 0 meaning "stop this student" got the
+# HIGHEST cap in the system. These constants make the three intentions distinct and nameable.
+CAP_DEFAULT = 0      # stored: fall back to member_cap(plan)
+CAP_BLOCKED = -1     # stored: this member may spend nothing
+
+
 def member_cap(org_plan: str) -> int:
-    """Default per-member daily ceiling for an org on `org_plan`."""
-    return plans.daily_tokens("free") * MEMBER_CAP_MULTIPLE
+    """Default per-member daily ceiling for an org on `org_plan`.
+
+    Derived from the tier rather than fixed, so retuning a tier's pool or seat count carries the
+    per-member ceiling with it. All three institution tiers currently share one per-seat allowance,
+    which is what made a constant look correct — nothing enforced that, and `daily_tokens` also
+    honours per-tier env overrides, so a throttled pool would have kept a ceiling two members could
+    drain it with.
+
+    MEMBER_CAP_MULTIPLE times an even share is deliberate over-subscription: an even split is nothing
+    to buy, and capacity moving to whoever is studying today is what pooling IS. Never below the free
+    allowance — a school seat that buys less than no school seat would be absurd.
+    """
+    t = plans.tier(org_plan)
+    share = plans.daily_tokens(org_plan) // max(1, t.seats)
+    return max(plans.daily_tokens("free"), share * MEMBER_CAP_MULTIPLE)
 
 
 def quota_context(owner_id: str) -> dict[str, Any] | None:
@@ -82,17 +126,39 @@ def quota_context(owner_id: str) -> dict[str, Any] | None:
     if not m:
         return None
     plan = plans.canonical(m["plan"])
+    stored = int(m["daily_cap"])
     return {
         "org_id": m["org_id"],
         "org_name": m["name"],
         "role": m["role"],
         "plan": plan,
         "pool_id": pool_id(m["org_id"]),
-        "member_cap": int(m["daily_cap"]) or member_cap(plan),
+        "member_id": member_meter_id(m["org_id"], owner_id),
+        "member_cap": member_cap(plan) if stored == CAP_DEFAULT else stored,
         "pool_daily": plans.daily_tokens(plan),
         "pool_weekly": plans.weekly_tokens(plan),
         "weekly_lessons": plans.weekly_lessons(plan),
     }
+
+
+def refuse_personal_purchase(owner_id: str, plan: str | None) -> str | None:
+    """Why this account may not buy or be granted `plan` for itself — or None if it may.
+
+    The rule is "would this change what the account can spend", not "is this person in a school".
+    A member draws on the pool and nothing else (api.py::_reserve_tokens branches on quota_context
+    before it reaches a personal plan, credits or BYOK), so a personal tier buys them nothing.
+
+    But the ADMIN who pays for the school is a member of it too — the first cut of this guard tested
+    membership alone and locked the paying customer out of buying, renewing or being granted the very
+    subscription that funds the org. An institutional tier bought by the account that owns the org is
+    the school's own subscription, and must go through.
+    """
+    m = membership(owner_id)
+    if not m:
+        return None
+    if plan and plans.is_institutional(plan) and m["org_owner"] == owner_id:
+        return None
+    return ("member" if m["org_owner"] != owner_id else "owner")
 
 
 def members(org_id: str) -> list[dict[str, Any]]:
@@ -173,8 +239,48 @@ def create_org(owner_id: str, name: str, plan: str, *, is_demo: bool = False) ->
     return org_id
 
 
+def owned_org(owner_id: str) -> dict[str, Any] | None:
+    """The organisation this account PAYS for, if any."""
+    with db._LOCK:
+        row = db.get_conn().execute("SELECT * FROM orgs WHERE owner_id=?", (owner_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def sync_plan_from_owner(owner_id: str, plan: str) -> str | None:
+    """Move the org's tier to match what its payer now holds. Returns the org id, or None.
+
+    Without this the school's tier was written once at creation and never again: `quota_context`
+    sizes the pool from `orgs.plan`, and no code path anywhere updated it. A school that stopped
+    paying kept its full institution pool forever — the largest money leak in the feature, and
+    invisible, because the panel reads the same stale row and cheerfully renders the whole pool. It
+    also ran the other way: a school that UPGRADED could not be given what it had just bought.
+
+    A non-institutional plan (the payer lapsed to free) degrades the pool rather than dissolving the
+    school: members keep their accounts, their history and their seats, and the tier comes straight
+    back when payment resumes. Nobody is locked out of their own study by a billing failure.
+    """
+    org = owned_org(owner_id)
+    if not org:
+        return None
+    target = plans.canonical(plan)
+    if target == plans.canonical(org["plan"]):
+        return org["id"]
+    with db._tx(db.get_conn()) as conn:
+        conn.execute("UPDATE orgs SET plan=? WHERE id=?", (target, org["id"]))
+    return org["id"]
+
+
 def create_invite(org_id: str, created_by: str, role: str, *, max_uses: int = 1,
                   expires_at: str | None = None) -> str:
+    """Mint a join code. It EXPIRES — the default is not "never".
+
+    A code is a bearer credential: whoever holds the string takes a seat and spends the pool. The
+    first cut left `expires_at` NULL on every code the product actually issued, so a class code
+    screenshotted into a group chat stayed live forever, with no route to revoke it either. A
+    fortnight is long enough to get a class signed up and short enough that a leak stops mattering.
+    """
+    if expires_at is None:
+        expires_at = (datetime.now(UTC) + timedelta(days=INVITE_DAYS)).isoformat()
     code = "".join(secrets.choice(_CODE_ALPHABET) for _ in range(10))
     with db._tx(db.get_conn()) as conn:
         conn.execute(
@@ -208,6 +314,18 @@ def accept_invite(code: str, owner_id: str) -> dict[str, Any]:
         # coupon-granted plan is stored as 'canceled' with a future period end and would slip past.
         if plans.canonical(db.get_plan(owner_id)) != "free":
             raise JoinRefused("this account holds a paid plan; leave or let it lapse first")
+        # A checkout in flight counts as holding one. start_checkout writes a 'pending' subscription
+        # but does NOT set accounts.plan, so the plan test above still reads 'free' for someone
+        # sitting on the payment page — join here and the webhook then activates a real recurring
+        # charge on an account whose spending goes to the pool instead. That is money taken monthly
+        # for an entitlement the system deliberately ignores.
+        sub = db.get_subscription(owner_id) or {}
+        if sub.get("status") in ("pending", "active"):
+            raise JoinRefused("this account has a subscription in progress; finish or cancel it first")
+        # Credits are unspendable for a member (no fallback behind the pool), so joining with a
+        # balance would quietly strand something they paid for.
+        if db.get_credits(owner_id) > 0:
+            raise JoinRefused("this account holds unused credits; spend them before joining")
         if conn.execute("SELECT 1 FROM orgs WHERE owner_id=?", (owner_id,)).fetchone():
             raise JoinRefused("this account owns an organisation")
         if conn.execute("SELECT 1 FROM org_members WHERE owner_id=? AND accepted_at IS NOT NULL",
@@ -232,19 +350,66 @@ def accept_invite(code: str, owner_id: str) -> dict[str, Any]:
     return {"org_id": org["id"], "name": org["name"], "role": inv["role"]}
 
 
+def live_invites(org_id: str) -> list[dict[str, Any]]:
+    """Codes that can still admit someone. An admin cannot revoke what they cannot see."""
+    with db._LOCK:
+        rows = db.get_conn().execute(
+            "SELECT code, role, max_uses, used_count, created_by, created_at, expires_at "
+            "FROM org_invites WHERE org_id=? AND revoked_at IS NULL AND used_count < max_uses "
+            "ORDER BY created_at DESC", (org_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def revoke_invite(org_id: str, code: str) -> bool:
+    """Kill a code. Scoped by org_id so one school cannot revoke another's."""
+    with db._tx(db.get_conn()) as conn:
+        cur = conn.execute(
+            "UPDATE org_invites SET revoked_at=? WHERE org_id=? AND code=? AND revoked_at IS NULL",
+            (db._now(), org_id, code.strip().upper()))
+    return cur.rowcount > 0
+
+
 def remove_member(org_id: str, owner_id: str) -> bool:
     """Delete the row rather than nulling accepted_at — a revoked membership that still exists is
-    one re-POST away from being live again."""
+    one re-POST away from being live again.
+
+    Their unspent codes die with the membership. Otherwise removal was advisory: a dismissed teacher
+    walks back in with a code they minted while employed (every precondition in accept_invite passes
+    again the moment they are removed), and the admin has no route to stop it. This is the only lever
+    an admin has, so it has to actually hold.
+    """
     with db._tx(db.get_conn()) as conn:
+        conn.execute("UPDATE org_invites SET revoked_at=? WHERE org_id=? AND created_by=? "
+                     "AND revoked_at IS NULL", (db._now(), org_id, owner_id))
         cur = conn.execute("DELETE FROM org_members WHERE org_id=? AND owner_id=?",
                            (org_id, owner_id))
     return cur.rowcount > 0
 
 
+def close_org(org_id: str) -> None:
+    """Wind up a school: memberships and codes go, the org row goes, the pool counters stay.
+
+    The escape hatch the first cut had no equivalent of. An org owner could not delete their account
+    (purge_owner refuses one), could not leave their own org, and there was no way to close it — so
+    the paying administrator, the account most likely to receive an erasure request, was permanently
+    undeletable through the product and support had only raw SQL. Members revert to their own free
+    accounts untouched, which is what they had before joining.
+
+    The pool's usage_counters rows are deliberately left: they are measurements under a synthetic id
+    that names no person, and deleting them would rewrite history for aggregates already reported.
+    """
+    with db._tx(db.get_conn()) as conn:
+        conn.execute("DELETE FROM org_invites WHERE org_id=?", (org_id,))
+        conn.execute("DELETE FROM org_members WHERE org_id=?", (org_id,))
+        conn.execute("DELETE FROM orgs WHERE id=?", (org_id,))
+
+
 def set_member_cap(org_id: str, owner_id: str, daily_cap: int) -> bool:
+    """Store a member's ceiling. See CAP_DEFAULT / CAP_BLOCKED for what the values mean."""
+    value = CAP_BLOCKED if int(daily_cap) < 0 else int(daily_cap)
     with db._tx(db.get_conn()) as conn:
         cur = conn.execute("UPDATE org_members SET daily_cap=? WHERE org_id=? AND owner_id=?",
-                           (max(0, int(daily_cap)), org_id, owner_id))
+                           (value, org_id, owner_id))
     return cur.rowcount > 0
 
 
@@ -256,11 +421,18 @@ def ensure_demo_org() -> str:
     what a school administrator sees WITHOUT opening a real school's records — which would be a back
     door to exactly the data spec 004 decided no one outside a school may read. Nothing here accepts
     an org id from the client; the id is this constant, so there is nothing to parameterise.
+
+    Every id in here is synthetic, INCLUDING the owner. It used to be the operator's real account,
+    on the reasoning that someone has to own it — and one look at the demo panel then quietly turned
+    that account into a school member for good: its questions started charging the demo pool, it
+    could no longer buy or be granted anything (the wallet guards test membership), and it became
+    undeletable (purge_owner refuses an org owner). The operator's route into this panel is
+    _is_admin, not membership — api.py::_org_for hardcodes the role for the demo branch — so nothing
+    needed a real account here at all.
     """
     if get_org(DEMO_ORG_ID):
         return DEMO_ORG_ID
-    operator = (os.environ.get("CHAVRUTA_ADMIN_OWNERS", "").split(",") or [""])[0].strip() or "local"
-    create_org(operator, "בית ספר לדוגמה", "institution", is_demo=True)
+    create_org(DEMO_OWNER, "בית ספר לדוגמה", "institution", is_demo=True)
     now = db._now()
     demo = [("demo-teacher-1", TEACHER), ("demo-student-1", STUDENT),
             ("demo-student-2", STUDENT), ("demo-student-3", STUDENT)]

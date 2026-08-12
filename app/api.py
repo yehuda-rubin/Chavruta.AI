@@ -19,6 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import NamedTuple
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -1921,7 +1922,7 @@ def _quota_message(kind: str, lang: str, balance: int, cost: int) -> str:
     return head + tail
 
 
-def _charge_lesson_unit(owner: str, used_byok: bool) -> None:
+def _charge_lesson_unit(owner: str, res: Reservation, used_byok: bool) -> bool:
     """The lesson pool: a weekly COUNT, entirely independent of conversation tokens — charged
     post-hoc, from _metered, ONLY for the turn that actually produced a real lesson (files/lesson_id
     non-empty — see _run_lesson). Preliminary turns in a lesson-mode conversation (resolving
@@ -1935,40 +1936,69 @@ def _charge_lesson_unit(owner: str, used_byok: bool) -> None:
     Falls back to credits exactly like the old pre-charge did; logs (rather than 429s) if the account
     is over quota with nothing left to spend, so the imbalance is visible without punishing a request
     that already completed.
+
+    Returns True when the lesson could NOT be charged to a lesson pool and its token reservation must
+    therefore settle at real usage instead of being refunded — otherwise an over-cap lesson is free.
     """
     if owner == "local":
-        return
+        return False
+    ctx = res.ctx
     # A member's lessons come out of the SCHOOL's weekly count, not a personal one. If each member
     # simply inherited the org's plan, 20 members would each get its full lesson allowance — 1,600
     # lessons a week from one subscription, each running the agentic loop over a large source pool.
     # The lesson meter is entirely separate from tokens, so the pooled token counter does not bound
     # it and this has to be pooled explicitly.
-    ctx = orgs.quota_context(owner)
     if ctx:
         allowed, _d, _w = db.bump_usage(ctx["pool_id"], 0, weekly_limit=ctx["weekly_lessons"],
                                         units=1, meter=db.LESSON)
-        if not allowed:
-            _log.warning("org=%s produced a lesson beyond its weekly pool (member=%s)",
-                         ctx["org_id"], owner)
-        return
+        if allowed:
+            return False
+        _log.warning("org=%s produced a lesson beyond its weekly pool (member=%s)",
+                     ctx["org_id"], owner)
+        # Past the cap the lesson still has to be PAID for. It used to cost nothing at all: the
+        # refused bump leaves the lesson counter pinned, and _metered zeroes the turn's usage so its
+        # token reservation was refunded in full — so lesson #81 and every one after it was free,
+        # unbounded, at ~58,000 normalized tokens each, with the panel still reporting "80 of 80".
+        # Returning True tells _metered to settle this turn at REAL usage instead, so it comes out of
+        # the token pool, shows up in the figures, and counts against the member's own cap.
+        return True
     limit = plans.weekly_lessons(db.get_plan(owner))
     if limit <= 0:
-        return
+        return False
     lesson_meter = db.BYOK_LESSON if used_byok else db.LESSON
     allowed, _d, _w = db.bump_usage(owner, 0, weekly_limit=limit, units=1, meter=lesson_meter)
     if allowed:
-        return
+        return False
     cost = plans.credit_cost("lesson")
     spent, balance = db.spend_credits(owner, cost)
     if spent:
         _log.info("owner=%s over weekly lesson quota; spent %d credit(s), %d left", owner, cost, balance)
-        return
+        return False
     _log.warning("owner=%s produced a lesson beyond quota with no credits left (balance=%d)",
                 owner, balance)
+    return True     # nothing paid for it — let the token reservation stand at real usage
 
 
-def _reserve_tokens(owner: str, lang: str, intent: str, user_key: str = "") -> tuple[int, bool]:
-    """Admit a conversation turn against an ESTIMATE of its token cost. Returns (reserved, used_byok).
+class Reservation(NamedTuple):
+    """What a turn was admitted against, captured ONCE at entry and carried to settlement.
+
+    `ctx` and `day` are the load-bearing fields. Settlement used to re-resolve both, which broke in
+    two directions with real money in them. A member removed (or leaving) between reserve and settle
+    resolved to None, so the school's pool kept the full estimate with nothing left in the world able
+    to release it — and the async paths make that window minutes, not milliseconds. A non-member who
+    joined mid-request resolved to a pool that had never been charged, and the refund landed on the
+    school as free capacity. The day has the same shape at midnight: reserve on one day, settle on
+    the next, and yesterday keeps the estimate while today is credited usage it never had.
+    """
+
+    tokens: int
+    used_byok: bool = False
+    ctx: dict | None = None
+    day: str = ""
+
+
+def _reserve_tokens(owner: str, lang: str, intent: str, user_key: str = "") -> Reservation:
+    """Admit a conversation turn against an ESTIMATE of its token cost.
 
     The quota is denominated in tokens but they are only known after the call, so the turn is
     charged an estimate up front and corrected by _settle_tokens once the real figure comes back.
@@ -1987,25 +2017,27 @@ def _reserve_tokens(owner: str, lang: str, intent: str, user_key: str = "") -> t
     # member's situation is by then, and a member removed mid-request would leave the school's
     # reservation permanently unreleased. Non-members take the original path untouched.
     ctx = orgs.quota_context(owner)
+    day = db.today_il()
     if ctx:
-        allowed, _pd, _pw = db.bump_pooled(
-            owner, ctx["pool_id"], member_cap=ctx["member_cap"], pool_daily=ctx["pool_daily"],
-            pool_weekly=ctx["pool_weekly"], units=estimate, meter=db.TOKENS)
-        if allowed:
-            return estimate, False
+        charge = db.bump_pooled(
+            ctx["member_id"], ctx["pool_id"], member_cap=ctx["member_cap"],
+            pool_daily=ctx["pool_daily"], pool_weekly=ctx["pool_weekly"], units=estimate,
+            meter=db.TOKENS, day=day)
+        if charge.allowed:
+            return Reservation(estimate, False, ctx, day)
         # Deliberately no credit or BYOK fallback for a member: both would let one person spend past
         # the cap the school set for them, which is the single control an admin has over the pool.
-        raise HTTPException(status_code=429, detail=_quota_message("day", lang, 0, 0))
+        raise HTTPException(status_code=429, detail=_pool_quota_message(charge.refused, lang, ctx))
 
     plan = db.get_plan(owner)
     daily, weekly = plans.daily_tokens(plan), plans.weekly_tokens(plan)
     if daily <= 0 and weekly <= 0:
-        return 0, False
+        return Reservation(0)
 
     allowed, _d, used_week = db.bump_usage(owner, daily, weekly_limit=weekly, units=estimate,
                                            meter=db.TOKENS)
     if allowed:
-        return estimate, False
+        return Reservation(estimate, False, None, day)
 
     weekly_hit = weekly > 0 and used_week + estimate > weekly
 
@@ -2013,19 +2045,45 @@ def _reserve_tokens(owner: str, lang: str, intent: str, user_key: str = "") -> t
         b_allowed, _bd, _bw = db.bump_usage(owner, daily, weekly_limit=weekly, units=estimate,
                                             meter=db.BYOK_TOKENS)
         if b_allowed:
-            return estimate, True
+            return Reservation(estimate, True, None, day)
 
     cost = plans.credit_cost(intent)
     spent, balance = db.spend_credits(owner, cost)
     if spent:
         _log.info("owner=%s over %s token quota; spent %d credit(s), %d left",
                   owner, "weekly" if weekly_hit else "daily", cost, balance)
-        return 0, False            # paid for with credits — nothing reserved, so nothing to settle
+        return Reservation(0)      # paid for with credits — nothing reserved, so nothing to settle
     raise HTTPException(status_code=429,
                         detail=_quota_message("week" if weekly_hit else "day", lang, balance, cost))
 
 
-def _settle_tokens(owner: str, reserved: int, usage: dict, intent: str, meter: str = db.TOKENS) -> None:
+def _pool_quota_message(refused: str, lang: str, ctx: dict) -> str:
+    """The 429 a school member sees. It names the ceiling that actually stopped them.
+
+    The old message said "resets tomorrow" whichever of the three ceilings bit — so a school that had
+    exhausted its WEEK was told to come back in the morning, which is the precise wrong statement
+    _quota_message exists to avoid. Worse, it closed by advising the reader to upgrade their plan or
+    redeem a coupon: two things the server now refuses a member outright. Someone who cannot spend
+    tells their school administrator, who has the actual lever.
+    """
+    he = (lang or "he").startswith("he")
+    name = ctx.get("org_name") or ""
+    if refused == "blocked":
+        return ("החשבון שלך במוסד מוגבל כרגע ואינו יכול לשלוח שאלות. פנה למנהל המוסד."
+                if he else "Your account has been paused by your institution. Ask your administrator.")
+    if refused == "member_cap":
+        return ("הגעת למכסה היומית שמנהל המוסד הקצה לך. היא מתחדשת מחר, ומנהל המוסד יכול להגדיל אותה."
+                if he else "You've reached the daily allowance your institution set for you. It "
+                           "renews tomorrow, and your administrator can raise it.")
+    if refused == "week":
+        return (f"המוסד {name} ניצל את המכסה השבועית המשותפת. היא מתאפסת ביום ראשון.".strip()
+                if he else f"{name} has used its shared weekly allowance. It resets on Sunday.".strip())
+    return (f"המוסד {name} ניצל את המכסה היומית המשותפת. היא מתחדשת מחר.".strip()
+            if he else f"{name} has used its shared daily allowance. It renews tomorrow.".strip())
+
+
+def _settle_tokens(owner: str, res: Reservation, usage: dict, intent: str,
+                   meter: str = db.TOKENS) -> None:
     """Replace the reservation with what the request actually spent, against whichever meter it was
     reserved from (the plan's own TOKENS, or BYOK_TOKENS when the turn ran on the caller's own key).
 
@@ -2034,23 +2092,25 @@ def _settle_tokens(owner: str, reserved: int, usage: dict, intent: str, meter: s
     the turn that actually produces a real lesson skips this (see _metered, which zeroes `usage`
     before calling here for that one turn, so its reservation nets to zero spent instead of settling
     a real charge — that turn is paid for from the lesson pool by _charge_lesson_unit instead).
+
+    Everything about WHO and WHEN comes off the Reservation, never from a fresh lookup — see the
+    Reservation docstring for the two ways re-resolving moved a school's money.
     """
     if owner == "local":
         return
     actual = plans.normalized_tokens(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
-    if not actual and not reserved:
+    if not actual and not res.tokens:
         return
-    ctx = orgs.quota_context(owner)
-    if ctx and meter == db.TOKENS:
+    if res.ctx and meter == db.TOKENS:
         # Both counters, together — settling only the member's row would leave the school charged the
         # generous ESTIMATE for every turn, burning the pool several times faster than real use.
-        db.settle_pooled(owner, ctx["pool_id"], reserved, actual)
+        db.settle_pooled(res.ctx["member_id"], res.ctx["pool_id"], res.tokens, actual, day=res.day)
         _log.info("owner=%s org=%s tokens reserved=%d actual=%d calls=%d",
-                  owner, ctx["org_id"], reserved, actual, usage.get("calls", 0))
+                  owner, res.ctx["org_id"], res.tokens, actual, usage.get("calls", 0))
         return
-    total = db.settle_usage(owner, reserved, actual, meter=meter)
+    total = db.settle_usage(owner, res.tokens, actual, meter=meter, day=res.day or None)
     _log.info("owner=%s meter=%s tokens reserved=%d actual=%d calls=%d total=%d",
-              owner, meter, reserved, actual, usage.get("calls", 0), total)
+              owner, meter, res.tokens, actual, usage.get("calls", 0), total)
 
 
 def _lesson_id_of(result) -> str:
@@ -2064,7 +2124,7 @@ def _lesson_id_of(result) -> str:
     return got.get("lesson_id") or ""
 
 
-def _metered(owner: str, reserved: int, intent: str, fn, req: QueryRequest | None = None,
+def _metered(owner: str, reserved: Reservation, intent: str, fn, req: QueryRequest | None = None,
             meter: str = db.TOKENS):
     """Wrap a generation so its real token spend replaces the reservation, and record what happened.
 
@@ -2098,8 +2158,13 @@ def _metered(owner: str, reserved: int, intent: str, fn, req: QueryRequest | Non
                 # must be charged from the lesson pool the same as a turn requested as "lesson" —
                 # charging by what actually happened, not by which mode was originally selected.
                 if _lesson_id_of(result):
-                    _charge_lesson_unit(owner, used_byok=(meter == db.BYOK_TOKENS))
-                    _settle_tokens(owner, reserved, {}, intent, meter=meter)
+                    # A lesson normally nets its token reservation to zero — it is paid for out of
+                    # the weekly lesson count instead, and must not cost twice. But when NOTHING
+                    # could pay for it (the pool's weekly lessons are gone, or a personal account is
+                    # over quota with no credits), zeroing it made the most expensive operation in
+                    # the product completely free, without limit. Then it settles for real.
+                    unpaid = _charge_lesson_unit(owner, reserved, used_byok=(meter == db.BYOK_TOKENS))
+                    _settle_tokens(owner, reserved, usage if unpaid else {}, intent, meter=meter)
                 else:
                     _settle_tokens(owner, reserved, usage, intent, meter=meter)
                 _record_event(owner, intent, req, usage, result, error,
@@ -2149,7 +2214,7 @@ def _record_event(owner: str, intent: str, req: QueryRequest | None, usage: dict
         _log.exception("failed to record usage telemetry")
 
 
-def _enforce_quota(owner: str, lang: str, intent: str = "", user_key: str = "") -> tuple[int, bool]:
+def _enforce_quota(owner: str, lang: str, intent: str = "", user_key: str = "") -> Reservation:
     """Reserve against the conversation-token pool and admit the turn. Returns (tokens reserved,
     used_byok). Every intent goes through here the same way, lesson included — see _charge_lesson_unit
     for why a lesson's OWN weekly pool is charged separately, post-hoc, instead of gating entry here.
@@ -2159,7 +2224,7 @@ def _enforce_quota(owner: str, lang: str, intent: str = "", user_key: str = "") 
     the caller's own provider API key (X-User-LLM-Key), if any — see _byok_supported.
     """
     if owner == "local":
-        return 0, False
+        return Reservation(0)
     return _reserve_tokens(owner, lang, intent, user_key)
 
 
@@ -2180,10 +2245,10 @@ def _resolve_llm_for_request(owner: str, lang: str, intent: str, user_key: str |
     lands in the right pool. `base_url`/`model` let the caller point their key at a different
     provider/model entirely — see _byok_llm's docstring."""
     key = _hstr(user_key)
-    reserved, used_byok = _enforce_quota(owner, lang, intent, user_key=key)
-    if used_byok:
-        return reserved, _byok_llm(key, _hstr(base_url), _hstr(model)), db.BYOK_TOKENS
-    return reserved, None, db.TOKENS
+    res = _enforce_quota(owner, lang, intent, user_key=key)
+    if res.used_byok:
+        return res, _byok_llm(key, _hstr(base_url), _hstr(model)), db.BYOK_TOKENS
+    return res, None, db.TOKENS
 
 
 class QueryRequest(BaseModel):
@@ -2274,12 +2339,25 @@ def me(owner: str = Depends(current_owner)):
             return None
         return round(max(0.0, min(1.0, (cap - used) / cap)), 2)
 
-    day_left = _left(0 if is_local else db.usage_today(owner, meter=db.TOKENS),
-                     plans.daily_tokens(plan))
-    week_left = _left(0 if is_local else db.usage_this_week(owner, meter=db.TOKENS),
-                      plans.weekly_tokens(plan))
-    lessons_left = _left(0 if is_local else db.usage_this_week(owner, meter=db.LESSON),
-                         plans.weekly_lessons(plan))
+    # A school member's gauges must read the pool they actually spend, not their personal plan —
+    # which for a member is always 'free', because that is the only plan accept_invite admits. Every
+    # figure here was wrong for them: the day gauge hit 0% at a third of their real ceiling and told
+    # them they were out while the school had bought them three times that; the lesson gauge could
+    # never move at all, because a member's lessons are counted against the org's pool and their own
+    # LESSON meter is never touched — so it showed a full allowance forever and no warning ever fired.
+    ctx = None if is_local else orgs.quota_context(owner)
+    if ctx:
+        day_left = _left(db.usage_today(ctx["member_id"], meter=db.TOKENS), ctx["member_cap"])
+        week_left = _left(db.usage_this_week(ctx["pool_id"], meter=db.TOKENS), ctx["pool_weekly"])
+        lessons_left = _left(db.usage_this_week(ctx["pool_id"], meter=db.LESSON),
+                             ctx["weekly_lessons"])
+    else:
+        day_left = _left(0 if is_local else db.usage_today(owner, meter=db.TOKENS),
+                         plans.daily_tokens(plan))
+        week_left = _left(0 if is_local else db.usage_this_week(owner, meter=db.TOKENS),
+                          plans.weekly_tokens(plan))
+        lessons_left = _left(0 if is_local else db.usage_this_week(owner, meter=db.LESSON),
+                             plans.weekly_lessons(plan))
     byok_day_left = _left(0 if is_local else db.usage_today(owner, meter=db.BYOK_TOKENS),
                          plans.daily_tokens(plan))
     byok_week_left = _left(0 if is_local else db.usage_this_week(owner, meter=db.BYOK_TOKENS),
@@ -3118,21 +3196,37 @@ def org_panel(demo: bool = False, owner: str = Depends(current_owner)):
     daily_cap = plans.daily_tokens(m["plan"])
 
     rows = orgs.members(org_id)
+    # The ROSTER is a teacher-and-up view. This route was the only /orgs/* one with no role floor,
+    # and the masking below considered teacher-vs-admin only — so a student got every classmate's
+    # account id, role and cap. In a school that is a list of minors' identifiers handed to every
+    # other minor, and the /school button being hidden from students is client-side decoration.
+    # A student still sees their own row: their own usage is theirs to see.
+    if orgs.rank(m["role"]) < orgs.rank(orgs.TEACHER):
+        rows = [r for r in rows if r["owner_id"] == owner]
     out_members: list[OrgMemberOut] = []
     for r in rows:
         # A teacher sees the roster; per-member figures are an admin view. Least privilege: starting
         # narrow costs nothing, and widening later is easy where narrowing after the fact is not.
         show = is_admin_role or r["owner_id"] == owner
+        # The member's SCHOOL usage, under its own counter identity — never their personal one. Those
+        # were the same row until it turned out a school could see what someone spent on their own
+        # free account that morning, and a member who left carried the school's spending into their
+        # own weekly cap. See orgs.member_meter_id.
+        mid = orgs.member_meter_id(org_id, r["owner_id"])
         out_members.append(OrgMemberOut(
             owner_id=r["owner_id"], role=r["role"], daily_cap=r["daily_cap"] or 0,
             accepted=bool(r["accepted_at"]),
-            tokens_today=db.usage_today(r["owner_id"], meter=db.TOKENS) if show else 0,
-            tokens_week=db.usage_this_week(r["owner_id"], meter=db.TOKENS) if show else 0,
+            tokens_today=db.usage_today(mid, meter=db.TOKENS) if show else 0,
+            tokens_week=db.usage_this_week(mid, meter=db.TOKENS) if show else 0,
         ))
 
     topics: list[dict] = []
     if is_admin_role:
-        topics = db.usage_by_intent_for([r["owner_id"] for r in rows])
+        # Bounded per member to their OWN join date. A school is entitled to see what it is paying
+        # for; it is not entitled to the year of private study someone did on their own account
+        # before joining, which is what the first panel load after a teacher joined would otherwise
+        # have reported as "what this member has been studying".
+        topics = db.usage_by_intent_for({r["owner_id"]: r["accepted_at"] for r in rows})
 
     orgs.log_access(org_id, owner, "view_panel")
     return OrgPanelOut(
@@ -3166,13 +3260,50 @@ def org_invite(req: InviteIn, owner: str = Depends(current_owner)):
     except orgs.OrgAccessError:
         raise HTTPException(status_code=404, detail="not found") from None
     role = (req.role or orgs.STUDENT).strip().lower()
-    if role not in (orgs.STUDENT, orgs.TEACHER, orgs.ADMIN):
+    # No admin codes over the API at all. A multi-use admin code is a bearer credential that hands
+    # over a school of minors: the holder reads the roster, re-caps and removes every other member.
+    # There is no workflow that needs one — a second administrator is rare enough to be an operator
+    # action — and the UI never offered it, so this closes a door only an attacker was using.
+    if role not in (orgs.STUDENT, orgs.TEACHER):
         raise HTTPException(status_code=422, detail="unknown role")
     if orgs.rank(role) > orgs.rank(actor["role"]):
         raise HTTPException(status_code=404, detail="not found")   # never mint above your own rank
-    code = orgs.create_invite(m["org_id"], owner, role, max_uses=req.max_uses)
+    # A staff code admits ONE person. Thirty students joining from one class code is the point of a
+    # multi-use code; thirty teachers from one is a leak nobody would notice.
+    uses = req.max_uses if role == orgs.STUDENT else 1
+    code = orgs.create_invite(m["org_id"], owner, role, max_uses=uses)
     orgs.log_access(m["org_id"], owner, "invite:" + role)
-    return {"code": code, "role": role, "max_uses": req.max_uses}
+    return {"code": code, "role": role, "max_uses": uses, "expires_days": orgs.INVITE_DAYS}
+
+
+@app.get("/orgs/invites")
+def org_invites(owner: str = Depends(current_owner)):
+    """Codes that can still admit someone. An admin cannot revoke what they cannot see."""
+    m = _org_for(owner)
+    try:
+        orgs.require_member(owner, m["org_id"], orgs.TEACHER)
+    except orgs.OrgAccessError:
+        raise HTTPException(status_code=404, detail="not found") from None
+    return {"invites": orgs.live_invites(m["org_id"])}
+
+
+class RevokeIn(BaseModel):
+    code: str = Field(max_length=32)
+
+
+@app.post("/orgs/invite/revoke")
+def org_revoke_invite(req: RevokeIn, owner: str = Depends(current_owner)):
+    """Kill a code. Without this, a code leaked into a group chat was a permanent key to the pool and
+    removal was advisory — the removed member simply rejoined with the code that admitted them."""
+    m = _org_for(owner)
+    try:
+        orgs.require_member(owner, m["org_id"], orgs.TEACHER)
+    except orgs.OrgAccessError:
+        raise HTTPException(status_code=404, detail="not found") from None
+    if not orgs.revoke_invite(m["org_id"], req.code):
+        raise HTTPException(status_code=404, detail="not found")
+    orgs.log_access(m["org_id"], owner, "revoke_invite")
+    return {"revoked": True}
 
 
 class JoinIn(BaseModel):
@@ -3199,14 +3330,43 @@ def org_leave(owner: str = Depends(current_owner)):
     org = orgs.get_org(m["org_id"]) or {}
     if org.get("owner_id") == owner:
         raise HTTPException(status_code=409,
-                            detail="transfer ownership before leaving your own organisation")
+                            detail="an organisation's owner closes it rather than leaving it")
     orgs.remove_member(m["org_id"], owner)
+    # Logged like every other roster change. Leaving alters the roster and frees a seat, and an audit
+    # trail that records who was removed but not who walked out cannot answer "why is this seat free".
+    orgs.log_access(m["org_id"], owner, "leave")
     return {"left": True}
+
+
+@app.post("/orgs/close")
+def org_close(owner: str = Depends(current_owner)):
+    """Wind up the school. Only its owner, and it is the way out of an otherwise closed loop.
+
+    Before this, an org owner could not leave their own org (no transfer route exists), could not
+    delete their account (purge_owner refuses an org owner), and nothing anywhere deleted an `orgs`
+    row — so the paying administrator, the account most likely to receive an erasure request, was
+    permanently undeletable and support's only remedy was raw SQL against production.
+
+    Members revert to their own free accounts with their conversations and lessons intact: the school
+    bought quota, not anyone's work. Billing is NOT cancelled here — that is /billing/cancel, and
+    silently stopping someone's payments as a side effect of a different button would be worse than
+    making them press two.
+    """
+    org = orgs.owned_org(owner)
+    if not org:
+        raise HTTPException(status_code=404, detail="not found")
+    orgs.log_access(org["id"], owner, "close_org")
+    orgs.close_org(org["id"])
+    _log.info("org %s closed by its owner %s", org["id"], owner)
+    return {"closed": True, "org_id": org["id"]}
 
 
 class MemberActionIn(BaseModel):
     owner_id: str = Field(max_length=128)
-    daily_cap: int | None = Field(default=None, ge=0)
+    # -1 is orgs.CAP_BLOCKED (this member may spend nothing), 0 is the tier default. The two used to
+    # collapse into one value, so an admin who set 0 to stop a disruptive student handed them the
+    # HIGHEST cap in the system instead, and nothing anywhere said otherwise.
+    daily_cap: int | None = Field(default=None, ge=-1)
 
 
 @app.post("/orgs/members/remove")
@@ -3232,6 +3392,13 @@ def org_set_cap(req: MemberActionIn, owner: str = Depends(current_owner)):
         orgs.require_can_act_on(actor, req.owner_id)
     except orgs.OrgAccessError:
         raise HTTPException(status_code=404, detail="not found") from None
-    orgs.set_member_cap(m["org_id"], req.owner_id, req.daily_cap or 0)
+    # The owner is the one member no one else may throttle. require_can_act_on permits equal ranks by
+    # design (an admin may act on an admin), so without this a second administrator could cap the
+    # paying owner at a single token — and the owner has no route to read or reset their own cap.
+    if (orgs.get_org(m["org_id"]) or {}).get("owner_id") == req.owner_id and req.owner_id != owner:
+        raise HTTPException(status_code=409, detail="the organisation owner's cap cannot be changed")
+    cap = orgs.CAP_DEFAULT if req.daily_cap is None else req.daily_cap
+    if not orgs.set_member_cap(m["org_id"], req.owner_id, cap):
+        raise HTTPException(status_code=404, detail="not found")
     orgs.log_access(m["org_id"], owner, "set_cap", req.owner_id)
-    return {"owner_id": req.owner_id, "daily_cap": req.daily_cap or 0}
+    return {"owner_id": req.owner_id, "daily_cap": cap}

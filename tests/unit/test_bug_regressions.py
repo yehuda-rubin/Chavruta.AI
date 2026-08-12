@@ -1434,7 +1434,8 @@ def test_metered_charges_lesson_pool_only_when_a_real_lesson_was_produced(monkey
     lesson_charges = []
     settle_calls = []
     monkeypatch.setattr(api, "_charge_lesson_unit",
-                        lambda owner, used_byok: lesson_charges.append((owner, used_byok)))
+                        lambda owner, res, used_byok: (lesson_charges.append((owner, used_byok))
+                                                       or False))
     monkeypatch.setattr(api, "_settle_tokens",
                         lambda owner, reserved, usage, intent, meter=api.db.TOKENS:
                             settle_calls.append(dict(usage)))
@@ -1447,7 +1448,7 @@ def test_metered_charges_lesson_pool_only_when_a_real_lesson_was_produced(monkey
         return api.QueryResponse(answer="למי מיועד השיעור?", citations=[], grounded=False,
                                  intent="lesson", files=[])
 
-    api._metered("owner1", reserved=20_000, intent="lesson", fn=_prelim)()
+    api._metered("owner1", reserved=api.Reservation(20_000), intent="lesson", fn=_prelim)()
     assert lesson_charges == [], "a preliminary (no-lesson-yet) turn must not touch the lesson pool"
     assert settle_calls[-1] == {"prompt_tokens": 500, "completion_tokens": 120, "calls": 1}, \
         "a preliminary turn's real token spend must settle as an ordinary conversation-token charge"
@@ -1460,7 +1461,7 @@ def test_metered_charges_lesson_pool_only_when_a_real_lesson_was_produced(monkey
                                  files=[api.FileOut(name="x.doc", title="x", content="c")],
                                  lesson_id="abc123")
 
-    api._metered("owner1", reserved=20_000, intent="lesson", fn=_real_lesson)()
+    api._metered("owner1", reserved=api.Reservation(20_000), intent="lesson", fn=_real_lesson)()
     assert lesson_charges == [("owner1", False)], "the real-lesson turn must charge exactly one lesson unit"
     assert settle_calls[-1] == {}, \
         "the real-lesson turn's token spend must be suppressed — paid for by the lesson pool instead"

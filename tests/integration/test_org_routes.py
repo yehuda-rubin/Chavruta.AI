@@ -1,0 +1,241 @@
+"""HTTP-level coverage of /orgs/* — spec 004.
+
+Everything here was previously proven only at the module level, which is why the roster leak below
+survived the first review: the role floors, the 404-never-403 convention and the JoinRefused mapping
+all live in the ROUTE, and no test had ever issued a request to one.
+
+Same TestClient fixture as test_admin_routes.py. Callers are distinguished by API key, since in
+API-key mode `_owner_from_key` hashes the presented key into a stable owner id — which gives us
+several distinct authenticated accounts without standing up Supabase.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from types import SimpleNamespace
+
+import pytest
+from fastapi.testclient import TestClient
+
+import app.api as api
+import app.db as db
+import app.orgs as orgs
+
+
+def _owner_of(key: str) -> str:
+    """The owner id app.security derives from an API key — so a test can seed rows for that account
+    before it ever makes a request."""
+    return "u_" + hashlib.sha256(key.encode()).hexdigest()[:16]
+
+
+BOSS, TEACH, PUPIL, OUTSIDER = "k-boss", "k-teach", "k-pupil", "k-outsider"
+
+
+@pytest.fixture
+def client(monkeypatch, tmp_path):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr(db, "_conn", None)
+    monkeypatch.setattr(api, "_assert_config_usable", lambda: None)
+    fake_pipeline = SimpleNamespace(
+        embedding=SimpleNamespace(embed_query=lambda q: SimpleNamespace(dense=[0.0], sparse={})))
+    monkeypatch.setattr(api, "_get_pipeline", lambda: fake_pipeline)
+    monkeypatch.delenv("CHAVRUTA_ADMIN_OWNERS", raising=False)
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_JWKS_URL", raising=False)
+    monkeypatch.setenv("CHAVRUTA_API_KEYS", ",".join([BOSS, TEACH, PUPIL, OUTSIDER]))
+    with TestClient(api.app) as c:
+        yield c
+
+
+@pytest.fixture
+def school(client):
+    """A school with an owner-admin, a teacher and a student, built through the real join flow."""
+    oid = orgs.create_org(_owner_of(BOSS), "בית ספר", "institution")
+    for key, role in ((TEACH, orgs.TEACHER), (PUPIL, orgs.STUDENT)):
+        code = orgs.create_invite(oid, _owner_of(BOSS), role)
+        orgs.accept_invite(code, _owner_of(key))
+    return oid
+
+
+def h(key: str) -> dict:
+    return {"Authorization": f"Bearer {key}"}
+
+
+# ── The roster: a student must not receive a list of their classmates ─────────
+# This is the finding that motivated the file. /orgs/panel was the one route with no role floor, and
+# the masking inside it considered teacher-vs-admin only — so every student got every classmate's
+# account id, role and cap. In a school that is a roster of minors handed to every other minor, and
+# the button being hidden from students in the UI is decoration, not a control.
+def test_a_student_sees_only_their_own_row(client, school):
+    body = client.get("/orgs/panel", headers=h(PUPIL)).json()
+    assert [m["owner_id"] for m in body["members"]] == [_owner_of(PUPIL)]
+    assert body["topics"] == []
+
+
+def test_a_teacher_sees_the_whole_roster(client, school):
+    body = client.get("/orgs/panel", headers=h(TEACH)).json()
+    assert {m["owner_id"] for m in body["members"]} == {
+        _owner_of(BOSS), _owner_of(TEACH), _owner_of(PUPIL)}
+    # ...but not each member's figures: those are an admin view.
+    assert [m for m in body["members"] if m["owner_id"] == _owner_of(PUPIL)][0]["tokens_today"] == 0
+
+
+def test_the_panel_never_returns_conversation_text(client, school):
+    """Spec 004 decision 1. `sessions.first_q` is the verbatim opening question of every chat, and
+    joining that table is the innocent-looking way this promise gets broken."""
+    db.create_session("מה אומר רש\"י על בראשית א א", owner_id=_owner_of(PUPIL))
+    raw = client.get("/orgs/panel", headers=h(BOSS)).text
+    assert "רש" not in raw
+
+
+# ── 404, never 403 ───────────────────────────────────────────────────────────
+def test_a_non_member_gets_404_from_every_org_route(client, school):
+    """403 would tell an outsider the org is real and that they merely lack a role."""
+    assert client.get("/orgs/panel", headers=h(OUTSIDER)).status_code == 404
+    assert client.get("/orgs/invites", headers=h(OUTSIDER)).status_code == 404
+    assert client.post("/orgs/invite", json={"role": "student"}, headers=h(OUTSIDER)).status_code == 404
+    assert client.post("/orgs/leave", headers=h(OUTSIDER)).status_code == 404
+    assert client.post("/orgs/close", headers=h(OUTSIDER)).status_code == 404
+    assert client.post("/orgs/members/remove", json={"owner_id": "x"},
+                       headers=h(OUTSIDER)).status_code == 404
+
+
+def test_a_student_gets_404_from_every_write_route(client, school):
+    assert client.post("/orgs/invite", json={"role": "student"}, headers=h(PUPIL)).status_code == 404
+    assert client.post("/orgs/members/remove", json={"owner_id": _owner_of(TEACH)},
+                       headers=h(PUPIL)).status_code == 404
+    assert client.post("/orgs/members/cap", json={"owner_id": _owner_of(TEACH), "daily_cap": 1},
+                       headers=h(PUPIL)).status_code == 404
+
+
+def test_a_teacher_cannot_remove_the_admin_over_http(client, school):
+    r = client.post("/orgs/members/remove", json={"owner_id": _owner_of(BOSS)}, headers=h(TEACH))
+    assert r.status_code == 404
+    assert orgs.membership(_owner_of(BOSS)) is not None
+
+
+# ── Invites ──────────────────────────────────────────────────────────────────
+def test_the_route_will_not_mint_an_admin_code(client, school):
+    """A multi-use admin code is a bearer credential handing over a school of minors."""
+    assert client.post("/orgs/invite", json={"role": "admin"}, headers=h(BOSS)).status_code == 422
+
+
+def test_a_teacher_code_admits_exactly_one_person(client, school):
+    body = client.post("/orgs/invite", json={"role": "teacher", "max_uses": 200},
+                       headers=h(BOSS)).json()
+    assert body["max_uses"] == 1
+
+
+def test_every_minted_code_expires(client, school):
+    """The mechanism existed and the only caller never used it, so every code the product issued was
+    eternal — and there was no way to revoke one either."""
+    code = client.post("/orgs/invite", json={"role": "student"}, headers=h(BOSS)).json()["code"]
+    with db._LOCK:
+        row = db.get_conn().execute("SELECT expires_at FROM org_invites WHERE code=?",
+                                    (code,)).fetchone()
+    assert row["expires_at"]
+
+
+def test_a_revoked_code_no_longer_admits(client, school):
+    code = client.post("/orgs/invite", json={"role": "student"}, headers=h(BOSS)).json()["code"]
+    assert client.post("/orgs/invite/revoke", json={"code": code}, headers=h(BOSS)).status_code == 200
+    r = client.post("/orgs/join", json={"code": code}, headers=h(OUTSIDER))
+    assert r.status_code == 409
+    assert orgs.membership(_owner_of(OUTSIDER)) is None
+
+
+def test_one_school_cannot_revoke_anothers_code(client, school):
+    other = orgs.create_org("other-boss", "אחר", "institution")
+    code = orgs.create_invite(other, "other-boss", orgs.STUDENT)
+    assert client.post("/orgs/invite/revoke", json={"code": code}, headers=h(BOSS)).status_code == 404
+
+
+def test_removing_a_member_kills_the_codes_they_minted(client, school):
+    """Otherwise removal is advisory: a dismissed teacher walks back in with a code they minted while
+    employed, and the admin has no route that stops it."""
+    code = client.post("/orgs/invite", json={"role": "student"}, headers=h(TEACH)).json()["code"]
+    client.post("/orgs/members/remove", json={"owner_id": _owner_of(TEACH)}, headers=h(BOSS))
+    assert client.post("/orgs/join", json={"code": code}, headers=h(OUTSIDER)).status_code == 409
+
+
+def test_a_bad_code_is_a_409_with_a_reason_for_the_joiner(client, school):
+    r = client.post("/orgs/join", json={"code": "NOPENOPE12"}, headers=h(OUTSIDER))
+    assert r.status_code == 409
+    assert r.json()["detail"]
+
+
+# ── Caps ─────────────────────────────────────────────────────────────────────
+def test_a_cap_of_zero_is_the_tier_default_and_minus_one_blocks(client, school):
+    """The two used to be one value, so an admin who set 0 to stop a disruptive student handed them
+    the highest cap in the system instead."""
+    client.post("/orgs/members/cap", json={"owner_id": _owner_of(PUPIL), "daily_cap": 0},
+                headers=h(BOSS))
+    assert orgs.quota_context(_owner_of(PUPIL))["member_cap"] == orgs.member_cap("institution")
+
+    client.post("/orgs/members/cap", json={"owner_id": _owner_of(PUPIL), "daily_cap": -1},
+                headers=h(BOSS))
+    ctx = orgs.quota_context(_owner_of(PUPIL))
+    assert ctx["member_cap"] == orgs.CAP_BLOCKED
+    charge = db.bump_pooled(ctx["member_id"], ctx["pool_id"], member_cap=ctx["member_cap"],
+                            pool_daily=0, pool_weekly=0, units=1)
+    assert charge.allowed is False and charge.refused == "blocked"
+
+
+def test_a_second_admin_cannot_throttle_the_paying_owner(client, school):
+    """require_can_act_on permits equal ranks by design, and the owner has no route to read or reset
+    their own cap — so without this an admin could cap the person paying at a single token."""
+    orgs.set_member_cap(school, _owner_of(TEACH), 0)
+    with db._tx(db.get_conn()) as conn:
+        conn.execute("UPDATE org_members SET role='admin' WHERE org_id=? AND owner_id=?",
+                     (school, _owner_of(TEACH)))
+    r = client.post("/orgs/members/cap", json={"owner_id": _owner_of(BOSS), "daily_cap": 1},
+                    headers=h(TEACH))
+    assert r.status_code == 409
+
+
+# ── Leaving and closing ──────────────────────────────────────────────────────
+def test_leaving_is_recorded(client, school):
+    client.post("/orgs/leave", headers=h(PUPIL))
+    with db._LOCK:
+        actions = [r["action"] for r in db.get_conn().execute(
+            "SELECT action FROM org_access_log WHERE org_id=?", (school,)).fetchall()]
+    assert "leave" in actions
+
+
+def test_the_owner_closes_the_school_rather_than_leaving_it(client, school):
+    assert client.post("/orgs/leave", headers=h(BOSS)).status_code == 409
+    assert client.post("/orgs/close", headers=h(BOSS)).status_code == 200
+    assert orgs.get_org(school) is None
+    # Members revert to their own free accounts — the school bought quota, not anyone's work.
+    assert orgs.membership(_owner_of(PUPIL)) is None
+    assert orgs.quota_context(_owner_of(PUPIL)) is None
+
+
+def test_a_teacher_cannot_close_the_school(client, school):
+    assert client.post("/orgs/close", headers=h(TEACH)).status_code == 404
+    assert orgs.get_org(school) is not None
+
+
+def test_closing_the_school_unblocks_the_owners_account_deletion(client, school):
+    """The closed loop this route exists to open: the owner could not leave, could not delete their
+    account, and nothing anywhere deleted an org row."""
+    assert client.post("/account/delete", headers=h(BOSS)).status_code == 409
+    client.post("/orgs/close", headers=h(BOSS))
+    assert client.post("/account/delete", headers=h(BOSS)).status_code == 200
+
+
+# ── The operator's sample school ─────────────────────────────────────────────
+def test_the_demo_panel_is_operator_only_and_enrols_nobody(client, monkeypatch):
+    """Opening it used to convert the operator's real account into a school member for good: their
+    questions started charging the demo pool, they could no longer buy or be granted anything, and
+    their account became undeletable."""
+    operator = _owner_of(BOSS)
+    monkeypatch.setenv("CHAVRUTA_ADMIN_OWNERS", operator)
+    assert client.get("/orgs/panel?demo=true", headers=h(PUPIL)).status_code == 404
+
+    body = client.get("/orgs/panel?demo=true", headers=h(BOSS)).json()
+    assert body["is_demo"] is True
+    assert orgs.membership(operator) is None
+    assert orgs.quota_context(operator) is None
+    assert db.owns_org(operator) is False
+    assert all(m["owner_id"].startswith("demo-") for m in body["members"])

@@ -128,11 +128,11 @@ def test_removal_deletes_the_row_so_a_code_cannot_resurrect_it(school):
 def test_a_turn_charges_both_the_member_and_the_pool(school):
     _join(school, "pupil")
     ctx = orgs.quota_context("pupil")
-    ok, pool_day, _ = db.bump_pooled("pupil", ctx["pool_id"], member_cap=ctx["member_cap"],
+    ok, pool_day, _, _ = db.bump_pooled(ctx["member_id"], ctx["pool_id"], member_cap=ctx["member_cap"],
                                      pool_daily=ctx["pool_daily"], pool_weekly=ctx["pool_weekly"],
                                      units=1000)
     assert ok and pool_day == 1000
-    assert db.usage_today("pupil") == 1000
+    assert db.usage_today(ctx["member_id"]) == 1000
     assert db.usage_today(ctx["pool_id"]) == 1000
 
 
@@ -140,18 +140,18 @@ def test_the_member_cap_bounds_one_persons_share_of_the_pool(school):
     """Without it a single student spends the school's entire day in an hour."""
     _join(school, "pupil")
     ctx = orgs.quota_context("pupil")
-    ok, _, _ = db.bump_pooled("pupil", ctx["pool_id"], member_cap=500,
+    ok, _, _, _ = db.bump_pooled(ctx["member_id"], ctx["pool_id"], member_cap=500,
                               pool_daily=ctx["pool_daily"], pool_weekly=ctx["pool_weekly"],
                               units=501)
     assert ok is False
-    assert db.usage_today("pupil") == 0        # refused means NOTHING moved, on either counter
+    assert db.usage_today(ctx["member_id"]) == 0        # refused means NOTHING moved, on either counter
     assert db.usage_today(ctx["pool_id"]) == 0
 
 
 def test_the_pool_bounds_the_school_even_when_a_member_is_under_their_cap(school):
     _join(school, "pupil")
     ctx = orgs.quota_context("pupil")
-    ok, _, _ = db.bump_pooled("pupil", ctx["pool_id"], member_cap=0, pool_daily=100,
+    ok, _, _, _ = db.bump_pooled(ctx["member_id"], ctx["pool_id"], member_cap=0, pool_daily=100,
                               pool_weekly=0, units=101)
     assert ok is False
 
@@ -161,13 +161,13 @@ def test_a_refused_pooled_charge_moves_neither_counter(school):
     then discovering the pool is full would need an exact refund, and settle floors at zero."""
     _join(school, "pupil")
     ctx = orgs.quota_context("pupil")
-    db.bump_pooled("pupil", ctx["pool_id"], member_cap=0, pool_daily=1000, pool_weekly=0, units=900)
-    before_member = db.usage_today("pupil")
+    db.bump_pooled(ctx["member_id"], ctx["pool_id"], member_cap=0, pool_daily=1000, pool_weekly=0, units=900)
+    before_member = db.usage_today(ctx["member_id"])
     before_pool = db.usage_today(ctx["pool_id"])
-    ok, _, _ = db.bump_pooled("pupil", ctx["pool_id"], member_cap=0, pool_daily=1000,
+    ok, _, _, _ = db.bump_pooled(ctx["member_id"], ctx["pool_id"], member_cap=0, pool_daily=1000,
                               pool_weekly=0, units=200)
     assert ok is False
-    assert db.usage_today("pupil") == before_member
+    assert db.usage_today(ctx["member_id"]) == before_member
     assert db.usage_today(ctx["pool_id"]) == before_pool
 
 
@@ -177,9 +177,9 @@ def test_settlement_corrects_both_counters(school):
     would empty several times faster than real use."""
     _join(school, "pupil")
     ctx = orgs.quota_context("pupil")
-    db.bump_pooled("pupil", ctx["pool_id"], member_cap=0, pool_daily=0, pool_weekly=0, units=30_000)
-    db.settle_pooled("pupil", ctx["pool_id"], reserved=30_000, actual=4_000)
-    assert db.usage_today("pupil") == 4_000
+    db.bump_pooled(ctx["member_id"], ctx["pool_id"], member_cap=0, pool_daily=0, pool_weekly=0, units=30_000)
+    db.settle_pooled(ctx["member_id"], ctx["pool_id"], reserved=30_000, actual=4_000)
+    assert db.usage_today(ctx["member_id"]) == 4_000
     assert db.usage_today(ctx["pool_id"]) == 4_000
 
 
@@ -209,10 +209,22 @@ def test_the_demo_org_is_a_fixed_id_and_is_idempotent(fresh_db):
     assert len(orgs.members(first)) > 1
 
 
-def test_the_demo_org_holds_only_synthetic_members(fresh_db):
+def test_the_demo_org_holds_only_synthetic_members(fresh_db, monkeypatch):
+    """Every id in the sample school is invented, INCLUDING the owner.
+
+    The previous version of this assertion excused any id without an '@' in it — true of every
+    Supabase UUID, so it passed while the demo org was owned by the operator's real production
+    account. One look at the panel turned that account into a school member for good: its questions
+    charged the demo pool, it could no longer buy or be granted anything, and it became undeletable.
+    """
+    monkeypatch.setenv("CHAVRUTA_ADMIN_OWNERS", "real-operator-uuid")
     orgs.ensure_demo_org()
     owners = {m["owner_id"] for m in orgs.members(orgs.DEMO_ORG_ID)}
-    assert all(o.startswith("demo-") or o in ("local",) or "@" not in o for o in owners)
+    assert owners == {orgs.DEMO_OWNER, "demo-teacher-1", "demo-student-1",
+                      "demo-student-2", "demo-student-3"}
+    assert orgs.get_org(orgs.DEMO_ORG_ID)["owner_id"] == orgs.DEMO_OWNER
+    assert orgs.membership("real-operator-uuid") is None
+    assert db.owns_org("real-operator-uuid") is False
 
 
 # ── The access log ────────────────────────────────────────────────────────────
@@ -315,3 +327,167 @@ def test_the_org_owner_cannot_be_purged(school):
 def test_purging_an_unrelated_account_is_unaffected(school):
     db.purge_owner("stranger")     # must not raise
     assert orgs.get_org(school) is not None
+
+
+# ── The payer must be able to pay ─────────────────────────────────────────────
+# create_org makes the owner an accepted ADMIN member, so the first cut of the wallet guard — which
+# tested membership alone — locked the paying customer out of buying, renewing or being granted the
+# very subscription that funds the school, with no transfer route and no way to leave. One test per
+# role, so which side of the line each sits on is written down rather than implied.
+
+@pytest.fixture
+def _payplus(monkeypatch):
+    from app.billing import payplus
+    monkeypatch.setattr(payplus, "enabled", lambda: True)
+    monkeypatch.setattr(payplus, "create_payment_page", lambda *a, **k: {"link": "https://pay/x"})
+    return payplus
+
+
+def test_the_owner_can_buy_the_schools_own_plan(school, _payplus):
+    from app.billing import service as billing
+    assert billing.start_checkout("boss", "b@e.com", "B", plan="institution_50")
+
+
+def test_the_owner_still_cannot_buy_a_personal_plan(school, _payplus):
+    """They spend the pool like everyone else, so 'pro' would buy them nothing either."""
+    from app.billing import service as billing
+    with pytest.raises(ValueError):
+        billing.start_checkout("boss", "b@e.com", "B", plan="pro")
+
+
+def test_a_teacher_cannot_buy_an_institution_plan_for_themselves(school, _payplus):
+    from app.billing import service as billing
+    _join(school, "teach", orgs.TEACHER)
+    with pytest.raises(ValueError):
+        billing.start_checkout("teach", "t@e.com", "T", plan="institution")
+
+
+def test_the_operator_can_grant_a_school_its_plan(school):
+    """/admin/grant mints a code and redeems it on the account's behalf — the provisioning path."""
+    import app.coupons as coupons
+    code = coupons.issue_plan_coupon(plan="institution", days=30, max_redemptions=1)
+    assert coupons.redeem("boss", code, bypass_throttle=True)["kind"] == "plan"
+
+
+def test_the_owner_cannot_be_granted_credits(school):
+    import app.coupons as coupons
+    code = coupons.issue_credit_coupon(credits=50, max_redemptions=1)
+    with pytest.raises(coupons.RedeemError):
+        coupons.redeem("boss", code, bypass_throttle=True)
+
+
+# ── Joining in the other order ────────────────────────────────────────────────
+def test_a_checkout_in_flight_blocks_joining(school):
+    """start_checkout writes a 'pending' subscription but does NOT set accounts.plan, so the plan
+    test alone still read 'free' for someone sitting on the payment page. Join there and the webhook
+    then activates a real recurring charge on an account that spends the pool instead."""
+    db.upsert_subscription("shopper", provider="payplus", status="pending", plan="pro",
+                           updated_at=db._now())
+    with pytest.raises(orgs.JoinRefused):
+        _join(school, "shopper")
+
+
+def test_unspent_credits_block_joining(school):
+    """A member has no credit fallback, so joining with a balance strands something they paid for."""
+    db.add_credits("saver", 40)
+    with pytest.raises(orgs.JoinRefused):
+        _join(school, "saver")
+
+
+# ── The member's counter is not their personal one ───────────────────────────
+def test_leaving_a_school_does_not_spend_the_persons_own_free_week(school):
+    """A student who spent the school's pool on Sunday and left on Monday used to be locked out of
+    the free product until the following Sunday — their personal weekly allowance is smaller than
+    the school-funded day they had just had, and both were the same counter row."""
+    _join(school, "pupil")
+    ctx = orgs.quota_context("pupil")
+    db.bump_pooled(ctx["member_id"], ctx["pool_id"], member_cap=0, pool_daily=0, pool_weekly=0,
+                   units=600_000)
+    orgs.remove_member(school, "pupil")
+    assert db.usage_today("pupil") == 0
+    assert db.usage_this_week("pupil") == 0
+
+
+def test_joining_mid_day_gives_the_full_member_cap(school):
+    """The mirror: a free user who had already spent that morning used to get a reduced share of the
+    school's pool, for a reason nobody could see."""
+    db.bump_usage("newcomer", 0, units=150_000)
+    _join(school, "newcomer")
+    ctx = orgs.quota_context("newcomer")
+    assert db.usage_today(ctx["member_id"]) == 0
+
+
+def test_the_member_cap_follows_the_tier(fresh_db, monkeypatch):
+    """It used to be a constant that ignored its argument, correct only because all three tiers
+    happen to share a per-seat allowance — and daily_tokens honours per-tier env overrides, so a
+    throttled pool kept a ceiling two members could drain it with."""
+    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_INSTITUTION", "1000000")
+    assert orgs.member_cap("institution") < orgs.member_cap("institution_100")
+    for tier_id in ("institution", "institution_50", "institution_100"):
+        share = plans.daily_tokens(tier_id) // plans.tier(tier_id).seats
+        assert orgs.member_cap(tier_id) >= share
+
+
+# ── The pool's own ceilings ──────────────────────────────────────────────────
+def test_the_weekly_pool_refuses_and_says_so(school):
+    _join(school, "pupil")
+    ctx = orgs.quota_context("pupil")
+    db.bump_pooled(ctx["member_id"], ctx["pool_id"], member_cap=0, pool_daily=0,
+                   pool_weekly=1000, units=900)
+    charge = db.bump_pooled(ctx["member_id"], ctx["pool_id"], member_cap=0, pool_daily=0,
+                            pool_weekly=1000, units=200)
+    assert charge.allowed is False
+    assert charge.refused == "week"      # not "day" — it resets on Sunday, not tomorrow
+
+
+def test_each_ceiling_names_itself(school):
+    _join(school, "pupil")
+    ctx = orgs.quota_context("pupil")
+    assert db.bump_pooled(ctx["member_id"], ctx["pool_id"], member_cap=10, pool_daily=0,
+                          pool_weekly=0, units=99).refused == "member_cap"
+    assert db.bump_pooled(ctx["member_id"], ctx["pool_id"], member_cap=0, pool_daily=10,
+                          pool_weekly=0, units=99).refused == "day"
+
+
+# ── A school's tier follows its payer ────────────────────────────────────────
+def test_a_lapsed_subscription_degrades_the_pool(school):
+    """Nothing used to write orgs.plan after creation, so a school that stopped paying kept its full
+    institution pool forever while the panel cheerfully rendered it."""
+    _join(school, "pupil")
+    assert orgs.sync_plan_from_owner("boss", "free") == school
+    assert orgs.get_org(school)["plan"] == "free"
+    # The member keeps their seat, their account and their history — the pool shrinks, the school
+    # does not dissolve. Nobody is locked out of their own study by a billing failure, and the tier
+    # comes straight back when payment resumes.
+    assert orgs.membership("pupil") is not None
+    assert orgs.quota_context("pupil")["pool_daily"] == plans.daily_tokens("free")
+
+
+def test_an_upgrade_reaches_the_school(school):
+    assert orgs.sync_plan_from_owner("boss", "institution_100") == school
+    assert plans.tier(orgs.get_org(school)["plan"]).seats == 100
+
+
+def test_syncing_a_plan_for_someone_who_owns_no_school_does_nothing(school):
+    assert orgs.sync_plan_from_owner("stranger", "pro") is None
+    assert orgs.get_org(school)["plan"] == "institution"
+
+
+# ── Deletion, continued ──────────────────────────────────────────────────────
+def test_purging_a_teacher_clears_the_rows_that_named_them(school):
+    _join(school, "teach", orgs.TEACHER)
+    orgs.accept_invite(orgs.create_invite(school, "teach", orgs.STUDENT), "pupil")
+    db.purge_owner("teach")
+    with db._LOCK:
+        row = db.get_conn().execute(
+            "SELECT invited_by FROM org_members WHERE org_id=? AND owner_id=?",
+            (school, "pupil")).fetchone()
+    assert row["invited_by"] == db.DELETED_OWNER
+
+
+def test_closing_a_school_frees_its_members(school):
+    _join(school, "pupil")
+    orgs.close_org(school)
+    assert orgs.get_org(school) is None
+    assert orgs.membership("pupil") is None
+    db.purge_owner("boss")           # the owner is deletable again — must not raise
