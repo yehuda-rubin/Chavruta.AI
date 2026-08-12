@@ -186,6 +186,40 @@ def detect_talmud_refs(text: str) -> list[str]:
     return refs
 
 
+# A tractate NAMED without enough detail to build a ref. Two unambiguous forms only:
+#   • preceded by מסכת / במסכת — nobody writes "מסכת ברכות טובות", so the word settles it
+#   • followed by a daf number, with or without the ע"א/ע"ב marker that _TALMUD_RE demands
+# The second is what makes "בסוכה מא" reachable: it is how people actually cite a daf, and requiring
+# the amud marker meant the most natural citation in the language resolved to nothing at all.
+_TRACTATE_NAMED_RE = re.compile(
+    rf"מסכת\s+(?P<t1>{_book_alt(HE_TRACTATES)})"
+    rf"|(?P<t2>{_book_alt(HE_TRACTATES)})\s+(?:דף\s+)?(?P<daf>{_DAF})(?![א-ת])"
+)
+
+
+def detect_tractates(text: str) -> list[str]:
+    """Tractates the text names explicitly → English names ('סוכה' → 'Sukkah').
+
+    Deliberately weaker than `detect_talmud_refs`: it answers "which tractate is being discussed",
+    not "which daf", so a question that names the masechet and nothing else can still be scoped to
+    it. A tractate that resolves to a full ref is still returned here — the caller may use both.
+    """
+    out: list[str] = []
+    for m in _TRACTATE_NAMED_RE.finditer(text):
+        he = m.group("t1") or m.group("t2")
+        if m.group("t2"):
+            # Hebrew numerals are ordinary letters, so an innocent word after a tractate name reads
+            # as a daf: "שבת קודש" parses as Shabbat + daf קודש (=410). The longest tractate is Bava
+            # Batra at 176 dapim, so an implausible value means this was never a citation.
+            daf = _daf_value(m.group("daf"))
+            if daf is None or not 2 <= daf <= 180:
+                continue
+        en = HE_TRACTATES.get(he or "")
+        if en and en not in out:
+            out.append(en)
+    return out
+
+
 def detect_hebrew_refs(text: str) -> list[str]:
     """All Hebrew references (Tanakh first, then Talmud), de-duplicated."""
     refs = detect_tanakh_refs(text)

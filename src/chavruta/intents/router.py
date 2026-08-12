@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass, field
 
 from chavruta.corpus.schema import Intent, Query
-from chavruta.intents.hebrew_refs import detect_hebrew_refs
+from chavruta.intents.hebrew_refs import detect_hebrew_refs, detect_tractates
 from chavruta.intents.landmarks import resolve_landmarks
 
 # ── Commentator aliases (extendable as data; mirrors the corpus commentator ids) ──
@@ -239,6 +239,15 @@ class Router:
             works = detect_requested_works(query.text)
             if works:
                 query.requested_works = works
+
+        # A tractate named without a daf ("במסכת סוכה") can't anchor, but it is still the single most
+        # useful thing the question said. Caught live: a user asked what Rashi says about building
+        # the Temple, was told the wrong thing, replied "רש\"י על הגמרא כן אומר את זה במסכת סוכה" —
+        # and the system still didn't look in Sukkah, because naming a masechet resolved to nothing.
+        if query.tractates is None:
+            tractates = detect_tractates(query.text)
+            if tractates:
+                query.tractates = tractates
 
         if query.intent is Intent.QA:   # only override the default, never an explicit choice
             query.intent = detect_intent(query.text, len(commentators))

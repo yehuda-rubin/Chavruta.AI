@@ -260,6 +260,25 @@ class HybridRetriever:
             except Exception:
                 pass
 
+        # Named-tractate floor: the question said which masechet ("במסכת סוכה", "סוכה מא") but not
+        # enough to build a ref. Free-text similarity alone routinely misses inside it — a sugya
+        # states its point in its own words, not the querier's — so search again scoped to refs
+        # carrying that tractate name. This is the difference between answering "what does Rashi say
+        # in Sukkah" from Sukkah and answering it from wherever the embedding happened to land.
+        for tractate in (query.tractates or [])[:2]:
+            try:
+                with _timed(t, "tractate"):
+                    scoped = self.store.search(self.profile.collection, hquery, top_k=6,
+                                               filters={"ref": {"$text": tractate}})
+                for h in scoped:
+                    rh = _to_hit(h)
+                    # Below the named-ref anchor sentinel: the question named a tractate, not a ref,
+                    # so this must not masquerade as something the user pointed at exactly.
+                    rh.score = min(rh.score + 0.05, 0.98)
+                    hits.append(rh)
+            except Exception as exc:
+                logger.warning("tractate-scoped search failed for %s (%s)", tractate, exc)
+
         # Optional reranking (heavy in cloud / optional local)
         if self.reranker is not None and self.profile.rerank and hits:
             with _timed(t, "rerank"):

@@ -163,6 +163,11 @@ class Query:
     expand_depth: int = 1
     search_text: str = ""                        # text used for retrieval (trigger phrases like
                                                  # "prepare a lesson on" stripped); falls back to `text`
+    # Tractates the question NAMES explicitly ("במסכת סוכה", "סוכה מא") but without enough detail to
+    # resolve a ref. Weaker than named_refs and used differently: it scopes a sub-search to that
+    # tractate rather than anchoring, so "what does Rashi say in Sukkah" can reach Rashi on Sukkah
+    # even when the daf is never given.
+    tractates: list[str] | None = None
 
 
 @dataclass
