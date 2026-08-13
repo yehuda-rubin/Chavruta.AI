@@ -144,9 +144,25 @@ export default function AdminDashboard() {
             )}
           </button>
         ))}
+        {/* The operator's way into the institution panel. It is NOT a section of this page: the
+            school panel is a real product screen that a school administrator sees, and the point of
+            reaching it from here is to look at the actual thing rather than a copy of it that could
+            drift. It opens the synthetic demo school — /orgs/panel?demo=true, gated on _is_admin
+            server-side — so no real school's records are involved.
+
+            Without this there was no route to it at all. The header button that opens /school is
+            shown only to org admins and teachers, and the operator belongs to no organisation, so
+            their org_role is empty and the button never appeared for them. */}
+        <Link
+          href="/school"
+          className="lg:mt-auto flex items-center gap-2 px-3 py-2.5 rounded-2xl text-sm font-semibold text-ink/70 hover:bg-white/60 hover:text-tekhelet transition shrink-0"
+        >
+          <Icon name="school" className="text-[19px]" />
+          <span>פאנל מוסד (לדוגמה)</span>
+        </Link>
         <Link
           href="/"
-          className="lg:mt-auto flex items-center gap-2 px-3 py-2.5 rounded-2xl text-sm font-semibold text-ink/60 hover:bg-white/60 hover:text-tekhelet transition shrink-0"
+          className="flex items-center gap-2 px-3 py-2.5 rounded-2xl text-sm font-semibold text-ink/60 hover:bg-white/60 hover:text-tekhelet transition shrink-0"
         >
           <Icon name="chevron_right" className="text-[19px]" />
           <span>חזרה לאפליקציה</span>

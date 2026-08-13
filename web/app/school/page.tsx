@@ -166,6 +166,12 @@ export default function SchoolPanel() {
   }
 
   const isAdminRole = panel.role === "admin";
+  // The sample school is for LOOKING at. Every mutating /orgs/* route resolves the organisation from
+  // the caller's own membership, and the operator is a member of nothing — so minting a code or
+  // setting a cap here would 404. The controls stay visible, because seeing the real screen is the
+  // whole point of the demo, but they are inert and say so.
+  const demoReadOnly = !!panel.is_demo;
+  const demoNote = demoReadOnly ? "לא זמין בבית הספר לדוגמה — זו תצוגה בלבד" : undefined;
   const num = (n: number) => n.toLocaleString("he-IL");
   const asTurns = (tokens: number) => Math.round(tokens / TURN);
   const ROLE_HE: Record<string, string> = { admin: "מנהל", teacher: "מורה", student: "תלמיד" };
@@ -182,15 +188,19 @@ export default function SchoolPanel() {
             </p>
           </div>
         </div>
-        <Link href="/" className="text-xs text-tekhelet/80 hover:text-tekhelet font-semibold">
-          חזרה לאפליקציה
+        <Link
+          href={demoReadOnly ? "/admin" : "/"}
+          className="text-xs text-tekhelet/80 hover:text-tekhelet font-semibold"
+        >
+          {demoReadOnly ? "חזרה לפאנל הניהול" : "חזרה לאפליקציה"}
         </Link>
       </header>
 
       {panel.is_demo && (
         <div className="glass rounded-2xl p-3 text-xs text-ink/70 border border-gold/40">
           <b>בית ספר לדוגמה.</b> נתונים מומצאים, לתצוגה ולבדיקה בלבד — אין כאן שום מוסד אמיתי ואף
-          חשבון של אדם אמיתי.
+          חשבון של אדם אמיתי. כפתורי הפעולה מושבתים כאן בכוונה: זה המסך שמנהל מוסד רואה, לא מוסד
+          שאפשר לשנות.
         </div>
       )}
 
@@ -221,7 +231,8 @@ export default function SchoolPanel() {
           <h2 className="font-serif font-bold text-tekhelet">צירוף חברים</h2>
           <div className="flex gap-2">
             <button
-              disabled={busy}
+              disabled={busy || demoReadOnly}
+              title={demoNote}
               onClick={() => mintCode("student")}
               className="text-xs px-3 py-2 rounded-xl glass text-tekhelet font-semibold disabled:opacity-40"
             >
@@ -229,7 +240,8 @@ export default function SchoolPanel() {
             </button>
             {isAdminRole && (
               <button
-                disabled={busy}
+                disabled={busy || demoReadOnly}
+                title={demoNote}
                 onClick={() => mintCode("teacher")}
                 className="text-xs px-3 py-2 rounded-xl glass text-tekhelet font-semibold disabled:opacity-40"
               >
@@ -268,7 +280,8 @@ export default function SchoolPanel() {
                   {inv.expires_at ? ` · עד ${inv.expires_at.slice(0, 10)}` : ""}
                 </span>
                 <button
-                  disabled={busy}
+                  disabled={busy || demoReadOnly}
+                  title={demoNote}
                   onClick={() => revoke(inv.code)}
                   className="text-[11px] px-2 py-1 rounded-lg glass text-ink/60 disabled:opacity-40"
                 >
@@ -317,14 +330,16 @@ export default function SchoolPanel() {
                     {m.accepted ? (
                       <>
                         <button
-                          disabled={busy}
+                          disabled={busy || demoReadOnly}
+                          title={demoNote}
                           onClick={() => setCap(m.owner_id, m.daily_cap)}
                           className="text-[11px] px-2 py-1 rounded-lg glass text-tekhelet disabled:opacity-40"
                         >
                           תקרה
                         </button>
                         <button
-                          disabled={busy || m.role === "admin"}
+                          disabled={busy || demoReadOnly || m.role === "admin"}
+                          title={demoNote}
                           onClick={() => removeMember(m.owner_id)}
                           className="text-[11px] px-2 py-1 rounded-lg glass text-ink/60 disabled:opacity-30"
                         >
@@ -333,7 +348,8 @@ export default function SchoolPanel() {
                       </>
                     ) : (
                       <button
-                        disabled={busy}
+                        disabled={busy || demoReadOnly}
+                        title={demoNote}
                         onClick={() => readmit(m.owner_id)}
                         className="text-[11px] px-2 py-1 rounded-lg glass text-tekhelet disabled:opacity-40"
                       >
