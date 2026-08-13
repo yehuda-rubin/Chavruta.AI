@@ -23,7 +23,9 @@ from chavruta.corpus.schema import Answer, Intent, Query, Turn
 from chavruta.generation import deontic, grounded
 from chavruta.retrieval.hybrid import HybridRetriever
 
-_log = logging.getLogger("chavruta.pipeline")
+# Its own name, not chavruta.pipeline: these lines are the only record the watching guards leave,
+# and an operator reviewing a week of them should be able to filter to exactly this and nothing else.
+_guard_log = logging.getLogger("chavruta.guards")
 
 
 def _detect_lang(text: str) -> str:
@@ -465,32 +467,39 @@ class ChavrutaPipeline:
             answer.caveats.append(("הערה: ציטוט/ים שלא נמצאו במקורות שנשלפו: «" + "», «".join(bad_q[:2]) + "» — יש לאמת.")
                                   if query.lang != "en" else
                                   ("Note: quote(s) not found in the retrieved sources: «" + "», «".join(bad_q[:2]) + "» — verify."))
-        # A SECOND kind of fabrication, which every check above passes clean: a quote that really is
-        # in the corpus, under a different name than the prose credits. Tosafot's words introduced as
-        # "רש״י כותב במפורש" satisfies unverified_quotes (the string exists in a retrieved source) and
-        # satisfies enforce_citations (the marker points at a real chunk) — and a reader has still
-        # been shown something Rashi never said. Reproduced against these functions on 2026-08-13.
-        wrong_name = grounded.misattributed_quotes(text, list(result.hits) + list(fetched or []))
-        if wrong_name:
-            answer.caveats.append(grounded.misattribution_note(query.lang, wrong_name))
-        # Deontic self-contradiction is LOGGED, NOT SHOWN — deliberately, and for now. Telling a user
-        # "this answer may contradict itself" is a strong claim, and this check has never run against
-        # real traffic: its false-positive rate is argued from its own test set, not measured. So it
-        # watches first. Read the log for a week; make it user-facing only if what it caught was
-        # worth catching. (Measurement before action — the same reason the reward function was built
-        # as a metric before anyone proposed training on it.)
+        # ── Guards that WATCH, and do not yet speak ─────────────────────────────────────────────
+        # INTERNAL ONLY, by decision on 2026-08-13. Both checks below write to the log and add
+        # nothing a user sees. Neither has met real traffic — their false-positive rates are argued
+        # from their own test sets, not measured — and a caveat on a CORRECT answer costs more than
+        # a missed finding on a wrong one: it teaches the reader that our warnings are noise, which
+        # is precisely the credit the honest-no-source behaviour has spent the year earning. So they
+        # watch first, and go user-facing only once the log shows they fire on things worth firing
+        # on. `grounded.misattribution_note` already holds the wording for that day and is
+        # deliberately left uncalled until then.
+        #
+        # `_guard_log` is its own logger so one name follows every guard at once, without the rest
+        # of the pipeline's chatter in the way.
         try:
-            if conflicts := deontic.deontic_conflicts(text):
-                # `attribution` is in the line on purpose: 'inherited' means the second verdict was
-                # never attributed to anyone and took the name of the last speaker in scope. That is
-                # the weakest of the two paths, and an operator triaging these should be able to
-                # discount it without reading the code.
-                for c in conflicts[:2]:
-                    _log.warning("deontic: %s %s/%s (%s) — %r || %r", c.authority, c.axis,
-                                 c.attribution, len(conflicts), c.first.sentence[:70],
-                                 c.second.sentence[:70])
+            # A quote that really IS in the corpus, under a different name than the prose credits.
+            # Tosafot's words introduced as "רש״י כותב במפורש" satisfies unverified_quotes (the
+            # string exists in a retrieved source) AND enforce_citations (the marker points at a real
+            # chunk) — and a reader has still been shown something Rashi never said. Reproduced
+            # against these functions on 2026-08-13.
+            for m in grounded.misattributed_quotes(
+                    text, list(result.hits) + list(fetched or []))[:2]:
+                _guard_log.warning("misattribution: credited to %s, text is from %s — %r",
+                                   m.claimed, m.found_in, m.quote[:70])
         except Exception:                   # noqa: BLE001 — a watching check must never break an answer
-            _log.exception("deontic check failed")
+            _guard_log.exception("misattribution check failed")
+        try:
+            # `attribution` is in the line on purpose: 'inherited' means the second verdict named
+            # nobody and took the last speaker in scope. That is the weaker of the two paths, and an
+            # operator triaging these should be able to discount it without reading the code.
+            for c in deontic.deontic_conflicts(text)[:2]:
+                _guard_log.warning("deontic: %s %s/%s — %r || %r", c.authority, c.axis,
+                                   c.attribution, c.first.sentence[:70], c.second.sentence[:70])
+        except Exception:                   # noqa: BLE001
+            _guard_log.exception("deontic check failed")
         return grounded.maybe_halacha_caveat(answer, query.lang)
 
     def _lesson_answer(self, query, result, llm=None, *, history=None):
