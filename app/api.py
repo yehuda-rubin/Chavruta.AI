@@ -201,8 +201,16 @@ def _fix_bleeding_sentences(text: str, he: bool, llm) -> str:
     if len(targets) == 1 or getattr(llm, "serial_only", False):
         rewrites = [_rewrite_bleeding_sentence(parts[i], llm) for i in targets]
     else:
+        # run_in_context, NOT a bare lambda. A pool thread starts with a fresh context, so the
+        # request's token tally is invisible inside it and metering.record() drops the call —
+        # silently, because "outside a metered block" is a legitimate state (the CLI). These calls
+        # still reached the provider and still appeared on the bill: reconciling our own totals
+        # against a real Nebius invoice on 2026-08-13 showed 4.81M input recorded against 6.69M
+        # charged, and this was the leak.
         with ThreadPoolExecutor(max_workers=min(_BLEED_FIX_WORKERS, len(targets))) as pool:
-            rewrites = list(pool.map(lambda i: _rewrite_bleeding_sentence(parts[i], llm), targets))
+            rewrites = list(pool.map(
+                metering.run_in_context(lambda i: _rewrite_bleeding_sentence(parts[i], llm)),
+                targets))
 
     for i, rewritten in zip(targets, rewrites):
         if rewritten:
