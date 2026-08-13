@@ -474,7 +474,7 @@ export function SettingsModal({
   onClearHistory: () => void;
   deletionScheduledFor?: string | null;   // ISO ts if the account is pending deletion
   deletionGraceDays?: number;             // /me — the length of the wait, named before the user commits
-  onDeleteAccount?: (immediate: boolean) => void;
+  onDeleteAccount?: (immediate: boolean) => Promise<string | null>;   // resolves with an error, or null
   onCancelDeletion?: () => void;
   plan?: string;                           // tier id — see app/plans.py
   planName?: string;                       // localized tier name from /me
@@ -497,6 +497,14 @@ export function SettingsModal({
   const auth = useAuth();
   const [idCopied, setIdCopied] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  // The panel stays OPEN on failure and shows why. Closing it would look like the deletion had been
+  // accepted, which is exactly the impression the server refused in order to avoid.
+  const runDelete = async (immediate: boolean) => {
+    const err = await onDeleteAccount?.(immediate);
+    if (err) setDeleteError(err);
+    else { setDeleteError(""); setConfirmDelete(false); }
+  };
   const fmtDate = (iso: string) =>
     new Date(iso).toLocaleDateString(lang === "he" ? "he-IL" : "en-US",
       { year: "numeric", month: "long", day: "numeric" });
@@ -705,8 +713,18 @@ export function SettingsModal({
               <div className="mt-2 p-3 rounded-2xl bg-red-500/5 ring-1 ring-red-500/15 flex flex-col gap-2">
                 <p className="text-xs text-ink/80 leading-relaxed">{tr(lang, "deleteAccountIntro")}</p>
 
+                {/* Money, before the choice rather than after it. Requesting deletion stops the
+                    recurring charge (app/accounts.py::stop_billing) — which is what a paying user
+                    wants, but it is not reversible by cancelling the deletion, and the immediate
+                    path additionally forfeits the period already paid for. */}
+                {plan && plan !== "free" && !cancelAtPeriodEnd && (
+                  <p className="text-[11px] text-ink/60 leading-relaxed">
+                    {tr(lang, "deletePaidNotice")}
+                  </p>
+                )}
+
                 <button
-                  onClick={() => { setConfirmDelete(false); onDeleteAccount?.(false); }}
+                  onClick={() => runDelete(false)}
                   className="py-2 px-3 rounded-2xl glass text-red-500 font-semibold text-sm hover:bg-red-500/10 transition text-start"
                 >
                   {tr(lang, "deleteAfterDays").replace("{days}", String(deletionGraceDays ?? 30))}
@@ -720,21 +738,23 @@ export function SettingsModal({
                     it can be taken back, and it sits one tap from the reversible option above. */}
                 <button
                   onClick={() => {
-                    if (window.confirm(tr(lang, "deleteNowConfirm"))) {
-                      setConfirmDelete(false);
-                      onDeleteAccount?.(true);
-                    }
+                    if (window.confirm(tr(lang, "deleteNowConfirm"))) runDelete(true);
                   }}
                   className="py-2 px-3 rounded-2xl glass text-red-500 font-semibold text-sm hover:bg-red-500/10 transition text-start"
                 >
                   {tr(lang, "deleteNow")}
                   <span className="block font-normal text-[11px] text-ink/55 mt-0.5">
                     {tr(lang, "deleteNowHint")}
+                    {plan && plan !== "free" && <> {tr(lang, "deletePaidNowNotice")}</>}
                   </span>
                 </button>
 
+                {deleteError && (
+                  <p className="text-[11px] text-red-600 leading-relaxed">{deleteError}</p>
+                )}
+
                 <button
-                  onClick={() => setConfirmDelete(false)}
+                  onClick={() => { setDeleteError(""); setConfirmDelete(false); }}
                   className="py-2 rounded-2xl grad text-white font-semibold text-sm hover:opacity-95 transition"
                 >
                   {tr(lang, "deleteKeep")}

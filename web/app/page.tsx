@@ -270,19 +270,24 @@ export default function Home() {
     return `הצטרפת ל${joined.name}`;
   }, [refreshMe]);
 
-  const deleteAccount = useCallback(async (immediate: boolean) => {
+  // Resolves with an error message to show, or null on success. Deletion is the one place a silent
+  // failure is unacceptable: the server refuses when it cannot stop a recurring charge, and that
+  // refusal has to reach the person who would otherwise keep being billed.
+  const deleteAccount = useCallback(async (immediate: boolean): Promise<string | null> => {
     try {
       const res = await api.deleteAccount(immediate);
       if (res.deleted) {
         // Nothing is left to come back to: staying signed in would render a list of chats that no
         // longer exist and 401 on the next call. End the session with the data it belonged to.
         await auth.signOut();
-        return;
+        return null;
       }
-    } catch {
-      /* ignore — /me below re-reads the real state, so a failed request shows as "not scheduled" */
+    } catch (e) {
+      refreshMe();
+      return e instanceof Error ? e.message : "המחיקה נכשלה";
     }
     refreshMe();
+    return null;
   }, [refreshMe, auth]);
 
   const cancelAccountDeletion = useCallback(async () => {

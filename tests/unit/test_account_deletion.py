@@ -105,6 +105,91 @@ def test_purge_now_refuses_a_school_owner(fresh_db):
     assert len(fresh_db.list_sessions("principal")) == 1     # nothing was deleted on the way out
 
 
+# ── Deletion and a live subscription ─────────────────────────────────────────
+def _paying(d, owner, ref="recur-123"):
+    d.upsert_subscription(owner, provider="payplus", provider_ref=ref, status="active",
+                          plan="pro", cycle="monthly", updated_at="2026-08-13T00:00:00+00:00")
+
+
+def test_deletion_stops_the_recurring_charge_before_the_row_holding_it_is_deleted(fresh_db,
+                                                                                  monkeypatch):
+    """purge_owner deletes the subscriptions row, and provider_ref inside it is the ONLY handle on
+    the recurring charge. Cancel after the purge and there is nothing left to cancel with — the card
+    keeps being charged for an account that no longer exists."""
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    called: list[str] = []
+    monkeypatch.setattr("app.billing.payplus.cancel_recurring", lambda ref: called.append(ref))
+    _seed_owner(fresh_db, "payer")
+    _paying(fresh_db, "payer")
+
+    accounts.purge_now("payer")
+
+    assert called == ["recur-123"]
+    assert fresh_db.get_subscription("payer") is None
+
+
+def test_scheduling_stops_the_charge_at_the_request_not_at_the_deadline(fresh_db, monkeypatch):
+    """A monthly subscription renews INSIDE a 30-day grace period. Waiting for the purge would bill
+    someone once more for an account they had already asked us to erase."""
+    called: list[str] = []
+    monkeypatch.setattr("app.billing.payplus.cancel_recurring", lambda ref: called.append(ref))
+    _paying(fresh_db, "leaver")
+
+    accounts.schedule("leaver")
+
+    assert called == ["recur-123"]
+    assert fresh_db.get_subscription("leaver")["cancel_at_period_end"] == 1
+
+
+def test_deletion_is_abandoned_when_the_charge_cannot_be_stopped(fresh_db, monkeypatch):
+    """Refusing to delete is recoverable — everything is still here and the user is told. Deleting
+    anyway is not: the data would be gone and the monthly charge would continue with no local record
+    of what to cancel."""
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+
+    def boom(_ref):
+        raise RuntimeError("provider down")
+
+    monkeypatch.setattr("app.billing.payplus.cancel_recurring", boom)
+    _seed_owner(fresh_db, "payer")
+    _paying(fresh_db, "payer")
+
+    import app.billing.service as billing
+    with pytest.raises(billing.ProviderCancelFailed):
+        accounts.purge_now("payer")
+    assert len(fresh_db.list_sessions("payer")) == 1          # nothing was deleted
+    assert fresh_db.get_subscription("payer") is not None     # the handle is still here to retry
+
+
+def test_a_free_account_has_nothing_to_cancel(fresh_db, monkeypatch):
+    """The provider must not be called for someone who never paid — and a provider outage must not
+    stop a free user from deleting their account."""
+    def boom(_ref):
+        raise AssertionError("the provider must not be called for a free account")
+
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.setattr("app.billing.payplus.cancel_recurring", boom)
+    _seed_owner(fresh_db, "freebie")
+    accounts.purge_now("freebie")
+    assert fresh_db.list_sessions("freebie") == []
+
+
+def test_a_coupon_plan_is_not_sent_to_the_payment_provider(fresh_db, monkeypatch):
+    """A coupon-granted plan stores the coupon CODE in provider_ref. Sending that to PayPlus is a
+    guaranteed error, and under `strict` it would abort a deletion that has nothing wrong with it."""
+    def boom(_ref):
+        raise AssertionError("a coupon code must never reach the payment provider")
+
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.setattr("app.billing.payplus.cancel_recurring", boom)
+    fresh_db.upsert_subscription("couponed", provider="coupon", provider_ref="TORAH25",
+                                 status="active", plan="pro", cycle="coupon",
+                                 updated_at="2026-08-13T00:00:00+00:00")
+    _seed_owner(fresh_db, "couponed")
+    accounts.purge_now("couponed")
+    assert fresh_db.list_sessions("couponed") == []
+
+
 def test_schedule_sets_future_deadline(fresh_db, monkeypatch):
     monkeypatch.setenv("CHAVRUTA_ACCOUNT_DELETION_GRACE_DAYS", "30")
     when = accounts.schedule("u9")

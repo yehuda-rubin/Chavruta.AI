@@ -33,7 +33,14 @@ def grace_days() -> int:
 
 
 def schedule(owner_id: str) -> str:
-    """Schedule deletion `grace_days` from now and return the ISO timestamp it will happen."""
+    """Schedule deletion `grace_days` from now and return the ISO timestamp it will happen.
+
+    The recurring charge stops at the REQUEST, not at the purge. A monthly subscription renews inside
+    a 30-day grace period, so waiting would bill someone once more for an account they have already
+    asked us to erase. Paid access still runs to the end of the period they paid for (billing.cancel
+    keeps that promise); what stops is the next charge.
+    """
+    stop_billing(owner_id)                  # raises ⇒ nothing is scheduled, and the caller says why
     now = datetime.now(UTC)
     scheduled = now + timedelta(days=grace_days())
     db.schedule_deletion(owner_id, now.isoformat(), scheduled.isoformat())
@@ -163,6 +170,36 @@ def list_supabase_user_emails() -> list[str]:
         return []
 
 
+def stop_billing(owner_id: str) -> None:
+    """Stop a recurring charge before an account deletion goes anywhere near the data.
+
+    Deleting an account used to leave the subscription running. Nothing in either deletion path
+    called billing.cancel, so a paying user who deleted their account kept being charged every month
+    — and purge_owner deletes the `subscriptions` row, which holds `provider_ref`, the only handle
+    on that recurring charge. The money kept leaving their card and we no longer had the string
+    needed to stop it. It had to be found in the PayPlus dashboard by hand, if anyone noticed.
+
+    So this runs FIRST, and it is allowed to fail loudly: billing.ProviderCancelFailed propagates and
+    the caller abandons the deletion. Refusing to delete is the recoverable outcome — the user is
+    told, and everything is still here to try again. Deleting anyway is not.
+
+    Free accounts and coupon-granted plans have nothing to cancel and pass straight through, as does
+    a subscription already marked cancelled (calling the provider twice for the same one earns an
+    error and no benefit).
+    """
+    # Imported here, not at module scope: app.billing.service reaches for plans/coupons which reach
+    # back, and the deletion path must not be the thing that decides that import order.
+    import app.billing.service as billing
+
+    sub = db.get_subscription(owner_id)
+    if not sub or sub.get("status") == "canceled":
+        return
+    if not (sub.get("provider_ref") and sub.get("provider") == "payplus"):
+        return
+    billing.cancel(owner_id, strict=True)
+    _log.info("recurring charge stopped for %s ahead of deletion", owner_id)
+
+
 def purge_now(owner_id: str) -> None:
     """Delete one account's data and login immediately, with no grace period.
 
@@ -177,8 +214,9 @@ def purge_now(owner_id: str) -> None:
 
     Raises whatever db.purge_owner raises (it refuses an account that owns a school) — deliberately
     NOT swallowed, so the caller can tell the user it did not happen instead of reporting a success it
-    cannot back up.
+    cannot back up. Same for stop_billing, which runs first for the reason given there.
     """
+    stop_billing(owner_id)                  # before the row holding provider_ref is destroyed
     db.purge_owner(owner_id)
     _delete_supabase_user(owner_id)         # best-effort; swallows its own errors
     _log.info("account %s purged immediately at the user's request", owner_id)

@@ -163,7 +163,12 @@ def _apply_coupon_discount(owner: str, amount: float, txn_uid: str | None, tier:
               owner, rebate, round(balance - rebate, 2))
 
 
-def cancel(owner_id: str, *, now: datetime | None = None) -> None:
+class ProviderCancelFailed(Exception):
+    """The recurring charge could not be stopped at the provider. Only raised when the caller asked
+    for `strict` — i.e. when it is about to destroy the handle that would let anyone try again."""
+
+
+def cancel(owner_id: str, *, strict: bool = False, now: datetime | None = None) -> None:
     """Stop future charges and mark the subscription cancelled. Paid access is retained until the
     current period ends (Consumer Protection: billing stops, but the user keeps what they paid for).
 
@@ -174,7 +179,15 @@ def cancel(owner_id: str, *, now: datetime | None = None) -> None:
     ANNUAL_INSTALMENTS).
 
     NOT a refund — cancelling stops the next charge and gives nothing back. Money is returned by
-    refund() below, which an operator runs deliberately through scripts/refund.py."""
+    refund() below, which an operator runs deliberately through scripts/refund.py.
+
+    `strict` re-raises a provider failure instead of logging it. The default is right for a user who
+    clicked "cancel subscription" — we stop renewing locally and sort the provider out afterwards. It
+    is wrong for account deletion, which is about to delete the subscriptions row and with it
+    `provider_ref`, the only handle anyone has on the recurring charge: a swallowed error there ends
+    with a person billed monthly for an account that no longer exists and no local record of what to
+    cancel. See app/accounts.py::stop_billing.
+    """
     now = now or datetime.now(UTC)
     sub = db.get_subscription(owner_id)
     # Only a real provider subscription has anything to cancel upstream. A coupon-granted plan stores
@@ -182,8 +195,10 @@ def cancel(owner_id: str, *, now: datetime | None = None) -> None:
     if sub and sub.get("provider_ref") and sub.get("provider") == "payplus":
         try:
             payplus.cancel_recurring(sub["provider_ref"])
-        except Exception:               # noqa: BLE001 — still mark cancelled locally so we stop renewing
+        except Exception as exc:        # noqa: BLE001 — still mark cancelled locally so we stop renewing
             _log.exception("payplus cancel_recurring failed for %s", owner_id)
+            if strict:
+                raise ProviderCancelFailed(owner_id) from exc
     db.upsert_subscription(owner_id, status="canceled", cancel_at_period_end=True,
                            updated_at=now.isoformat())
     _log.info("subscription cancelled for %s (paid access until period end)", owner_id)

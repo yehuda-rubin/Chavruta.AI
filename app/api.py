@@ -2717,13 +2717,24 @@ def request_account_deletion(req: DeletionRequest = DeletionRequest(),
             status_code=409,
             detail="החשבון הזה מנהל מוסד. כדי למחוק אותו, יש לסגור תחילה את המוסד — מחיקה עכשיו "
                    "הייתה משאירה את חברי המוסד בלי מי שמנהל את המכסה שלהם. פנו אלינו ונסייע.")
-    if req.immediate:
-        # Not wrapped in a try: purge_owner raising means the deletion did NOT happen, and a 500 the
-        # user sees beats a 200 they believe. The one case it refuses (owning a school) is already
-        # answered above with a message that says what to do about it.
-        accounts.purge_now(owner)
-        return DeletionOut(deletion_scheduled_for=None, deleted=True)
-    return DeletionOut(deletion_scheduled_for=accounts.schedule(owner))
+    # Both paths stop the recurring charge first (accounts.stop_billing). If the provider will not
+    # confirm it, neither path proceeds: the alternative is an account that no longer exists still
+    # being billed every month, with the handle needed to stop it deleted along with the data. The
+    # user is told what happened and nothing has been lost — everything is still here to retry.
+    try:
+        if req.immediate:
+            # purge_owner raising is likewise NOT swallowed: the deletion did not happen, and a 500
+            # the user sees beats a 200 they believe. Its one refusal (owning a school) is already
+            # answered above with a message that says what to do about it.
+            accounts.purge_now(owner)
+            return DeletionOut(deletion_scheduled_for=None, deleted=True)
+        return DeletionOut(deletion_scheduled_for=accounts.schedule(owner))
+    except billing.ProviderCancelFailed as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="לא הצלחנו לעצור את החיוב המתחדש אצל ספק התשלומים, ולכן לא ביצענו את המחיקה — "
+                   "מחיקה עכשיו הייתה משאירה אותך מחויב מדי חודש בלי חשבון. המנוי והנתונים שלך לא "
+                   "השתנו. נסו שוב בעוד כמה דקות, ואם זה חוזר — פנו אלינו ונטפל בזה ידנית.") from exc
 
 
 @app.post("/account/delete/cancel", response_model=DeletionOut)
