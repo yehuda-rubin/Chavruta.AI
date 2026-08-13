@@ -349,3 +349,41 @@ def test_topics_exclude_what_a_member_did_before_they_joined(client, school):
     _event(db._now(), "lesson")                  # ...and what they have done since joining
     topics = client.get("/orgs/panel", headers=h(BOSS)).json()["topics"]
     assert [t["intent"] for t in topics] == ["lesson"]
+
+
+def test_a_teacher_cannot_reverse_an_admins_removal(client, school):
+    """The safeguarding control introduced last round was reversible by exactly the people it
+    constrains: readmit had a TEACHER floor and no rank check, so a colleague could undo a dismissal
+    and mint the staff code that let the person back in."""
+    client.post("/orgs/members/remove", json={"owner_id": _owner_of(PUPIL)}, headers=h(BOSS))
+    assert client.post("/orgs/members/readmit", json={"owner_id": _owner_of(PUPIL)},
+                       headers=h(TEACH)).status_code == 404
+
+    code = client.post("/orgs/invite", json={"role": "student"}, headers=h(TEACH)).json()["code"]
+    assert client.post("/orgs/join", json={"code": code}, headers=h(PUPIL)).status_code == 409
+
+
+def test_readmit_cannot_be_pointed_at_a_higher_rank(client, school):
+    """require_can_act_on, for the same reason remove has it: without it a teacher could readmit a
+    removed ADMIN — someone they could never have removed in the first place."""
+    with db._tx(db.get_conn()) as conn:
+        conn.execute("UPDATE org_members SET role='admin', accepted_at=NULL, removed_at=? "
+                     "WHERE org_id=? AND owner_id=?", (db._now(), school, _owner_of(PUPIL)))
+    assert client.post("/orgs/members/readmit", json={"owner_id": _owner_of(PUPIL)},
+                       headers=h(TEACH)).status_code == 404
+
+
+def test_a_credit_paid_turn_that_404s_gets_the_credits_back(client, school, monkeypatch):
+    """The release guard gave back reserved TOKENS but not credits, and a credit-admitted turn
+    reserves none — so a stale session id destroyed real credits per attempt, five at a time for a
+    lesson, with no generation and nothing to see."""
+    import app.plans as plans
+    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", "1")
+    monkeypatch.setenv("CHAVRUTA_TOKENS_WEEK_FREE", "0")
+    db.add_credits(_owner_of(OUTSIDER), 50)
+
+    r = client.post("/sessions/no-such-session/query",
+                    json={"question": "x", "intent": "lesson"}, headers=h(OUTSIDER))
+    assert r.status_code == 404
+    assert db.get_credits(_owner_of(OUTSIDER)) == 50
+    assert plans.credit_cost("lesson") > 0     # the refund is not vacuous

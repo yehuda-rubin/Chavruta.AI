@@ -157,3 +157,18 @@ def store():
 @pytest.fixture
 def fake_llm():
     return FakeLLM()
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limit_windows():
+    """The rate limiter's sliding windows are module-level and keyed by identity, so every TestClient
+    request in the whole session lands in ONE bucket ('ip:testclient'). Past ~20 metered POSTs the
+    limiter starts 429ing tests that have nothing to do with rate limiting — a cross-test dependency
+    that shows up as an unrelated test failing only when the suite grows. Cleared between tests so
+    each one starts with the budget it assumes.
+    """
+    from app import security
+
+    security._minute._hits.clear()
+    security._hour._hits.clear()
+    yield

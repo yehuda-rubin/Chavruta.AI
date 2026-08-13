@@ -454,7 +454,7 @@ def test_a_lapsed_subscription_degrades_the_pool(school):
     """Nothing used to write orgs.plan after creation, so a school that stopped paying kept its full
     institution pool forever while the panel cheerfully rendered it."""
     _join(school, "pupil")
-    assert orgs.sync_plan_from_owner("boss", "free") == school
+    assert orgs.sync_plan_from_owner("boss", "free", degrade=True) == school
     assert orgs.get_org(school)["plan"] == "free"
     # The member keeps their seat, their account and their history — the pool shrinks, the school
     # does not dissolve. Nobody is locked out of their own study by a billing failure, and the tier
@@ -527,8 +527,18 @@ def test_the_downgrade_sweep_degrades_the_school(school, monkeypatch):
 def test_a_personal_tier_never_becomes_a_schools_tier(school):
     """'pro' has seats=1, so writing it through would refuse every new member with "no seats left"
     while the panel printed "1 seat, 21 used" — and member_cap would exceed the whole pool."""
-    orgs.sync_plan_from_owner("boss", "pro")
-    assert orgs.get_org(school)["plan"] == "free"
+    assert orgs.sync_plan_from_owner("boss", "pro") is None
+    assert orgs.get_org(school)["plan"] == "institution"
+
+
+def test_an_unrelated_personal_renewal_does_not_degrade_the_school(school):
+    """How a school gets provisioned by coupon leaves the PayPlus row reading the owner's PERSONAL
+    plan. The ordinary monthly renewal of that unrelated subscription then dropped a hundred students
+    from a shared 8,000,000/day pool to 200,000, mid-term, because a different plan charged on
+    schedule. Only a real lapse degrades."""
+    orgs.sync_plan_from_owner("boss", "institution_100")
+    orgs.sync_plan_from_owner("boss", "pro")            # their personal subscription renews
+    assert orgs.get_org(school)["plan"] == "institution_100"
 
 
 def test_a_member_ceiling_never_exceeds_the_pool_it_bounds(fresh_db):
@@ -566,10 +576,34 @@ def test_closing_a_school_takes_the_records_that_name_people(school):
     orgs.close_org(school)
     with db._LOCK:
         conn = db.get_conn()
-        assert conn.execute("SELECT COUNT(*) FROM org_access_log WHERE org_id=?",
-                            (school,)).fetchone()[0] == 0
+        # The per-member counters embed an account id, so they go...
         assert conn.execute("SELECT COUNT(*) FROM usage_counters WHERE owner_id LIKE ?",
                             (f"org:{school}:%",)).fetchone()[0] == 0
+        # ...but the access trail survives INTACT, attribution and all. Deleting it would hand the
+        # account with the most access to other people's data a one-click way to destroy the record
+        # of what it looked at — and closing the school is the documented step before deleting that
+        # very account. Individual erasure is purge_owner's job, per person.
+        rows = conn.execute("SELECT actor_owner_id, target_owner_id FROM org_access_log "
+                            "WHERE org_id=?", (school,)).fetchall()
+    assert [tuple(r) for r in rows] == [("boss", "pupil")]
+
+
+def test_an_owner_who_closes_a_school_cannot_erase_who_they_looked_at(school):
+    """Blanking the actor on every row kept the timestamps and lost the attribution — no better than
+    deleting, since the trail could no longer answer the only question it exists for."""
+    _join(school, "pupil")
+    orgs.log_access(school, "boss", "view_panel", "pupil")
+    orgs.close_org(school)
+    with db._LOCK:
+        actors = [r[0] for r in db.get_conn().execute(
+            "SELECT actor_owner_id FROM org_access_log WHERE org_id=?", (school,)).fetchall()]
+    assert actors == ["boss"]
+    # ...and deleting their own account is what removes THEIR name, nobody else's.
+    db.purge_owner("boss")
+    with db._LOCK:
+        actors = [r[0] for r in db.get_conn().execute(
+            "SELECT actor_owner_id FROM org_access_log WHERE org_id=?", (school,)).fetchall()]
+    assert actors == [db.DELETED_OWNER]
 
 
 # ── An abandoned payment page must not bar someone for good ──────────────────
@@ -588,3 +622,65 @@ def test_a_checkout_started_moments_ago_still_blocks(school):
                            updated_at=db._now())
     with pytest.raises(orgs.JoinRefused):
         _join(school, "shopper2")
+
+
+# ── The subscription row must survive an unrelated write ─────────────────────
+def test_an_ordinary_renewal_does_not_destroy_a_granted_discount(fresh_db):
+    """upsert_subscription is INSERT OR REPLACE, and REPLACE deletes the row first — so any column
+    left out of its read reverts to the schema default. Three coupon columns were omitted, and the
+    effect was that a rebate granted to a paying customer was wiped by the very charge it was meant
+    to reduce (handle_event upserts BEFORE it reads the balance). Money owed, never returned,
+    nothing logged."""
+    db.upsert_subscription("payer", provider="payplus", status="active", plan="pro",
+                           updated_at=db._now())
+    db.set_coupon_discount("payer", 49.0)
+    db.set_coupon_boost("payer", revert_plan="pro", revert_at="2099-01-01T00:00:00",
+                        updated_at=db._now())
+
+    db.upsert_subscription("payer", status="active", updated_at=db._now())   # the next charge
+
+    sub = db.get_subscription("payer")
+    assert sub["coupon_discount_ils"] == 49.0
+    assert sub["coupon_revert_plan"] == "pro"
+    assert sub["coupon_revert_at"] == "2099-01-01T00:00:00"
+
+
+# ── One member cannot take the whole school's week of lessons ────────────────
+def test_a_members_lessons_are_bounded_by_their_own_share(school):
+    """A lesson was charged only to the school's counter while its token reservation was refunded in
+    full, so it cost the member nothing at all — member_cap bounds TOKENS per day and the lesson pool
+    is a separate weekly count. One student could take every lesson a 20-seat school gets in a week
+    and appear, in the panel, to have used nothing."""
+    _join(school, "pupil")
+    ctx = orgs.quota_context("pupil")
+    share = ctx["member_lessons"]
+    assert 0 < share < ctx["weekly_lessons"]
+
+    for _ in range(share):
+        assert db.bump_pooled(ctx["member_id"], ctx["pool_id"], member_cap=0,
+                              member_weekly=share, pool_daily=0,
+                              pool_weekly=ctx["weekly_lessons"], units=1,
+                              meter=db.LESSON).allowed
+
+    over = db.bump_pooled(ctx["member_id"], ctx["pool_id"], member_cap=0, member_weekly=share,
+                          pool_daily=0, pool_weekly=ctx["weekly_lessons"], units=1, meter=db.LESSON)
+    assert over.allowed is False and over.refused == "member_weekly"
+    # ...and the school still has most of its week left for everyone else.
+    assert db.usage_this_week(ctx["pool_id"], meter=db.LESSON) < ctx["weekly_lessons"]
+
+
+# ── Settlement must not resurrect what a purge removed ───────────────────────
+def test_settling_after_a_purge_does_not_recreate_the_deleted_id(school):
+    """The reservation deliberately carries the member identity from entry, so settlement never
+    re-checks whether that person still exists — and an async lesson makes the window minutes wide.
+    Re-creating the row would undo an erasure that had already completed."""
+    _join(school, "pupil")
+    ctx = orgs.quota_context("pupil")
+    db.bump_pooled(ctx["member_id"], ctx["pool_id"], member_cap=0, pool_daily=0, pool_weekly=0,
+                   units=30_000)
+    db.purge_owner("pupil")
+    db.settle_pooled(ctx["member_id"], ctx["pool_id"], reserved=30_000, actual=58_000)
+    with db._LOCK:
+        rows = db.get_conn().execute(
+            "SELECT owner_id FROM usage_counters WHERE owner_id LIKE '%pupil%'").fetchall()
+    assert rows == []

@@ -123,6 +123,27 @@ def member_cap(org_plan: str) -> int:
     return min(pool, max(plans.daily_tokens("free"), share * MEMBER_CAP_MULTIPLE))
 
 
+def member_lessons(org_plan: str) -> int:
+    """One member's share of the school's WEEKLY lesson count.
+
+    `member_cap` bounds tokens per day, and the lesson pool is weekly and counted separately — so it
+    bounded nothing here. A member's lesson was charged only to the school's counter, and the turn's
+    token reservation was refunded in full because a lesson is paid for from its own pool. The result
+    was that a lesson cost a member exactly nothing: one student could take every lesson a 20-seat
+    school gets in a week in a single sitting, and the only lever an administrator had was blocking
+    them from asking anything at all.
+
+    Same over-subscription as member_cap, and for the same reason: capacity should move to whoever is
+    preparing lessons this week, but not all of it to one person.
+    """
+    t = plans.tier(org_plan)
+    weekly = plans.weekly_lessons(org_plan)
+    if weekly <= 0:
+        return 0
+    share = weekly // max(1, t.seats)
+    return min(weekly, max(plans.weekly_lessons("free"), share * MEMBER_CAP_MULTIPLE))
+
+
 def quota_context(owner_id: str) -> dict[str, Any] | None:
     """Everything a metered request needs, resolved ONCE and carried through settlement.
 
@@ -145,6 +166,9 @@ def quota_context(owner_id: str) -> dict[str, Any] | None:
         "pool_daily": plans.daily_tokens(plan),
         "pool_weekly": plans.weekly_tokens(plan),
         "weekly_lessons": plans.weekly_lessons(plan),
+        # No CAP_BLOCKED variant: a blocked member is refused at _reserve_tokens and never reaches
+        # the lesson charge at all.
+        "member_lessons": member_lessons(plan),
     }
 
 
@@ -258,7 +282,7 @@ def owned_org(owner_id: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
-def sync_plan_from_owner(owner_id: str, plan: str) -> str | None:
+def sync_plan_from_owner(owner_id: str, plan: str, *, degrade: bool = False) -> str | None:
     """Move the org's tier to match what its payer now holds. Returns the org id, or None.
 
     Without this the school's tier was written once at creation and never again: `quota_context`
@@ -274,13 +298,21 @@ def sync_plan_from_owner(owner_id: str, plan: str) -> str | None:
     org = owned_org(owner_id)
     if not org:
         return None
-    # Only an INSTITUTIONAL tier can size a school. Anything else means the school is not currently
-    # paid for, and degrades the pool — writing the tier through unguarded would have stamped a
-    # personal plan onto the org row: 'pro' has seats=1, so every new member is refused with "no
-    # seats left" while the panel prints "1 seat, 21 used", and member_cap would exceed the entire
-    # pool, letting one person drain the school in a day.
+    # Only an INSTITUTIONAL tier can size a school. A personal plan stamped onto the org row would be
+    # nonsense — 'pro' has seats=1, so every new member is refused with "no seats left" while the
+    # panel prints "1 seat, 21 used", and member_cap would exceed the entire pool.
+    #
+    # And a non-institutional plan only DEGRADES the school when the caller says this is a lapse.
+    # Without that flag the two ends fought: a school owner who also holds a personal subscription
+    # (which is how one gets provisioned by coupon — the coupon leaves the PayPlus row reading 'pro')
+    # had their school dropped to the free tier by the ordinary monthly renewal of that unrelated
+    # personal plan. A hundred students went from a shared 8,000,000/day pool to 200,000, mid-term,
+    # because a different subscription charged on schedule. Only sweep_downgrades, which knows a paid
+    # period actually ended, passes degrade=True.
     target = plans.canonical(plan)
     if not plans.is_institutional(target):
+        if not degrade:
+            return None
         target = "free"
     if target == plans.canonical(org["plan"]):
         return org["id"]
@@ -468,15 +500,27 @@ def close_org(org_id: str) -> None:
     accounts untouched, which is what they had before joining.
 
     The POOL's usage_counters rows are deliberately left: `org:<id>` names no person, and deleting
-    them would rewrite history for aggregates already reported. Everything that does name a person
-    goes — the per-member counters (which embed the account id) and the access log, whose purpose is
-    accountability inside a school and does not outlive the school. Leaving those would have kept a
-    roster of members, indefinitely, attached to an org that no longer exists and readable through
-    no route at all.
+    them would rewrite history for aggregates already reported. The per-member counters DO go — they
+    embed the account id, so leaving them would keep a per-day record of each member's study attached
+    to an org that no longer exists.
+
+    The ACCESS LOG is left ENTIRELY ALONE — not deleted, and not de-identified either.
+
+    Deleting it would hand the one account with the most access to other people's data, including
+    minors', a one-click way to destroy the record of what it looked at — and closing the school is
+    the documented step before deleting that very account. But blanking the actor on every row was no
+    better: it kept the timestamps and lost the attribution, so the trail could no longer answer the
+    only question it exists for, while the owner still erased their own accountability in one click.
+    That satisfied neither goal.
+
+    Individual erasure is already handled where it belongs: purge_owner rewrites the rows naming the
+    ONE person being deleted and leaves everyone else's attribution intact. So a member who deletes
+    their account disappears from the trail, and an administrator who wants to disappear from it has
+    to delete their own account too — which is the honest bargain.
     """
     with db._tx(db.get_conn()) as conn:
-        conn.execute("DELETE FROM usage_counters WHERE owner_id LIKE 'org:' || ? || ':%'", (org_id,))
-        conn.execute("DELETE FROM org_access_log WHERE org_id=?", (org_id,))
+        conn.execute(r"DELETE FROM usage_counters WHERE owner_id LIKE 'org:' || ? || ':%' ESCAPE '\'",
+                     (db._like_literal(org_id),))
         conn.execute("DELETE FROM org_invites WHERE org_id=?", (org_id,))
         conn.execute("DELETE FROM org_members WHERE org_id=?", (org_id,))
         conn.execute("DELETE FROM orgs WHERE id=?", (org_id,))

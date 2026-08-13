@@ -285,7 +285,7 @@ def sweep_downgrades(now: datetime | None = None) -> int:
         # accounts, their history and their seats, and the tier comes straight back when payment
         # resumes: nobody is locked out of their own study by a billing failure. Before this, an
         # unpaid school simply kept its full institution pool, indefinitely and invisibly.
-        if org_id := orgs.sync_plan_from_owner(owner, "free"):
+        if org_id := orgs.sync_plan_from_owner(owner, "free", degrade=True):
             _log.warning("org %s degraded to free — its subscription (%s) lapsed", org_id, owner)
         _log.info("subscription expired → free plan for %s", owner)
     return len(due)
@@ -298,7 +298,9 @@ def sweep_coupon_reverts(now: datetime | None = None) -> int:
     due = db.due_coupon_reverts(now.isoformat())
     for row in due:
         db.set_plan(row["owner_id"], row["revert_plan"])
-        orgs.sync_plan_from_owner(row["owner_id"], row["revert_plan"])   # keep the school in step
+        # degrade=True: a boost ENDING is a real lapse back to what is actually paid for, unlike
+        # an unrelated personal renewal.
+        orgs.sync_plan_from_owner(row["owner_id"], row["revert_plan"], degrade=True)
         db.clear_coupon_revert(row["owner_id"], updated_at=now.isoformat())
         _log.info("coupon boost ended for %s → reverted to %s", row["owner_id"], row["revert_plan"])
     return len(due)

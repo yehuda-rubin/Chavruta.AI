@@ -423,3 +423,21 @@ def test_the_schools_exhausted_day_names_the_school(_school, api_backend, monkey
     db.bump_pooled(ctx["member_id"], ctx["pool_id"], member_cap=0, pool_daily=0, pool_weekly=0,
                    units=999)
     assert "ישיבת דוגמה" in _refusal()
+
+
+def test_a_lesson_within_quota_is_not_billed_to_both_currencies(fresh_db, api_backend, monkeypatch):
+    """Conversation tokens and lessons are independent pools — plans.py says running out of one does
+    not stop the other. When the token pool was spent, credits admitted the turn AND the weekly
+    lesson unit was charged for the same generation: two currencies, one lesson."""
+    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", str(_DAY_CAP))
+    monkeypatch.setenv("CHAVRUTA_TOKENS_WEEK_FREE", "0")
+    monkeypatch.setenv("CHAVRUTA_LESSONS_WEEK_FREE", "2")
+    db.add_credits("u14", 50)
+    db.bump_usage("u14", _DAY_CAP, units=_DAY_CAP, meter=db.TOKENS)     # tokens gone, lessons intact
+
+    res = api._reserve_tokens("u14", "he", "lesson")
+    assert res.credits_spent == plans.credit_cost("lesson")
+    assert api._charge_lesson_unit("u14", res, used_byok=False) is False
+    # The credits paid for it; the weekly lesson allowance is untouched and still spendable.
+    assert db.usage_this_week("u14", meter=db.LESSON) == 0
+    assert db.get_credits("u14") == 50 - plans.credit_cost("lesson")

@@ -1406,7 +1406,8 @@ class PoolCharge(NamedTuple):
 
 
 def bump_pooled(member_id: str, pool_id: str, *, member_cap: int, pool_daily: int, pool_weekly: int,
-                units: int = 1, meter: str = TOKENS, day: str | None = None) -> PoolCharge:
+                member_weekly: int = 0, units: int = 1, meter: str = TOKENS,
+                day: str | None = None) -> PoolCharge:
     """Charge one turn to BOTH a member's own counter and their organisation's shared pool.
 
     Returns (allowed, pool_day_total, pool_week_total, refused).
@@ -1434,12 +1435,17 @@ def bump_pooled(member_id: str, pool_id: str, *, member_cap: int, pool_daily: in
     units = max(0, int(units))
     conn = get_conn()
     with _LOCK, _tx(conn):
-        m_day, _m_week = _counts(conn, member_id, day, meter)
+        m_day, m_week = _counts(conn, member_id, day, meter)
         p_day, p_week = _counts(conn, pool_id, day, meter)
         if member_cap < 0:
             return PoolCharge(False, p_day, p_week, "blocked")
         if member_cap > 0 and m_day + units > member_cap:
             return PoolCharge(False, p_day, p_week, "member_cap")
+        # A member's share of a WEEKLY pool. The lesson pool is weekly-only, so a daily ceiling says
+        # nothing about it — and without this one member could take every lesson a school gets in a
+        # week, at zero cost to any per-member control, which is exactly what happened.
+        if member_weekly > 0 and m_week + units > member_weekly:
+            return PoolCharge(False, p_day, p_week, "member_weekly")
         if pool_daily > 0 and p_day + units > pool_daily:
             return PoolCharge(False, p_day, p_week, "day")
         if pool_weekly > 0 and p_week + units > pool_weekly:
@@ -1472,11 +1478,16 @@ def settle_pooled(member_id: str, pool_id: str, reserved: int, actual: int,
             row = conn.execute(
                 "SELECT count FROM usage_counters WHERE owner_id=? AND day=? AND meter=?",
                 (who, day, meter)).fetchone()
-            new = max(0, (int(row["count"]) if row else 0) + delta)
+            # A MISSING row means there is nothing to settle: bump_pooled always creates both rows,
+            # so its absence means something removed them — an account purged, or a school closed,
+            # while the turn was still running. Re-creating it would resurrect the deleted person's
+            # id inside the counter key, undoing an erasure that had already completed, and would
+            # leave a school that no longer exists with counters no route can ever read or delete.
+            if row is None:
+                continue
             conn.execute(
-                "INSERT INTO usage_counters (owner_id, day, meter, count) VALUES (?,?,?,?) "
-                "ON CONFLICT(owner_id, day, meter) DO UPDATE SET count = excluded.count",
-                (who, day, meter, new))
+                "UPDATE usage_counters SET count=? WHERE owner_id=? AND day=? AND meter=?",
+                (max(0, int(row["count"]) + delta), who, day, meter))
 
 
 def settle_usage(owner_id: str, reserved: int, actual: int, day: str | None = None,
@@ -1789,19 +1800,31 @@ def upsert_subscription(owner_id: str, *, provider: str | None = None, provider_
                         plan: str | None = None, cycle: str | None = None) -> None:
     """Create or update an owner's subscription row. A passed field is written; None means "leave as-is"
     (merged over the current row), so a webhook can update just status+period without clobbering the
-    stored provider_ref. Read-merge-write under the lock keeps concurrent webhooks consistent."""
+    stored provider_ref. Read-merge-write under the lock keeps concurrent webhooks consistent.
+
+    The merge MUST cover every column, not just the ones this function takes as parameters. It is an
+    INSERT OR REPLACE, and REPLACE deletes the row before inserting — so any column left out of the
+    read reverts to its schema default. Three coupon columns were omitted, and the effect was that a
+    ₪49 rebate granted to a paying customer was wiped by the very charge it was meant to reduce
+    (handle_event upserts BEFORE it reads the balance), and a coupon boost's revert_at was erased so
+    the sweep that ends a boost could never select the row again. Money owed and never returned, with
+    nothing logged. If you add a column to this table, add it here.
+    """
     conn = get_conn()
     with _LOCK, _tx(conn):
         row = conn.execute(
             "SELECT provider, provider_ref, status, current_period_end, cancel_at_period_end, "
-            "plan, cycle FROM subscriptions WHERE owner_id=?", (owner_id,)).fetchone()
+            "plan, cycle, coupon_discount_ils, coupon_revert_plan, coupon_revert_at "
+            "FROM subscriptions WHERE owner_id=?", (owner_id,)).fetchone()
         cur = dict(row) if row else {
             "provider": None, "provider_ref": None, "status": "none",
-            "current_period_end": None, "cancel_at_period_end": 0, "plan": None, "cycle": "monthly"}
+            "current_period_end": None, "cancel_at_period_end": 0, "plan": None, "cycle": "monthly",
+            "coupon_discount_ils": 0.0, "coupon_revert_plan": None, "coupon_revert_at": None}
         conn.execute(
             "INSERT OR REPLACE INTO subscriptions (owner_id, provider, provider_ref, status, "
-            "current_period_end, cancel_at_period_end, updated_at, plan, cycle) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
+            "current_period_end, cancel_at_period_end, updated_at, plan, cycle, "
+            "coupon_discount_ils, coupon_revert_plan, coupon_revert_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (owner_id,
              provider if provider is not None else cur["provider"],
              provider_ref if provider_ref is not None else cur["provider_ref"],
@@ -1810,7 +1833,10 @@ def upsert_subscription(owner_id: str, *, provider: str | None = None, provider_
              cur["cancel_at_period_end"] if cancel_at_period_end is None else int(cancel_at_period_end),
              updated_at,
              plan if plan is not None else cur["plan"],
-             cycle if cycle is not None else (cur["cycle"] or "monthly")))
+             cycle if cycle is not None else (cur["cycle"] or "monthly"),
+             cur["coupon_discount_ils"] or 0.0,
+             cur["coupon_revert_plan"],
+             cur["coupon_revert_at"]))
 
 
 def get_subscription(owner_id: str) -> dict[str, Any] | None:
@@ -1907,6 +1933,15 @@ class OwnsOrganisation(Exception):
 DELETED_OWNER = "deleted-account"
 
 
+def _like_literal(value: str) -> str:
+    r"""Escape a value that is being spliced into a LIKE PATTERN rather than compared to one.
+
+    Parameter binding stops SQL injection; it does NOT stop `%` and `_` inside the bound value from
+    acting as wildcards. Callers pair this with ESCAPE '\'.
+    """
+    return value.replace("\\", r"\\").replace("%", r"\%").replace("_", r"\_")
+
+
 def owns_org(owner_id: str) -> bool:
     """Does this account own (pay for, administer) an organisation?"""
     with _LOCK:
@@ -1939,7 +1974,13 @@ def purge_owner(owner_id: str) -> None:
         # which an exact-match delete misses — so the account id survived erasure inside a composite
         # key, joined to a per-day record of how much that person studied. Introduced by the very
         # change that separated the two counters; the identifier has to go with the account.
-        conn.execute("DELETE FROM usage_counters WHERE owner_id LIKE 'org:%:' || ?", (owner_id,))
+        #
+        # ESCAPE, because the id goes into a LIKE PATTERN: `_` and `%` inside it would be wildcards.
+        # In API-key mode every owner id begins `u_` (security._owner_from_key), so this is already
+        # true today — it happens to be harmless because the rest is a SHA-256 prefix no other
+        # account can match. That is a property of the current auth provider, not of the query.
+        conn.execute(r"DELETE FROM usage_counters WHERE owner_id LIKE 'org:%:' || ? ESCAPE '\'",
+                     (_like_literal(owner_id),))
         conn.execute("DELETE FROM subscriptions WHERE owner_id=?", (owner_id,))
         conn.execute("DELETE FROM accounts WHERE owner_id=?", (owner_id,))
         # Coupon redemptions too. Keeping them would leave a user identifier behind after an account
@@ -1947,6 +1988,13 @@ def purge_owner(owner_id: str) -> None:
         # never decremented, so a spent code stays spent whether or not this row survives. (Nor
         # would keeping it stop re-redemption — a re-registered person gets a new owner_id anyway.)
         conn.execute("DELETE FROM coupon_redemptions WHERE owner_id=?", (owner_id,))
+        # Things the person WROTE, under their own id. Both were missed while every measurement table
+        # around them was handled: feedback holds their free text, and a message_report holds their id
+        # against a message that cascade-deletes with the session — so the report was not only kept
+        # but became invisible to the operator's own review screen, which inner-joins messages.
+        # Retained data that nothing can see is data nothing will ever clean up.
+        conn.execute("DELETE FROM feedback WHERE owner_id=?", (owner_id,))
+        conn.execute("DELETE FROM message_reports WHERE owner_id=?", (owner_id,))
         # School membership goes with the account. The seat must be freed too — leaving the row would
         # hold a seat for someone who no longer exists, and a 20-seat school would slowly run out of
         # room it is still paying for.
@@ -1964,6 +2012,11 @@ def purge_owner(owner_id: str) -> None:
                      (DELETED_OWNER, owner_id))
         conn.execute("UPDATE org_access_log SET target_owner_id=? WHERE target_owner_id=?",
                      (DELETED_OWNER, owner_id))
+        # Their live codes die with the account, as they would on removal — otherwise a teacher who
+        # deletes their account leaves multi-use class codes behind, attributed to nobody, for as
+        # long as the expiry allows.
+        conn.execute("UPDATE org_invites SET revoked_at=?, created_by=? WHERE created_by=? "
+                     "AND revoked_at IS NULL", (_now(), DELETED_OWNER, owner_id))
         conn.execute("UPDATE org_invites SET created_by=? WHERE created_by=?",
                      (DELETED_OWNER, owner_id))
         # invited_by is the same kind of residue one statement up: a teacher who deletes their

@@ -1951,12 +1951,19 @@ def _charge_lesson_unit(owner: str, res: Reservation, used_byok: bool) -> bool:
     day = res.day or None      # the day the turn was ADMITTED, so a lesson finished after midnight
                                # on Saturday night lands in the week it was actually built in
     if ctx:
-        allowed, _d, _w = db.bump_usage(ctx["pool_id"], 0, weekly_limit=ctx["weekly_lessons"],
-                                        units=1, meter=db.LESSON, day=day)
-        if allowed:
+        # BOTH counters, and a per-member weekly share as well as the school's. A lesson used to be
+        # charged only to the pool while its token reservation was refunded in full — so it cost the
+        # member nothing at all, and one student could take every lesson a 20-seat school gets in a
+        # week in a single sitting. `member_cap` could not stop it: that bounds tokens per day, and
+        # the lesson pool is a separate weekly count.
+        charge = db.bump_pooled(ctx["member_id"], ctx["pool_id"], member_cap=0,
+                                member_weekly=ctx["member_lessons"], pool_daily=0,
+                                pool_weekly=ctx["weekly_lessons"], units=1, meter=db.LESSON,
+                                day=day)
+        if charge.allowed:
             return False
-        _log.warning("org=%s produced a lesson beyond its weekly pool (member=%s)",
-                     ctx["org_id"], owner)
+        _log.warning("org=%s member=%s produced a lesson it could not pay for (%s)",
+                     ctx["org_id"], owner, charge.refused)
         # Past the cap the lesson still has to be PAID for. It used to cost nothing at all: the
         # refused bump leaves the lesson counter pinned, and _metered zeroes the turn's usage so its
         # token reservation was refunded in full — so lesson #81 and every one after it was free,
@@ -1967,15 +1974,20 @@ def _charge_lesson_unit(owner: str, res: Reservation, used_byok: bool) -> bool:
     limit = plans.weekly_lessons(db.get_plan(owner))
     if limit <= 0:
         return False
+    # If credits already paid to ADMIT this turn, they have paid for it — checked BEFORE the bump,
+    # not after. Behind the bump it only caught the case where the lesson pool ALSO refused, so the
+    # ordinary case (conversation tokens spent, weekly lessons untouched) charged the same generation
+    # to both currencies at once: five credits AND one of the two weekly lessons. plans.py states
+    # these pools are independent — running out of conversation tokens does not stop a lesson — and
+    # billing one from the other is exactly the coupling it says does not exist.
+    if res.paid_with_credits:
+        _log.info("owner=%s lesson already paid for at entry with %d credit(s)",
+                  owner, res.credits_spent)
+        return False
     lesson_meter = db.BYOK_LESSON if used_byok else db.LESSON
     allowed, _d, _w = db.bump_usage(owner, 0, weekly_limit=limit, units=1, meter=lesson_meter,
                                     day=day)
     if allowed:
-        return False
-    # If credits already paid to ADMIT this turn, they have paid for it. Charging again here took
-    # ten credits for one generation — twice the documented price of a lesson — and told nobody.
-    if res.paid_with_credits:
-        _log.info("owner=%s over weekly lesson quota; already paid for at entry with credits", owner)
         return False
     cost = plans.credit_cost("lesson")
     spent, balance = db.spend_credits(owner, cost)
@@ -2003,9 +2015,14 @@ class Reservation(NamedTuple):
     used_byok: bool = False
     ctx: dict | None = None
     day: str = ""
-    # This turn was admitted by spending credits rather than by reserving quota. Carried so the
-    # lesson charge does not bill for it a second time.
-    paid_with_credits: bool = False
+    # How many credits admitted this turn, if it was paid for that way rather than by reserving
+    # quota. Carried so the lesson charge does not bill for it a second time, and so a turn that
+    # never runs can hand them back.
+    credits_spent: int = 0
+
+    @property
+    def paid_with_credits(self) -> bool:
+        return self.credits_spent > 0
 
 
 def _reserve_tokens(owner: str, lang: str, intent: str, user_key: str = "") -> Reservation:
@@ -2065,7 +2082,7 @@ def _reserve_tokens(owner: str, lang: str, intent: str, user_key: str = "") -> R
                   owner, "weekly" if weekly_hit else "daily", cost, balance)
         # Nothing reserved, so nothing to settle — but the turn IS paid for, which the lesson charge
         # needs to know so it does not take a second helping of credits for the same generation.
-        return Reservation(0, day=day, paid_with_credits=True)
+        return Reservation(0, day=day, credits_spent=cost)
     raise HTTPException(status_code=429,
                         detail=_quota_message("week" if weekly_hit else "day", lang, balance, cost))
 
@@ -2175,6 +2192,13 @@ def _release_on_error(owner: str, res: Reservation, intent: str, meter: str):
         yield
     except BaseException:
         _settle_tokens(owner, res, {}, intent, meter=meter)
+        # A turn admitted by spending CREDITS reserved no tokens, so settlement has nothing to give
+        # back — but a real credit was taken for a generation that never happened. Same 404, same
+        # accident, and at the documented price this is money.
+        if res.credits_spent:
+            db.add_credits(owner, res.credits_spent)
+            _log.info("owner=%s refunded %d credit(s) for a turn that never ran",
+                      owner, res.credits_spent)
         raise
 
 
@@ -2329,7 +2353,8 @@ def query(req: QueryRequest, owner: str = Depends(current_owner),
          x_user_llm_model: str | None = Header(default=None, alias="X-User-LLM-Model")):
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
-    reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key)
+    reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key,
+                                                    x_user_llm_base_url, x_user_llm_model)
     return _metered(owner, reserved, req.intent, lambda: _run_query(
         _augment_question(req.question, req.attachments), req.lang, req.intent, [],
         audience=req.audience, grade_band=req.grade_band, length=req.length, owner_id=owner, llm=llm),
@@ -2992,11 +3017,12 @@ def query_async(req: QueryRequest, owner: str = Depends(current_owner),
         raise HTTPException(status_code=422, detail="question must not be empty")
     reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key,
                                                     x_user_llm_base_url, x_user_llm_model)
-    q = _augment_question(req.question, req.attachments)
-    jid = jobs.submit(owner, _metered(owner, reserved, req.intent, lambda: jsonable_encoder(
-        _run_query(q, req.lang, req.intent, [], audience=req.audience,
-                   grade_band=req.grade_band, length=req.length, owner_id=owner, llm=llm)),
-        req, meter=meter))
+    with _release_on_error(owner, reserved, req.intent, meter):
+        q = _augment_question(req.question, req.attachments)
+        jid = jobs.submit(owner, _metered(owner, reserved, req.intent, lambda: jsonable_encoder(
+            _run_query(q, req.lang, req.intent, [], audience=req.audience,
+                       grade_band=req.grade_band, length=req.length, owner_id=owner, llm=llm)),
+            req, meter=meter))
     return JobAccepted(job_id=jid)
 
 
@@ -3014,10 +3040,10 @@ def create_session_async(req: QueryRequest, owner: str = Depends(current_owner),
     with _release_on_error(owner, reserved, req.intent, meter):
         sid = db.create_session(req.question.strip(), mode=req.intent or None, owner_id=owner)
         db.save_message(sid, "user", req.question)
-    jid = jobs.submit(owner, _metered(
-        owner, reserved, req.intent,
-        lambda: jsonable_encoder(_first_query_work(sid, req, owner, llm=llm)),
-        req, meter=meter))
+        jid = jobs.submit(owner, _metered(
+            owner, reserved, req.intent,
+            lambda: jsonable_encoder(_first_query_work(sid, req, owner, llm=llm)),
+            req, meter=meter))
     return JobAccepted(job_id=jid, session_id=sid)
 
 
@@ -3034,8 +3060,9 @@ def session_query_async(session_id: str, req: QueryRequest, owner: str = Depends
     # gets a synchronous 404 and the user message is durable even if generation later fails.
     with _release_on_error(owner, reserved, req.intent, meter):
         history, intent = _prepare_continue(session_id, req, owner)
-    jid = jobs.submit(owner, _metered(owner, reserved, req.intent, lambda: jsonable_encoder(
-        _continue_query_work(session_id, req, history, intent, owner, llm=llm)), req, meter=meter))
+        jid = jobs.submit(owner, _metered(owner, reserved, req.intent, lambda: jsonable_encoder(
+            _continue_query_work(session_id, req, history, intent, owner, llm=llm)),
+            req, meter=meter))
     return JobAccepted(job_id=jid, session_id=session_id)
 
 
@@ -3304,11 +3331,13 @@ def org_panel(demo: bool = False, owner: str = Depends(current_owner)):
 
     topics: list[dict] = []
     if is_admin_role:
-        # Bounded per member to their OWN join date. A school is entitled to see what it is paying
-        # for; it is not entitled to the year of private study someone did on their own account
-        # before joining, which is what the first panel load after a teacher joined would otherwise
-        # have reported as "what this member has been studying".
-        topics = db.usage_by_intent_for({r["owner_id"]: r["accepted_at"] for r in rows})
+        # Bounded per member to when they FIRST entered this school. Not to accepted_at: that is
+        # rewritten every time someone rejoins, and it is NULL for anyone who has left — so the
+        # school's own record of what it paid for shrank the moment a member walked out, and a
+        # student could erase their study from it by leaving and coming back. invited_at is written
+        # once and never updated, which is the boundary the privacy rule actually means: not before
+        # they joined this school, rather than not unless they are still here.
+        topics = db.usage_by_intent_for({r["owner_id"]: r["invited_at"] for r in rows})
 
     orgs.log_access(org_id, owner, "view_panel")
     return OrgPanelOut(
@@ -3471,10 +3500,18 @@ def org_remove_member(req: MemberActionIn, owner: str = Depends(current_owner)):
 @app.post("/orgs/members/readmit")
 def org_readmit_member(req: MemberActionIn, owner: str = Depends(current_owner)):
     """Undo a removal so the person can join again. The counterpart of the fact that a removal now
-    sticks: without a way back, an administrator's mistake would be permanent."""
+    sticks: without a way back, an administrator's mistake would be permanent.
+
+    ADMIN, not teacher — a removal is a safeguarding decision and the refusal a removed member sees
+    says an administrator must re-admit them. At the teacher floor this route reversed an admin's
+    expulsion from one rank below, which is the invariant this module exists to hold. The rank check
+    matters for the same reason it does on remove and cap: without it a teacher could readmit a
+    removed ADMIN, someone they could never have removed in the first place.
+    """
     m = _org_for(owner)
     try:
-        orgs.require_member(owner, m["org_id"], orgs.TEACHER)
+        actor = orgs.require_member(owner, m["org_id"], orgs.ADMIN)
+        orgs.require_can_act_on(actor, req.owner_id)
     except orgs.OrgAccessError:
         raise HTTPException(status_code=404, detail="not found") from None
     if not orgs.readmit(m["org_id"], req.owner_id):

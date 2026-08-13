@@ -300,3 +300,44 @@ def test_the_sweeper_skips_an_org_owner_without_destroying_their_login(monkeypat
     assert orgs.get_org(school) is not None
     assert db.list_sessions("headmaster")                        # ...and neither was their data
     assert db.list_sessions("ordinary") == []
+
+
+def test_purge_removes_what_the_person_wrote_and_reported(monkeypatch, tmp_path):
+    """feedback holds their free text and message_reports holds their id against a message that
+    cascade-deletes with the session — so the report was not only kept but became invisible to the
+    operator's own review screen, which inner-joins messages. Retained data nothing can see is data
+    nothing will ever clean up."""
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "wrote.db")
+    monkeypatch.setattr(db, "_conn", None)
+    db.get_conn()
+    sid = db.create_session("a question", owner_id="author")
+    mid = db.save_message(sid, "assistant", "an answer")
+    db.submit_feedback("author", "something they typed")
+    db.report_message(mid, "author", "wrong")
+
+    db.purge_owner("author")
+
+    with db._LOCK:
+        conn = db.get_conn()
+        assert conn.execute("SELECT COUNT(*) FROM feedback WHERE owner_id=?",
+                            ("author",)).fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM message_reports WHERE owner_id=?",
+                            ("author",)).fetchone()[0] == 0
+
+
+def test_a_purge_pattern_cannot_match_other_accounts(monkeypatch, tmp_path):
+    """The org counter delete builds a LIKE PATTERN from the owner id, so `%` and `_` inside it would
+    be wildcards. Every API-key-mode id already contains an underscore."""
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "like.db")
+    monkeypatch.setattr(db, "_conn", None)
+    db.get_conn()
+    for who in ("org:o1:u_alice", "org:o1:u_bob", "org:o1:literal"):
+        db.bump_usage(who, 0, units=5)
+
+    db.purge_owner("%")            # a pattern, not an account: must match nothing
+    db.purge_owner("u_alice")      # ...and a real id must take only its own row
+
+    with db._LOCK:
+        left = {r[0] for r in db.get_conn().execute(
+            "SELECT owner_id FROM usage_counters").fetchall()}
+    assert left == {"org:o1:u_bob", "org:o1:literal"}
