@@ -1386,7 +1386,11 @@ def record_guard_finding(kind: str, intent: str, detail: dict[str, Any],
                 "INSERT INTO guard_findings (at, kind, intent, detail) VALUES (?,?,?,?)",
                 (at or _now(), kind, intent or None, json.dumps(detail, ensure_ascii=False)))
     except Exception:                       # noqa: BLE001
-        _log.exception("failed to record guard finding (%s)", kind)
+        # `_telemetry_log`, not `_log`: this module has never had a bare `_log`, and writing one here
+        # meant the only line in the except branch was itself a NameError. The tests passed because
+        # the branch only runs when the insert fails — a handler that breaks exactly when it is
+        # needed, which is the same shape as the misattribution NameError earlier today.
+        _telemetry_log.exception("failed to record guard finding (%s)", kind)
 
 
 def list_guard_findings(since: str | None = None, kind: str = "",
