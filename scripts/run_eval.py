@@ -44,9 +44,15 @@ def main() -> None:
     d = report.to_dict()
     print("─" * 60)
     print(f"profile:        {d['profile']}   (top_k={d['top_k']})")
-    print(f"retrieval@K:    {d['retrieval_at_k']:.1%}   ({report.retrieval_hits}/{report.n_answerable})")
+    print(f"retrieval@K:    {d['retrieval_at_k']:.1%}   ({report.retrieval_hits}/{report.n_answerable})"
+          "   [found ANYTHING expected]")
+    print(f"source coverage:{d['source_coverage']:.1%}   ({report.expected_found}/{report.expected_total})"
+          "   [found ALL of it]")
     print(f"grounding:      {d['grounding_rate']:.1%}" + ("   [retrieval-only proxy]" if args.retrieval_only else ""))
     print(f"honesty (SC-002): {d['honesty_rate']:.1%}   ({report.no_source_honest}/{report.n_unanswerable})")
+    if not args.retrieval_only:
+        print(f"quote fidelity: {d['quote_faithfulness']:.1%}   "
+              f"({report.fabricated_quotes} answers quoted text found in no source)")
     print(f"time:           {d['seconds']}s")
     if report.failures:
         print(f"\n⚠️  failures ({len(report.failures)} total, showing {args.show_failures}):")

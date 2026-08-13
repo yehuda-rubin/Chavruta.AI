@@ -70,6 +70,11 @@ class Tier:
                               # ANNUAL_INSTALMENTS and price_ils().
     name_he: str
     name_en: str
+    # How many accounts may share this subscription. 1 for a personal plan; the institution tiers
+    # carry 20 / 50 / 100. The pool scales WITH the seat count so the per-member allowance stays
+    # constant — split a fixed pool three ways and the biggest school gets the least per person,
+    # which is how the first cut of this was wrong (see specs/004-school-accounts/plan.md).
+    seats: int = 1
 
 
 # Order matters: rank() uses it to decide whether a coupon is an upgrade or a downgrade.
@@ -89,15 +94,71 @@ class Tier:
 # Free raised 2026-08-03 (+50% on both token pools, +1 lesson/week — real usage was routinely
 # maxing the old 350k/week pool inside a single heavy day) — every paid tier recomputed at its SAME
 # multiple against the new free baseline, preserving the honest-ratio invariant above.
+#
+# Free's DAILY pool raised again 2026-08-12 (user decision): 180k → 200k, alongside the per-intent
+# generation budgets roughly doubling in pipeline.py. A bigger answer costs more per turn, so
+# leaving the daily pool where it was would have quietly cut how many turns a free day buys. Every
+# paid tier is recomputed at its SAME multiple (x3 / x10 / x40) so "3x the usage" stays literally
+# true — that invariant is the whole reason the UI can state a ratio and never a number.
+# Repriced 2026-08-12. The old ladder (₪29 / ₪49.90 / ₪199) was set before anyone measured what a
+# turn costs, and two of its three tiers lost money at their own cap — see the profitability test in
+# tests/unit. Nothing was grandfathered because nothing had to be: the only paid accounts in
+# production were a coupon grant and a test.
+#
+# Every paid tier must cover THREE things, and the price is derived from them rather than guessed:
+#
+#   1. its own worst case — the daily pool maxed every day, PLUS the separate weekly lesson pool,
+#      which draws no tokens at all and is the line easiest to forget when pricing;
+#   2. the free users it carries — a paid tier subsidises `multiple` free accounts (basic 3, pro 10,
+#      institution 40), so a larger customer funds proportionally more of the free tier rather than a
+#      flat amount that would crush the small tier;
+#   3. a PROFIT_TARGET margin on top of both.
+#
+# Every figure is the FULL-utilisation worst case, deliberately: a price that only works when
+# customers under-use their allowance is not a price, it is a hope. Real usage sits far below, so
+# these are floors.
+#
+#     tier      own cost   free users   subsidy   total   net needed   gross (incl. VAT)
+#     basic         ₪14        3           ₪14      ₪29       ₪41            ₪49
+#     pro           ₪48       10           ₪48      ₪96      ₪137           ₪169
+#     institution  ₪192       40          ₪192     ₪385      ₪549           ₪649
+#
+# Derived at $0.20 per million normalized tokens (= COMPLETION_WEIGHT matches the provider's own
+# input:output ratio, so a normalized token IS the cost unit), ~3.7 ILS/USD, 18% VAT, and a measured
+# 23,512 normalized tokens per turn / ~58,000 per lesson.
+#
+# NOT included, because no per-seat price can carry it alone: the server costs ~₪740/month whether
+# anyone subscribes or not. At realistic usage that is roughly two institutions or eight pro
+# subscribers — the number to actually aim at.
+PROFIT_TARGET = 0.30
+
+# The rule above yields a FLOOR, not a price. Institution-20's floor is ~₪275; it is sold at ₪649
+# because ₪32 per member per month is still cheap for a school, and the margin over the floor is what
+# funds the ~₪740/month server and the work. Do not "correct" the paid tiers down to their floors —
+# the floor answers "would this lose money", not "what is this worth".
+#
+# The three institution tiers share one per-member allowance and differ only in size: seats, pool and
+# lesson count all scale together (×1 / ×2.5 / ×5 from institution-20), so a bigger school gets more
+# capacity rather than a thinner slice of the same pool. Per-seat price drops gently with size —
+# ₪32.45 → ₪29.98 → ₪27.99 — a real volume discount that still clears the floor at every step.
 TIERS: tuple[Tier, ...] = (
-    Tier("free",          180_000,    525_000,  2,  1,   0.0,    0.0, "חינם",   "Free"),
-    Tier("basic",         540_000,  1_575_000,  6,  3,  29.0,  290.0, "בסיסי",  "Basic"),
-    Tier("pro",         1_800_000,  5_250_000, 20, 10,  49.9,  499.0, "מלא",    "Pro"),
-    Tier("institution", 7_200_000, 21_000_000, 80, 40, 199.0, 1990.0, "מוסדי",  "Institution"),
+    Tier("free",             200_000,     525_000,   2,   1,    0.0,     0.0, "חינם",         "Free"),
+    Tier("basic",            600_000,   1_575_000,   6,   3,   49.0,   490.0, "בסיסי",        "Basic"),
+    Tier("pro",            2_000_000,   5_250_000,  20,  10,  169.0,  1690.0, "מלא",          "Pro"),
+    Tier("institution",    8_000_000,  21_000_000,  80,  40,  649.0,  6490.0, "מוסדי 20",     "Institution 20", 20),
+    Tier("institution_50", 20_000_000,  52_500_000, 200, 100, 1499.0, 14990.0, "מוסדי 50",    "Institution 50", 50),
+    Tier("institution_100", 40_000_000, 105_000_000, 400, 200, 2799.0, 27990.0, "מוסדי 100",  "Institution 100", 100),
 )
 
 # Output costs several times input everywhere; 3x is the round figure that holds across the models
 # this runs on. Only the RATIO matters — it decides whether a long paste or a long answer dominates.
+#
+# It also happens to be EXACTLY the provider's own structure: Nebius charges $0.20 per million input
+# tokens and 3x that for output. So a normalized token is not merely proportional to cost, it IS the
+# cost unit — `billed_tokens * $0.20 / 1e6` is the real dollar figure for any account, tier or turn,
+# with no conversion factor to get wrong. Measured 2026-08-12 over 166 production turns: 19,566
+# prompt + 1,315 completion per turn = 23,512 normalized ≈ $0.0047. If the provider or its pricing
+# ratio ever changes, this constant is where that shows up.
 COMPLETION_WEIGHT = 3
 
 
@@ -124,6 +185,12 @@ def tier(plan: str | None) -> Tier:
 def rank(plan: str | None) -> int:
     """Position in TIERS — higher is more access. Used to avoid downgrading someone with a coupon."""
     return next(i for i, t in enumerate(TIERS) if t.id == canonical(plan))
+
+
+def is_institutional(plan: str | None) -> bool:
+    """Whether this tier is sold to an organisation rather than to a person. Read off `seats` rather
+    than an id prefix so adding a tier can't quietly land on the wrong side of the rule."""
+    return tier(plan).seats > 1
 
 
 def is_valid_plan(plan: str) -> bool:
@@ -188,8 +255,13 @@ def token_estimate(intent: str | None) -> int:
     # explain/chavruta, not like a full lesson; the rare turn that escalates into one still
     # settles against its real usage (see _metered), so under-reserving here just means a
     # slightly late top-up, not an unpaid lesson.
-    return {"compare": 40_000, "halacha": 40_000, "shut": 40_000, "explain": 25_000,
-            "parsha": 25_000, "dafyomi": 25_000}.get((intent or "").strip().lower(), 20_000)
+    #
+    # Raised 2026-08-12 with the per-intent generation budgets in pipeline.py. These have to move
+    # together: a completion is weighted x3 (COMPLETION_WEIGHT), so a 6k-token answer alone is 18k
+    # normalized — an estimate of 20k for a whole qa turn stopped covering even the output, let
+    # alone the prompt, the moment the budget doubled.
+    return {"compare": 80_000, "halacha": 80_000, "shut": 80_000, "explain": 40_000,
+            "parsha": 40_000, "dafyomi": 40_000}.get((intent or "").strip().lower(), 30_000)
 
 
 def canonical_cycle(cycle: str | None) -> str:
@@ -328,6 +400,29 @@ def refund_quote(amount: float, *, days_used: int = 0, cycle: str | None = MONTH
 
 
 # ── Credits ──────────────────────────────────────────────────────────────────
+#
+# A credit is one generation, spent ONLY after a plan's cap is hit. Pricing it has almost nothing to
+# do with what it costs us and everything to do with not undercutting the subscriptions:
+#
+#     marginal cost of one turn          ₪0.017
+#     implied per-turn price, basic      ₪0.171
+#     implied per-turn price, pro        ₪0.177
+#     implied per-turn price, inst-100   ₪0.146   (the cheapest rate we sell at all)
+#
+# So a credit priced below ~₪0.15 is not an overflow valve, it is a cheaper subscription with extra
+# steps — anyone doing arithmetic buys credits instead of a plan, and the recurring revenue that
+# actually funds the server evaporates. ₪0.50 sits ~3x above the cheapest subscription rate and ~29x
+# marginal cost, which is what makes it worth topping up in a pinch and never worth living on.
+#
+# Not yet sold: credits are granted by coupon today (db.add_credits), and a pack purchase would
+# write the same column. This constant is here so the first person to build that flow inherits the
+# reasoning rather than picking a round number.
+CREDIT_PRICE_ILS = 0.50
+
+# A credit costs more for the expensive intents. Measured: a lesson averages ~58,000 normalized
+# tokens against ~23,512 for a question — 2.5x. It is charged 5x, deliberately above the measured
+# ratio, because a lesson also runs the agentic loop over a much larger source pool and its variance
+# is far wider than a question's.
 _DEFAULT_COSTS = {"lesson": 5, "halacha": 2, "shut": 2}
 _FALLBACK_COST = 1
 

@@ -20,6 +20,7 @@ import uuid
 
 from fastapi import Header, HTTPException, Request
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from app import accounts as accts
 from app import auth_supabase as sb
@@ -150,7 +151,7 @@ def current_owner(
     return _owner_from_key(authorization, x_api_key)
 
 
-# ── Rate limiting (per-IP, in-memory sliding window) ──────────────────────────
+# ── Rate limiting (per-account where provable, else per-IP; in-memory sliding window) ─────────
 class _SlidingWindow:
     def __init__(self, max_events: int, window_s: float):
         self.max = max_events
@@ -222,17 +223,43 @@ def _client_ip(request: Request) -> str:
     return peer
 
 
+def _limit_key(request: Request) -> str:
+    """Who this request counts against: the signed-in account if we can prove one, else the IP.
+
+    The IP alone was wrong for the first deployment shape where many paying users share an egress
+    address — a school. Thirty students behind one NAT shared one 20/min bucket, so three active
+    students could 429 the other twenty-seven, and no amount of quota they had paid for would help.
+
+    The account id is taken from the VERIFIED token, never from a client-supplied header: an
+    unverified id would be a way to mint a fresh bucket per request and skip the limiter entirely.
+    Anything that doesn't verify falls back to the IP (and require_auth 401s it a moment later).
+    This does verify the JWT a second time — a local signature check against the cached JWKS, on
+    POSTs to two routes that are about to run an LLM, so it is not a cost worth engineering around.
+    """
+    if sb.enabled():
+        sub = sb.verify_sub(_bearer(request.headers.get("authorization")))
+        if sub:
+            return f"u:{sub}"
+    return f"ip:{_client_ip(request)}"
+
+
 async def rate_limit_middleware(request: Request, call_next):
     path = request.url.path
     metered = request.method == "POST" and path.startswith(_METERED_PREFIXES) and path not in _EXEMPT
     if metered:
-        ip = _client_ip(request)
+        # _limit_key verifies a JWT, and on a cache miss PyJWKClient fetches the JWKS over the network
+        # with a blocking urllib call. This middleware is async, so doing that inline would park the
+        # event loop and stall every other in-flight request in the worker — not just this one — at
+        # exactly the two moments it happens: the first metered request after a restart, and a
+        # Supabase key rotation. Steady state is a local signature check and the threadpool hop is
+        # noise next to the LLM call this request is about to make.
+        key = await run_in_threadpool(_limit_key, request)
         now = time.monotonic()
         if now - _last_sweep[0] > 300:
             _last_sweep[0] = now
             _minute.sweep(now)
             _hour.sweep(now)
-        if not _minute.allow(ip, now) or not _hour.allow(ip, now):
+        if not _minute.allow(key, now) or not _hour.allow(key, now):
             return JSONResponse(
                 status_code=429,
                 content={"detail": "rate limit exceeded — please slow down"},

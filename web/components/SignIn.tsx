@@ -104,7 +104,7 @@ export function SignIn({ lang }: { lang: Lang }) {
     "w-full glass rounded-2xl px-4 py-3 font-serif text-[15px] outline-none focus:ring-2 focus:ring-indigo/30";
 
   return (
-    <div className="min-h-screen grid place-items-center p-4">
+    <div className="min-h-dvh grid place-items-center p-4">
       <div className="glass rounded-[28px] p-8 w-full max-w-sm flex flex-col gap-5">
         <div className="flex flex-col items-center gap-2 text-center">
           <div className="h-14 w-14 rounded-2xl grad grid place-items-center text-white">

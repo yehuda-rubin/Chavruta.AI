@@ -33,7 +33,14 @@ def grace_days() -> int:
 
 
 def schedule(owner_id: str) -> str:
-    """Schedule deletion `grace_days` from now and return the ISO timestamp it will happen."""
+    """Schedule deletion `grace_days` from now and return the ISO timestamp it will happen.
+
+    The recurring charge stops at the REQUEST, not at the purge. A monthly subscription renews inside
+    a 30-day grace period, so waiting would bill someone once more for an account they have already
+    asked us to erase. Paid access still runs to the end of the period they paid for (billing.cancel
+    keeps that promise); what stops is the next charge.
+    """
+    stop_billing(owner_id)                  # raises ⇒ nothing is scheduled, and the caller says why
     now = datetime.now(UTC)
     scheduled = now + timedelta(days=grace_days())
     db.schedule_deletion(owner_id, now.isoformat(), scheduled.isoformat())
@@ -128,18 +135,115 @@ def count_supabase_users() -> int | None:
         return None
 
 
+def list_supabase_user_emails() -> list[str]:
+    """All registered user email addresses from Supabase auth.
+
+    Uses the same pagination pattern as count_supabase_users() but collects email addresses instead
+    of counting. Returns an empty list if Supabase isn't configured (empty is a valid response,
+    not "unknown"). This is the recipient list for operator broadcasts (e.g. policy updates).
+    """
+    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    url = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
+    if not (key and url):
+        return []
+    import urllib.request
+
+    emails = []
+    page = 1
+    try:
+        while True:
+            req = urllib.request.Request(
+                f"{url}/auth/v1/admin/users?page={page}&per_page=1000",
+                headers={"Authorization": f"Bearer {key}", "apikey": key},
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                users = json.loads(resp.read()).get("users", [])
+            for user in users:
+                email = user.get("email")
+                if email:
+                    emails.append(email)
+            if len(users) < 1000:
+                return emails
+            page += 1
+    except Exception:                        # noqa: BLE001 — best-effort, never breaks the caller
+        _log.warning("supabase user email list failed", exc_info=True)
+        return []
+
+
+def stop_billing(owner_id: str) -> None:
+    """Stop a recurring charge before an account deletion goes anywhere near the data.
+
+    Deleting an account used to leave the subscription running. Nothing in either deletion path
+    called billing.cancel, so a paying user who deleted their account kept being charged every month
+    — and purge_owner deletes the `subscriptions` row, which holds `provider_ref`, the only handle
+    on that recurring charge. The money kept leaving their card and we no longer had the string
+    needed to stop it. It had to be found in the PayPlus dashboard by hand, if anyone noticed.
+
+    So this runs FIRST, and it is allowed to fail loudly: billing.ProviderCancelFailed propagates and
+    the caller abandons the deletion. Refusing to delete is the recoverable outcome — the user is
+    told, and everything is still here to try again. Deleting anyway is not.
+
+    Free accounts and coupon-granted plans have nothing to cancel and pass straight through, as does
+    a subscription already marked cancelled (calling the provider twice for the same one earns an
+    error and no benefit).
+    """
+    # Imported here, not at module scope: app.billing.service reaches for plans/coupons which reach
+    # back, and the deletion path must not be the thing that decides that import order.
+    import app.billing.service as billing
+
+    sub = db.get_subscription(owner_id)
+    if not sub or sub.get("status") == "canceled":
+        return
+    if not (sub.get("provider_ref") and sub.get("provider") == "payplus"):
+        return
+    billing.cancel(owner_id, strict=True)
+    _log.info("recurring charge stopped for %s ahead of deletion", owner_id)
+
+
+def purge_now(owner_id: str) -> None:
+    """Delete one account's data and login immediately, with no grace period.
+
+    For the user who says "I asked to be deleted, why is it a month away" — the grace period protects
+    an accidental click, and someone who deliberately refuses it should not have to email us to get
+    what they already asked for in the app.
+
+    DATA first, login second. The login is the recoverable half — a person locked out can be helped,
+    data that was supposed to be gone and isn't cannot be un-kept. In the old order any failure at all
+    (a lock, an org created inside the window, an FK error) left an account that could not sign in
+    whose data was fully intact, retried and re-logged every sweep forever. That is the worst of both.
+
+    Raises whatever db.purge_owner raises (it refuses an account that owns a school) — deliberately
+    NOT swallowed, so the caller can tell the user it did not happen instead of reporting a success it
+    cannot back up. Same for stop_billing, which runs first for the reason given there.
+    """
+    stop_billing(owner_id)                  # before the row holding provider_ref is destroyed
+    db.purge_owner(owner_id)
+    _delete_supabase_user(owner_id)         # best-effort; swallows its own errors
+    _log.info("account %s purged immediately at the user's request", owner_id)
+
+
 def run_due_purges(now_iso: str | None = None) -> int:
-    """Purge every account whose grace period has lapsed. Returns how many were purged."""
+    """Purge every account whose grace period has lapsed. Returns how many were actually purged."""
     now_iso = now_iso or datetime.now(UTC).isoformat()
     due = db.due_deletions(now_iso)
+    purged = 0
     for owner_id in due:
+        # Checked BEFORE the login is deleted. purge_owner refuses an account that owns a school, and
+        # the two steps used to run in the other order: the Supabase user was destroyed, the purge
+        # then raised, and the result was an account that could not sign in, whose data was not
+        # deleted, retried and re-logged every sweep forever. An unfulfilled deletion request that
+        # LOOKS fulfilled is the worst of both. /account/delete refuses this case up front, so
+        # reaching here means the org was created after the request was filed.
+        if db.owns_org(owner_id):
+            _log.error("account %s is due for deletion but owns an organisation — skipped. Close or "
+                       "transfer the school, then the deletion will proceed.", owner_id)
+            continue
         try:
-            _delete_supabase_user(owner_id)     # remove the login first (best-effort)
-            db.purge_owner(owner_id)            # then irreversibly drop all their data
-            _log.info("account %s purged", owner_id)
+            purge_now(owner_id)                 # data first, login second — see there for why
+            purged += 1
         except Exception:                       # noqa: BLE001 — one bad row must not stop the rest
             _log.exception("failed to purge account %s", owner_id)
-    return len(due)
+    return purged
 
 
 # ── Chat retention ────────────────────────────────────────────────────────────

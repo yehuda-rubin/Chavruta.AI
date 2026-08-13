@@ -148,6 +148,12 @@ class Citation:
 class Turn:
     role: str   # "user" | "assistant"
     text: str
+    # Refs this turn CITED (assistant turns only). A study conversation converges on a sugya over
+    # several turns, and the surest record of which sugya is what the earlier answers already
+    # grounded themselves in — far more reliable than re-deriving it from the wording of a
+    # follow-up like "האם הם חולקים?". Optional and empty by default: a caller that does not
+    # track citations keeps the old two-field behaviour.
+    refs: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -163,6 +169,11 @@ class Query:
     expand_depth: int = 1
     search_text: str = ""                        # text used for retrieval (trigger phrases like
                                                  # "prepare a lesson on" stripped); falls back to `text`
+    # Tractates the question NAMES explicitly ("במסכת סוכה", "סוכה מא") but without enough detail to
+    # resolve a ref. Weaker than named_refs and used differently: it scopes a sub-search to that
+    # tractate rather than anchoring, so "what does Rashi say in Sukkah" can reach Rashi on Sukkah
+    # even when the daf is never given.
+    tractates: list[str] | None = None
 
 
 @dataclass

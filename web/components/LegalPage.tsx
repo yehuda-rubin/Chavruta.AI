@@ -25,8 +25,8 @@ export function LegalPage({ doc }: { doc: "terms" | "privacy" | "accessibility" 
     : doc === "privacy" ? "privacyTitle" : "accessibilityTitle");
 
   return (
-    <div dir={lang === "he" ? "rtl" : "ltr"} className="h-screen overflow-y-auto py-10 px-4">
-      {/* h-screen + overflow-y-auto: the app's <body> is overflow-hidden (fixed chat layout), so the
+    <div dir={lang === "he" ? "rtl" : "ltr"} className="h-dvh overflow-y-auto py-10 px-4">
+      {/* h-dvh + overflow-y-auto: the app's <body> is overflow-hidden (fixed chat layout), so the
           page must own its own scroll or long legal text is clipped. */}
       <article className="glass rounded-[28px] max-w-2xl mx-auto p-8 flex flex-col gap-5">
         <div className="flex items-center justify-between gap-3">

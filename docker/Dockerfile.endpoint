@@ -48,6 +48,12 @@ RUN pip install -e . --no-deps && chown -R app:app /app
 # right owner means Docker copies that ownership onto the volume the first time it's created.
 RUN mkdir -p /app-data && chown app:app /app-data
 
+# /app/eval-out is the same story for the nightly evaluation's output (harvested pairs, per-night
+# logs). Its curated INPUT is bind-mounted read-only at /app/eval, so this is the only place the job
+# can write — and without seeding the ownership here it would be root:root and every run would die
+# on mkdir, which is exactly what the first one did.
+RUN mkdir -p /app/eval-out && chown app:app /app/eval-out
+
 USER app
 
 # Pre-download bge-m3 weights so the first request isn't slow (as `app`, into HF_HOME above).

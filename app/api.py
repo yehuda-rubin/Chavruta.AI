@@ -15,16 +15,36 @@ import re
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import NamedTuple
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 # Source markers ([S1], [S1, S5], (S1), 【S1】, …) are the grounding mechanism — the pipeline maps them
 # to citations, then we strip them from the DISPLAYED text so the answer reads cleanly.
-_MARKER_RE = re.compile(r"\s*[\[(（【]\s*S\d+(?:\s*,\s*S\d+)*\s*[\])）】]")
+_MARKER_BODY = r"[\[(（【]\s*S\d+(?:\s*,\s*S\d+)*\s*[\])）】]"
+_MARKER_RE = re.compile(rf"\s*{_MARKER_BODY}")
+
+# A marker the model used as a NOUN rather than as a trailing footnote — "ב[S2] יש דיון" ("in
+# [source 2] there is a discussion"), "את [S3]: שם נאמר". Deleting only the marker strands the
+# preposition that introduced it, and real users saw the result: "כי באמת, ב יש דיון", "הבא נבדוק
+# את: שם נאמר". This is the same trap the English-word path avoids by REWRITING rather than
+# deleting, since the word is grammatically load-bearing — markers just got blind deletion.
+#
+# The repair is keyed on ADJACENCY to the marker, which is what makes it safe. A blind "drop
+# orphaned one-letter words" pass cannot be: in a Torah corpus a lone Hebrew letter is usually a
+# chapter or section number ("פרק ב.", "הסעיפים א, ב, ג", "ובסעיף ה"), and stripping those would
+# silently corrupt citations across the product. Nothing here fires unless a marker was actually
+# removed at that exact spot.
+#
+# The lookbehind is load-bearing too: without it, "הכתוב[S1]" would match its own final ב and
+# leave "הכתו". A one-letter prefix only counts when it is not the tail of a Hebrew word.
+_CARRIER_PREFIX = r"(?<![א-ת])(?:את\s+|[בכלמשוהד])"
+_CARRIER_MARKER_RE = re.compile(rf"\s*{_CARRIER_PREFIX}{_MARKER_BODY}")
 
 # Caught live (2026-08-04): the model occasionally emits a literal backslash before a quote mark when
 # it quotes source text that itself contains a Hebrew abbreviation gershayim (e.g. verbatim-quoting a
@@ -61,18 +81,25 @@ def _strip_foreign(text: str) -> str:
 # aside like '(1)' is untouched, and requires NO Hebrew letter so a mixed aside is left alone.
 _HE_CHAR_RE = re.compile(r"[֐-׿]")
 _LATIN_LETTER_RE = re.compile(r"[A-Za-z]")
-_PAREN_RE = re.compile(r"[ \t]*[(（][^()（）]*[)）]")
+# An optional Hebrew preposition introducing the aside is consumed WITH it, for the same reason as
+# _CARRIER_MARKER_RE above: "ראינו זאת ב(Chatam Sofer on Sukkah 41a) בהרחבה" must not become
+# "ראינו זאת ב בהרחבה". The keep/drop decision is made on the ASIDE ALONE — including the Hebrew
+# preposition in that test would make every prefixed aside look "mixed", so none would ever strip.
+_PAREN_RE = re.compile(rf"[ \t]*(?:{_CARRIER_PREFIX})?(?P<aside>[(（][^()（）]*[)）])")
 
 
 def _strip_foreign_parens(text: str) -> str:
     def repl(m: re.Match) -> str:
-        inner = m.group(0)
-        return "" if _LATIN_LETTER_RE.search(inner) and not _HE_CHAR_RE.search(inner) else inner
+        aside = m.group("aside")
+        latin_only = _LATIN_LETTER_RE.search(aside) and not _HE_CHAR_RE.search(aside)
+        return "" if latin_only else m.group(0)   # drop the preposition with it, or restore both
     return _PAREN_RE.sub(repl, text)
 
 
 def _strip_markers(text: str, he: bool = False) -> str:
-    t = _MARKER_RE.sub("", text or "")
+    # Load-bearing markers first ("ב[S2]" → nothing, not "ב"), then every remaining plain marker.
+    t = _CARRIER_MARKER_RE.sub("", text or "")
+    t = _MARKER_RE.sub("", t)
     t = _STRAY_ESCAPE_RE.sub("", t)           # drop a leaked escape backslash before a quote mark
     t = _strip_foreign(t)                    # drop stray foreign-script tokens (model multilingual bleed)
     if he:
@@ -101,7 +128,17 @@ def _has_bleed(text: str) -> bool:
 
 
 _SENTENCE_SPLIT_RE = re.compile(r"([.!?]\s+|\n+)")   # captured so separators are preserved verbatim
-_MAX_BLEED_FIXES = 3    # bound worst-case latency/cost if something is very wrong with one answer
+_MAX_BLEED_FIXES = 20   # bound worst-case latency/cost if something is very wrong with one answer.
+# Was 3, then 8 — both were still too low in practice. A long lesson or responsa answer quoting many
+# sources can bleed in a dozen-plus sentences, and every sentence over the cap reaches the user in
+# broken Hebrew, which is exactly the defect this whole mechanism exists to prevent. The cap's job is
+# to stop a runaway answer from costing unbounded time and money, not to ration the fix — 20 covers
+# every real answer seen so far while still bounding the pathological case.
+_BLEED_FIX_WORKERS = 4
+# Raising the cap without this would have made the worst case 20 sentences x 2 attempts = 40 model
+# calls IN SERIES, all of them blocking the user's response. The rewrites are independent of each
+# other (each sees one sentence and nothing else), so they parallelise exactly. Small pool: this runs
+# alongside other users' generation calls, and the point is to cut the tail, not to burst the provider.
 
 _BLEED_FIX_SYSTEM = (
     "Rewrite the given Hebrew sentence so it contains NO English or other non-Hebrew words or "
@@ -114,48 +151,62 @@ _BLEED_FIX_SYSTEM = (
 )
 
 
-def _fix_bleeding_sentences(text: str, he: bool, llm) -> str:
-    """Best-effort: a failed or degenerate rewrite call keeps the ORIGINAL sentence rather than
-    raising or blanking it — a language-cleanup pass must never be the reason a real answer breaks.
+def _rewrite_bleeding_sentence(sentence: str, llm) -> str | None:
+    """One sentence → its Hebrew-only rewrite, or None if no attempt produced a clean one.
 
-    Caught live (2026-08-04): a bleeding sentence ("...שNERואה כמשתחוה...", a bad mid-word
-    transliteration) reached a real user unfixed. The first cut of this function accepted WHATEVER
-    the rewrite call returned as long as it was non-empty, never checking whether the rewrite had
-    actually removed the Latin text — so a call that failed outright (caught below, kept the
-    original) and a call that succeeded but produced an equally-bleeding rewrite were both dead
-    ends after one try. One retry, on either failure mode, is cheap (bounded by _MAX_BLEED_FIXES
-    sentences) and gives the model a real second chance before we give up and keep the original."""
+    Returning None (rather than raising or returning something degenerate) is what lets the caller
+    keep the ORIGINAL sentence — a language-cleanup pass must never be the reason a real answer
+    breaks. Caught live (2026-08-04): a bleeding sentence ("...שNERואה כמשתחוה...", a bad mid-word
+    transliteration) reached a real user unfixed. The first cut accepted WHATEVER the rewrite call
+    returned as long as it was non-empty, never checking whether the rewrite had actually removed
+    the Latin text — so a call that failed outright and a call that succeeded but produced an
+    equally-bleeding rewrite were both dead ends after one try.
+    """
+    # A retry at the SAME low temperature on the SAME model tends to reproduce the SAME mistake
+    # (caught live: "sugya"/"mixture" survived two identical-temperature attempts) — the second
+    # try uses a higher temperature so it's a genuinely different roll, not a near-duplicate.
+    for attempt, temperature in enumerate((0.2, 0.6)):
+        try:
+            prompt = GroundedPrompt(system=_BLEED_FIX_SYSTEM, sources=[], question=sentence, bare=True)
+            res = llm.generate(prompt, lang="he", max_tokens=200, temperature=temperature)
+            candidate = (res.text or "").strip()
+        except Exception:
+            _log.warning("bleed sentence-fix call failed (attempt %d/2)", attempt + 1, exc_info=True)
+            continue
+        if candidate and not _has_bleed(candidate):
+            return candidate
+        if candidate:
+            _log.warning("bleed sentence-fix rewrite still contained Latin text (attempt %d/2)",
+                         attempt + 1)
+    return None
+
+
+def _fix_bleeding_sentences(text: str, he: bool, llm) -> str:
+    """Rewrite every sentence carrying foreign-script bleed, up to _MAX_BLEED_FIXES of them.
+
+    Sentences are rewritten CONCURRENTLY (see _BLEED_FIX_WORKERS) because each rewrite sees one
+    sentence and nothing else, so they are genuinely independent — but only when the backend can
+    take concurrent calls. The bridge answers in-session through a single job file, so overlapping
+    calls there would interleave into each other; it opts out via `serial_only`.
+    """
     if not he or not text or llm is None or not _has_bleed(text):
         return text
     parts = _SENTENCE_SPLIT_RE.split(text)   # alternates: sentence, separator, sentence, separator, …
-    fixed = 0
-    for i in range(0, len(parts), 2):
-        if fixed >= _MAX_BLEED_FIXES:
-            break
-        sentence = parts[i]
-        if not _has_bleed(sentence):
-            continue
-        rewritten = None
-        # A retry at the SAME low temperature on the SAME model tends to reproduce the SAME mistake
-        # (caught live: "sugya"/"mixture" survived two identical-temperature attempts) — the second
-        # try uses a higher temperature so it's a genuinely different roll, not a near-duplicate.
-        for attempt, temperature in enumerate((0.2, 0.6)):
-            try:
-                prompt = GroundedPrompt(system=_BLEED_FIX_SYSTEM, sources=[], question=sentence, bare=True)
-                res = llm.generate(prompt, lang="he", max_tokens=200, temperature=temperature)
-                candidate = (res.text or "").strip()
-            except Exception:
-                _log.warning("bleed sentence-fix call failed (attempt %d/2)", attempt + 1, exc_info=True)
-                continue
-            if candidate and not _has_bleed(candidate):
-                rewritten = candidate
-                break
-            if candidate:
-                _log.warning("bleed sentence-fix rewrite still contained Latin text (attempt %d/2)",
-                            attempt + 1)
+    # The cap is applied HERE, on the selection, so which sentences get fixed does not depend on how
+    # the work is scheduled: it is always the first _MAX_BLEED_FIXES bleeding sentences, in order.
+    targets = [i for i in range(0, len(parts), 2) if _has_bleed(parts[i])][:_MAX_BLEED_FIXES]
+    if not targets:
+        return text
+
+    if len(targets) == 1 or getattr(llm, "serial_only", False):
+        rewrites = [_rewrite_bleeding_sentence(parts[i], llm) for i in targets]
+    else:
+        with ThreadPoolExecutor(max_workers=min(_BLEED_FIX_WORKERS, len(targets))) as pool:
+            rewrites = list(pool.map(lambda i: _rewrite_bleeding_sentence(parts[i], llm), targets))
+
+    for i, rewritten in zip(targets, rewrites):
         if rewritten:
             parts[i] = rewritten
-            fixed += 1
     return "".join(parts)
 
 
@@ -182,7 +233,7 @@ def _strip_instruction_echo(text: str, he: bool) -> str:
 
 import torch  # noqa: F401,E402 — MUST precede qdrant_client import (Windows pyarrow DLL order)
 
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.encoders import jsonable_encoder
@@ -200,13 +251,17 @@ from chavruta.corpus.refs import (
     with_ref_variants,
 )
 from chavruta.corpus.schema import Intent, Query, Turn
+from chavruta.generation import computed, guards
 from chavruta.retrieval.base import RetrievalResult
 from chavruta.llm import metering
 from chavruta.llm.agentic import is_degrade_message
 from chavruta.llm.base import GroundedPrompt
 from chavruta.pipeline.pipeline import _max_tokens_for
+from chavruta.intents.hebrew_refs import detect_tractates, detect_hebrew_refs
+from chavruta.intents.router import detect_commentators
 
 import app.accounts as accounts
+import app.orgs as orgs
 import app.auth_supabase as sb
 import app.billing.service as billing
 import app.coupons as coupons
@@ -259,6 +314,8 @@ def _configure_sentry() -> None:
 _configure_logging()
 _configure_sentry()
 _log = logging.getLogger("chavruta.api")
+# Shares the name pipeline.py uses, so one filter follows every watching guard wherever it runs.
+_guard_log = logging.getLogger("chavruta.guards")
 _pipeline = None
 # FastAPI runs sync endpoints in a threadpool, so the lazy singletons below can be raced by concurrent
 # first requests (each building a heavy embedder / Qdrant client, leaking all but one). Guard with a
@@ -297,6 +354,10 @@ async def lifespan(app: FastAPI):
     db.get_conn()          # initialise DB + run migrations
     accounts.start_sweeper()   # background purge of accounts past their deletion grace period
     billing.start_sweeper()    # background downgrade of expired-cancelled subscriptions (if billing on)
+    # The watching guards keep their findings only in the log unless something is listening. This is
+    # what makes them visible in the admin panel; without it the engine still runs (the CLI and the
+    # tests have no database), it just has nowhere to write them down.
+    guards.set_sink(db.record_guard_finding)
     p = _get_pipeline()    # warm up bge-m3 + Qdrant connection at startup
     try:
         p.embedding.embed_query("warmup")   # load the embedder BEFORE any qdrant_client use
@@ -629,14 +690,50 @@ def _source_sheet_entry(n: int, c: CitationOut) -> str:
     Naming only the ref, as this did, is not TASL for a work by a named translator or publisher:
     it omits which edition the text is and under what terms. Public-domain and CC0 sources need no
     credit line, so they don't get noise.
+
+    The heading uses the HEBREW ref when one is known (`ref_he`, already resolved by the caller via
+    hebrew_display_ref) — a Hebrew source sheet handed to a class shouldn't title every source in
+    transliterated English. Falls back to the English ref when no Hebrew rendering exists, which is
+    the same honest-gap rule hebrew_display_ref itself follows. Likewise the body prefers the Hebrew
+    text and only falls back to the English one when the source has no Hebrew at all (some responsa
+    in the corpus exist only as English translations).
     """
-    entry = f"**{n}. {c.ref}**\n{c.text_he}"
+    entry = f"**{n}. {c.ref_he or c.ref}**\n{c.text_he or c.text_en}"
     if rights.requires_attribution(c.license):
         entry += "\n\n> " + rights.attribution_line(
             ref=c.ref, version_title=c.version_title,
             license_str=c.license, deep_link=c.deep_link,
         )
     return entry
+
+
+# Public-domain licence names, for a reader rather than a lawyer. Everything else is shown as the
+# licence's own identifier (CC-BY-SA, CC0…), which is the string people actually search for.
+_LICENSE_HE = {"public domain": "נחלת הכלל", "cc0": "CC0 (ויתור על זכויות)"}
+
+
+def _license_table(used: list[CitationOut], he: bool) -> str:
+    """Every source on the sheet with its edition and licence, numbered to match the sheet above.
+
+    Distinct from the per-source credit line in _source_sheet_entry, which appears ONLY where a
+    licence legally demands attribution — Public Domain and CC0 are the overwhelming majority of the
+    corpus and demand nothing, so on a typical sheet that mechanism prints nothing at all and the
+    reader is left with no idea what any of it is. A teacher handing out a sheet, or an operator
+    answering "where is this text from and may I reproduce it", needs the whole list in one place.
+    """
+    if not used:
+        return ""
+    head = "## מקורות ורישיונות" if he else "## Sources and licences"
+    lines = [head]
+    for n, c in enumerate(used, 1):
+        lic = (c.license or "").strip()
+        shown = _LICENSE_HE.get(lic.lower(), lic) if he else lic
+        parts = [f"{n}. {(c.ref_he or c.ref) if he else c.ref}"]
+        if c.version_title:
+            parts.append(c.version_title)
+        parts.append(shown or ("רישיון לא ידוע" if he else "licence unknown"))
+        lines.append(" — ".join(parts))
+    return "\n".join(lines)
 
 
 _LESSON_SPLIT_RE = re.compile(r"^[ \t>*‏‎]*===\s*(SOURCE_SHEET|LESSON_FLOW|FULL_LESSON|ORDER)\s*===[ \t*]*$", re.M)
@@ -874,8 +971,16 @@ def _generate_lesson_from_hits(topic: str, hits, lang: str, he: bool, *, audienc
         if 1 <= i <= len(hits) and i not in seen:
             seen.add(i)
             h = hits[i - 1]
+            # The corpus keeps the Hebrew and the English of a passage in their own payload fields;
+            # `text` is the indexed blob that concatenates a header line, the Hebrew AND the English.
+            # Reading `text` is what printed every source twice on a Hebrew sheet. Fall back to it
+            # only if neither split field is populated.
+            he_text = (getattr(h, "text_he", "") or "").strip()
+            en_text = (getattr(h, "text_en", "") or "").strip()
+            if not he_text and not en_text:
+                he_text = getattr(h, "text", "") or ""
             used.append(CitationOut(ref=h.ref, ref_he=(hebrew_display_ref(h.ref) or "") if he else "",
-                                    text_he=(getattr(h, "text", "") or ""), text_en="",
+                                    text_he=he_text, text_en=en_text,
                                     commentator=(getattr(h, "commentator_id", "") or ""),
                                     deep_link=(getattr(h, "deep_link", "") or ""),
                                     license=(getattr(h, "license", "") or ""),
@@ -898,8 +1003,40 @@ def _generate_lesson_from_hits(topic: str, hits, lang: str, he: bool, *, audienc
     # Citation-faithfulness: flag any verbatim quote in the lesson not found in the retrieved sources.
     # Runs on the LESSON TEXT, before the licence footer is appended below — the footer names refs and
     # licences, and nothing generated by us should be sent through a check for fabricated quotes.
-    from chavruta.generation.grounded import unverified_quotes
+    from chavruta.generation.grounded import misattributed_quotes, unverified_quotes
     bad_q = unverified_quotes(fl + "\n" + ss, hits)
+    # ── Watching guards (internal only — see pipeline.py for why they do not speak yet) ───────────
+    # Misattribution runs on the LESSON TEXT ALONE, never on the source sheet. The sheet is assembled
+    # mechanically by us from the citations, so its "**1. רש״י על סוכה 41**" heading sits directly
+    # above that source's own verbatim text — handing that to a checker that looks for a name near a
+    # quote would report our own correct formatting as a fabrication, on every lesson ever built.
+    try:
+        for _m in misattributed_quotes(fl, hits)[:2]:
+            guards.report("misattribution", "lesson",
+                          {"claimed": _m.claimed, "found_in": ", ".join(_m.found_in),
+                           "quote": _m.quote[:300]},
+                          summary=f"credited to {_m.claimed}, text is from "
+                                  f"{', '.join(_m.found_in)}")
+    except Exception:                       # noqa: BLE001 — a watching check must never break a lesson
+        _guard_log.exception("misattribution check failed")
+    # Calendar-determinate claims: a perfectly cited lesson can still name the wrong daf. Cache-first
+    # and network-off — `resolve_facts` reads the same calendar_cache buckets the parsha/daf-yomi
+    # modes fill, and returns "unknown" rather than a mismatch when they are cold. A lesson must never
+    # wait on Sefaria for a check that only writes to a log.
+    try:
+        _cal = computed.check_calendar_claims(fl, computed.resolve_facts(load_cached=db.get_calendar_cache))
+        for _mm in _cal.mismatches[:2]:
+            guards.report("calendar", "lesson",
+                          {"claim": _mm.kind, "stated": _mm.stated, "expected": _mm.expected,
+                           "span": _mm.span[:300]},
+                          summary=f"said {_mm.stated}, actually {_mm.expected}")
+    except Exception:                       # noqa: BLE001
+        _guard_log.exception("calendar check failed")
+
+    # Every source's edition and licence, in one numbered list matching the sheet. This is the part
+    # a reader can act on; the notice below is the part a licence legally compels.
+    if used:
+        ss += "\n\n" + _license_table(used, he)
 
     # Per-source credit answers who wrote a passage; this answers what the teacher holding the
     # downloaded file may do with it. Empty unless something on the sheet is CC-BY or CC-BY-SA,
@@ -1120,6 +1257,51 @@ def _generate_qa_turn_from_hits(question: str, hits, lang: str, he: bool, histor
     )
 
 
+_MAX_CARRIED_REFS = 12
+# Bounded because named_refs anchors retrieval: every ref carried costs a lookup and takes a slot
+# that fresh retrieval could have used. Twelve is roughly the last two answers' worth — enough to
+# hold the sugya, few enough that a conversation which has genuinely moved on is not dragged back.
+
+
+def _carried_refs(history) -> list[str]:
+    """Refs the conversation's own earlier ANSWERS already cited, most recent first.
+
+    This is the strongest available signal for "which sugya are we in", and it is free: the answers
+    were grounded in these refs, so they are known-relevant rather than guessed. Re-deriving the
+    sugya from the words of a follow-up cannot match it — "האם הם חולקים?" names nothing at all.
+    """
+    out: list[str] = []
+    for turn in reversed(list(history or [])):
+        if getattr(turn, "role", "") != "assistant":
+            continue
+        for ref in getattr(turn, "refs", None) or []:
+            if ref and ref not in out:
+                out.append(ref)
+                if len(out) >= _MAX_CARRIED_REFS:
+                    return out
+    return out
+
+
+def _conversation_signals(user_turns: list[str], question: str, rq: Query, history=None) -> None:
+    """Harvest structural signals from the WHOLE conversation (all user turns + current question)
+    to preserve context that a multi-turn discussion established (e.g. a tractate named in turn 2
+    that should still scope retrieval in turn 5). The embedding text stays anchored on the first
+    turn + current question to avoid diluting the semantic signal with conversational noise.
+    Only fill in signals that the current turn did NOT already provide, so an explicit signal
+    in the current question always wins over historical context. Modifies rq in-place.
+
+    Refs the earlier ANSWERS cited outrank refs parsed out of the user's own wording: they are what
+    the conversation was actually grounded in, whereas a parsed ref is an inference from prose.
+    """
+    convo = " ".join(user_turns + [question])
+    if not rq.tractates:
+        rq.tractates = detect_tractates(convo)
+    if not rq.commentator_ids:
+        rq.commentator_ids = detect_commentators(convo)
+    if not rq.named_refs:
+        rq.named_refs = _carried_refs(history) or detect_hebrew_refs(convo)
+
+
 def _run_chavruta(question: str, lang: str, history=None, llm=None) -> QueryResponse:
     """Socratic study-partner mode: retrieve on the topic, then Claude plays a chavruta that asks
     questions and learns WITH the user (grounded), rather than lecturing. When retrieval confidence
@@ -1132,6 +1314,7 @@ def _run_chavruta(question: str, lang: str, history=None, llm=None) -> QueryResp
     anchor = (user_turns[0] + " " + question) if user_turns else question   # keep retrieval on the topic
     q = Query(text=anchor, lang=lang or None, intent=Intent.QA)
     rq = pipeline._resolve_query(q)
+    _conversation_signals(user_turns, question, rq, history)
     lang = rq.lang or lang or "he"
     he = lang != "en"
     result = pipeline.retriever.retrieve(rq, top_k=10)
@@ -1773,7 +1956,7 @@ def _quota_message(kind: str, lang: str, balance: int, cost: int) -> str:
     return head + tail
 
 
-def _charge_lesson_unit(owner: str, used_byok: bool) -> None:
+def _charge_lesson_unit(owner: str, res: Reservation, used_byok: bool) -> bool:
     """The lesson pool: a weekly COUNT, entirely independent of conversation tokens — charged
     post-hoc, from _metered, ONLY for the turn that actually produced a real lesson (files/lesson_id
     non-empty — see _run_lesson). Preliminary turns in a lesson-mode conversation (resolving
@@ -1787,27 +1970,97 @@ def _charge_lesson_unit(owner: str, used_byok: bool) -> None:
     Falls back to credits exactly like the old pre-charge did; logs (rather than 429s) if the account
     is over quota with nothing left to spend, so the imbalance is visible without punishing a request
     that already completed.
+
+    Returns True when the lesson could NOT be charged to a lesson pool and its token reservation must
+    therefore settle at real usage instead of being refunded — otherwise an over-cap lesson is free.
     """
     if owner == "local":
-        return
+        return False
+    ctx = res.ctx
+    # A member's lessons come out of the SCHOOL's weekly count, not a personal one. If each member
+    # simply inherited the org's plan, 20 members would each get its full lesson allowance — 1,600
+    # lessons a week from one subscription, each running the agentic loop over a large source pool.
+    # The lesson meter is entirely separate from tokens, so the pooled token counter does not bound
+    # it and this has to be pooled explicitly.
+    day = res.day or None      # the day the turn was ADMITTED, so a lesson finished after midnight
+                               # on Saturday night lands in the week it was actually built in
+    if ctx:
+        # BOTH counters, and a per-member weekly share as well as the school's. A lesson used to be
+        # charged only to the pool while its token reservation was refunded in full — so it cost the
+        # member nothing at all, and one student could take every lesson a 20-seat school gets in a
+        # week in a single sitting. `member_cap` could not stop it: that bounds tokens per day, and
+        # the lesson pool is a separate weekly count.
+        charge = db.bump_pooled(ctx["member_id"], ctx["pool_id"], member_cap=0,
+                                member_weekly=ctx["member_lessons"], pool_daily=0,
+                                pool_weekly=ctx["weekly_lessons"], units=1, meter=db.LESSON,
+                                day=day)
+        if charge.allowed:
+            return False
+        _log.warning("org=%s member=%s produced a lesson it could not pay for (%s)",
+                     ctx["org_id"], owner, charge.refused)
+        # Past the cap the lesson still has to be PAID for. It used to cost nothing at all: the
+        # refused bump leaves the lesson counter pinned, and _metered zeroes the turn's usage so its
+        # token reservation was refunded in full — so lesson #81 and every one after it was free,
+        # unbounded, at ~58,000 normalized tokens each, with the panel still reporting "80 of 80".
+        # Returning True tells _metered to settle this turn at REAL usage instead, so it comes out of
+        # the token pool, shows up in the figures, and counts against the member's own cap.
+        return True
     limit = plans.weekly_lessons(db.get_plan(owner))
     if limit <= 0:
-        return
+        return False
+    # If credits already paid to ADMIT this turn, they have paid for it — checked BEFORE the bump,
+    # not after. Behind the bump it only caught the case where the lesson pool ALSO refused, so the
+    # ordinary case (conversation tokens spent, weekly lessons untouched) charged the same generation
+    # to both currencies at once: five credits AND one of the two weekly lessons. plans.py states
+    # these pools are independent — running out of conversation tokens does not stop a lesson — and
+    # billing one from the other is exactly the coupling it says does not exist.
+    if res.paid_with_credits:
+        _log.info("owner=%s lesson already paid for at entry with %d credit(s)",
+                  owner, res.credits_spent)
+        return False
     lesson_meter = db.BYOK_LESSON if used_byok else db.LESSON
-    allowed, _d, _w = db.bump_usage(owner, 0, weekly_limit=limit, units=1, meter=lesson_meter)
+    allowed, _d, _w = db.bump_usage(owner, 0, weekly_limit=limit, units=1, meter=lesson_meter,
+                                    day=day)
     if allowed:
-        return
+        return False
     cost = plans.credit_cost("lesson")
     spent, balance = db.spend_credits(owner, cost)
     if spent:
         _log.info("owner=%s over weekly lesson quota; spent %d credit(s), %d left", owner, cost, balance)
-        return
+        return False
     _log.warning("owner=%s produced a lesson beyond quota with no credits left (balance=%d)",
                 owner, balance)
+    return True     # nothing paid for it — let the token reservation stand at real usage
 
 
-def _reserve_tokens(owner: str, lang: str, intent: str, user_key: str = "") -> tuple[int, bool]:
-    """Admit a conversation turn against an ESTIMATE of its token cost. Returns (reserved, used_byok).
+class Reservation(NamedTuple):
+    """What a turn was admitted against, captured ONCE at entry and carried to settlement.
+
+    `ctx` and `day` are the load-bearing fields. Settlement used to re-resolve both, which broke in
+    two directions with real money in them. A member removed (or leaving) between reserve and settle
+    resolved to None, so the school's pool kept the full estimate with nothing left in the world able
+    to release it — and the async paths make that window minutes, not milliseconds. A non-member who
+    joined mid-request resolved to a pool that had never been charged, and the refund landed on the
+    school as free capacity. The day has the same shape at midnight: reserve on one day, settle on
+    the next, and yesterday keeps the estimate while today is credited usage it never had.
+    """
+
+    tokens: int
+    used_byok: bool = False
+    ctx: dict | None = None
+    day: str = ""
+    # How many credits admitted this turn, if it was paid for that way rather than by reserving
+    # quota. Carried so the lesson charge does not bill for it a second time, and so a turn that
+    # never runs can hand them back.
+    credits_spent: int = 0
+
+    @property
+    def paid_with_credits(self) -> bool:
+        return self.credits_spent > 0
+
+
+def _reserve_tokens(owner: str, lang: str, intent: str, user_key: str = "") -> Reservation:
+    """Admit a conversation turn against an ESTIMATE of its token cost.
 
     The quota is denominated in tokens but they are only known after the call, so the turn is
     charged an estimate up front and corrected by _settle_tokens once the real figure comes back.
@@ -1819,15 +2072,34 @@ def _reserve_tokens(owner: str, lang: str, intent: str, user_key: str = "") -> t
     back to credits — see the module docstring above _byok_supported.
     """
     estimate = plans.token_estimate(intent)
+
+    # An organisation member spends the SCHOOL's pool, bounded by their own per-member cap, and both
+    # counters move in one transaction (db.bump_pooled). Resolved once here and returned to the
+    # caller so settlement uses the same pool — re-resolving later would settle against whatever the
+    # member's situation is by then, and a member removed mid-request would leave the school's
+    # reservation permanently unreleased. Non-members take the original path untouched.
+    ctx = orgs.quota_context(owner)
+    day = db.today_il()
+    if ctx:
+        charge = db.bump_pooled(
+            ctx["member_id"], ctx["pool_id"], member_cap=ctx["member_cap"],
+            pool_daily=ctx["pool_daily"], pool_weekly=ctx["pool_weekly"], units=estimate,
+            meter=db.TOKENS, day=day)
+        if charge.allowed:
+            return Reservation(estimate, False, ctx, day)
+        # Deliberately no credit or BYOK fallback for a member: both would let one person spend past
+        # the cap the school set for them, which is the single control an admin has over the pool.
+        raise HTTPException(status_code=429, detail=_pool_quota_message(charge.refused, lang, ctx))
+
     plan = db.get_plan(owner)
     daily, weekly = plans.daily_tokens(plan), plans.weekly_tokens(plan)
     if daily <= 0 and weekly <= 0:
-        return 0, False
+        return Reservation(0)
 
     allowed, _d, used_week = db.bump_usage(owner, daily, weekly_limit=weekly, units=estimate,
                                            meter=db.TOKENS)
     if allowed:
-        return estimate, False
+        return Reservation(estimate, False, None, day)
 
     weekly_hit = weekly > 0 and used_week + estimate > weekly
 
@@ -1835,19 +2107,47 @@ def _reserve_tokens(owner: str, lang: str, intent: str, user_key: str = "") -> t
         b_allowed, _bd, _bw = db.bump_usage(owner, daily, weekly_limit=weekly, units=estimate,
                                             meter=db.BYOK_TOKENS)
         if b_allowed:
-            return estimate, True
+            return Reservation(estimate, True, None, day)
 
     cost = plans.credit_cost(intent)
     spent, balance = db.spend_credits(owner, cost)
     if spent:
         _log.info("owner=%s over %s token quota; spent %d credit(s), %d left",
                   owner, "weekly" if weekly_hit else "daily", cost, balance)
-        return 0, False            # paid for with credits — nothing reserved, so nothing to settle
+        # Nothing reserved, so nothing to settle — but the turn IS paid for, which the lesson charge
+        # needs to know so it does not take a second helping of credits for the same generation.
+        return Reservation(0, day=day, credits_spent=cost)
     raise HTTPException(status_code=429,
                         detail=_quota_message("week" if weekly_hit else "day", lang, balance, cost))
 
 
-def _settle_tokens(owner: str, reserved: int, usage: dict, intent: str, meter: str = db.TOKENS) -> None:
+def _pool_quota_message(refused: str, lang: str, ctx: dict) -> str:
+    """The 429 a school member sees. It names the ceiling that actually stopped them.
+
+    The old message said "resets tomorrow" whichever of the three ceilings bit — so a school that had
+    exhausted its WEEK was told to come back in the morning, which is the precise wrong statement
+    _quota_message exists to avoid. Worse, it closed by advising the reader to upgrade their plan or
+    redeem a coupon: two things the server now refuses a member outright. Someone who cannot spend
+    tells their school administrator, who has the actual lever.
+    """
+    he = (lang or "he").startswith("he")
+    name = ctx.get("org_name") or ""
+    if refused == "blocked":
+        return ("החשבון שלך במוסד מוגבל כרגע ואינו יכול לשלוח שאלות. פנה למנהל המוסד."
+                if he else "Your account has been paused by your institution. Ask your administrator.")
+    if refused == "member_cap":
+        return ("הגעת למכסה היומית שמנהל המוסד הקצה לך. היא מתחדשת מחר, ומנהל המוסד יכול להגדיל אותה."
+                if he else "You've reached the daily allowance your institution set for you. It "
+                           "renews tomorrow, and your administrator can raise it.")
+    if refused == "week":
+        return (f"המוסד {name} ניצל את המכסה השבועית המשותפת. היא מתאפסת ביום ראשון.".strip()
+                if he else f"{name} has used its shared weekly allowance. It resets on Sunday.".strip())
+    return (f"המוסד {name} ניצל את המכסה היומית המשותפת. היא מתחדשת מחר.".strip()
+            if he else f"{name} has used its shared daily allowance. It renews tomorrow.".strip())
+
+
+def _settle_tokens(owner: str, res: Reservation, usage: dict, intent: str,
+                   meter: str = db.TOKENS) -> None:
     """Replace the reservation with what the request actually spent, against whichever meter it was
     reserved from (the plan's own TOKENS, or BYOK_TOKENS when the turn ran on the caller's own key).
 
@@ -1856,29 +2156,93 @@ def _settle_tokens(owner: str, reserved: int, usage: dict, intent: str, meter: s
     the turn that actually produces a real lesson skips this (see _metered, which zeroes `usage`
     before calling here for that one turn, so its reservation nets to zero spent instead of settling
     a real charge — that turn is paid for from the lesson pool by _charge_lesson_unit instead).
+
+    Everything about WHO and WHEN comes off the Reservation, never from a fresh lookup — see the
+    Reservation docstring for the two ways re-resolving moved a school's money.
     """
     if owner == "local":
         return
     actual = plans.normalized_tokens(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
-    if not actual and not reserved:
+    if not actual and not res.tokens:
         return
-    total = db.settle_usage(owner, reserved, actual, meter=meter)
+    if res.ctx and meter == db.TOKENS:
+        # Both counters, together — settling only the member's row would leave the school charged the
+        # generous ESTIMATE for every turn, burning the pool several times faster than real use.
+        db.settle_pooled(res.ctx["member_id"], res.ctx["pool_id"], res.tokens, actual, day=res.day)
+        _log.info("owner=%s org=%s tokens reserved=%d actual=%d calls=%d",
+                  owner, res.ctx["org_id"], res.tokens, actual, usage.get("calls", 0))
+        return
+    total = db.settle_usage(owner, res.tokens, actual, meter=meter, day=res.day or None)
     _log.info("owner=%s meter=%s tokens reserved=%d actual=%d calls=%d total=%d",
-              owner, meter, reserved, actual, usage.get("calls", 0), total)
+              owner, meter, res.tokens, actual, usage.get("calls", 0), total)
+
+
+def _answer_payload(result) -> dict:
+    """The ANSWER inside whatever a metered call returned, as a plain dict.
+
+    Three shapes reach _metered: a QueryResponse/SessionQueryResponse, the same thing already run
+    through jsonable_encoder (the async job paths), and — the one that was missed — the envelope the
+    session-CREATING routes return, `{"id", "first_q", "created_at", "result": <the answer>}`.
+
+    Reading the envelope as though it were the answer is silent and total: every key the callers ask
+    for is simply absent. `lesson_id` came back "" so _metered never charged the lesson pool, and
+    since the shipped UI starts a new chat per lesson, that was most lessons in the product — a
+    teacher on the free tier got roughly three a day against a limit of two a week, and a school's
+    pooled lesson count sat at zero while the panel reported it faithfully. `grounded` and
+    `citations` came back None too, so every first turn was recorded as an ungrounded, source-less
+    answer — the exact figure the admin dashboard reports as the product's grounding rate.
+    """
+    if result is None:
+        return {}
+    got = result if isinstance(result, dict) else result.model_dump()
+    inner = got.get("result")
+    if isinstance(inner, dict):
+        return inner
+    if inner is not None and hasattr(inner, "model_dump"):
+        return inner.model_dump()
+    return got
+
+
+@contextmanager
+def _release_on_error(owner: str, res: Reservation, intent: str, meter: str):
+    """Give the reservation back if the request dies before _metered takes ownership of it.
+
+    _metered settles in a `finally`, so anything it wraps is safe. The gap is the code BETWEEN
+    reserving and handing the reservation to _metered — the ownership gate on the session routes,
+    which raises 404 for a session the caller does not own. That path charged the estimate and then
+    threw away the only object able to release it: no settle call is possible without the
+    Reservation, and nothing reconciles the counters afterwards.
+
+    On a shared pool that is not a leak, it is a weapon. A member could spend their whole daily cap
+    on 404s in seconds — no LLM call, no usage_events row, nothing to see — and a class doing it
+    together empties a school's WEEK in one morning. It also happens by accident: a chat deleted in
+    another tab, or a session the retention sweep removed, is the same 404.
+
+    Reordering the gate ahead of the reservation would fix the leak and reopen a different hole —
+    quota is deliberately enforced first so an over-quota account cannot probe session ids for free
+    (see _enforce_quota). So the reservation is released instead, and the 404 still costs a turn.
+    """
+    try:
+        yield
+    except BaseException:
+        _settle_tokens(owner, res, {}, intent, meter=meter)
+        # A turn admitted by spending CREDITS reserved no tokens, so settlement has nothing to give
+        # back — but a real credit was taken for a generation that never happened. Same 404, same
+        # accident, and at the documented price this is money.
+        if res.credits_spent:
+            db.add_credits(owner, res.credits_spent)
+            _log.info("owner=%s refunded %d credit(s) for a turn that never ran",
+                      owner, res.credits_spent)
+        raise
 
 
 def _lesson_id_of(result) -> str:
-    """The lesson_id off a result that may be a QueryResponse/SessionQueryResponse OR a plain dict
-    (the async job paths run this through jsonable_encoder before _metered ever sees it back) —
-    same dual-shape handling _record_event already uses. Non-empty ONLY on the turn that actually
-    built a real lesson (see _run_lesson); every preliminary turn returns files=[] / lesson_id=""."""
-    if result is None:
-        return ""
-    got = result if isinstance(result, dict) else result.model_dump()
-    return got.get("lesson_id") or ""
+    """Non-empty ONLY on the turn that actually built a real lesson (see _run_lesson); every
+    preliminary turn returns files=[] / lesson_id=""."""
+    return _answer_payload(result).get("lesson_id") or ""
 
 
-def _metered(owner: str, reserved: int, intent: str, fn, req: QueryRequest | None = None,
+def _metered(owner: str, reserved: Reservation, intent: str, fn, req: QueryRequest | None = None,
             meter: str = db.TOKENS):
     """Wrap a generation so its real token spend replaces the reservation, and record what happened.
 
@@ -1912,8 +2276,13 @@ def _metered(owner: str, reserved: int, intent: str, fn, req: QueryRequest | Non
                 # must be charged from the lesson pool the same as a turn requested as "lesson" —
                 # charging by what actually happened, not by which mode was originally selected.
                 if _lesson_id_of(result):
-                    _charge_lesson_unit(owner, used_byok=(meter == db.BYOK_TOKENS))
-                    _settle_tokens(owner, reserved, {}, intent, meter=meter)
+                    # A lesson normally nets its token reservation to zero — it is paid for out of
+                    # the weekly lesson count instead, and must not cost twice. But when NOTHING
+                    # could pay for it (the pool's weekly lessons are gone, or a personal account is
+                    # over quota with no credits), zeroing it made the most expensive operation in
+                    # the product completely free, without limit. Then it settles for real.
+                    unpaid = _charge_lesson_unit(owner, reserved, used_byok=(meter == db.BYOK_TOKENS))
+                    _settle_tokens(owner, reserved, usage if unpaid else {}, intent, meter=meter)
                 else:
                     _settle_tokens(owner, reserved, usage, intent, meter=meter)
                 _record_event(owner, intent, req, usage, result, error,
@@ -1933,8 +2302,7 @@ def _record_event(owner: str, intent: str, req: QueryRequest | None, usage: dict
     try:
         now = datetime.now(UTC)
         local = now.astimezone(_LOCAL_TZ)
-        payload = result if isinstance(result, dict) else None
-        got = payload if payload is not None else (result.model_dump() if result is not None else {})
+        got = _answer_payload(result)      # unwraps the session-creation envelope — see its docstring
         db.record_usage_event(
             at=now.isoformat(),
             hour_local=local.hour,
@@ -1963,7 +2331,7 @@ def _record_event(owner: str, intent: str, req: QueryRequest | None, usage: dict
         _log.exception("failed to record usage telemetry")
 
 
-def _enforce_quota(owner: str, lang: str, intent: str = "", user_key: str = "") -> tuple[int, bool]:
+def _enforce_quota(owner: str, lang: str, intent: str = "", user_key: str = "") -> Reservation:
     """Reserve against the conversation-token pool and admit the turn. Returns (tokens reserved,
     used_byok). Every intent goes through here the same way, lesson included — see _charge_lesson_unit
     for why a lesson's OWN weekly pool is charged separately, post-hoc, instead of gating entry here.
@@ -1973,7 +2341,7 @@ def _enforce_quota(owner: str, lang: str, intent: str = "", user_key: str = "") 
     the caller's own provider API key (X-User-LLM-Key), if any — see _byok_supported.
     """
     if owner == "local":
-        return 0, False
+        return Reservation(0)
     return _reserve_tokens(owner, lang, intent, user_key)
 
 
@@ -1994,10 +2362,10 @@ def _resolve_llm_for_request(owner: str, lang: str, intent: str, user_key: str |
     lands in the right pool. `base_url`/`model` let the caller point their key at a different
     provider/model entirely — see _byok_llm's docstring."""
     key = _hstr(user_key)
-    reserved, used_byok = _enforce_quota(owner, lang, intent, user_key=key)
-    if used_byok:
-        return reserved, _byok_llm(key, _hstr(base_url), _hstr(model)), db.BYOK_TOKENS
-    return reserved, None, db.TOKENS
+    res = _enforce_quota(owner, lang, intent, user_key=key)
+    if res.used_byok:
+        return res, _byok_llm(key, _hstr(base_url), _hstr(model)), db.BYOK_TOKENS
+    return res, None, db.TOKENS
 
 
 class QueryRequest(BaseModel):
@@ -2019,7 +2387,8 @@ def query(req: QueryRequest, owner: str = Depends(current_owner),
          x_user_llm_model: str | None = Header(default=None, alias="X-User-LLM-Model")):
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
-    reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key)
+    reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key,
+                                                    x_user_llm_base_url, x_user_llm_model)
     return _metered(owner, reserved, req.intent, lambda: _run_query(
         _augment_question(req.question, req.attachments), req.lang, req.intent, [],
         audience=req.audience, grade_band=req.grade_band, length=req.length, owner_id=owner, llm=llm),
@@ -2052,6 +2421,12 @@ class MeOut(BaseModel):
     cycle: str = "monthly"           # 'monthly' | 'annual' | 'coupon'
     cancel_at_period_end: bool = False   # true ⇒ cancelled, access runs to plan_until then lapses
     deletion_scheduled_for: str | None = None   # ISO ts if the account is pending deletion
+    # How long the grace period is, so the confirmation can say it BEFORE the user commits. It used to
+    # say only "after a grace period", and the length appeared afterwards — a user read that as the
+    # deletion being stalled ("why is it delayed by a month, that is strange"). Sent rather than
+    # hardcoded in the UI because it is deployment config (CHAVRUTA_ACCOUNT_DELETION_GRACE_DAYS), and
+    # a number the interface promises has to be the number the server will use.
+    deletion_grace_days: int = 30
     blocked: bool = False            # account on the blocklist
     blocked_until: str | None = None  # ISO ts the block lifts (None + blocked ⇒ permanent)
     blocked_reason: str = ""
@@ -2063,6 +2438,13 @@ class MeOut(BaseModel):
     # Admin dashboard link — see _is_admin. UI convenience only, same as the field above; the real
     # enforcement is the 404 every /admin/* route raises for a non-admin owner.
     is_admin: bool = False
+    # Organisation membership, for the school panel link. `org_role` is what decides whether the UI
+    # shows the button at all — students are members but have nothing to manage, so they never see
+    # it. UI convenience again: /orgs/* enforces the role itself and 404s regardless of what the
+    # client renders.
+    org_id: str = ""
+    org_name: str = ""
+    org_role: str = ""               # admin | teacher | student | "" (not in one)
 
 
 @app.get("/me", response_model=MeOut)
@@ -2081,42 +2463,78 @@ def me(owner: str = Depends(current_owner)):
             return None
         return round(max(0.0, min(1.0, (cap - used) / cap)), 2)
 
-    day_left = _left(0 if is_local else db.usage_today(owner, meter=db.TOKENS),
-                     plans.daily_tokens(plan))
-    week_left = _left(0 if is_local else db.usage_this_week(owner, meter=db.TOKENS),
-                      plans.weekly_tokens(plan))
-    lessons_left = _left(0 if is_local else db.usage_this_week(owner, meter=db.LESSON),
-                         plans.weekly_lessons(plan))
-    byok_day_left = _left(0 if is_local else db.usage_today(owner, meter=db.BYOK_TOKENS),
+    # A school member's gauges must read the pool they actually spend, not their personal plan —
+    # which for a member is always 'free', because that is the only plan accept_invite admits. Every
+    # figure here was wrong for them: the day gauge hit 0% at a third of their real ceiling and told
+    # them they were out while the school had bought them three times that; the lesson gauge could
+    # never move at all, because a member's lessons are counted against the org's pool and their own
+    # LESSON meter is never touched — so it showed a full allowance forever and no warning ever fired.
+    ctx = None if is_local else orgs.quota_context(owner)
+    if ctx:
+        # A BLOCKED member reads 0, not None. _left returns None for any cap <= 0 and MeOut documents
+        # None as "uncapped" — so the sentinel that means "may spend nothing" collapsed back onto
+        # "no ceiling", the exact conflation CAP_DEFAULT/CAP_BLOCKED was introduced to remove. The
+        # blocked member would see a full gauge and then be refused.
+        day_left = (0.0 if ctx["member_cap"] < 0
+                    else _left(db.usage_today(ctx["member_id"], meter=db.TOKENS), ctx["member_cap"]))
+        week_left = _left(db.usage_this_week(ctx["pool_id"], meter=db.TOKENS), ctx["pool_weekly"])
+        lessons_left = _left(db.usage_this_week(ctx["pool_id"], meter=db.LESSON),
+                             ctx["weekly_lessons"])
+    else:
+        day_left = _left(0 if is_local else db.usage_today(owner, meter=db.TOKENS),
                          plans.daily_tokens(plan))
-    byok_week_left = _left(0 if is_local else db.usage_this_week(owner, meter=db.BYOK_TOKENS),
+        week_left = _left(0 if is_local else db.usage_this_week(owner, meter=db.TOKENS),
                           plans.weekly_tokens(plan))
-    byok_lessons_left = _left(0 if is_local else db.usage_this_week(owner, meter=db.BYOK_LESSON),
+        lessons_left = _left(0 if is_local else db.usage_this_week(owner, meter=db.LESSON),
                              plans.weekly_lessons(plan))
+    # A member has no BYOK allowance at all — _reserve_tokens branches on the pool and raises 429
+    # before it ever reaches that meter. Reporting the untouched meters against their personal free
+    # tier showed them a full second allowance, so they would supply a provider key and still be
+    # refused. None here is honest: there is no such allowance to draw a gauge for.
+    byok_day_left = byok_week_left = byok_lessons_left = None
+    if not ctx:
+        byok_day_left = _left(0 if is_local else db.usage_today(owner, meter=db.BYOK_TOKENS),
+                              plans.daily_tokens(plan))
+        byok_week_left = _left(0 if is_local else db.usage_this_week(owner, meter=db.BYOK_TOKENS),
+                               plans.weekly_tokens(plan))
+        byok_lessons_left = _left(0 if is_local else db.usage_this_week(owner, meter=db.BYOK_LESSON),
+                                  plans.weekly_lessons(plan))
+    # A member's PERSONAL plan is always 'free' — it is the only one accept_invite admits — but that
+    # is not what they are studying on, and telling a student in a school paying ₪649 a month that
+    # they are on the free tier invites them to buy something the server would refuse them.
+    shown_plan = ctx["plan"] if ctx else plan
     return MeOut(
         owner=owner,
         authenticated=not is_local,
-        plan=plan,
-        plan_name=plans.tier(plan).name_he,
+        plan=shown_plan,
+        plan_name=(ctx["org_name"] or plans.tier(shown_plan).name_he) if ctx
+                  else plans.tier(plan).name_he,
         day_left=day_left,
         week_left=week_left,
         lessons_left=lessons_left,
         lessons_exhausted=lessons_left == 0.0,
-        multiple=plans.tier(plan).multiple,
-        byok_supported=_byok_supported(),
+        multiple=plans.tier(shown_plan).multiple,
+        # Not offered to a member: the request path refuses their key, so an input for one is a
+        # promise the server does not keep.
+        byok_supported=_byok_supported() and not ctx,
         byok_day_left=byok_day_left,
         byok_week_left=byok_week_left,
         byok_lessons_left=byok_lessons_left,
         credits=0 if is_local else db.get_credits(owner),
-        plan_until=sub.get("current_period_end") if plan != "free" else None,
+        # A member has no subscription of their own; the school's belongs to its owner.
+        plan_until=None if ctx else (sub.get("current_period_end") if plan != "free" else None),
         cycle=sub.get("cycle") or "monthly",
         cancel_at_period_end=bool(sub.get("cancel_at_period_end")),
         deletion_scheduled_for=None if owner == "local" else accounts.scheduled_for(owner),
+        deletion_grace_days=accounts.grace_days(),
         blocked=ban is not None,
         blocked_until=ban["until"] if ban else None,
         blocked_reason=ban["reason"] if ban else "",
         calendar_modes_enabled=_calendar_modes_enabled(owner),
         is_admin=_is_admin(owner),
+        org_id=(_org := orgs.membership(owner) or {}).get("org_id", "") or "",
+        org_name=_org.get("name", "") or "",
+        org_role=_org.get("role", "") or "",
     )
 
 
@@ -2162,6 +2580,20 @@ def admin_usage_by_owner(since: str = "30d", limit: int = 50, owner: str = Depen
     return db.usage_by_owner(_since_cutoff(since), limit)
 
 
+@app.get("/admin/guards")
+def admin_guard_findings(since: str = "30d", kind: str = "", limit: int = 100,
+                         owner: str = Depends(_require_admin)):
+    """What the watching guards caught — misattribution, self-contradiction, wrong calendar claims.
+
+    These checks show nothing to users on purpose (see chavruta/generation/guards.py): none has met
+    real traffic, and a warning on a correct answer spends credit the honest ones earned. This route
+    is how that decision gets revisited on evidence instead of on a hunch — the counts say whether a
+    guard fires at all, and the rows say whether what it caught was worth catching.
+    """
+    return {"counts": db.guard_finding_counts(_since_cutoff(since)),
+            "findings": db.list_guard_findings(_since_cutoff(since), kind, limit)}
+
+
 @app.get("/admin/usage-by-intent")
 def admin_usage_by_intent(since: str = "30d", owner: str = Depends(_require_admin)):
     return db.usage_by_intent(_since_cutoff(since))
@@ -2185,19 +2617,172 @@ def admin_review_message(report_id: int, owner: str = Depends(_require_admin)):
     return {"ok": True}
 
 
+@app.get("/admin/feedback")
+def admin_feedback(reviewed: bool = False, limit: int = 100,
+                   owner: str = Depends(_require_admin)):
+    return db.list_feedback(reviewed=reviewed, limit=limit)
+
+
+@app.post("/admin/feedback/{feedback_id}/review")
+def admin_review_feedback(feedback_id: int, owner: str = Depends(_require_admin)):
+    if not db.mark_feedback_reviewed(feedback_id):
+        raise HTTPException(status_code=404, detail="feedback not found")
+    return {"ok": True}
+
+
+# ── Coupons (operator) ────────────────────────────────────────────────────────
+# Issuing used to be CLI-only (scripts/manage_coupons.py). These routes put the same operations
+# behind the admin gate so codes can be minted and pulled from the panel — the CLI still works and
+# calls the exact same app/coupons.py functions, so neither path can drift from the other.
+class CouponIn(BaseModel):
+    kind: str = "plan"                     # 'plan' | 'credits'
+    plan: str = "pro"                      # kind='plan'
+    days: int = 30                         # kind='plan'
+    credits: int = 0                       # kind='credits'
+    code: str = ""                         # blank → a generated ~59-bit code
+    max_redemptions: int = 1               # 0 = unlimited
+    expires_in_days: int | None = None
+    note: str = ""
+
+
+class GrantIn(BaseModel):
+    owner_id: str
+    kind: str = "plan"
+    plan: str = "pro"
+    days: int = 30
+    credits: int = 0
+    note: str = ""
+
+
+@app.get("/admin/coupons")
+def admin_list_coupons(owner: str = Depends(_require_admin)):
+    return db.list_coupons()
+
+
+@app.post("/admin/coupons")
+def admin_create_coupon(req: CouponIn, owner: str = Depends(_require_admin)):
+    try:
+        if req.kind == "credits":
+            code = coupons.issue_credit_coupon(
+                credits=req.credits, code=req.code, max_redemptions=req.max_redemptions,
+                expires_in_days=req.expires_in_days, note=req.note)
+        else:
+            code = coupons.issue_plan_coupon(
+                plan=req.plan, days=req.days, code=req.code,
+                max_redemptions=req.max_redemptions, expires_in_days=req.expires_in_days,
+                note=req.note)
+    except ValueError as exc:                      # unknown plan, bad code, duplicate, non-positive
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _log.info("admin %s issued coupon %s (%s)", owner, code, req.kind)
+    return {"code": code}
+
+
+@app.delete("/admin/coupons/{code}")
+def admin_delete_coupon(code: str, owner: str = Depends(_require_admin)):
+    """Revoke a code — and drop the row entirely when nothing was ever redeemed on it.
+
+    A code with redemptions is kept and merely deactivated: `coupon_redemptions` records who was
+    granted what, and deleting the coupon would leave that history pointing at nothing. A code that
+    was never used has no history to protect, so a mistyped or superseded one can just go.
+    """
+    stored = coupons.normalize(code)
+    c = db.get_coupon(stored)
+    if c is None:
+        raise HTTPException(status_code=404, detail="coupon not found")
+    if int(c.get("redeemed_count") or 0) == 0 and db.delete_coupon(stored):
+        _log.info("admin %s deleted unused coupon %s", owner, stored)
+        return {"ok": True, "deleted": True}
+    db.set_coupon_active(stored, False)
+    _log.info("admin %s revoked coupon %s (kept: %s redemptions)", owner, stored,
+              c.get("redeemed_count"))
+    return {"ok": True, "deleted": False}
+
+
+@app.post("/admin/grant")
+def admin_grant(req: GrantIn, owner: str = Depends(_require_admin)):
+    """Give a plan or credits straight to an account by its owner id.
+
+    Implemented as "mint a single-use code and redeem it for them" rather than writing the plan
+    directly, so it goes through the one code path that already knows how a grant must behave on an
+    account with a live PayPlus subscription — never overwriting plan/provider_ref/current_period_end
+    (see app/coupons.py::_redeem_against_active_subscription). It also leaves the same audit trail a
+    normal redemption does: the coupon row plus a redemption row naming this account.
+    """
+    target = (req.owner_id or "").strip()
+    if not target or target == "local":
+        raise HTTPException(status_code=422, detail="owner_id is required")
+    note = req.note or f"admin grant by {owner}"
+    try:
+        if req.kind == "credits":
+            code = coupons.issue_credit_coupon(credits=req.credits, max_redemptions=1, note=note)
+        else:
+            code = coupons.issue_plan_coupon(plan=req.plan, days=req.days, max_redemptions=1,
+                                             note=note)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
+        res = coupons.redeem(target, code, bypass_throttle=True)
+    except coupons.RedeemError as exc:
+        # The code was minted but not applied (e.g. 'downgrade' — the account already has more than
+        # this grant would give). Pull it so a dangling single-use code isn't left lying around.
+        db.set_coupon_active(coupons.normalize(code), False)
+        raise HTTPException(status_code=422, detail=exc.reason) from exc
+    _log.info("admin %s granted %s to %s via %s", owner, req.kind, target, code)
+    return {"ok": True, "code": code, **res}
+
+
 # ── Account deletion (scheduled, with a grace period + cancel) ────────────────
 class DeletionOut(BaseModel):
     deletion_scheduled_for: str | None = None
+    deleted: bool = False            # true ⇒ it already happened; there is nothing to cancel
+
+
+class DeletionRequest(BaseModel):
+    # Skip the grace period entirely. The grace period exists to make an ACCIDENTAL click reversible,
+    # which is no reason to hold a deliberate request for a month: a user asked exactly that ("why is
+    # the deletion delayed by a month, that is strange"), and without this the only way to get what
+    # the app had already offered was to email the operator and have them do it by hand.
+    immediate: bool = False
 
 
 @app.post("/account/delete", response_model=DeletionOut)
-def request_account_deletion(owner: str = Depends(current_owner)):
-    """Schedule this account for deletion after a grace period. The user can cancel until then; at the
-    deadline the background sweeper purges all their data (and the Supabase login, if configured)."""
+def request_account_deletion(req: DeletionRequest = DeletionRequest(),
+                             owner: str = Depends(current_owner)):
+    """Schedule this account for deletion after a grace period — or, with `immediate`, delete it now.
+
+    Scheduled is the default: the user can cancel until the deadline, and at it the background sweeper
+    purges all their data (and the Supabase login, if configured). `immediate` runs that same purge
+    synchronously and cannot be undone.
+    """
     if owner == "local":
         # No account to delete in local/offline mode (the single-user store isn't an account).
         raise HTTPException(status_code=400, detail="no account in local mode")
-    return DeletionOut(deletion_scheduled_for=accounts.schedule(owner))
+    # Refused here rather than at the deadline, so the user finds out now instead of discovering
+    # weeks later that the deletion they scheduled never happened. db.purge_owner guards the same
+    # condition again — this is the message, that is the safety net.
+    if db.owns_org(owner):
+        raise HTTPException(
+            status_code=409,
+            detail="החשבון הזה מנהל מוסד. כדי למחוק אותו, יש לסגור תחילה את המוסד — מחיקה עכשיו "
+                   "הייתה משאירה את חברי המוסד בלי מי שמנהל את המכסה שלהם. פנו אלינו ונסייע.")
+    # Both paths stop the recurring charge first (accounts.stop_billing). If the provider will not
+    # confirm it, neither path proceeds: the alternative is an account that no longer exists still
+    # being billed every month, with the handle needed to stop it deleted along with the data. The
+    # user is told what happened and nothing has been lost — everything is still here to retry.
+    try:
+        if req.immediate:
+            # purge_owner raising is likewise NOT swallowed: the deletion did not happen, and a 500
+            # the user sees beats a 200 they believe. Its one refusal (owning a school) is already
+            # answered above with a message that says what to do about it.
+            accounts.purge_now(owner)
+            return DeletionOut(deletion_scheduled_for=None, deleted=True)
+        return DeletionOut(deletion_scheduled_for=accounts.schedule(owner))
+    except billing.ProviderCancelFailed as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="לא הצלחנו לעצור את החיוב המתחדש אצל ספק התשלומים, ולכן לא ביצענו את המחיקה — "
+                   "מחיקה עכשיו הייתה משאירה אותך מחויב מדי חודש בלי חשבון. המנוי והנתונים שלך לא "
+                   "השתנו. נסו שוב בעוד כמה דקות, ואם זה חוזר — פנו אלינו ונטפל בזה ידנית.") from exc
 
 
 @app.post("/account/delete/cancel", response_model=DeletionOut)
@@ -2268,6 +2853,10 @@ _REDEEM_MESSAGES = {
     "throttled": ("יותר מדי ניסיונות. נסה שוב בעוד שעה.", "Too many attempts. Try again in an hour."),
     "downgrade": ("הקוד נותן רמה נמוכה מזו שיש לך כבר.",
                   "That code grants a lower tier than you already have."),
+    "org_member": ("החשבון הזה משויך למוסד ומשתמש במכסה המשותפת שלו, ולכן אי אפשר להוסיף לו מנוי "
+                   "או קרדיטים. אפשר לצאת מהמוסד בהגדרות ואז לממש את הקוד.",
+                   "This account belongs to an institution and draws on its shared quota, so a plan "
+                   "or credits can't be added to it. Leave the institution in Settings first."),
 }
 _REDEEM_STATUS = {"throttled": 429, "sign_in_required": 401}
 
@@ -2441,7 +3030,12 @@ def _prepare_continue(session_id: str, req: QueryRequest, owner: str) -> tuple[l
         # A session the caller doesn't own reads as not-found — no history leak, no writing into
         # someone else's chat.
         raise HTTPException(status_code=404, detail="session not found")
-    history = [Turn(role=m["role"], text=m["text"]) for m in history_rows[-8:]]
+    # Carry each assistant turn's CITED refs, not just its prose. db.get_messages already decodes
+    # them; dropping them here is what let a five-turn discussion of a sugya lose the sugya (see
+    # _conversation_signals).
+    history = [Turn(role=m["role"], text=m["text"],
+                    refs=[r for c in (m.get("citations") or []) if (r := (c or {}).get("ref"))])
+               for m in history_rows[-8:]]
     db.save_message(session_id, "user", req.question)
     # Sticky mode: a chat stays in the mode chosen on its first turn — ignore any intent the client
     # sends on later turns. Legacy sessions (mode=NULL) fall back to the per-request intent.
@@ -2472,8 +3066,9 @@ def create_session(req: QueryRequest, owner: str = Depends(current_owner),
                                                     x_user_llm_base_url, x_user_llm_model)
 
     # Lock the chat's mode to the intent chosen on this first turn; every follow-up stays in it.
-    sid = db.create_session(req.question.strip(), mode=req.intent or None, owner_id=owner)
-    db.save_message(sid, "user", req.question)
+    with _release_on_error(owner, reserved, req.intent, meter):
+        sid = db.create_session(req.question.strip(), mode=req.intent or None, owner_id=owner)
+        db.save_message(sid, "user", req.question)
     return _metered(owner, reserved, req.intent,
                     lambda: _first_query_work(sid, req, owner, llm=llm), req, meter=meter)()
 
@@ -2488,7 +3083,8 @@ def session_query(session_id: str, req: QueryRequest, owner: str = Depends(curre
         raise HTTPException(status_code=422, detail="question must not be empty")
     reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key,
                                                     x_user_llm_base_url, x_user_llm_model)
-    history, intent = _prepare_continue(session_id, req, owner)
+    with _release_on_error(owner, reserved, req.intent, meter):
+        history, intent = _prepare_continue(session_id, req, owner)
     return _metered(owner, reserved, req.intent,
                     lambda: _continue_query_work(session_id, req, history, intent, owner, llm=llm),
                     req, meter=meter)()
@@ -2507,11 +3103,12 @@ def query_async(req: QueryRequest, owner: str = Depends(current_owner),
         raise HTTPException(status_code=422, detail="question must not be empty")
     reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key,
                                                     x_user_llm_base_url, x_user_llm_model)
-    q = _augment_question(req.question, req.attachments)
-    jid = jobs.submit(owner, _metered(owner, reserved, req.intent, lambda: jsonable_encoder(
-        _run_query(q, req.lang, req.intent, [], audience=req.audience,
-                   grade_band=req.grade_band, length=req.length, owner_id=owner, llm=llm)),
-        req, meter=meter))
+    with _release_on_error(owner, reserved, req.intent, meter):
+        q = _augment_question(req.question, req.attachments)
+        jid = jobs.submit(owner, _metered(owner, reserved, req.intent, lambda: jsonable_encoder(
+            _run_query(q, req.lang, req.intent, [], audience=req.audience,
+                       grade_band=req.grade_band, length=req.length, owner_id=owner, llm=llm)),
+            req, meter=meter))
     return JobAccepted(job_id=jid)
 
 
@@ -2526,12 +3123,13 @@ def create_session_async(req: QueryRequest, owner: str = Depends(current_owner),
         raise HTTPException(status_code=422, detail="question must not be empty")
     reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key,
                                                     x_user_llm_base_url, x_user_llm_model)
-    sid = db.create_session(req.question.strip(), mode=req.intent or None, owner_id=owner)
-    db.save_message(sid, "user", req.question)
-    jid = jobs.submit(owner, _metered(
-        owner, reserved, req.intent,
-        lambda: jsonable_encoder(_first_query_work(sid, req, owner, llm=llm)),
-        req, meter=meter))
+    with _release_on_error(owner, reserved, req.intent, meter):
+        sid = db.create_session(req.question.strip(), mode=req.intent or None, owner_id=owner)
+        db.save_message(sid, "user", req.question)
+        jid = jobs.submit(owner, _metered(
+            owner, reserved, req.intent,
+            lambda: jsonable_encoder(_first_query_work(sid, req, owner, llm=llm)),
+            req, meter=meter))
     return JobAccepted(job_id=jid, session_id=sid)
 
 
@@ -2546,9 +3144,11 @@ def session_query_async(session_id: str, req: QueryRequest, owner: str = Depends
                                                     x_user_llm_base_url, x_user_llm_model)
     # The ownership gate + user-turn save happen NOW (before returning) so an unauthorized caller
     # gets a synchronous 404 and the user message is durable even if generation later fails.
-    history, intent = _prepare_continue(session_id, req, owner)
-    jid = jobs.submit(owner, _metered(owner, reserved, req.intent, lambda: jsonable_encoder(
-        _continue_query_work(session_id, req, history, intent, owner, llm=llm)), req, meter=meter))
+    with _release_on_error(owner, reserved, req.intent, meter):
+        history, intent = _prepare_continue(session_id, req, owner)
+        jid = jobs.submit(owner, _metered(owner, reserved, req.intent, lambda: jsonable_encoder(
+            _continue_query_work(session_id, req, history, intent, owner, llm=llm)),
+            req, meter=meter))
     return JobAccepted(job_id=jid, session_id=session_id)
 
 
@@ -2656,6 +3256,29 @@ def report_message(message_id: int, req: ReportIn, owner: str = Depends(current_
     return {"ok": True}
 
 
+class FeedbackIn(BaseModel):
+    text: str
+
+
+# General comment/correction/suggestion channel — not tied to any specific message (unlike the
+# per-answer report above). Reviewed the same way, from /admin/feedback.
+#
+# Deliberately NOT bare "/feedback" — that path is also a real Next.js page (web/app/feedback/
+# page.tsx), and unlike /admin (where every API sub-route has a segment after it) this endpoint
+# and the page would otherwise collide on the exact same URL, distinguished only by HTTP method —
+# something nginx can't route on cleanly (see docker/nginx.conf). "/submit" gives the API its own
+# sub-path, same fix shape as /admin's dedicated block.
+@app.post("/feedback/submit", status_code=201)
+def submit_feedback(req: FeedbackIn, owner: str = Depends(current_owner)):
+    text = req.text.strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="feedback text must not be empty")
+    if len(text) > 4000:
+        raise HTTPException(status_code=422, detail="feedback text too long")
+    db.submit_feedback(owner, text)
+    return {"ok": True}
+
+
 # ── 'My Shiurim' lesson library ───────────────────────────────────────────────
 
 class SavedLessonOut(BaseModel):
@@ -2685,3 +3308,319 @@ def get_lesson(lesson_id: str, owner: str = Depends(current_owner)):
 def delete_lesson(lesson_id: str, owner: str = Depends(current_owner)):
     if not db.delete_lesson(lesson_id, owner):
         raise HTTPException(status_code=404, detail="lesson not found")
+
+
+# ── Organisations (schools) — spec 004 ────────────────────────────────────────
+#
+# No route here takes an org id from the client. A caller belongs to at most one organisation (a
+# unique index enforces it), so accepting an id would only create the opportunity to pass someone
+# else's. The operator's sample school is the single exception, handled inside _org_for.
+#
+# Failures are 404, never 403 — the convention _require_admin already sets, so an outsider cannot
+# tell "you lack the role" from "no such thing".
+
+class OrgMemberOut(BaseModel):
+    owner_id: str
+    role: str
+    daily_cap: int = 0
+    accepted: bool = True
+    tokens_today: int = 0
+    tokens_week: int = 0
+
+
+class OrgPanelOut(BaseModel):
+    org_id: str
+    name: str
+    role: str                    # the CALLER's role
+    plan: str
+    seats: int
+    seats_used: int
+    is_demo: bool = False
+    pool_daily: int = 0
+    pool_weekly: int = 0
+    pool_used_today: int = 0
+    pool_used_week: int = 0
+    pool_pct_today: float = 0.0
+    warn_80: bool = False        # the admin is told BEFORE the pool is gone, not after
+    weekly_lessons: int = 0
+    lessons_used_week: int = 0
+    members: list[OrgMemberOut] = []
+    topics: list[dict] = []      # intent counts only — never conversation text (decision 1)
+
+
+def _org_for(owner: str, demo: bool = False) -> dict:
+    """The organisation this caller may act on, and their role in it.
+
+    demo=True is the operator's inspection path (spec 004 decision 6): a fixed synthetic school, so
+    the panel can be seen and tested without opening a real one. Gated on _is_admin and taking no id
+    from the client — there is nothing to point at another org, which is what keeps this a simulator
+    rather than impersonation.
+    """
+    if demo:
+        if not _is_admin(owner):
+            raise HTTPException(status_code=404, detail="not found")
+        org_id = orgs.ensure_demo_org()
+        org = orgs.get_org(org_id) or {}
+        return {"org_id": org_id, "role": orgs.ADMIN, "name": org.get("name", ""),
+                "plan": org.get("plan", "institution"), "org_owner": org.get("owner_id", owner),
+                "owner_id": owner, "is_demo": True}
+    m = orgs.membership(owner)
+    if not m:
+        raise HTTPException(status_code=404, detail="not found")
+    return m
+
+
+@app.get("/orgs/panel", response_model=OrgPanelOut)
+def org_panel(demo: bool = False, owner: str = Depends(current_owner)):
+    """Usage and topics for the caller's organisation. NEVER conversation text (spec 004 decision 1).
+
+    Everything is read from usage_events and the usage counters, whose columns are measurements
+    only. `sessions` and `messages` are deliberately untouched: sessions.first_q holds the verbatim
+    opening question of every chat, and joining that table is the obvious, innocent-looking way this
+    promise gets broken.
+    """
+    m = _org_for(owner, demo)
+    org_id = m["org_id"]
+    tier = plans.tier(m["plan"])
+    is_admin_role = orgs.rank(m["role"]) >= orgs.rank(orgs.ADMIN)
+    pool = orgs.pool_id(org_id)
+
+    day = db.usage_today(pool, meter=db.TOKENS)
+    week = db.usage_this_week(pool, meter=db.TOKENS)
+    lessons = db.usage_this_week(pool, meter=db.LESSON)
+    daily_cap = plans.daily_tokens(m["plan"])
+
+    rows = orgs.members(org_id)
+    # The ROSTER is a teacher-and-up view. This route was the only /orgs/* one with no role floor,
+    # and the masking below considered teacher-vs-admin only — so a student got every classmate's
+    # account id, role and cap. In a school that is a list of minors' identifiers handed to every
+    # other minor, and the /school button being hidden from students is client-side decoration.
+    # A student still sees their own row: their own usage is theirs to see.
+    if orgs.rank(m["role"]) < orgs.rank(orgs.TEACHER):
+        rows = [r for r in rows if r["owner_id"] == owner]
+    out_members: list[OrgMemberOut] = []
+    for r in rows:
+        # A teacher sees the roster; per-member figures are an admin view. Least privilege: starting
+        # narrow costs nothing, and widening later is easy where narrowing after the fact is not.
+        show = is_admin_role or r["owner_id"] == owner
+        # The member's SCHOOL usage, under its own counter identity — never their personal one. Those
+        # were the same row until it turned out a school could see what someone spent on their own
+        # free account that morning, and a member who left carried the school's spending into their
+        # own weekly cap. See orgs.member_meter_id.
+        mid = orgs.member_meter_id(org_id, r["owner_id"])
+        out_members.append(OrgMemberOut(
+            owner_id=r["owner_id"], role=r["role"], daily_cap=r["daily_cap"] or 0,
+            accepted=bool(r["accepted_at"]),
+            tokens_today=db.usage_today(mid, meter=db.TOKENS) if show else 0,
+            tokens_week=db.usage_this_week(mid, meter=db.TOKENS) if show else 0,
+        ))
+
+    topics: list[dict] = []
+    if is_admin_role:
+        # Bounded per member to when they FIRST entered this school. Not to accepted_at: that is
+        # rewritten every time someone rejoins, and it is NULL for anyone who has left — so the
+        # school's own record of what it paid for shrank the moment a member walked out, and a
+        # student could erase their study from it by leaving and coming back. invited_at is written
+        # once and never updated, which is the boundary the privacy rule actually means: not before
+        # they joined this school, rather than not unless they are still here.
+        topics = db.usage_by_intent_for({r["owner_id"]: r["invited_at"] for r in rows})
+
+    orgs.log_access(org_id, owner, "view_panel")
+    return OrgPanelOut(
+        org_id=org_id, name=m.get("name", ""), role=m["role"], plan=m["plan"],
+        seats=tier.seats, seats_used=orgs.seats_used(org_id), is_demo=bool(m.get("is_demo")),
+        pool_daily=daily_cap, pool_weekly=plans.weekly_tokens(m["plan"]),
+        pool_used_today=day, pool_used_week=week,
+        pool_pct_today=round(day / daily_cap, 3) if daily_cap else 0.0,
+        warn_80=bool(daily_cap and day >= daily_cap * 0.8),
+        weekly_lessons=plans.weekly_lessons(m["plan"]), lessons_used_week=lessons,
+        members=out_members, topics=topics,
+    )
+
+
+class InviteIn(BaseModel):
+    role: str = Field(default="student", max_length=16)
+    max_uses: int = Field(default=1, ge=1, le=200)
+
+
+@app.post("/orgs/invite", status_code=201)
+def org_invite(req: InviteIn, owner: str = Depends(current_owner)):
+    """Mint a join CODE.
+
+    Deliberately not "invite this account id": that would let an org owner attach any account in the
+    system, let a typo attach a stranger, and turn the endpoint into an oracle answering whether an
+    arbitrary account exists and what plan it holds.
+    """
+    m = _org_for(owner)
+    try:
+        actor = orgs.require_member(owner, m["org_id"], orgs.TEACHER)
+    except orgs.OrgAccessError:
+        raise HTTPException(status_code=404, detail="not found") from None
+    role = (req.role or orgs.STUDENT).strip().lower()
+    # No admin codes over the API at all. A multi-use admin code is a bearer credential that hands
+    # over a school of minors: the holder reads the roster, re-caps and removes every other member.
+    # There is no workflow that needs one — a second administrator is rare enough to be an operator
+    # action — and the UI never offered it, so this closes a door only an attacker was using.
+    if role not in (orgs.STUDENT, orgs.TEACHER):
+        raise HTTPException(status_code=422, detail="unknown role")
+    if orgs.rank(role) > orgs.rank(actor["role"]):
+        raise HTTPException(status_code=404, detail="not found")   # never mint above your own rank
+    # A staff code admits ONE person. Thirty students joining from one class code is the point of a
+    # multi-use code; thirty teachers from one is a leak nobody would notice.
+    uses = req.max_uses if role == orgs.STUDENT else 1
+    code = orgs.create_invite(m["org_id"], owner, role, max_uses=uses)
+    orgs.log_access(m["org_id"], owner, "invite:" + role)
+    return {"code": code, "role": role, "max_uses": uses, "expires_days": orgs.INVITE_DAYS}
+
+
+@app.get("/orgs/invites")
+def org_invites(owner: str = Depends(current_owner)):
+    """Codes that can still admit someone. An admin cannot revoke what they cannot see."""
+    m = _org_for(owner)
+    try:
+        orgs.require_member(owner, m["org_id"], orgs.TEACHER)
+    except orgs.OrgAccessError:
+        raise HTTPException(status_code=404, detail="not found") from None
+    return {"invites": orgs.live_invites(m["org_id"])}
+
+
+class RevokeIn(BaseModel):
+    code: str = Field(max_length=32)
+
+
+@app.post("/orgs/invite/revoke")
+def org_revoke_invite(req: RevokeIn, owner: str = Depends(current_owner)):
+    """Kill a code. Without this, a code leaked into a group chat was a permanent key to the pool and
+    removal was advisory — the removed member simply rejoined with the code that admitted them."""
+    m = _org_for(owner)
+    try:
+        orgs.require_member(owner, m["org_id"], orgs.TEACHER)
+    except orgs.OrgAccessError:
+        raise HTTPException(status_code=404, detail="not found") from None
+    if not orgs.revoke_invite(m["org_id"], req.code):
+        raise HTTPException(status_code=404, detail="not found")
+    orgs.log_access(m["org_id"], owner, "revoke_invite")
+    return {"revoked": True}
+
+
+class JoinIn(BaseModel):
+    code: str = Field(max_length=32)
+
+
+@app.post("/orgs/join")
+def org_join(req: JoinIn, owner: str = Depends(current_owner)):
+    """Redeem a join code. The refusal reason goes to the JOINER — the person it is about — and
+    never back to whoever minted the code."""
+    try:
+        joined = orgs.accept_invite(req.code, owner)
+    except orgs.JoinRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    orgs.log_access(joined["org_id"], owner, "join")
+    return joined
+
+
+@app.post("/orgs/leave")
+def org_leave(owner: str = Depends(current_owner)):
+    """Leave. The account, its conversations and its lessons stay — the school bought quota, not the
+    person's work — and the member reverts to the free tier."""
+    m = _org_for(owner)
+    org = orgs.get_org(m["org_id"]) or {}
+    if org.get("owner_id") == owner:
+        raise HTTPException(status_code=409,
+                            detail="an organisation's owner closes it rather than leaving it")
+    # by_admin=False: they may come back with a valid code. Their cap comes back with them — leaving
+    # is not a way to shed a ceiling an administrator set.
+    orgs.remove_member(m["org_id"], owner, by_admin=False)
+    # Logged like every other roster change. Leaving alters the roster and frees a seat, and an audit
+    # trail that records who was removed but not who walked out cannot answer "why is this seat free".
+    orgs.log_access(m["org_id"], owner, "leave")
+    return {"left": True}
+
+
+@app.post("/orgs/close")
+def org_close(owner: str = Depends(current_owner)):
+    """Wind up the school. Only its owner, and it is the way out of an otherwise closed loop.
+
+    Before this, an org owner could not leave their own org (no transfer route exists), could not
+    delete their account (purge_owner refuses an org owner), and nothing anywhere deleted an `orgs`
+    row — so the paying administrator, the account most likely to receive an erasure request, was
+    permanently undeletable and support's only remedy was raw SQL against production.
+
+    Members revert to their own free accounts with their conversations and lessons intact: the school
+    bought quota, not anyone's work. Billing is NOT cancelled here — that is /billing/cancel, and
+    silently stopping someone's payments as a side effect of a different button would be worse than
+    making them press two.
+    """
+    org = orgs.owned_org(owner)
+    if not org:
+        raise HTTPException(status_code=404, detail="not found")
+    orgs.log_access(org["id"], owner, "close_org")
+    orgs.close_org(org["id"])
+    _log.info("org %s closed by its owner %s", org["id"], owner)
+    return {"closed": True, "org_id": org["id"]}
+
+
+class MemberActionIn(BaseModel):
+    owner_id: str = Field(max_length=128)
+    # -1 is orgs.CAP_BLOCKED (this member may spend nothing), 0 is the tier default. The two used to
+    # collapse into one value, so an admin who set 0 to stop a disruptive student handed them the
+    # HIGHEST cap in the system instead, and nothing anywhere said otherwise.
+    daily_cap: int | None = Field(default=None, ge=-1)
+
+
+@app.post("/orgs/members/remove")
+def org_remove_member(req: MemberActionIn, owner: str = Depends(current_owner)):
+    m = _org_for(owner)
+    try:
+        actor = orgs.require_member(owner, m["org_id"], orgs.TEACHER)
+        orgs.require_can_act_on(actor, req.owner_id)   # the rank check the first plan was missing:
+    except orgs.OrgAccessError:                        # without it a teacher removes the paying admin
+        raise HTTPException(status_code=404, detail="not found") from None
+    if (orgs.get_org(m["org_id"]) or {}).get("owner_id") == req.owner_id:
+        raise HTTPException(status_code=409, detail="the organisation owner cannot be removed")
+    orgs.remove_member(m["org_id"], req.owner_id)
+    orgs.log_access(m["org_id"], owner, "remove_member", req.owner_id)
+    return {"removed": True}
+
+
+@app.post("/orgs/members/readmit")
+def org_readmit_member(req: MemberActionIn, owner: str = Depends(current_owner)):
+    """Undo a removal so the person can join again. The counterpart of the fact that a removal now
+    sticks: without a way back, an administrator's mistake would be permanent.
+
+    ADMIN, not teacher — a removal is a safeguarding decision and the refusal a removed member sees
+    says an administrator must re-admit them. At the teacher floor this route reversed an admin's
+    expulsion from one rank below, which is the invariant this module exists to hold. The rank check
+    matters for the same reason it does on remove and cap: without it a teacher could readmit a
+    removed ADMIN, someone they could never have removed in the first place.
+    """
+    m = _org_for(owner)
+    try:
+        actor = orgs.require_member(owner, m["org_id"], orgs.ADMIN)
+        orgs.require_can_act_on(actor, req.owner_id)
+    except orgs.OrgAccessError:
+        raise HTTPException(status_code=404, detail="not found") from None
+    if not orgs.readmit(m["org_id"], req.owner_id):
+        raise HTTPException(status_code=404, detail="not found")
+    orgs.log_access(m["org_id"], owner, "readmit", req.owner_id)
+    return {"readmitted": True}
+
+
+@app.post("/orgs/members/cap")
+def org_set_cap(req: MemberActionIn, owner: str = Depends(current_owner)):
+    m = _org_for(owner)
+    try:
+        actor = orgs.require_member(owner, m["org_id"], orgs.ADMIN)
+        orgs.require_can_act_on(actor, req.owner_id)
+    except orgs.OrgAccessError:
+        raise HTTPException(status_code=404, detail="not found") from None
+    # The owner is the one member no one else may throttle. require_can_act_on permits equal ranks by
+    # design (an admin may act on an admin), so without this a second administrator could cap the
+    # paying owner at a single token — and the owner has no route to read or reset their own cap.
+    if (orgs.get_org(m["org_id"]) or {}).get("owner_id") == req.owner_id and req.owner_id != owner:
+        raise HTTPException(status_code=409, detail="the organisation owner's cap cannot be changed")
+    cap = orgs.CAP_DEFAULT if req.daily_cap is None else req.daily_cap
+    if not orgs.set_member_cap(m["org_id"], req.owner_id, cap):
+        raise HTTPException(status_code=404, detail="not found")
+    orgs.log_access(m["org_id"], owner, "set_cap", req.owner_id)
+    return {"owner_id": req.owner_id, "daily_cap": cap}

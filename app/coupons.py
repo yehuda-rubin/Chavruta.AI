@@ -22,6 +22,7 @@ import time
 from datetime import UTC, datetime, timedelta
 
 import app.db as db
+import app.orgs as orgs
 from app import plans
 
 _log = logging.getLogger("chavruta.coupons")
@@ -129,7 +130,8 @@ class RedeemError(Exception):
         self.reason = reason
 
 
-def redeem(owner_id: str, code: str, *, now: datetime | None = None) -> dict:
+def redeem(owner_id: str, code: str, *, now: datetime | None = None,
+           bypass_throttle: bool = False) -> dict:
     """Apply a coupon to an account. Returns a summary of what was granted, with a `mode` of
     "grant" (time-boxed plan, no active paid subscription), "discount" (ILS credit rebated off the
     next PayPlus charge(s), because the coupon's plan is at or below what's already being paid for),
@@ -138,13 +140,18 @@ def redeem(owner_id: str, code: str, *, now: datetime | None = None) -> dict:
 
     Raises RedeemError with one of: throttled · invalid · already_redeemed · exhausted · expired ·
     downgrade.
+
+    `bypass_throttle` is for the operator grant path (/admin/grant), which issues a fresh code and
+    redeems it on the account's behalf. The throttle exists because redemption is a public guessing
+    target; an admin handing out access is not guessing, and an operator granting to several accounts
+    in a row would otherwise lock themselves out after ten.
     """
     if owner_id == "local":
         raise RedeemError("sign_in_required")
     stored = normalize(code)
     if not _VALID.match(stored):
         raise RedeemError("invalid")
-    if _throttled(owner_id):
+    if not bypass_throttle and _throttled(owner_id):
         raise RedeemError("throttled")
 
     now = now or datetime.now(UTC)
@@ -153,6 +160,19 @@ def redeem(owner_id: str, code: str, *, now: datetime | None = None) -> dict:
         raise RedeemError("invalid")
 
     kind = c["kind"]
+    # A school member spends the org's pool and nothing else — there is no personal allowance, no
+    # credit fallback and no BYOK path behind it (app/api.py::_reserve_tokens branches on
+    # orgs.quota_context BEFORE any of those). So a personal plan here would grant a tier that
+    # changes nothing, and credits would be handed out that can never be spent. Refusing is the
+    # honest answer; granting silently would look like it worked. This also covers /admin/grant,
+    # which mints a code and redeems it on the account's behalf through this same function.
+    #
+    # Checked HERE rather than at the top because the answer depends on what the coupon grants: the
+    # account that owns the school must be able to receive the school's own institutional plan, which
+    # is exactly how the operator provisions or extends one.
+    if orgs.refuse_personal_purchase(owner_id, c["plan"] if kind == "plan" else None):
+        raise RedeemError("org_member")
+
     set_plan_to = period_end = None
     add_credits = 0
 
@@ -204,6 +224,13 @@ def redeem(owner_id: str, code: str, *, now: datetime | None = None) -> dict:
         raise RedeemError({"not_found": "invalid", "inactive": "invalid"}.get(status, status))
 
     _clear_throttle(owner_id)
+    # A school provisioned or extended by coupon — the path refuse_personal_purchase deliberately
+    # allows — has to reach the org row too. Only the PAID path synced it, while the coupon's expiry
+    # DID degrade the org (a grant is stored as 'canceled' with a future period end, which is exactly
+    # what the downgrade sweep selects). So grants were invisible to the school and revocations were
+    # not: the asymmetry ran only in the direction that takes capacity away.
+    if set_plan_to:
+        orgs.sync_plan_from_owner(owner_id, set_plan_to)
     _log.info("coupon %s redeemed by %s (%s)", stored, owner_id, granted)
     return {
         "kind": kind,
@@ -263,6 +290,7 @@ def _redeem_against_active_subscription(owner_id: str, stored: str, kind: str, *
         revert_plan = current
         revert_at = (now + timedelta(days=days)).isoformat()
     db.set_plan(owner_id, target)
+    orgs.sync_plan_from_owner(owner_id, target)      # same reason as the grant path above
     db.set_coupon_boost(owner_id, revert_plan=revert_plan, revert_at=revert_at,
                         updated_at=now.isoformat())
     _log.info("coupon %s redeemed by %s (boost to %s until %s, reverts to %s)",

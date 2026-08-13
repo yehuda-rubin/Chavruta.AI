@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass, field
 
 from chavruta.corpus.schema import Intent, Query
-from chavruta.intents.hebrew_refs import detect_hebrew_refs
+from chavruta.intents.hebrew_refs import detect_hebrew_refs, detect_tractates
 from chavruta.intents.landmarks import resolve_landmarks
 
 # ── Commentator aliases (extendable as data; mirrors the corpus commentator ids) ──
@@ -80,6 +80,34 @@ _HALACHA_PAT = re.compile(
     r"\b(is it permitted|is it forbidden|am i allowed|may i|halachically)\b"
     r"|האם\s+(מותר|אסור|צריך|חייב|כשר|מחו?יי?ב)|מה\s+הדין|מהי?\s+ההלכה|מה\s+ההלכה"
     r"|הלכה\s+למעשה|כיצד\s+(נוהגים|יש\s+לנהוג|פוסקים)", re.IGNORECASE)
+
+
+# Modern technology terms whose halachically-operative concept shares no root with the surface
+# word. A question like "is it permitted to play on a COMPUTER on Shabbat" embeds close to the
+# literal שחוק (games/jest) sugyot — a real 2026-08-07 production case where that sugya was
+# retrieved instead of the corpus's own (excellent, directly on-point) B'Mareh HaBazak responsa on
+# electrical-device use, simply because "מחשב" and "חשמל" don't share a lexical root for the
+# embedding to latch onto. Bias retrieval toward the right concept WITHOUT touching what the model
+# sees (query.text stays untouched — this only appends to query.search_text, the embedding input).
+_TECH_TERMS: tuple[str, ...] = (
+    "מחשב", "מחשבים", "לפטופ", "טלפון", "סמארטפון", "סמרטפון", "נייד", "פלאפון",
+    "טאבלט", "אייפד", "אינטרנט", "וויפי", "מסך", "טלוויזיה", "מקרר", "מיקרוגל",
+    "מזגן", "מדיח", "רמקול", "בלוטות", "מצלמה", "רחפן", "אלקסה", "שעון חכם",
+    "אפליקציה", "קונסולה", "פלייסטיישן", "אקסבוקס",
+    "computer", "laptop", "smartphone", "tablet", "ipad", "internet", "wifi",
+    "screen", "television", "fridge", "refrigerator", "microwave",
+    "air conditioner", "dishwasher", "speaker", "bluetooth", "camera", "drone",
+    "alexa", "smartwatch", "app", "video game", "console", "playstation", "xbox",
+)
+_TECH_CONCEPT_EXPANSION = (
+    "חשמל שימוש במכשיר חשמלי הפעלת מעגל חשמלי מוקצה "
+    "electricity electrical device muktzeh"
+)
+
+
+def _has_tech_term(text: str) -> bool:
+    low = text.lower()
+    return any(_alias_hit(t, text, low) for t in _TECH_TERMS)
 
 
 # Lesson/prepare lead-ins to strip from the RETRIEVAL text (they pollute the embedding;
@@ -188,6 +216,9 @@ class Router:
         if not query.search_text:
             query.search_text = retrieval_text(query.text)
 
+        if _has_tech_term(query.text) and _TECH_CONCEPT_EXPANSION not in query.search_text:
+            query.search_text = f"{query.search_text} {_TECH_CONCEPT_EXPANSION}"
+
         commentators = detect_commentators(query.text)
         if commentators and not query.commentator_ids:
             # Bias, don't hard-filter, when exactly one is named in a compare-less question:
@@ -208,6 +239,15 @@ class Router:
             works = detect_requested_works(query.text)
             if works:
                 query.requested_works = works
+
+        # A tractate named without a daf ("במסכת סוכה") can't anchor, but it is still the single most
+        # useful thing the question said. Caught live: a user asked what Rashi says about building
+        # the Temple, was told the wrong thing, replied "רש\"י על הגמרא כן אומר את זה במסכת סוכה" —
+        # and the system still didn't look in Sukkah, because naming a masechet resolved to nothing.
+        if query.tractates is None:
+            tractates = detect_tractates(query.text)
+            if tractates:
+                query.tractates = tractates
 
         if query.intent is Intent.QA:   # only override the default, never an explicit choice
             query.intent = detect_intent(query.text, len(commentators))

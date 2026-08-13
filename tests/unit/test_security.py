@@ -110,6 +110,45 @@ def test_client_ip_falls_back_to_peer_when_xff_too_short(monkeypatch):
     assert _client_ip(_req_ip(peer="10.0.0.2", xff="203.0.113.7")) == "10.0.0.2"
 
 
+# ── The limit key: an account when provable, else the IP (spec 004 — a school behind one NAT) ──
+def _req_auth(peer="1.2.3.4", token=None):
+    r = types.SimpleNamespace()
+    r.client = types.SimpleNamespace(host=peer)
+    r.headers = {"authorization": f"Bearer {token}"} if token else {}
+    return r
+
+
+def test_limit_key_is_the_ip_when_there_is_no_auth(monkeypatch):
+    from app import auth_supabase as sb
+    from app.security import _limit_key
+    monkeypatch.setattr(sb, "enabled", lambda: False)
+    assert _limit_key(_req_auth(peer="9.9.9.9")) == "ip:9.9.9.9"
+
+
+def test_two_signed_in_users_behind_one_ip_get_separate_buckets(monkeypatch):
+    """The school case. Sharing one bucket meant three active students could 429 the other
+    twenty-seven, and no amount of quota the school had paid for would have helped."""
+    from app import auth_supabase as sb
+    from app.security import _limit_key
+    monkeypatch.setattr(sb, "enabled", lambda: True)
+    monkeypatch.setattr(sb, "verify_sub", lambda tok: {"t-a": "user-a", "t-b": "user-b"}.get(tok))
+    a = _limit_key(_req_auth(peer="203.0.113.9", token="t-a"))
+    b = _limit_key(_req_auth(peer="203.0.113.9", token="t-b"))
+    assert a != b
+    assert a == "u:user-a"
+
+
+def test_an_unverified_token_cannot_mint_a_fresh_bucket(monkeypatch):
+    """The id comes from the VERIFIED token only. Otherwise rotating a made-up bearer would skip the
+    limiter entirely — a worse hole than the one this fixes."""
+    from app import auth_supabase as sb
+    from app.security import _limit_key
+    monkeypatch.setattr(sb, "enabled", lambda: True)
+    monkeypatch.setattr(sb, "verify_sub", lambda tok: None)
+    assert _limit_key(_req_auth(peer="9.9.9.9", token="forged-1")) == "ip:9.9.9.9"
+    assert _limit_key(_req_auth(peer="9.9.9.9", token="forged-2")) == "ip:9.9.9.9"
+
+
 # ── Per-owner data isolation (app/db.py) — the IDOR the audit flagged (GET /sessions leaked all) ──
 def _fresh_db(tmp_path, monkeypatch):
     import app.db as db
@@ -145,3 +184,32 @@ def test_lessons_are_isolated_by_owner(tmp_path, monkeypatch):
     assert db.get_lesson("L2", "bob") is not None
     assert db.delete_lesson("L2", "alice") is False                # can't delete bob's
     assert db.get_lesson("L2", "bob") is not None
+
+
+# ── The middleware itself, not just the key function ─────────────────────────
+def test_the_limiter_still_limits_through_the_middleware(monkeypatch, tmp_path):
+    """_limit_key now runs via run_in_threadpool. The three tests above call it directly and would
+    pass identically if the middleware forgot to await it — which would use a coroutine as the dict
+    key, giving every request a unique bucket and switching the limiter off entirely."""
+    from types import SimpleNamespace
+
+    from fastapi.testclient import TestClient
+
+    import app.api as api
+    import app.db as db
+    from app import security
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "rl.db")
+    monkeypatch.setattr(db, "_conn", None)
+    monkeypatch.setattr(api, "_assert_config_usable", lambda: None)
+    monkeypatch.setattr(api, "_get_pipeline", lambda: SimpleNamespace(
+        embedding=SimpleNamespace(embed_query=lambda q: SimpleNamespace(dense=[0.0], sparse={}))))
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_JWKS_URL", raising=False)
+    monkeypatch.setattr(security, "_minute", security._SlidingWindow(3, 60.0))
+    monkeypatch.setattr(security, "_hour", security._SlidingWindow(100, 3600.0))
+
+    with TestClient(api.app) as c:
+        codes = [c.post("/query/async", json={"question": "x"}).status_code for _ in range(5)]
+    assert 429 in codes, "the middleware must actually reach the window"
+    assert codes.count(202) == 3

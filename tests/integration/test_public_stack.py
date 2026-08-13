@@ -15,6 +15,13 @@ from fastapi.testclient import TestClient
 
 import app.api as api
 import app.db as db
+import app.plans as plans
+
+# A daily cap that fits one qa turn and not two — derived, not hardcoded, so raising the generation
+# budgets cannot turn these quota tests into false 429s. The 1.5x headroom keeps the FIRST turn from
+# failing on a stray already-metered token. See the same constants in tests/unit/test_byok_quota.py.
+_ONE_TURN = plans.token_estimate("qa")
+_DAY_CAP = int(_ONE_TURN * 1.5)
 
 
 @pytest.fixture
@@ -139,18 +146,25 @@ def test_free_quota_blocks_over_limit_and_me_reflects_it(client, monkeypatch):
     absent: the integration surface that proves a free account can be cut off had no cover at all.
     """
     monkeypatch.setenv("CHAVRUTA_API_KEYS", "k")
-    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", "25000")
+    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", str(_DAY_CAP))
     h = {"Authorization": "Bearer k"}
     owner = client.get("/me", headers=h).json()["owner"]
 
     # One turn is admitted…
-    assert client.post("/query/async", headers=h, json={"question": "a"}).status_code == 202
+    admitted = client.post("/query/async", headers=h, json={"question": "a"})
+    assert admitted.status_code == 202
+    # …and its job must FINISH before we touch the counter it settles against. With the reservation
+    # still outstanding the seeding bump below is itself refused (estimate + cap > cap), and the
+    # worker's refund then drops the counter back to nearly zero — so the request that must be 429
+    # sails through. Passes alone, fails under a full-suite run.
+    _poll(client, admitted.json()["job_id"], headers=h)
 
     # …then spend the day's budget outright. Counting requests instead would race the worker: the
     # turn is admitted against an ESTIMATE and _settle_tokens corrects it to the real cost once the
     # job finishes, which under a stubbed LLM is nearly nothing — so the reservation is handed back
     # before the next request arrives and nothing appears to be metered at all.
-    db.bump_usage(owner, 25_000, weekly_limit=0, units=25_000, meter=db.TOKENS)
+    allowed, _d, _w = db.bump_usage(owner, _DAY_CAP, weekly_limit=0, units=_DAY_CAP, meter=db.TOKENS)
+    assert allowed, "the seeding bump must actually land, or this test proves nothing"
 
     blocked = client.post("/query/async", headers=h, json={"question": "b"})
     assert blocked.status_code == 429, "a free account past its daily tokens must be refused"
@@ -170,17 +184,24 @@ def test_byok_header_grants_a_second_allowance_over_http(client, monkeypatch):
     monkeypatch.setattr(api, "_byok_supported", lambda: True)
     monkeypatch.setattr(api, "_byok_llm", lambda key, base_url="", model="": _NS())
     monkeypatch.setenv("CHAVRUTA_API_KEYS", "k")
-    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", "25000")
+    monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_FREE", str(_DAY_CAP))
     h = {"Authorization": "Bearer k"}
     owner = client.get("/me", headers=h).json()["owner"]
 
-    db.bump_usage(owner, 25_000, weekly_limit=0, units=25_000, meter=db.TOKENS)
+    db.bump_usage(owner, _DAY_CAP, weekly_limit=0, units=_DAY_CAP, meter=db.TOKENS)
     assert client.post("/query/async", headers=h, json={"question": "a"}).status_code == 429
 
     hk = {**h, "X-User-LLM-Key": "user-owns-this-key"}
-    assert client.post("/query/async", headers=hk, json={"question": "a"}).status_code == 202
+    admitted = client.post("/query/async", headers=hk, json={"question": "a"})
+    assert admitted.status_code == 202
 
-    db.bump_usage(owner, 25_000, weekly_limit=0, units=25_000, meter=db.BYOK_TOKENS)
+    # Wait for that job to finish before touching the meter it settles against. The job refunds its
+    # own reservation from a worker thread, so a test that bumps the counter first races it — the
+    # refund lands afterwards, undoes the bump, and the third request is admitted. Rare enough to
+    # pass alone and fail under a full-suite run, which is the worst kind of flake to leave behind.
+    _poll(client, admitted.json()["job_id"], headers=hk)
+
+    db.bump_usage(owner, _DAY_CAP, weekly_limit=0, units=_DAY_CAP, meter=db.BYOK_TOKENS)
     blocked = client.post("/query/async", headers=hk, json={"question": "b"})
     assert blocked.status_code == 429, "a key is a second allowance, not unlimited"
 
@@ -207,6 +228,43 @@ def test_account_deletion_schedule_reflect_cancel(client, monkeypatch):
     # Cancel → cleared.
     client.post("/account/delete/cancel", headers=h)
     assert client.get("/me", headers=h).json()["deletion_scheduled_for"] is None
+
+
+def test_immediate_deletion_erases_now_and_leaves_nothing_scheduled(client, monkeypatch):
+    """The user who says "I asked to be deleted, why is it a month away" gets what they asked for in
+    the app instead of having to email the operator. Nothing is left pending afterwards — a deletion
+    that still shows as "scheduled" would suggest it had not happened."""
+    monkeypatch.setenv("CHAVRUTA_API_KEYS", "k")
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    h = {"Authorization": "Bearer k"}
+    # Seeded straight into the DB: POST /sessions runs a real generation, and this test is about
+    # what deletion removes, not about the model.
+    owner = client.get("/me", headers=h).json()["owner"]
+    db.create_session("שאלה", mode="qa", owner_id=owner)
+    assert len(client.get("/sessions", headers=h).json()) == 1
+
+    got = client.post("/account/delete", json={"immediate": True}, headers=h).json()
+    assert got["deleted"] is True and got["deletion_scheduled_for"] is None
+    assert client.get("/me", headers=h).json()["deletion_scheduled_for"] is None
+    assert client.get("/sessions", headers=h).json() == []          # the data really is gone
+
+
+def test_deletion_defaults_to_the_grace_period_when_no_body_is_sent(client, monkeypatch):
+    """An older client posts no body at all. It must still get the SAFE path, never the irreversible
+    one — a missing field defaulting to "delete now" would be the worst possible default."""
+    monkeypatch.setenv("CHAVRUTA_API_KEYS", "k")
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    h = {"Authorization": "Bearer k"}
+    got = client.post("/account/delete", headers=h).json()
+    assert got["deleted"] is False and got["deletion_scheduled_for"]
+
+
+def test_me_states_the_grace_period_length(client, monkeypatch):
+    """The UI names the number before the user commits, so it has to come from the server that will
+    actually apply it — not a 30 hardcoded in the frontend next to a configurable backend."""
+    monkeypatch.setenv("CHAVRUTA_API_KEYS", "k")
+    monkeypatch.setenv("CHAVRUTA_ACCOUNT_DELETION_GRACE_DAYS", "7")
+    assert client.get("/me", headers={"Authorization": "Bearer k"}).json()["deletion_grace_days"] == 7
 
 
 def test_account_deletion_rejected_in_local_mode(client):

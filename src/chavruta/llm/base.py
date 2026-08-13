@@ -20,6 +20,18 @@ class SourceBlock:
     ref: str
     commentator_id: str | None
     text: str
+    # Everything below is for the READER, not the model: the model only ever sees `text`.
+    # A source the agentic loop fetched becomes a SourceBlock and is then rendered on the lesson
+    # source sheet exactly like a first-round hit — so whatever a RankedHit carries for display and
+    # rights has to survive the conversion. It did not: the sheet fell back to the combined
+    # Hebrew+English blob and printed every self-fetched source twice, and its licence column read
+    # "unknown" for all of them (reported 2026-08-12). With ~75% of requests reaching a second
+    # retrieval round, that was most sources on most sheets.
+    text_he: str = ""
+    text_en: str = ""
+    deep_link: str = ""
+    license: str = ""
+    version_title: str = ""
 
 
 @dataclass

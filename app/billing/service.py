@@ -14,6 +14,7 @@ import time
 from datetime import UTC, datetime, timedelta
 
 import app.db as db
+import app.orgs as orgs
 from app import plans
 from app.billing import greeninvoice, payplus
 
@@ -47,6 +48,18 @@ def start_checkout(owner_id: str, email: str, name: str, *,
     cyc = plans.canonical_cycle(cycle)
     if tier == "free":
         raise ValueError("cannot check out the free tier")
+    # Refused BEFORE the payment page exists, not after the charge: a school member draws on the
+    # org's pool, so a personal subscription would take real money and grant nothing at all. The
+    # check is here rather than in the route so it holds for every caller of this function. The
+    # school's own OWNER buying an institutional tier is not this case — see orgs.refuse_personal_purchase.
+    # The reason matters: an owner told to "leave the institution" is being sent to a route that
+    # refuses them (an owner closes their school rather than leaving it), which is a dead end.
+    if (why := orgs.refuse_personal_purchase(owner_id, tier)) == "owner":
+        raise ValueError("החשבון הזה מנהל מוסד ומשתמש במכסה המשותפת שלו, ולכן מנוי אישי לא יוסיף לו "
+                         "כלום. אפשר לשדרג את מסלול המוסד, או לסגור אותו מפאנל המוסד.")
+    if why:
+        raise ValueError("החשבון משויך למוסד ומשתמש במכסה המשותפת שלו — מנוי אישי לא יוסיף לו כלום. "
+                         "כדי לרכוש מנוי משלך, צא מהמוסד בהגדרות תחילה.")
     db.upsert_subscription(owner_id, provider="payplus", status="pending", plan=tier, cycle=cyc,
                            updated_at=datetime.now(UTC).isoformat())
     return payplus.create_payment_page(owner_id, email, name,
@@ -72,6 +85,19 @@ def handle_event(normalized: dict, *, now: datetime | None = None) -> None:
                            status="active", plan=tier, cycle=cycle, current_period_end=period_end,
                            cancel_at_period_end=False, updated_at=now.isoformat())
     db.set_plan(owner, tier)
+    # A school's tier lives on the org row, and nothing used to write it after creation — so a school
+    # that upgraded could not be given what it had just paid for, and one that stopped paying kept its
+    # full pool forever while the panel cheerfully rendered it. Both directions run through here.
+    if org_id := orgs.sync_plan_from_owner(owner, tier):
+        _log.info("org %s now on %s (paid by %s)", org_id, tier, owner)
+    # The reverse of the guard in start_checkout. That one refuses at the payment page; this one is
+    # for the orders that were already in flight — a checkout started before joining a school, or a
+    # RECURRING charge that fires months after the holder joined one. The money has already moved by
+    # the time this callback arrives, so there is nothing to refuse: what matters is that it is
+    # LOGGED loudly rather than silently granting a plan the request path will never consult.
+    if orgs.membership(owner) and not plans.is_institutional(tier):
+        _log.error("BILLING/ORG CONFLICT: %s paid for %s but belongs to a school and spends its pool "
+                   "— this charge grants nothing; refund or remove the membership", owner, tier)
     _log.info("subscription active for %s: %s/%s (renewal=%s) until %s",
               owner, tier, cycle, normalized.get("is_renewal"), period_end)
     amount = float(normalized.get("amount") or 0.0)
@@ -137,7 +163,12 @@ def _apply_coupon_discount(owner: str, amount: float, txn_uid: str | None, tier:
               owner, rebate, round(balance - rebate, 2))
 
 
-def cancel(owner_id: str, *, now: datetime | None = None) -> None:
+class ProviderCancelFailed(Exception):
+    """The recurring charge could not be stopped at the provider. Only raised when the caller asked
+    for `strict` — i.e. when it is about to destroy the handle that would let anyone try again."""
+
+
+def cancel(owner_id: str, *, strict: bool = False, now: datetime | None = None) -> None:
     """Stop future charges and mark the subscription cancelled. Paid access is retained until the
     current period ends (Consumer Protection: billing stops, but the user keeps what they paid for).
 
@@ -148,7 +179,15 @@ def cancel(owner_id: str, *, now: datetime | None = None) -> None:
     ANNUAL_INSTALMENTS).
 
     NOT a refund — cancelling stops the next charge and gives nothing back. Money is returned by
-    refund() below, which an operator runs deliberately through scripts/refund.py."""
+    refund() below, which an operator runs deliberately through scripts/refund.py.
+
+    `strict` re-raises a provider failure instead of logging it. The default is right for a user who
+    clicked "cancel subscription" — we stop renewing locally and sort the provider out afterwards. It
+    is wrong for account deletion, which is about to delete the subscriptions row and with it
+    `provider_ref`, the only handle anyone has on the recurring charge: a swallowed error there ends
+    with a person billed monthly for an account that no longer exists and no local record of what to
+    cancel. See app/accounts.py::stop_billing.
+    """
     now = now or datetime.now(UTC)
     sub = db.get_subscription(owner_id)
     # Only a real provider subscription has anything to cancel upstream. A coupon-granted plan stores
@@ -156,8 +195,10 @@ def cancel(owner_id: str, *, now: datetime | None = None) -> None:
     if sub and sub.get("provider_ref") and sub.get("provider") == "payplus":
         try:
             payplus.cancel_recurring(sub["provider_ref"])
-        except Exception:               # noqa: BLE001 — still mark cancelled locally so we stop renewing
+        except Exception as exc:        # noqa: BLE001 — still mark cancelled locally so we stop renewing
             _log.exception("payplus cancel_recurring failed for %s", owner_id)
+            if strict:
+                raise ProviderCancelFailed(owner_id) from exc
     db.upsert_subscription(owner_id, status="canceled", cancel_at_period_end=True,
                            updated_at=now.isoformat())
     _log.info("subscription cancelled for %s (paid access until period end)", owner_id)
@@ -255,6 +296,12 @@ def sweep_downgrades(now: datetime | None = None) -> int:
     for owner in due:
         db.set_plan(owner, "free")
         db.upsert_subscription(owner, status="expired", updated_at=now.isoformat())
+        # A school whose payer lapses degrades its pool — it does NOT dissolve. Members keep their
+        # accounts, their history and their seats, and the tier comes straight back when payment
+        # resumes: nobody is locked out of their own study by a billing failure. Before this, an
+        # unpaid school simply kept its full institution pool, indefinitely and invisibly.
+        if org_id := orgs.sync_plan_from_owner(owner, "free", degrade=True):
+            _log.warning("org %s degraded to free — its subscription (%s) lapsed", org_id, owner)
         _log.info("subscription expired → free plan for %s", owner)
     return len(due)
 
@@ -266,6 +313,9 @@ def sweep_coupon_reverts(now: datetime | None = None) -> int:
     due = db.due_coupon_reverts(now.isoformat())
     for row in due:
         db.set_plan(row["owner_id"], row["revert_plan"])
+        # degrade=True: a boost ENDING is a real lapse back to what is actually paid for, unlike
+        # an unrelated personal renewal.
+        orgs.sync_plan_from_owner(row["owner_id"], row["revert_plan"], degrade=True)
         db.clear_coupon_revert(row["owner_id"], updated_at=now.isoformat())
         _log.info("coupon boost ended for %s → reverted to %s", row["owner_id"], row["revert_plan"])
     return len(due)

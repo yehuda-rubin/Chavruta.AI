@@ -244,19 +244,44 @@ function Seg<T extends string>({
 
 /** A remaining-allowance bar. Percentage only — the absolute figure behind it is deliberately not
  *  published (see app/plans.py), and a token count would mean nothing to a reader anyway. */
-function Gauge({ label, value }: { label: string; value: number }) {
+function Gauge({ label, value, caption }: { label: string; value: number; caption?: string }) {
   const pct = Math.round(value * 100);
   const bar = value === 0 ? "bg-red-500" : value <= 0.15 ? "bg-amber-500" : "bg-tekhelet/60";
   return (
-    <div className="flex items-center gap-2 text-xs text-ink/60">
-      <span className="w-20 shrink-0">{label}</span>
-      <span className="flex-1 h-1.5 rounded-full bg-ink/10 overflow-hidden"
-            role="img" aria-label={`${label}: ${pct}%`}>
-        <span className={"block h-full rounded-full " + bar} style={{ width: `${pct}%` }} />
-      </span>
-      <span className="w-9 text-end tabular-nums">{pct}%</span>
+    <div className="flex flex-col gap-0.5">
+      <div className="flex items-center gap-2 text-xs text-ink/60">
+        <span className="w-20 shrink-0">{label}</span>
+        <span className="flex-1 h-1.5 rounded-full bg-ink/10 overflow-hidden"
+              role="img" aria-label={`${label}: ${pct}%`}>
+          <span className={"block h-full rounded-full " + bar} style={{ width: `${pct}%` }} />
+        </span>
+        <span className="w-9 text-end tabular-nums">{pct}%</span>
+      </div>
+      {caption && <p className="text-[11px] text-ink/40 ps-[88px]">{caption}</p>}
     </div>
   );
+}
+
+/** How long until a quota pool next resets — daily pools at local midnight, weekly pools (including
+ *  the separate lessons pool, see app/plans.py) at the coming Sunday 00:00, matching the actual
+ *  reset moment the backend's own quota messages already describe ("It resets on Sunday" / "It
+ *  resets tomorrow" — app/api.py). Computed client-side since both are deterministic; no backend
+ *  field needed. */
+function resetsIn(kind: "day" | "week", lang: Lang): string {
+  const now = new Date();
+  const target = new Date(now);
+  if (kind === "day") {
+    target.setHours(24, 0, 0, 0);
+  } else {
+    const day = now.getDay(); // 0 = Sunday
+    target.setDate(now.getDate() + (day === 0 ? 7 : 7 - day));
+    target.setHours(0, 0, 0, 0);
+  }
+  const hours = Math.round((target.getTime() - now.getTime()) / 3_600_000);
+  if (hours < 1) return lang === "he" ? "מתאפס בקרוב" : "resets soon";
+  if (hours < 24) return lang === "he" ? `מתאפס בעוד כ-${hours} שעות` : `resets in about ${hours}h`;
+  const days = Math.round(hours / 24);
+  return lang === "he" ? `מתאפס בעוד כ-${days} ימים` : `resets in about ${days}d`;
 }
 
 /** Coupon entry. Keeps its own state so a failed attempt doesn't disturb the rest of settings; the
@@ -316,6 +341,82 @@ function CouponField({ lang, onRedeem }: { lang: Lang; onRedeem: (c: string) => 
   );
 }
 
+/* Join an institution by CODE. Deliberately the member's own action: a school never attaches an
+ * account by typing its id, so this field is the only way in. Mirrors CouponField because it is the
+ * same interaction — paste a short code, get one line back — and reusing the shape means a user who
+ * has redeemed a coupon already knows how this works. */
+function OrgJoinField({ lang, orgName, onJoin }: {
+  lang: Lang; orgName?: string; onJoin: (c: string) => Promise<string>;
+}) {
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const he = lang === "he";
+
+  async function submit() {
+    const c = code.trim();
+    if (!c || busy) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      setResult({ ok: true, msg: await onJoin(c) });
+      setCode("");
+    } catch (e) {
+      setResult({ ok: false, msg: e instanceof Error ? e.message : (he ? "ההצטרפות נכשלה" : "Could not join") });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (orgName) {
+    return (
+      <div className="mt-2 flex flex-col gap-1">
+        <span className="text-xs text-ink/60">{he ? "מוסד" : "Institution"}</span>
+        <p className="text-sm text-tekhelet font-semibold">{orgName}</p>
+        <p className="text-[11px] text-ink/45 leading-relaxed">
+          {he
+            ? "המכסה שלך מגיעה מהמוסד. המוסד רואה את היקף השימוש ואת סוגי הפעילות שלך — ולעולם לא את תוכן השיחות."
+            : "Your allowance comes from the institution. It can see how much you use and which modes — never the content of your conversations."}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 flex flex-col gap-2">
+      <span className="text-xs text-ink/60">{he ? "קוד הצטרפות למוסד" : "Institution join code"}</span>
+      <div className="flex gap-2">
+        <input
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+          placeholder={he ? "קוד מהמוסד" : "Code from your institution"}
+          aria-label={he ? "קוד הצטרפות למוסד" : "Institution join code"}
+          disabled={busy}
+          spellCheck={false}
+          autoComplete="off"
+          className="flex-1 min-w-0 px-3 py-2 rounded-2xl glass text-sm tracking-wider uppercase
+                     outline-none focus:ring-2 focus:ring-brand/40 disabled:opacity-50"
+        />
+        <button
+          onClick={submit}
+          disabled={busy || !code.trim()}
+          className="px-4 py-2 rounded-2xl grad text-white font-semibold text-sm shrink-0
+                     hover:opacity-95 transition disabled:opacity-40"
+        >
+          {busy ? (he ? "מצטרף…" : "Joining…") : (he ? "הצטרפות" : "Join")}
+        </button>
+      </div>
+      {result && (
+        <p role="status" aria-live="polite"
+           className={"text-xs leading-relaxed " + (result.ok ? "text-emerald-600" : "text-red-500")}>
+          {result.msg}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5">
@@ -340,6 +441,7 @@ export function SettingsModal({
   onSrcDefaultOpen,
   onClearHistory,
   deletionScheduledFor,
+  deletionGraceDays,
   onDeleteAccount,
   onCancelDeletion,
   plan,
@@ -348,12 +450,15 @@ export function SettingsModal({
   credits,
   cycle,
   cancelAtPeriodEnd,
+  dayLeft,
   weekLeft,
   lessonsLeft,
   billingEnabled,
   onUpgrade,
   onCancelSubscription,
   onRedeemCoupon,
+  onJoinOrg,
+  orgName,
   byokSupported,
 }: {
   open: boolean;
@@ -368,7 +473,8 @@ export function SettingsModal({
   onSrcDefaultOpen: (v: boolean) => void;
   onClearHistory: () => void;
   deletionScheduledFor?: string | null;   // ISO ts if the account is pending deletion
-  onDeleteAccount?: () => void;
+  deletionGraceDays?: number;             // /me — the length of the wait, named before the user commits
+  onDeleteAccount?: (immediate: boolean) => Promise<string | null>;   // resolves with an error, or null
   onCancelDeletion?: () => void;
   plan?: string;                           // tier id — see app/plans.py
   planName?: string;                       // localized tier name from /me
@@ -376,15 +482,29 @@ export function SettingsModal({
   credits?: number;                        // prepaid generations left
   cycle?: string;                          // 'monthly' | 'annual' | 'coupon'
   cancelAtPeriodEnd?: boolean;             // cancelled: access runs to planUntil, then lapses
+  dayLeft?: number | null;                 // fraction of today's conversation allowance left
   weekLeft?: number | null;                // fraction of this week's conversation allowance left
   lessonsLeft?: number | null;             // fraction of this week's lessons left (separate pool)
   billingEnabled?: boolean;
   onUpgrade?: () => void;
   onCancelSubscription?: () => void;
   onRedeemCoupon?: (code: string) => Promise<string>;   // resolves with a message to show
+  onJoinOrg?: (code: string) => Promise<string>;        // institution join code (spec 004)
+  orgName?: string;                                    // set ⇒ already a member, show what
+                                                       // the school can and cannot see
   byokSupported?: boolean;   // /me: whether this deployment's backend accepts a provider key at all
 }) {
   const auth = useAuth();
+  const [idCopied, setIdCopied] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  // The panel stays OPEN on failure and shows why. Closing it would look like the deletion had been
+  // accepted, which is exactly the impression the server refused in order to avoid.
+  const runDelete = async (immediate: boolean) => {
+    const err = await onDeleteAccount?.(immediate);
+    if (err) setDeleteError(err);
+    else { setDeleteError(""); setConfirmDelete(false); }
+  };
   const fmtDate = (iso: string) =>
     new Date(iso).toLocaleDateString(lang === "he" ? "he-IL" : "en-US",
       { year: "numeric", month: "long", day: "numeric" });
@@ -447,7 +567,25 @@ export function SettingsModal({
         {auth.enabled && auth.user && (
           <Field label={tr(lang, "account")}>
             <div className="flex items-center justify-between gap-2">
-              <span className="text-xs text-ink/60 truncate">{auth.user.email}</span>
+              <div className="min-w-0 flex flex-col gap-0.5">
+                <span className="text-xs text-ink/60 truncate">{auth.user.email}</span>
+                {/* The account id, under the email. It's what support needs to identify an account
+                    (grants and coupons are applied by this id, never by email), so it has to be
+                    readable and copyable by the person being helped. Click copies it. */}
+                <button
+                  type="button"
+                  title={tr(lang, "copyUserId")}
+                  onClick={() => {
+                    navigator.clipboard?.writeText(auth.user!.id);
+                    setIdCopied(true);
+                    setTimeout(() => setIdCopied(false), 1500);
+                  }}
+                  className="text-[11px] font-mono text-ink/40 hover:text-tekhelet truncate text-start transition"
+                  dir="ltr"
+                >
+                  {idCopied ? tr(lang, "copied") : auth.user.id}
+                </button>
+              </div>
               <button
                 onClick={() => auth.signOut()}
                 className="px-4 py-2 rounded-2xl glass text-red-500 font-semibold text-sm hover:bg-red-500/10 transition shrink-0"
@@ -524,15 +662,20 @@ export function SettingsModal({
               )}
             </div>
 
-            {/* Two gauges because there are two independent pools: running out of conversation
-                usage does not touch lessons, and a single combined bar would imply it does. */}
-            {(typeof weekLeft === "number" || typeof lessonsLeft === "number") && (
-              <div className="mt-2 flex flex-col gap-1.5">
+            {/* Three gauges because there are up to three independent pools: daily and weekly
+                conversation usage, and lessons (its own pool — running out of conversation usage
+                does not touch it, and a single combined bar would imply it does). Moved here from
+                the main header entirely — see Header.tsx. */}
+            {(typeof dayLeft === "number" || typeof weekLeft === "number" || typeof lessonsLeft === "number") && (
+              <div className="mt-2 flex flex-col gap-2.5">
+                {typeof dayLeft === "number" && (
+                  <Gauge label={tr(lang, "usageLeftDay")} value={dayLeft} caption={resetsIn("day", lang)} />
+                )}
                 {typeof weekLeft === "number" && (
-                  <Gauge label={tr(lang, "usageLeft")} value={weekLeft} />
+                  <Gauge label={tr(lang, "usageLeftWeek")} value={weekLeft} caption={resetsIn("week", lang)} />
                 )}
                 {typeof lessonsLeft === "number" && (
-                  <Gauge label={tr(lang, "lessonsLeft")} value={lessonsLeft} />
+                  <Gauge label={tr(lang, "lessonsLeft")} value={lessonsLeft} caption={resetsIn("week", lang)} />
                 )}
               </div>
             )}
@@ -542,10 +685,18 @@ export function SettingsModal({
                 access on a deployment with no payment provider configured. */}
             {onRedeemCoupon && <CouponField lang={lang} onRedeem={onRedeemCoupon} />}
 
+            {/* Institution membership — join by code, or, once in, what the school can see. */}
+            {onJoinOrg && <OrgJoinField lang={lang} orgName={orgName} onJoin={onJoinOrg} />}
+
             {/* BYOK — only offered when the backend has a provider-key concept at all (not 'bridge'). */}
             {byokSupported && <ByokKeyField lang={lang} />}
 
-            {/* Account deletion — scheduled with a grace period, cancellable until the deadline. */}
+            {/* Account deletion. Two paths, both named up front with what they cost: wait out the
+                grace period and keep the option to change your mind, or go now and lose it. The old
+                version was one window.confirm that said "after a grace period" without saying how
+                long — the length only appeared once the deletion was already filed, which a user
+                read as us stalling ("why is the deletion delayed by a month, that is strange"). The
+                number is the server's own (deletionGraceDays from /me), not a copy of it here. */}
             {deletionScheduledFor ? (
               <div className="mt-2 p-3 rounded-2xl bg-red-500/5 ring-1 ring-red-500/15 flex flex-col gap-2">
                 <p className="text-xs text-red-600/90 leading-relaxed">
@@ -558,11 +709,60 @@ export function SettingsModal({
                   {tr(lang, "cancelDeletion")}
                 </button>
               </div>
+            ) : confirmDelete ? (
+              <div className="mt-2 p-3 rounded-2xl bg-red-500/5 ring-1 ring-red-500/15 flex flex-col gap-2">
+                <p className="text-xs text-ink/80 leading-relaxed">{tr(lang, "deleteAccountIntro")}</p>
+
+                {/* Money, before the choice rather than after it. Requesting deletion stops the
+                    recurring charge (app/accounts.py::stop_billing) — which is what a paying user
+                    wants, but it is not reversible by cancelling the deletion, and the immediate
+                    path additionally forfeits the period already paid for. */}
+                {plan && plan !== "free" && !cancelAtPeriodEnd && (
+                  <p className="text-[11px] text-ink/60 leading-relaxed">
+                    {tr(lang, "deletePaidNotice")}
+                  </p>
+                )}
+
+                <button
+                  onClick={() => runDelete(false)}
+                  className="py-2 px-3 rounded-2xl glass text-red-500 font-semibold text-sm hover:bg-red-500/10 transition text-start"
+                >
+                  {tr(lang, "deleteAfterDays").replace("{days}", String(deletionGraceDays ?? 30))}
+                  <span className="block font-normal text-[11px] text-ink/55 mt-0.5">
+                    {tr(lang, "deleteAfterDaysHint")}
+                  </span>
+                </button>
+
+                {/* The irreversible one keeps a second confirmation. Not to discourage it — it is a
+                    legitimate choice and the reason this option exists — but because nothing after
+                    it can be taken back, and it sits one tap from the reversible option above. */}
+                <button
+                  onClick={() => {
+                    if (window.confirm(tr(lang, "deleteNowConfirm"))) runDelete(true);
+                  }}
+                  className="py-2 px-3 rounded-2xl glass text-red-500 font-semibold text-sm hover:bg-red-500/10 transition text-start"
+                >
+                  {tr(lang, "deleteNow")}
+                  <span className="block font-normal text-[11px] text-ink/55 mt-0.5">
+                    {tr(lang, "deleteNowHint")}
+                    {plan && plan !== "free" && <> {tr(lang, "deletePaidNowNotice")}</>}
+                  </span>
+                </button>
+
+                {deleteError && (
+                  <p className="text-[11px] text-red-600 leading-relaxed">{deleteError}</p>
+                )}
+
+                <button
+                  onClick={() => { setDeleteError(""); setConfirmDelete(false); }}
+                  className="py-2 rounded-2xl grad text-white font-semibold text-sm hover:opacity-95 transition"
+                >
+                  {tr(lang, "deleteKeep")}
+                </button>
+              </div>
             ) : (
               <button
-                onClick={() => {
-                  if (window.confirm(tr(lang, "deleteAccountConfirm"))) onDeleteAccount?.();
-                }}
+                onClick={() => setConfirmDelete(true)}
                 className="mt-2 w-full py-2 rounded-2xl glass text-red-500 font-semibold text-sm hover:bg-red-500/10 transition"
               >
                 {tr(lang, "deleteAccount")}

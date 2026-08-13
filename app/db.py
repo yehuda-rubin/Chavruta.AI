@@ -11,7 +11,8 @@ import uuid
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from collections.abc import Collection, Mapping
+from typing import Any, NamedTuple
 from zoneinfo import ZoneInfo
 
 from app import moderation
@@ -66,7 +67,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 25
+SCHEMA_VERSION = 29
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -135,6 +136,90 @@ def _migrate(conn: sqlite3.Connection) -> None:
             reviewed_at TEXT,
             created_at  TEXT NOT NULL
         );
+
+        -- Free-text feedback/suggestions — a general channel, not tied to any specific message
+        -- (unlike message_reports, which is always about one flagged answer). reviewed_at is NULL
+        -- until an operator marks it handled, same backlog convention as message_reports.
+        CREATE TABLE IF NOT EXISTS feedback (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id    TEXT NOT NULL,
+            text        TEXT NOT NULL,
+            reviewed_at TEXT,
+            created_at  TEXT NOT NULL
+        );
+
+        -- ── Organisations (schools) — spec 004 ──────────────────────────────────────────────
+        -- A school buys one subscription and its members study on that pool instead of their own.
+        --
+        -- `owner_id` is who PAYS (it keys `subscriptions`, whose owner_id is a PRIMARY KEY and whose
+        -- PayPlus token belongs to the person who checked out). It is deliberately NOT the source of
+        -- truth for permissions — org_members.role is. Two sources of truth for "is admin" is where
+        -- privilege escalation lives, so: role decides what you may do, owner_id decides who is
+        -- billed, and they are written together.
+        --
+        -- No FK on owner_id: `accounts` only gets a row when a plan changes or credits are granted,
+        -- so most real people have none, exactly as sessions/usage_events already assume.
+        CREATE TABLE IF NOT EXISTS orgs (
+            id          TEXT PRIMARY KEY,
+            name        TEXT NOT NULL,
+            owner_id    TEXT NOT NULL,       -- who pays; see above
+            plan        TEXT NOT NULL,       -- institution | institution_50 | institution_100
+            created_at  TEXT NOT NULL,
+            is_demo     INTEGER NOT NULL DEFAULT 0
+                        -- the operator's read-only sample school (spec 004 decision 6): a fixed
+                        -- synthetic org so the panel can be inspected without impersonating anyone.
+        );
+
+        -- Membership. A row exists from the moment of invitation; `accepted_at IS NULL` grants
+        -- NOTHING. The unique index below is the constraint that makes quota resolution decidable:
+        -- with two accepted memberships there is no answer to "which pool does this turn charge".
+        CREATE TABLE IF NOT EXISTS org_members (
+            org_id      TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+            owner_id    TEXT NOT NULL,
+            role        TEXT NOT NULL,       -- admin | teacher | student
+            daily_cap   INTEGER NOT NULL DEFAULT 0,   -- 0 = the tier default; see orgs.member_cap
+            invited_by  TEXT,
+            invited_at  TEXT NOT NULL,
+            accepted_at TEXT,
+            -- Set when an ADMIN removed this person; NULL if they left of their own accord. The row
+            -- survives either way (accepted_at goes NULL, freeing the seat) so the decision outlives
+            -- the membership: deleting it made both of an administrator's controls self-reversible.
+            -- A blocked student could leave and rejoin with the class code every classmate holds,
+            -- and come back at the tier default — the largest per-member allowance in the system.
+            removed_at  TEXT,
+            PRIMARY KEY (org_id, owner_id)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_org_members_one_accepted
+            ON org_members(owner_id) WHERE accepted_at IS NOT NULL;
+
+        -- Join codes. Membership is never conferred by an admin typing someone's account id: that
+        -- would let any org owner attach any account in the system, and a typo attach a stranger.
+        -- The code is how an invitation is ADDRESSED; the member performs the act of joining.
+        -- It also avoids turning the invite endpoint into an account-enumeration oracle.
+        CREATE TABLE IF NOT EXISTS org_invites (
+            code        TEXT PRIMARY KEY,
+            org_id      TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+            role        TEXT NOT NULL,
+            max_uses    INTEGER NOT NULL DEFAULT 1,
+            used_count  INTEGER NOT NULL DEFAULT 0,
+            expires_at  TEXT,
+            created_by  TEXT NOT NULL,
+            created_at  TEXT NOT NULL,
+            revoked_at  TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_org_invites_org ON org_invites(org_id);
+
+        -- Who looked at whom. Written even though v1 shows no conversation text: an audit trail
+        -- added after the fact cannot describe what happened before it existed.
+        CREATE TABLE IF NOT EXISTS org_access_log (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            org_id          TEXT NOT NULL,
+            actor_owner_id  TEXT NOT NULL,
+            target_owner_id TEXT,
+            action          TEXT NOT NULL,
+            at              TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_org_access_log_org ON org_access_log(org_id, id DESC);
 
         -- 'My Shiurim' library: generated lessons persisted on their own (not just inside a chat),
         -- so teachers can browse, reopen and reuse them. CREATE IF NOT EXISTS is idempotent.
@@ -241,6 +326,22 @@ def _migrate(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_usage_events_at ON usage_events(at DESC);
         CREATE INDEX IF NOT EXISTS idx_usage_events_owner ON usage_events(owner_id);
+
+        -- What the watching guards caught (src/chavruta/generation/guards.py). These checks add
+        -- nothing a user sees; this table is the only place their findings survive, and it is what
+        -- the admin panel reads. Deliberately has NO owner_id and NO session_id: a finding records
+        -- how well the SYSTEM wrote, never who asked. That is also why it needs no handling in
+        -- purge_owner — there is nothing here belonging to a person to delete. `detail` is JSON
+        -- whose shape depends on `kind`, because the three guards have nothing in common to
+        -- normalise into columns and inventing shared ones would only produce empty fields.
+        CREATE TABLE IF NOT EXISTS guard_findings (
+            id     INTEGER PRIMARY KEY AUTOINCREMENT,
+            at     TEXT NOT NULL,        -- ISO ts (UTC)
+            kind   TEXT NOT NULL,        -- misattribution | deontic | calendar
+            intent TEXT,                 -- qa | explain | lesson | halacha | chavruta …
+            detail TEXT NOT NULL         -- JSON
+        );
+        CREATE INDEX IF NOT EXISTS idx_guard_findings_at ON guard_findings(at DESC);
 
         -- Accounting ledger. Deliberately has NO owner_id and is NEVER purged: tax law requires
         -- keeping records of what was charged for ~7 years, while a user may ask to be forgotten
@@ -477,6 +578,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute(
                 "ALTER TABLE sessions ADD COLUMN excluded_from_review INTEGER NOT NULL DEFAULT 0")
 
+    # v26: feedback is a brand-new table (see CREATE TABLE IF NOT EXISTS above) — no ALTER needed.
+    # v27: orgs / org_members / org_access_log are likewise brand-new — nothing to migrate.
+
+    # v28: org_members.removed_at. A database created at v27 has the table without it.
+    if _table_exists(conn, "org_members"):
+        mcols = {r[1] for r in conn.execute("PRAGMA table_info(org_members)")}
+        if "removed_at" not in mcols:
+            conn.execute("ALTER TABLE org_members ADD COLUMN removed_at TEXT")
+
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
 
@@ -669,6 +779,59 @@ def set_session_excluded(sid: str, owner_id: str, excluded: bool) -> bool:
     return cur.rowcount > 0
 
 
+# ── The single gate on reading user conversations for review/improvement ──────────────────────
+#
+# Privacy policy 1.8 / Terms 1.10 permit the operator to review conversation content to improve the
+# service — but only under three conditions, all of which were promised to users in the notice email
+# and all of which are enforced HERE and nowhere else. A second enforcement point is how one of them
+# eventually gets forgotten.
+#
+#   1. NOT RETROACTIVE. Only conversations created from 2026-08-10 00:00 Israel time onward. Anything
+#      older was collected under the previous promise ("used only to operate the service") and is
+#      permanently out of scope — not "probably fine", out of scope.
+#   2. The per-chat opt-out (sessions.excluded_from_review).
+#   3. The account-wide opt-out, which lives in Supabase user_metadata (data_review_opt_out) and so
+#      cannot be read from here — the caller passes the opted-out owner ids in. It OVERRIDES the
+#      per-chat setting, which is why it is applied as an exclusion rather than merged.
+#   4. A PENDING DELETION REQUEST. Someone who has asked to be deleted has withdrawn their consent to
+#      be read; that the data still physically exists for another 30 days is an implementation detail
+#      of making an accidental click reversible, not a licence to keep using it in the meantime. The
+#      request is the moment the reading stops, not the purge. Cancelling the deletion puts the
+#      account back in scope on its own — the row simply reappears in this query.
+#
+# Passing opted_out_owners=None means "the caller has not established who opted out", which is
+# treated as ALL owners opted out rather than none: failing closed on a privacy gate is the only
+# safe default, and a caller that genuinely has no opt-outs passes an empty collection.
+REVIEW_EFFECTIVE_FROM = "2026-08-09T21:00:00"   # 2026-08-10 00:00 Israel time, in UTC
+
+
+def reviewable_questions(*, since: str | None = None, limit: int = 200,
+                         opted_out_owners: Collection[str] | None = ()) -> list[dict[str, Any]]:
+    """User questions the operator is permitted to review, oldest first.
+
+    The ONLY sanctioned way to read conversation text for review, evaluation or model improvement.
+    Do not hand-roll a query over `messages` for those purposes — see the conditions above.
+    """
+    if opted_out_owners is None:
+        return []
+    cutoff = max(since or REVIEW_EFFECTIVE_FROM, REVIEW_EFFECTIVE_FROM)   # never before the promise
+    with _LOCK:
+        rows = get_conn().execute(
+            """SELECT m.id, m.text, m.intent, m.created_at, s.id AS session_id, s.owner_id
+               FROM messages m JOIN sessions s ON s.id = m.session_id
+               WHERE m.role = 'user'
+                 AND s.excluded_from_review = 0
+                 AND s.owner_id NOT IN (SELECT owner_id FROM accounts
+                                        WHERE deletion_scheduled_for IS NOT NULL)
+                 AND s.created_at >= ?
+               ORDER BY m.id ASC
+               LIMIT ?""",
+            (cutoff, max(1, int(limit))),
+        ).fetchall()
+    excluded = {o for o in opted_out_owners}
+    return [dict(r) for r in rows if r["owner_id"] not in excluded]
+
+
 MAX_PINNED_SESSIONS = 3
 
 
@@ -821,6 +984,33 @@ def mark_report_reviewed(report_id: int) -> bool:
     return cur.rowcount > 0
 
 
+def submit_feedback(owner_id: str, text: str) -> None:
+    """Record a general comment/correction/suggestion — not tied to any specific message, unlike
+    report_message(). `text` is already trimmed/length-checked by the caller."""
+    with _tx(get_conn()) as conn:
+        conn.execute(
+            "INSERT INTO feedback (owner_id, text, created_at) VALUES (?,?,?)",
+            (owner_id, text, datetime.now(UTC).isoformat()),
+        )
+
+
+def list_feedback(reviewed: bool = False, limit: int = 100) -> list[dict[str, Any]]:
+    """Feedback awaiting operator review by default (reviewed=False); pass True for handled ones."""
+    return _agg(
+        "SELECT id, owner_id, text, created_at, reviewed_at FROM feedback "
+        "WHERE (reviewed_at IS NOT NULL) = ? ORDER BY created_at DESC LIMIT ?",
+        (int(reviewed), limit))
+
+
+def mark_feedback_reviewed(feedback_id: int) -> bool:
+    """Mark one feedback item as handled, so it drops off the default (unreviewed) backlog."""
+    with _tx(get_conn()) as conn:
+        cur = conn.execute(
+            "UPDATE feedback SET reviewed_at=? WHERE id=? AND reviewed_at IS NULL",
+            (datetime.now(UTC).isoformat(), feedback_id))
+    return cur.rowcount > 0
+
+
 # ── 'My Shiurim' saved-lesson library ────────────────────────────────────────
 
 def save_lesson(lesson_id: str, topic: str, audience: str, grade_band: str, length: str,
@@ -905,6 +1095,32 @@ def usage_by_intent(since: str | None = None) -> list[dict[str, Any]]:
         f"SUM(CASE WHEN no_source=1 THEN 1 ELSE 0 END) AS no_source "
         f"FROM usage_events {where} GROUP BY intent ORDER BY requests DESC",
         ((since,) if since else ()))
+
+
+def usage_by_intent_for(joined_at: Mapping[str, str]) -> list[dict[str, Any]]:
+    """What an organisation's members have been studying — as MODE COUNTS, never as text.
+
+    This is the whole "topics" view a school gets (spec 004 decision 1), and it reads `usage_events`
+    for a reason: that table's columns are a fixed list of measurements, so there is no path from it
+    to anything a member wrote. The intuitive alternative — joining `sessions` — would hand a teacher
+    `first_q`, the verbatim opening question of every conversation.
+
+    Takes {owner_id: accepted_at} and bounds EACH member to their OWN join date — not one cutoff for
+    the group, which would still hand the school everything a late joiner did before they arrived. A
+    school is entitled to see what it is paying for; it is not entitled to the year of private study
+    someone did on their own free account beforehand. Without the bound, the first panel load after a
+    teacher joins reports their entire personal history as "what this member has been studying".
+    """
+    pairs = [(o, s) for o, s in (joined_at or {}).items() if o and s]
+    if not pairs:
+        return []
+    clause = " OR ".join("(owner_id = ? AND at >= ?)" for _ in pairs)
+    args = tuple(v for pair in pairs for v in pair)
+    return _agg(
+        f"SELECT intent, COUNT(*) AS requests, SUM(billed_tokens) AS tokens "      # noqa: S608
+        f"FROM usage_events WHERE {clause} "
+        f"GROUP BY intent ORDER BY requests DESC",
+        args)
 
 
 def usage_by_hour(since: str | None = None) -> list[dict[str, Any]]:
@@ -1085,6 +1301,60 @@ def list_charges(since: str | None = None, until: str | None = None) -> list[dic
     return [dict(r) for r in rows]
 
 
+# ── Guard findings (what the watching checks caught) ──────────────────────────
+def record_guard_finding(kind: str, intent: str, detail: dict[str, Any],
+                         at: str | None = None) -> None:
+    """Store one finding. Never raises: this is called from the answer path, and a diagnostic that
+    can break a user's answer is worse than a diagnostic nobody has."""
+    try:
+        with _tx(get_conn()) as conn:
+            conn.execute(
+                "INSERT INTO guard_findings (at, kind, intent, detail) VALUES (?,?,?,?)",
+                (at or _now(), kind, intent or None, json.dumps(detail, ensure_ascii=False)))
+    except Exception:                       # noqa: BLE001
+        _log.exception("failed to record guard finding (%s)", kind)
+
+
+def list_guard_findings(since: str | None = None, kind: str = "",
+                        limit: int = 100) -> list[dict[str, Any]]:
+    """Newest first. `detail` comes back PARSED — a caller that has to json.loads every row is a
+    caller that will eventually forget to, and render a JSON blob at the operator."""
+    sql = "SELECT id, at, kind, intent, detail FROM guard_findings"
+    where, args = [], []
+    if since:
+        where.append("at >= ?")
+        args.append(since)
+    if kind:
+        where.append("kind = ?")
+        args.append(kind)
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    with _LOCK:
+        rows = get_conn().execute(sql + " ORDER BY at DESC LIMIT ?",
+                                  [*args, max(1, int(limit))]).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["detail"] = json.loads(d["detail"])
+        except (TypeError, ValueError):
+            d["detail"] = {"raw": d["detail"]}   # never lose the row over a bad parse
+        out.append(d)
+    return out
+
+
+def guard_finding_counts(since: str | None = None) -> dict[str, int]:
+    """How many of each kind — the number that says whether a guard is worth showing to users yet."""
+    sql = "SELECT kind, COUNT(*) n FROM guard_findings"
+    args: list[Any] = []
+    if since:
+        sql += " WHERE at >= ?"
+        args.append(since)
+    with _LOCK:
+        rows = get_conn().execute(sql + " GROUP BY kind", args).fetchall()
+    return {r["kind"]: r["n"] for r in rows}
+
+
 def revenue_total(since: str | None = None, until: str | None = None) -> float:
     return round(sum(float(r["amount"]) for r in list_charges(since, until)), 2)
 
@@ -1200,6 +1470,101 @@ def bump_usage(owner_id: str, limit: int, day: str | None = None, *, weekly_limi
                 "ON CONFLICT(owner_id, day, meter) DO UPDATE SET count = count + excluded.count",
                 (owner_id, day, meter, units))
         return True, day_count + units, week_count + units
+
+
+class PoolCharge(NamedTuple):
+    """The outcome of a pooled charge. A NamedTuple so the existing 3-tuple unpacking still works
+    while `refused` gives callers the reason they need to write an honest refusal message."""
+
+    allowed: bool
+    pool_day: int
+    pool_week: int
+    refused: str = ""      # "" | blocked | member_cap | day | week
+
+
+def bump_pooled(member_id: str, pool_id: str, *, member_cap: int, pool_daily: int, pool_weekly: int,
+                member_weekly: int = 0, units: int = 1, meter: str = TOKENS,
+                day: str | None = None) -> PoolCharge:
+    """Charge one turn to BOTH a member's own counter and their organisation's shared pool.
+
+    Returns (allowed, pool_day_total, pool_week_total, refused).
+
+    This exists because calling `bump_usage` twice is not equivalent, in two ways that both cost
+    money. First, they are separate transactions, so another request interleaves between them and the
+    atomicity that makes the single-row version correct is gone. Second, if the pool refuses after
+    the member row was already charged, the compensation is not exact — `settle_usage` floors each
+    counter at zero, so a refund can be silently swallowed and the member's counter drifts upward
+    against them forever.
+
+    Both rows are therefore checked and written under one lock and one transaction: either the turn
+    is admitted and both counters move, or nothing moves at all.
+
+    `member_cap` bounds one person's share of a shared pool — without it a single student can spend
+    a school's entire day in an hour. 0 disables it (usage is still counted, so it stays visible);
+    a NEGATIVE cap blocks the member outright, which is the one thing an admin most wants to express
+    and could not (see orgs.CAP_BLOCKED).
+
+    `refused` names which of the three ceilings said no. The caller needs it to tell the user the
+    truth: a school that has exhausted its WEEK was being told its limit "resets tomorrow", and a
+    member stopped by their own admin-set cap got a message identical to a school-wide outage.
+    """
+    day = day or today_il()
+    units = max(0, int(units))
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        m_day, m_week = _counts(conn, member_id, day, meter)
+        p_day, p_week = _counts(conn, pool_id, day, meter)
+        if member_cap < 0:
+            return PoolCharge(False, p_day, p_week, "blocked")
+        if member_cap > 0 and m_day + units > member_cap:
+            return PoolCharge(False, p_day, p_week, "member_cap")
+        # A member's share of a WEEKLY pool. The lesson pool is weekly-only, so a daily ceiling says
+        # nothing about it — and without this one member could take every lesson a school gets in a
+        # week, at zero cost to any per-member control, which is exactly what happened.
+        if member_weekly > 0 and m_week + units > member_weekly:
+            return PoolCharge(False, p_day, p_week, "member_weekly")
+        if pool_daily > 0 and p_day + units > pool_daily:
+            return PoolCharge(False, p_day, p_week, "day")
+        if pool_weekly > 0 and p_week + units > pool_weekly:
+            return PoolCharge(False, p_day, p_week, "week")
+        if units:
+            for who in (member_id, pool_id):
+                conn.execute(
+                    "INSERT INTO usage_counters (owner_id, day, meter, count) VALUES (?,?,?,?) "
+                    "ON CONFLICT(owner_id, day, meter) DO UPDATE SET count = count + excluded.count",
+                    (who, day, meter, units))
+        return PoolCharge(True, p_day + units, p_week + units, "")
+
+
+def settle_pooled(member_id: str, pool_id: str, reserved: int, actual: int,
+                  day: str | None = None, meter: str = TOKENS) -> None:
+    """Correct a pooled reservation to what was actually spent, on both counters together.
+
+    The pool identity must be the one resolved at RESERVATION time and carried through — resolving
+    it again here would settle against whatever the member's situation is now, and a member removed
+    between reserve and settle would leave the school's reservation permanently unreleased. The async
+    paths make that window minutes long, not milliseconds.
+    """
+    delta = int(actual) - int(reserved)
+    if not delta:
+        return
+    day = day or today_il()
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        for who in (member_id, pool_id):
+            row = conn.execute(
+                "SELECT count FROM usage_counters WHERE owner_id=? AND day=? AND meter=?",
+                (who, day, meter)).fetchone()
+            # A MISSING row means there is nothing to settle: bump_pooled always creates both rows,
+            # so its absence means something removed them — an account purged, or a school closed,
+            # while the turn was still running. Re-creating it would resurrect the deleted person's
+            # id inside the counter key, undoing an erasure that had already completed, and would
+            # leave a school that no longer exists with counters no route can ever read or delete.
+            if row is None:
+                continue
+            conn.execute(
+                "UPDATE usage_counters SET count=? WHERE owner_id=? AND day=? AND meter=?",
+                (max(0, int(row["count"]) + delta), who, day, meter))
 
 
 def settle_usage(owner_id: str, reserved: int, actual: int, day: str | None = None,
@@ -1374,6 +1739,23 @@ def set_coupon_active(code: str, active: bool) -> bool:
         return cur.rowcount > 0
 
 
+def delete_coupon(code: str) -> bool:
+    """Drop a coupon row outright. Returns True if a row was removed.
+
+    Only safe for a code with NO redemptions — `coupon_redemptions` records who was granted what and
+    references the code, so deleting a used one would leave that history pointing at nothing. The
+    caller (admin_delete_coupon) checks redeemed_count and falls back to set_coupon_active(False);
+    the guard is repeated here so a future caller can't quietly lose the audit trail.
+    """
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        used = conn.execute("SELECT 1 FROM coupon_redemptions WHERE code=? LIMIT 1",
+                            (code,)).fetchone()
+        if used:
+            return False
+        return conn.execute("DELETE FROM coupons WHERE code=?", (code,)).rowcount > 0
+
+
 def list_redemptions(code: str | None = None) -> list[dict[str, Any]]:
     conn = get_conn()
     sql = "SELECT * FROM coupon_redemptions"
@@ -1495,19 +1877,31 @@ def upsert_subscription(owner_id: str, *, provider: str | None = None, provider_
                         plan: str | None = None, cycle: str | None = None) -> None:
     """Create or update an owner's subscription row. A passed field is written; None means "leave as-is"
     (merged over the current row), so a webhook can update just status+period without clobbering the
-    stored provider_ref. Read-merge-write under the lock keeps concurrent webhooks consistent."""
+    stored provider_ref. Read-merge-write under the lock keeps concurrent webhooks consistent.
+
+    The merge MUST cover every column, not just the ones this function takes as parameters. It is an
+    INSERT OR REPLACE, and REPLACE deletes the row before inserting — so any column left out of the
+    read reverts to its schema default. Three coupon columns were omitted, and the effect was that a
+    ₪49 rebate granted to a paying customer was wiped by the very charge it was meant to reduce
+    (handle_event upserts BEFORE it reads the balance), and a coupon boost's revert_at was erased so
+    the sweep that ends a boost could never select the row again. Money owed and never returned, with
+    nothing logged. If you add a column to this table, add it here.
+    """
     conn = get_conn()
     with _LOCK, _tx(conn):
         row = conn.execute(
             "SELECT provider, provider_ref, status, current_period_end, cancel_at_period_end, "
-            "plan, cycle FROM subscriptions WHERE owner_id=?", (owner_id,)).fetchone()
+            "plan, cycle, coupon_discount_ils, coupon_revert_plan, coupon_revert_at "
+            "FROM subscriptions WHERE owner_id=?", (owner_id,)).fetchone()
         cur = dict(row) if row else {
             "provider": None, "provider_ref": None, "status": "none",
-            "current_period_end": None, "cancel_at_period_end": 0, "plan": None, "cycle": "monthly"}
+            "current_period_end": None, "cancel_at_period_end": 0, "plan": None, "cycle": "monthly",
+            "coupon_discount_ils": 0.0, "coupon_revert_plan": None, "coupon_revert_at": None}
         conn.execute(
             "INSERT OR REPLACE INTO subscriptions (owner_id, provider, provider_ref, status, "
-            "current_period_end, cancel_at_period_end, updated_at, plan, cycle) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
+            "current_period_end, cancel_at_period_end, updated_at, plan, cycle, "
+            "coupon_discount_ils, coupon_revert_plan, coupon_revert_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (owner_id,
              provider if provider is not None else cur["provider"],
              provider_ref if provider_ref is not None else cur["provider_ref"],
@@ -1516,7 +1910,10 @@ def upsert_subscription(owner_id: str, *, provider: str | None = None, provider_
              cur["cancel_at_period_end"] if cancel_at_period_end is None else int(cancel_at_period_end),
              updated_at,
              plan if plan is not None else cur["plan"],
-             cycle if cycle is not None else (cur["cycle"] or "monthly")))
+             cycle if cycle is not None else (cur["cycle"] or "monthly"),
+             cur["coupon_discount_ils"] or 0.0,
+             cur["coupon_revert_plan"],
+             cur["coupon_revert_at"]))
 
 
 def get_subscription(owner_id: str) -> dict[str, Any] | None:
@@ -1604,17 +2001,63 @@ def due_deletions(now_iso: str) -> list[str]:
     return [r["owner_id"] for r in rows]
 
 
+class OwnsOrganisation(Exception):
+    """This account owns a live organisation, so it cannot be deleted yet."""
+
+
+# Stands in for a purged account wherever a NOT NULL column named one. Never a real owner id:
+# Supabase ids are UUIDs and the offline single-user id is 'local'.
+DELETED_OWNER = "deleted-account"
+
+
+def _like_literal(value: str) -> str:
+    r"""Escape a value that is being spliced into a LIKE PATTERN rather than compared to one.
+
+    Parameter binding stops SQL injection; it does NOT stop `%` and `_` inside the bound value from
+    acting as wildcards. Callers pair this with ESCAPE '\'.
+    """
+    return value.replace("\\", r"\\").replace("%", r"\%").replace("_", r"\_")
+
+
+def owns_org(owner_id: str) -> bool:
+    """Does this account own (pay for, administer) an organisation?"""
+    with _LOCK:
+        return get_conn().execute(
+            "SELECT 1 FROM orgs WHERE owner_id=? LIMIT 1", (owner_id,)).fetchone() is not None
+
+
 def purge_owner(owner_id: str) -> None:
     """Irreversibly delete ALL of an owner's data: sessions (messages cascade), saved lessons, usage
     counters, and the account row itself. Used by the deletion sweeper once the grace period lapses.
-    Guarded against the shared single-user 'local' id so a misconfigured call can't wipe local dev."""
+    Guarded against the shared single-user 'local' id so a misconfigured call can't wipe local dev.
+
+    Raises OwnsOrganisation if the account still owns a school. `orgs.owner_id` is the only link
+    between an institution and the person who paid for it, so purging them would leave a live org
+    pointing at a dead account: the members keep spending a pool nobody can administer, and nothing
+    anywhere would error. The sweeper logs and skips (run_due_purges catches per row), and
+    /account/delete refuses up front so the user hears about it instead of the deletion silently
+    never happening.
+    """
     if owner_id == "local":
         return
     conn = get_conn()
+    if owns_org(owner_id):
+        raise OwnsOrganisation(owner_id)
     with _LOCK, _tx(conn):
         conn.execute("DELETE FROM sessions WHERE owner_id=?", (owner_id,))         # messages cascade
         conn.execute("DELETE FROM saved_lessons WHERE owner_id=?", (owner_id,))
         conn.execute("DELETE FROM usage_counters WHERE owner_id=?", (owner_id,))
+        # A member's school spending is counted under `org:<org_id>:<owner_id>` (orgs.member_meter_id),
+        # which an exact-match delete misses — so the account id survived erasure inside a composite
+        # key, joined to a per-day record of how much that person studied. Introduced by the very
+        # change that separated the two counters; the identifier has to go with the account.
+        #
+        # ESCAPE, because the id goes into a LIKE PATTERN: `_` and `%` inside it would be wildcards.
+        # In API-key mode every owner id begins `u_` (security._owner_from_key), so this is already
+        # true today — it happens to be harmless because the rest is a SHA-256 prefix no other
+        # account can match. That is a property of the current auth provider, not of the query.
+        conn.execute(r"DELETE FROM usage_counters WHERE owner_id LIKE 'org:%:' || ? ESCAPE '\'",
+                     (_like_literal(owner_id),))
         conn.execute("DELETE FROM subscriptions WHERE owner_id=?", (owner_id,))
         conn.execute("DELETE FROM accounts WHERE owner_id=?", (owner_id,))
         # Coupon redemptions too. Keeping them would leave a user identifier behind after an account
@@ -1622,10 +2065,41 @@ def purge_owner(owner_id: str) -> None:
         # never decremented, so a spent code stays spent whether or not this row survives. (Nor
         # would keeping it stop re-redemption — a re-registered person gets a new owner_id anyway.)
         conn.execute("DELETE FROM coupon_redemptions WHERE owner_id=?", (owner_id,))
+        # Things the person WROTE, under their own id. Both were missed while every measurement table
+        # around them was handled: feedback holds their free text, and a message_report holds their id
+        # against a message that cascade-deletes with the session — so the report was not only kept
+        # but became invisible to the operator's own review screen, which inner-joins messages.
+        # Retained data that nothing can see is data nothing will ever clean up.
+        conn.execute("DELETE FROM feedback WHERE owner_id=?", (owner_id,))
+        conn.execute("DELETE FROM message_reports WHERE owner_id=?", (owner_id,))
+        # School membership goes with the account. The seat must be freed too — leaving the row would
+        # hold a seat for someone who no longer exists, and a 20-seat school would slowly run out of
+        # room it is still paying for.
+        conn.execute("DELETE FROM org_members WHERE owner_id=?", (owner_id,))
         # Telemetry is anonymised rather than deleted: the rows carry no content, only measurements,
         # and dropping them would silently rewrite history for every aggregate that has already been
         # reported. Detaching the identity satisfies the deletion request; the counts stay true.
         conn.execute("UPDATE usage_events SET owner_id=NULL WHERE owner_id=?", (owner_id,))
+        # Same treatment for the org audit trail and invite provenance: both name a person but carry
+        # no content of theirs. Deleting the log outright would let a departing administrator erase
+        # the record of what they looked at, which is the one thing that trail exists to prevent.
+        # A sentinel rather than NULL — those columns are NOT NULL, and "the account was deleted"
+        # is a truer reading of the row than "unknown".
+        conn.execute("UPDATE org_access_log SET actor_owner_id=? WHERE actor_owner_id=?",
+                     (DELETED_OWNER, owner_id))
+        conn.execute("UPDATE org_access_log SET target_owner_id=? WHERE target_owner_id=?",
+                     (DELETED_OWNER, owner_id))
+        # Their live codes die with the account, as they would on removal — otherwise a teacher who
+        # deletes their account leaves multi-use class codes behind, attributed to nobody, for as
+        # long as the expiry allows.
+        conn.execute("UPDATE org_invites SET revoked_at=?, created_by=? WHERE created_by=? "
+                     "AND revoked_at IS NULL", (_now(), DELETED_OWNER, owner_id))
+        conn.execute("UPDATE org_invites SET created_by=? WHERE created_by=?",
+                     (DELETED_OWNER, owner_id))
+        # invited_by is the same kind of residue one statement up: a teacher who deletes their
+        # account was still named on the row of every student they ever admitted.
+        conn.execute("UPDATE org_members SET invited_by=? WHERE invited_by=?",
+                     (DELETED_OWNER, owner_id))
 
 
 # ── Calendar cache (Parshat HaShavua / Daf Yomi) ───────────────────────────────

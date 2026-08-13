@@ -16,6 +16,7 @@ from dataclasses import replace
 from chavruta.corpus.refs import (
     commentary_refs,
     commentator_from_ref,
+    is_commentary_ref,
     license_for_ref,
     with_ref_variants,
 )
@@ -60,6 +61,9 @@ def _to_hit(h) -> RankedHit:
         work_id=p.get("work_id", ""),
         anchor_ref=p.get("anchor_ref"),
         period=p.get("period"),
+        lang=lang,
+        text_he=p.get("text_he") or "",
+        text_en=p.get("text_en") or "",
         # …and if the payload carries neither (it carries neither on any point of the commercial
         # corpus), fall back to the work-level table. Licence is a property of the EDITION, not of
         # the chunk, so a per-work lookup is both correct and the only affordable option — see
@@ -74,7 +78,40 @@ def _to_hit(h) -> RankedHit:
 
 
 # The load-bearing sources a grounded answer should always be able to reach.
-_FOUNDATIONAL_WORKS = ("tanakh", "mishnah", "talmud_bavli", "halacha", "midrash")
+#
+# These MUST be the `work_id` values the corpus actually carries, not the names the registry uses
+# for them. They diverged: the collection tags the Talmud Bavli `gemara` and the responsa `shut`,
+# so the floors below filtered on `talmud_bavli` — a value held by 0 of 2,403,599 points — and the
+# single largest tier in the corpus (516,854 points) never had a reserved slot. A question whose
+# answer lives in a sugya was competing for space against derush with no floor protecting it, which
+# is exactly the shape of the failure reported 2026-08-12 (the Rashi/Tosafot machloket on Sukkah
+# 41a: both sides sitting in the corpus, neither retrieved). Verified against the live collection —
+# see the tier counts in docs/CORPUS.md.
+_FOUNDATIONAL_WORKS = ("tanakh", "mishnah", "gemara", "halacha", "midrash")
+
+# ── Tunable constants ─────────────────────────────────────────────────────────────────────────
+#
+# Every number below was chosen by judgement, not measurement — there was no eval set large enough
+# to tell a real 3% gain from noise (three consecutive retrieval changes all measured 52%). They are
+# named module constants rather than inline literals SO THAT they can be measured:
+# scripts/tune_retrieval.py sets them and scores the result against harvested ground truth, with the
+# human-written eval sets held back as a veto. Read them at call time; do not copy into locals.
+
+# How many slots of a result set are kept for base texts when the ranking would otherwise return
+# commentary only. Small on purpose: the commentary IS usually what answers the question — the base
+# text is what makes the answer checkable, and one or two of them is enough for that.
+_BASE_SLOTS = 2
+
+# The foundational-works floor: how many candidates to pull, and how hard to lift them. The boost is
+# capped below the named-ref anchor sentinel so a floor hit can never masquerade as something the
+# user pointed at by name.
+_FOUNDATIONAL_TOP_K = 6
+_FOUNDATIONAL_BOOST = 0.05
+
+# The named-tractate floor. Same shape, but capped lower still: naming a masechet is weaker evidence
+# than naming a ref, and the ranking must keep saying so.
+_TRACTATE_TOP_K = 6
+_TRACTATE_BOOST = 0.05
 
 
 class HybridRetriever:
@@ -190,24 +227,39 @@ class HybridRetriever:
                 hits.append(rh)
 
         # Base-source floor: within the foundational works, COMMENTARY chunks vastly outnumber base
-        # (unit_type=source) chunks, so a thematic / free-form / English query can fill every
-        # foundational slot with derush and never surface the actual pasuk/mishnah/daf. Reserve a few
-        # slots specifically for base texts (a filter commentary cannot satisfy) — but ONLY ones that
-        # are genuinely relevant (dense cosine ≥ threshold): the filtered sub-search's RRF is not a
-        # cosine and would otherwise promote off-topic pesukim un-prunably.
+        # ones, so a thematic / free-form / English query can fill every foundational slot with
+        # commentary and never surface the actual pasuk/mishnah/daf. Reserve a few slots for the base
+        # text — but ONLY where it is genuinely relevant (dense cosine ≥ threshold): the filtered
+        # sub-search's RRF is not a cosine and would otherwise promote off-topic pesukim un-prunably.
+        #
+        # The filter used to be `unit_type: "source"`, on the belief that commentary could not satisfy
+        # it. In this corpus it can: EVERY point carries unit_type="source" — 516,854 of 516,854 in
+        # the gemara tier — and `Rashi_on_Bava_Metzia.42.1.1` and `Bava_Metzia.42.1` are identical on
+        # both work_id and unit_type. So the floor reserved nothing and the base text kept losing to
+        # its own commentaries, which is the dominant failure in eval/torah_questions_v1.jsonl:
+        # "found Rashi on the sugya, missed the sugya".
+        #
+        # The one reliable signal is the ref shape — a commentary ref carries `_on_`. It isn't a
+        # server-side filter, so over-fetch and drop commentary here.
         if not query.work_ids and not query.commentator_ids:
             try:
-                bfilt = {"work_id": list(_FOUNDATIONAL_WORKS), "unit_type": "source"}
+                bfilt = {"work_id": list(_FOUNDATIONAL_WORKS)}
                 with _timed(t, "floors"):
-                    base = self.store.search(self.profile.collection, hquery, top_k=3, filters=bfilt)
-                    bmap = self.store.dense_scores(self.profile.collection, emb.dense, bfilt, top_k=3) \
+                    base = self.store.search(self.profile.collection, hquery, top_k=24, filters=bfilt)
+                    bmap = self.store.dense_scores(self.profile.collection, emb.dense, bfilt, top_k=24) \
                         if use_sparse else {}
                 thr = self.profile.relevance_threshold
+                kept = 0
                 for h in base:
+                    if kept >= 3:
+                        break
                     rh = _to_hit(h)
+                    if is_commentary_ref(rh.ref):      # the point of this floor is the base text
+                        continue
                     if not use_sparse or bmap.get(rh.chunk_id, 0.0) >= thr:
                         rh.score = min(rh.score, 0.99)   # never masquerade as a named-ref anchor
                         hits.append(rh)
+                        kept += 1
             except Exception:
                 pass
 
@@ -218,14 +270,36 @@ class HybridRetriever:
         if not query.work_ids and not query.commentator_ids:
             try:
                 with _timed(t, "floors"):
-                    found = self.store.search(self.profile.collection, hquery, top_k=6,
+                    found = self.store.search(self.profile.collection, hquery,
+                                              top_k=_FOUNDATIONAL_TOP_K,
                                               filters={"work_id": list(_FOUNDATIONAL_WORKS)})
                 for h in found:
                     rh = _to_hit(h)
-                    rh.score = min(rh.score + 0.05, 0.99)   # boost, but never reach the anchor sentinel
+                    # boost, but never reach the anchor sentinel
+                    rh.score = min(rh.score + _FOUNDATIONAL_BOOST, 0.99)
                     hits.append(rh)
             except Exception:
                 pass
+
+        # Named-tractate floor: the question said which masechet ("במסכת סוכה", "סוכה מא") but not
+        # enough to build a ref. Free-text similarity alone routinely misses inside it — a sugya
+        # states its point in its own words, not the querier's — so search again scoped to refs
+        # carrying that tractate name. This is the difference between answering "what does Rashi say
+        # in Sukkah" from Sukkah and answering it from wherever the embedding happened to land.
+        for tractate in (query.tractates or [])[:2]:
+            try:
+                with _timed(t, "tractate"):
+                    scoped = self.store.search(self.profile.collection, hquery,
+                                               top_k=_TRACTATE_TOP_K,
+                                               filters={"ref": {"$text": tractate}})
+                for h in scoped:
+                    rh = _to_hit(h)
+                    # Below the named-ref anchor sentinel: the question named a tractate, not a ref,
+                    # so this must not masquerade as something the user pointed at exactly.
+                    rh.score = min(rh.score + _TRACTATE_BOOST, 0.98)
+                    hits.append(rh)
+            except Exception as exc:
+                logger.warning("tractate-scoped search failed for %s (%s)", tractate, exc)
 
         # Optional reranking (heavy in cloud / optional local)
         if self.reranker is not None and self.profile.rerank and hits:
@@ -245,7 +319,34 @@ class HybridRetriever:
 
         hits = self._dedup(hits)
         hits.sort(key=lambda h: h.score, reverse=True)
-        hits = hits[:top_k]
+        # Actually RESERVE the base-text slots, rather than hoping they rank.
+        #
+        # The floor above finds the base source and appends it at its own score, which is usually
+        # low precisely because commentary discusses a topic in the querier's words while the sugya
+        # states it in its own. The sort then drops it: for "מה זה יאוש שלא מדעת", Bava_Metzia.42.1
+        # sat at 0.211 behind nine commentaries and fell outside top_k — the base text losing to its
+        # own commentaries, which is the exact thing this floor exists to prevent. Capping the score
+        # (min(score, 0.99)) never helped: it bounds from ABOVE, and the problem is from below.
+        #
+        # So take the top slots by score, then give back up to _BASE_SLOTS of them to base texts that
+        # made the candidate pool. No score is invented — the ordering the caller sees is still by
+        # score; only the membership of the final list is adjusted.
+        chosen = hits[:top_k]
+        if len(hits) > top_k and not query.work_ids and not query.commentator_ids:
+            # Fires when base texts are UNDER-REPRESENTED, not only when absent. Gating on "none at
+            # all" was useless in practice: with eight slots over this corpus some base text nearly
+            # always sneaks in, so the gate never opened while the base text that mattered stayed out.
+            have = sum(1 for h in chosen if not is_commentary_ref(h.ref))
+            want = max(0, _BASE_SLOTS - have)
+            if want:
+                spare = [h for h in hits[top_k:] if not is_commentary_ref(h.ref)][:want]
+                if spare:
+                    # Drop the lowest-scoring COMMENTARY to make room; never evict a base text.
+                    keep = [h for h in chosen if not is_commentary_ref(h.ref)]
+                    comm = [h for h in chosen if is_commentary_ref(h.ref)]
+                    chosen = keep + comm[:max(0, top_k - len(keep) - len(spare))] + spare
+                    chosen.sort(key=lambda h: h.score, reverse=True)
+        hits = chosen
 
         # Relevance / honesty gate. hits[0].score is never a clean cosine here (hybrid → RRF fusion
         # score; dense-only → possibly floor-boosted/capped), so both non-anchor branches probe the raw

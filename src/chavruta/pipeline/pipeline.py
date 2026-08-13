@@ -11,15 +11,21 @@ Grounding is enforced here and in `generation.grounded`, never trusted to the mo
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
+from dataclasses import replace
 
 from chavruta.config.profile import Profile
 from chavruta.corpus.links import LinkGraph
 from chavruta.corpus.refs import canon_corpus_ref, with_ref_variants
 from chavruta.corpus.registry import CorpusRegistry, default_registry
 from chavruta.corpus.schema import Answer, Intent, Query, Turn
-from chavruta.generation import grounded
+from chavruta.generation import deontic, grounded, guards
 from chavruta.retrieval.hybrid import HybridRetriever
+
+# Its own name, not chavruta.pipeline: these lines are the only record the watching guards leave,
+# and an operator reviewing a week of them should be able to filter to exactly this and nothing else.
+_guard_log = logging.getLogger("chavruta.guards")
 
 
 def _detect_lang(text: str) -> str:
@@ -34,12 +40,19 @@ def _detect_lang(text: str) -> str:
 # kept working; 'api' and 'openai' say what it actually is.
 _API_BACKENDS = frozenset({"api", "openai", "nebius"})
 
+# Raised across the board 2026-08-12 (user decision). Thorough, step-by-step answers are a
+# deliberate product choice, not a bug to trim (see the "long answers are a feature" decision), and
+# the agentic loop spends part of this budget on its own ===NEED_SOURCES=== rounds — so the old
+# figures were being split between fetching sources and writing the answer. Every intent roughly
+# doubles; the ORDER between them (qa < explain < compare < halacha < lesson) is what matters and is
+# preserved. A budget is a ceiling, not a target: a short question still gets a short answer, so
+# this raises what a long answer MAY use rather than what a typical turn does use.
 _INTENT_MAX_TOKENS = {
-    Intent.QA: 3000,
-    Intent.EXPLAIN: 3000,
-    Intent.LESSON: 30000,
-    Intent.COMPARE: 10000,
-    Intent.HALACHA: 12000,     # a teshuva: source → poskim → pesak, can be substantial
+    Intent.QA: 6000,
+    Intent.EXPLAIN: 8000,
+    Intent.LESSON: 48000,
+    Intent.COMPARE: 20000,
+    Intent.HALACHA: 24000,     # a teshuva: source → poskim → pesak, can be substantial
 }
 
 
@@ -202,9 +215,17 @@ class ChavrutaPipeline:
                     ref = getattr(h, "ref", "") or ""
                     if ref and ref not in seen:
                         seen.add(ref)
+                        # Carry the display/rights fields too — a self-fetched source is rendered on
+                        # the source sheet exactly like a first-round hit, and dropping them there is
+                        # what left those sheets bilingual and licence-less.
                         out.append(SourceBlock(marker="", ref=ref,
                                                commentator_id=getattr(h, "commentator_id", None),
-                                               text=getattr(h, "text", "") or ""))
+                                               text=getattr(h, "text", "") or "",
+                                               text_he=getattr(h, "text_he", "") or "",
+                                               text_en=getattr(h, "text_en", "") or "",
+                                               deep_link=getattr(h, "deep_link", "") or "",
+                                               license=getattr(h, "license", "") or "",
+                                               version_title=getattr(h, "version_title", "") or ""))
                 if len(out) >= 24:
                     break
             return out[:24]
@@ -234,6 +255,40 @@ class ChavrutaPipeline:
         if self.router is not None:
             return self.router.route(request)
         return request
+
+    # A follow-up this short carries no topic of its own — it only means something relative to the
+    # turn before it. Longer messages are assumed to stand alone, so a genuine change of subject
+    # mid-conversation still retrieves on its own terms.
+    _FOLLOWUP_MAX_WORDS = 6
+
+    def _anchor_followup(self, query: Query, history) -> Query:
+        """Point a short follow-up's RETRIEVAL at the topic it's following up on.
+
+        Caught live (2026-08-11): a user asked about a Rashi/Tosafot dispute, got a "not in the
+        corpus" answer, and replied "תנסה". Retrieval embedded the bare word, matched the corpus's
+        sources about the CONCEPT of a test (Job 4:2, the Akeidah, 'מה תנסון'), and the model duly
+        explained what ניסיון means — instead of retrying the question. `_run_chavruta` already
+        anchors its retrieval this way; nothing else did.
+
+        Only `search_text` (the embedding input) is touched. `query.text` — what the model reads —
+        stays exactly as the user typed it, so this steers retrieval without putting words in the
+        user's mouth.
+        """
+        if not history:
+            return query
+        current = (query.text or "").strip()
+        if len(current.split()) > self._FOLLOWUP_MAX_WORDS:
+            return query
+        prior = [t for h in history
+                 if getattr(h, "role", "user") == "user"
+                 and (t := (getattr(h, "text", "") or "").strip()) and t != current]
+        if not prior:
+            return query
+        base = (query.search_text or current).strip()
+        anchor = prior[-1]
+        if anchor in base:
+            return query
+        return replace(query, search_text=f"{anchor} {base}".strip())
 
     def _agentic_selffetch(self, query: Query, history, llm) -> Answer | None:
         """When retrieval returned NOTHING, give the model one chance to pull its own sources via the
@@ -306,7 +361,7 @@ class ChavrutaPipeline:
         override (BYOK — app/api.py::_byok_llm) so a single turn is billed to the caller's own
         provider key instead, without touching the pipeline's shared state."""
         llm = llm or self.llm
-        query = self._resolve_query(request)
+        query = self._anchor_followup(self._resolve_query(request), history)
 
         # Out-of-corpus work honesty (spec edge case): the question explicitly asks about
         # a body of work that is not loaded → say so; never substitute similar-sounding
@@ -341,6 +396,16 @@ class ChavrutaPipeline:
             present = {h.commentator_id for h in result.hits if h.commentator_id}
             missing = [c for c in query.commentator_ids if c not in present]
             if missing and len(missing) == len(query.commentator_ids):
+                # NONE of the named commentators came back — but a thematic question ("the dispute
+                # between Rashi and Tosafot about building the Beit HaMikdash") can miss them simply
+                # because the first retrieval round scored other material higher, not because the
+                # corpus lacks them. Declining here without letting the model search for itself is
+                # the system deciding on its behalf; the self-fetch loop is exactly the mechanism for
+                # this, and it was previously reachable only when retrieval came back completely
+                # empty. If it still finds nothing, the honest answer below is unchanged.
+                selffetched = self._agentic_selffetch(query, history, llm)
+                if selffetched is not None:
+                    return selffetched
                 return grounded.no_commentator_answer(query.lang, missing, query.intent)
             if missing:
                 missing_note = grounded.missing_commentator_note(query.lang, missing)
@@ -349,7 +414,7 @@ class ChavrutaPipeline:
         # that follows its arc and keeps only the sources it actually uses. Both run the same
         # machine; HALACHA just selects the separate responsa template set (shared corpus).
         if query.intent in (Intent.LESSON, Intent.HALACHA):
-            return self._lesson_answer(query, result, llm)
+            return self._lesson_answer(query, result, llm, history=history)
 
         return self._qa_answer(query, result, llm, history=history, missing_note=missing_note)
 
@@ -402,33 +467,90 @@ class ChavrutaPipeline:
             answer.caveats.append(("הערה: ציטוט/ים שלא נמצאו במקורות שנשלפו: «" + "», «".join(bad_q[:2]) + "» — יש לאמת.")
                                   if query.lang != "en" else
                                   ("Note: quote(s) not found in the retrieved sources: «" + "», «".join(bad_q[:2]) + "» — verify."))
+        # ── Guards that WATCH, and do not yet speak ─────────────────────────────────────────────
+        # INTERNAL ONLY, by decision on 2026-08-13. Both checks below write to the log and add
+        # nothing a user sees. Neither has met real traffic — their false-positive rates are argued
+        # from their own test sets, not measured — and a caveat on a CORRECT answer costs more than
+        # a missed finding on a wrong one: it teaches the reader that our warnings are noise, which
+        # is precisely the credit the honest-no-source behaviour has spent the year earning. So they
+        # watch first, and go user-facing only once the log shows they fire on things worth firing
+        # on. `grounded.misattribution_note` already holds the wording for that day and is
+        # deliberately left uncalled until then.
+        #
+        # `_guard_log` is its own logger so one name follows every guard at once, without the rest
+        # of the pipeline's chatter in the way.
+        intent_name = getattr(query.intent, "value", None) or str(query.intent or "qa")
+        try:
+            # A quote that really IS in the corpus, under a different name than the prose credits.
+            # Tosafot's words introduced as "רש״י כותב במפורש" satisfies unverified_quotes (the
+            # string exists in a retrieved source) AND enforce_citations (the marker points at a real
+            # chunk) — and a reader has still been shown something Rashi never said. Reproduced
+            # against these functions on 2026-08-13.
+            for m in grounded.misattributed_quotes(
+                    text, list(result.hits) + list(fetched or []))[:2]:
+                # `found_in` is a TUPLE — two commentaries can carry the same phrase, and naming all
+                # of them is what keeps the finding honest. Flattened to a string here because the
+                # panel renders it as text; a raw tuple would arrive there as a JSON array.
+                found = ", ".join(m.found_in)
+                guards.report("misattribution", intent_name,
+                              {"claimed": m.claimed, "found_in": found, "quote": m.quote[:300]},
+                              summary=f"credited to {m.claimed}, text is from {found}")
+        except Exception:                   # noqa: BLE001 — a watching check must never break an answer
+            _guard_log.exception("misattribution check failed")
+        try:
+            # `attribution` is carried on purpose: 'inherited' means the second verdict named nobody
+            # and took the last speaker in scope. That is the weaker of the two paths, and an
+            # operator triaging these should be able to discount it without reading the code.
+            for c in deontic.deontic_conflicts(text)[:2]:
+                guards.report("deontic", intent_name,
+                              {"authority": c.authority, "axis": c.axis,
+                               "attribution": c.attribution,
+                               "first": c.first.sentence[:300], "second": c.second.sentence[:300]},
+                              summary=f"{c.authority} {c.axis}/{c.attribution}")
+        except Exception:                   # noqa: BLE001
+            _guard_log.exception("deontic check failed")
         return grounded.maybe_halacha_caveat(answer, query.lang)
 
-    def _lesson_answer(self, query, result, llm=None):
+    def _lesson_answer(self, query, result, llm=None, *, history=None):
         """Generate the lesson — or responsa (שו"ת) — as a flowing walkthrough that follows
         the arc (opening → branches → convergence), then keep in each section only the sources
         the walkthrough actually cited. HALACHA uses the responsa template set + voice. `llm`
-        defaults to the pipeline's own shared backend; a caller may override it (BYOK)."""
+        defaults to the pipeline's own shared backend; a caller may override it (BYOK).
+
+        `history` is the conversation so far. It used not to be passed here at all, so every
+        lesson/responsa turn was answered in isolation — a follow-up ("ומה אם זה חולה שאין בו
+        סכנה?") arrived with no memory of the question it was following up on, while the same
+        follow-up in Q&A mode kept its thread. Both prompt builders now carry it.
+        """
         llm = llm or self.llm
         is_shut = query.intent is Intent.HALACHA
         plan = self._build_lesson(query, result)
         if plan.sections:
             prompt, marker_map = grounded.build_lesson_walkthrough_prompt(
-                plan, query.text, lang=query.lang, shut=is_shut)
+                plan, query.text, lang=query.lang, shut=is_shut, history=history)
         else:
             prompt, marker_map = grounded.build_prompt(
-                query.text, result.hits, intent=query.intent, lang=query.lang)
-        llm_out = llm.generate(
-            prompt, lang=query.lang,
-            max_tokens=_max_tokens_for(query.intent, self.profile),
-            temperature=self.profile.llm_temperature,
-        )
-        # Agentic retrieval may have appended sources during generation (bridge runs the loop inside
-        # generate) — extend the marker map so a responsa/lesson that fetched its own sources keeps
-        # those [S#] citations (and prune_lesson_to_cited doesn't then delete the sections citing them).
-        for i, s in enumerate(getattr(llm_out, "fetched_sources", None) or [], len(marker_map) + 1):
+                query.text, result.hits, intent=query.intent, lang=query.lang, history=history)
+        # Run through the agentic ===NEED_SOURCES=== loop, same as _qa_answer: a lesson/responsa
+        # whose initial sources share only a surface word with a modern real-world question (e.g.
+        # "computer" retrieving a games sugya instead of the corpus's own electricity/muktzeh
+        # responsa — a real 2026-08-07 production case) can pull the right sources itself instead
+        # of declining outright from a single, unreviewable round.
+        raw, fetched = self._agentic_generate(prompt, query.lang, query.intent, llm)
+        from chavruta.llm.agentic import is_degrade_message
+        if is_degrade_message(raw):
+            llm_out = llm.generate(
+                prompt, lang=query.lang,
+                max_tokens=_max_tokens_for(query.intent, self.profile),
+                temperature=self.profile.llm_temperature,
+            )
+            raw, fetched = llm_out.text, getattr(llm_out, "fetched_sources", None) or []
+        # Agentically-fetched sources continue the S# numbering — extend the marker map so a
+        # responsa/lesson that fetched its own sources keeps those [S#] citations (and
+        # prune_lesson_to_cited doesn't then delete the sections citing them).
+        for i, s in enumerate(fetched or [], len(marker_map) + 1):
             marker_map.setdefault(f"S{i}", s)
-        text, citations, is_grounded = grounded.enforce_citations(llm_out.text, marker_map)
+        text, citations, is_grounded = grounded.enforce_citations(raw, marker_map)
         if plan.sections:
             plan = grounded.prune_lesson_to_cited(plan, citations)
         answer = Answer(text=text, citations=citations, grounded=is_grounded,

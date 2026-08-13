@@ -6,7 +6,15 @@
 
 # Terms of Use — Chavruta AI
 
-**Version 1.10 · Effective 10 August 2026**
+**Version 1.11 · Effective 13 August 2026**
+
+Changes in version 1.11: section 10 clarifies the relationship between **account deletion and a paid
+subscription**, which was not stated until now. A deletion request **stops the recurring charge
+immediately** — not at the end of the grace period — so that nobody who has asked to be erased is
+billed again. With deletion at the end of a grace period, paid access continues to the end of the
+period already paid for, as with an ordinary cancellation; with immediate deletion (new — see Privacy
+Policy 1.9) the user gives up the remainder of that period. Cancelling a deletion request **does not
+restore** the subscription. The 14-day cancellation right is unchanged and applies independently.
 
 Changes in version 1.10: section 9 updated — data is also used, subject to the Privacy Policy
 (sections 2 and 12 there) and only for conversations from 10 August 2026 onward, for quality
@@ -186,7 +194,13 @@ section 15. **The refund is made to the payment method used for the transaction,
 our receiving your cancellation notice**, and a credit note is issued to you accordingly.
 
 **Cancelling a subscription (stopping billing) is not the same as deleting your account** (a separate
-mechanism — see the Privacy Policy).
+mechanism — see the Privacy Policy). That said, **deleting your account also stops the subscription**:
+a deletion request halts the recurring charge immediately — with deletion at the end of a grace period
+paid access continues to the end of the period you paid for, as with an ordinary cancellation, and with
+immediate deletion you give up the remainder of that period. **Cancelling a deletion request does not
+restore the subscription** — stopping a recurring charge is not reversible at the payment provider, and
+you would need to subscribe again. The 14-day cancellation right above applies as usual, independently
+of account deletion.
 
 ## 11. Coupons
 Coupons may be offered from time to time. A coupon grants a specific benefit (a time-limited plan tier

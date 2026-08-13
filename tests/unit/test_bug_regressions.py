@@ -8,6 +8,9 @@ helpers (audience / clarify-answer detection).
 
 from __future__ import annotations
 
+import threading
+import time
+
 import pytest
 
 from chavruta.corpus.registry import default_registry
@@ -70,14 +73,15 @@ def test_masechet_does_not_force_mishnah_work():
 # for genuinely-unloaded works couldn't tell a loaded corpus from a missing one.
 
 @pytest.mark.parametrize("cat", [
-    "tanakh", "mishnah", "talmud_bavli", "halacha", "responsa", "midrash", "kabbalah",
+    "tanakh", "mishnah", "gemara", "yerushalmi", "halacha", "shut", "midrash", "kabbalah",
 ])
 def test_registry_has_loaded_categories(cat):
     assert default_registry().has(cat)
 
 
 @pytest.mark.parametrize("alias,canonical", [
-    ("talmud", "talmud_bavli"),
+    ("talmud", "gemara"),
+    ("responsa", "shut"),
     ("shulchan_aruch", "halacha"),
     ("mishneh_torah", "halacha"),
     ("zohar", "kabbalah"),
@@ -85,6 +89,37 @@ def test_registry_has_loaded_categories(cat):
 def test_registry_resolves_aliases(alias, canonical):
     r = default_registry()
     assert r.has(alias) and r.has(canonical)
+
+
+# Fix (2026-08-12): these two tests used to assert 'talmud_bavli' and 'responsa' as CATEGORY names,
+# which is what the code believed — and what the corpus never carried. The live collection tags
+# those tiers `gemara` (516,854 points) and `shut` (96,493), so every filter built on the old names
+# matched 0 of 2,403,599 points, silently. The tests were locking the mismatch in place.
+#
+# The category keys are matched against Qdrant payloads, so they are DATA, not naming taste. This
+# guard pins them to the values counted in the live collection; if an ingest ever renames a tier,
+# it fails here rather than in a filter that quietly returns nothing.
+_CORPUS_WORK_IDS = {
+    "tanakh", "mishnah", "gemara", "yerushalmi", "tosefta", "midrash", "halacha", "shut",
+    "kabbalah", "chasidut", "musar", "jewish_thought", "liturgy", "reference", "second_temple",
+}
+
+
+def test_registry_categories_are_real_corpus_work_ids():
+    from chavruta.corpus.registry import _LOADED_CATEGORIES
+
+    unknown = set(_LOADED_CATEGORIES) - _CORPUS_WORK_IDS
+    assert not unknown, f"registry names no corpus tier holds: {sorted(unknown)}"
+
+
+def test_foundational_floor_targets_real_tiers_including_the_gemara():
+    """The floors reserve result slots for the foundational works. Filtering them on a work_id the
+    corpus doesn't use means the floor reserves nothing — which is what happened to the Gemara, the
+    largest tier in the corpus."""
+    from chavruta.retrieval.hybrid import _FOUNDATIONAL_WORKS
+
+    assert "gemara" in _FOUNDATIONAL_WORKS
+    assert not set(_FOUNDATIONAL_WORKS) - _CORPUS_WORK_IDS
 
 
 def test_registry_rejects_unloaded_work():
@@ -272,11 +307,79 @@ def test_fix_bleeding_sentences_keeps_original_on_llm_failure():
 
 def test_fix_bleeding_sentences_caps_the_number_of_fixes():
     llm = _FakeLLM(reply="תוקן")
-    # 4 bleeding sentences, one more than _MAX_BLEED_FIXES (3)
-    text = " ".join(f"משפט {w} מספר {i}." for i, w in enumerate(["AA", "BB", "CC", "DD"], 1))
+    # One more bleeding sentence than _MAX_BLEED_FIXES, whatever that's currently set to — the
+    # LAST word is the one expected to survive uncapped, regardless of the cap's exact value.
+    words = [f"W{i}" for i in range(api._MAX_BLEED_FIXES + 1)]
+    text = " ".join(f"משפט {w} מספר {i}." for i, w in enumerate(words, 1))
     out = api._fix_bleeding_sentences(text, True, llm)
     assert len(llm.calls) == api._MAX_BLEED_FIXES
-    assert "DD" in out                             # the 4th bleeding sentence was left untouched
+    assert words[-1] in out                        # the extra bleeding sentence was left untouched
+
+
+# ── Fix (2026-08-12): the cap rose to 20 (a long lesson/responsa answer bleeds in far more than the
+# 8 sentences the previous cap allowed, and every sentence over the cap reached the user in broken
+# Hebrew). Raising it alone would have put up to 20 sentences x 2 attempts = 40 model calls IN SERIES
+# in front of the user, so the rewrites now run concurrently — they are independent by construction,
+# each seeing one sentence and nothing else.
+class _ConcurrencyProbeLLM:
+    """Records the high-water mark of simultaneously in-flight rewrite calls."""
+
+    def __init__(self, serial_only=False):
+        if serial_only:
+            self.serial_only = True
+        self._lock = threading.Lock()
+        self.in_flight = 0
+        self.max_in_flight = 0
+        self.calls: list[str] = []
+
+    def generate(self, prompt, *, lang, max_tokens, temperature):
+        with self._lock:
+            self.calls.append(prompt.question)
+            self.in_flight += 1
+            self.max_in_flight = max(self.max_in_flight, self.in_flight)
+        time.sleep(0.05)          # long enough that serial execution could not overlap
+        with self._lock:
+            self.in_flight -= 1
+        return SimpleNamespace(text="תוקן")
+
+
+def _text_with_bleeding_sentences(n: int) -> str:
+    # Zero-padded so no marker is a substring of another ("W2" would match inside "W20").
+    return " ".join(f"משפט W{i:03d} מספר {i}." for i in range(n))
+
+
+def test_fix_bleeding_sentences_rewrites_concurrently():
+    llm = _ConcurrencyProbeLLM()
+    out = api._fix_bleeding_sentences(_text_with_bleeding_sentences(8), True, llm)
+    assert len(llm.calls) == 8
+    assert llm.max_in_flight > 1                   # the whole point: not one-at-a-time
+    assert not api._has_bleed(out)
+
+
+def test_fix_bleeding_sentences_stays_serial_for_a_serial_only_backend():
+    # The bridge answers through a single job file — overlapping calls would put two jobs in front
+    # of one reader with no way to match answers back to jobs.
+    llm = _ConcurrencyProbeLLM(serial_only=True)
+    api._fix_bleeding_sentences(_text_with_bleeding_sentences(6), True, llm)
+    assert llm.calls and llm.max_in_flight == 1
+
+
+def test_bridge_backend_declares_itself_serial_only():
+    from chavruta.llm.bridge import BridgeLLM
+
+    assert BridgeLLM.serial_only is True
+
+
+def test_fix_bleeding_sentences_caps_the_FIRST_n_sentences_regardless_of_scheduling():
+    # With the rewrites running in a pool, "which sentences get fixed" must not depend on which
+    # thread finishes first: the cap is applied to the SELECTION, in document order.
+    llm = _FakeLLM(reply="תוקן")
+    text = _text_with_bleeding_sentences(api._MAX_BLEED_FIXES + 3)
+    out = api._fix_bleeding_sentences(text, True, llm)
+    for i in range(api._MAX_BLEED_FIXES):
+        assert f"W{i:03d}" not in out               # the first N were rewritten
+    for i in range(api._MAX_BLEED_FIXES, api._MAX_BLEED_FIXES + 3):
+        assert f"W{i:03d}" in out                   # the tail was left untouched
 
 
 # Fix (caught live 2026-08-04): a bleeding sentence reached a real user unfixed
@@ -345,6 +448,101 @@ def test_fix_bleeding_sentences_fixes_a_single_stray_letter():
 ])
 def test_strip_markers_drops_a_leaked_escape_backslash_before_a_quote(raw, expected):
     assert api._strip_markers(raw, he=True) == expected
+
+
+# ── Fix (2026-08-12, caught live): the model uses a marker as the NOUN, not as a trailing footnote
+# — "ב[S2] יש דיון" ("in [source 2] there is a discussion") — so deleting only the marker stranded
+# the preposition that introduced it. Real users saw "כי באמת, ב יש דיון" and "הבא נבדוק את: שם
+# נאמר". Same trap the English-word path avoids by rewriting instead of deleting; markers were
+# getting blind deletion. All four cases below are reproduced verbatim from production output.
+@pytest.mark.parametrize("raw,expected", [
+    ("כי באמת, ב[S2] יש דיון מעניין.", "כי באמת, יש דיון מעניין."),
+    ("הבא נבדוק את [S3]: שם נאמר...", "הבא נבדוק: שם נאמר..."),
+    ("כמו שמציע החסיד נתן אדלער ב[S4], או...", "כמו שמציע החסיד נתן אדלער, או..."),
+    # Same failure shape via the all-Latin parenthetical stripper rather than the marker regex.
+    ("ראינו זאת ב(Chatam Sofer on Sukkah 41a).", "ראינו זאת."),
+])
+def test_strip_markers_repairs_a_load_bearing_marker(raw, expected):
+    assert api._strip_markers(raw, he=True) == expected
+
+
+# The repair MUST be anchored to an actual deletion site. A blind "drop orphaned one-letter words"
+# pass corrupts this corpus specifically: in Torah text a lone Hebrew letter is normally a chapter
+# or section NUMBER. A first cut of this fix turned "פרק ב." into "פרק" and "א, ב, ג" into "א, ג" —
+# silent citation corruption, far worse than the dangling preposition it set out to fix.
+@pytest.mark.parametrize("raw", [
+    "נלמד במסכת סוכה פרק ב.",
+    "הסעיפים הם א, ב, ג.",
+    "עיין בסימן ג, ובסעיף ה.",
+])
+def test_strip_markers_never_touches_a_lone_letter_with_no_marker(raw):
+    assert api._strip_markers(raw, he=True) == raw
+
+
+# A one-letter prefix only counts when it is not the tail of a Hebrew word — without that guard,
+# "הכתוב[S1]" matches its own final ב and leaves "הכתו".
+def test_strip_markers_does_not_eat_the_last_letter_of_the_preceding_word():
+    assert api._strip_markers("הכתוב[S1] אומר כך.", he=True) == "הכתוב אומר כך."
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("וכך נאמר [S1].", "וכך נאמר."),                  # ordinary trailing marker, unchanged behaviour
+    ("שני מקורות [S1, S5] כאן.", "שני מקורות כאן."),
+    ("הערה (עיין שם) חשובה.", "הערה (עיין שם) חשובה."),  # mixed-Hebrew aside still survives
+    ("סעיף (1) ברשימה.", "סעיף (1) ברשימה."),            # numeric aside still survives
+])
+def test_strip_markers_leaves_the_existing_behaviour_intact(raw, expected):
+    assert api._strip_markers(raw, he=True) == expected
+
+
+# ── Fix (2026-08-12): chavruta follow-up loses the tractate the conversation established.
+# Bug: only user_turns[0] (the FIRST question) was carried into the anchor, so a tractate named
+# in turn 2 was lost by turn 5. Now structural signals are harvested from the WHOLE conversation.
+def test_conversation_signals_harvests_tractate_from_full_history():
+    """The 5-turn conversation from the bug report should yield tractates == ['Sukkah']."""
+    from chavruta.corpus.schema import Query
+
+    user_turns = [
+        "מה רשי אומר על בניית בית המקדש?",
+        "ומה לגבי מה שהוא אומר במסכת סוכה בעניין הזה",
+        "מה תוספות סובר על כך?",
+        "האם תוספות חולק על רשי?",
+        "האם יש מחלוקת בין רשי לתוספות על בניית המקדש",
+    ]
+    question = user_turns[-1]
+    user_turns = user_turns[:-1]
+
+    # Simulate the query after _resolve_query (which would have only turn1 + turn5 signals)
+    rq = Query(text=user_turns[0] + " " + question, lang="he", intent=Intent.QA)
+    # At this point, tractates would be empty (turn1 has no tractate, turn5 has no tractate)
+    assert not rq.tractates
+
+    # Apply the conversation signal harvesting
+    api._conversation_signals(user_turns, question, rq)
+
+    # Now tractates should include Sukkah from turn 2
+    assert rq.tractates == ["Sukkah"]
+
+
+def test_conversation_signals_explicit_current_tractate_wins_over_history():
+    """An explicit tractate in the CURRENT question should win over one from earlier history."""
+    from chavruta.corpus.schema import Query
+
+    user_turns = [
+        "מה אומר רשי על סוגיית השבת?",
+        "ומה לגבי מה שהוא אומר במסכת סוכה בעניין הזה",
+    ]
+    question = "ומה אומר רשי במסכת ברכות על כך?"
+
+    # Simulate _resolve_query already detecting the current question's tractate
+    rq = Query(text=user_turns[0] + " " + question, lang="he", intent=Intent.QA)
+    rq.tractates = ["Berakhot"]  # Explicit from current question
+
+    # Apply conversation signal harvesting
+    api._conversation_signals(user_turns, question, rq)
+
+    # Current question's tractate should win, history should not override
+    assert rq.tractates == ["Berakhot"]
 
 
 # ── Fix (2026-08-02, caught live): a genuinely-grounded 'explain' answer still contained the bare
@@ -565,16 +763,34 @@ def test_commentary_refs_reach_the_named_commentator_on_a_verse():
     ("Bartenura_on_Mishnah_Bava_Metzia.1.1.1", "ברטנורא על משנה בבא מציעא 1:1"),
     ("Rambam_on_Mishnah_Bava_Metzia.1.1.1", 'רמב"ם על משנה בבא מציעא 1:1'),
     # Commentaries whose base can't be told apart from a bare tractate name once stripped (Tosefta,
-    # Mishneh Torah, ...) must decline rather than guess wrong:
-    ("Maggid_Mishneh_on_Mishneh_Torah,_Plaintiff_and_Defendant.9.7.1", None),
-    ("Tosefta_Kifshutah_on_Bava_Metzia.1.1.1", None),
-    ("Tosefta_Bava_Metzia_(Lieberman).1.1", None),
+    # Mishneh Torah, ...) used to DECLINE, because the curated tables were the only source of Hebrew
+    # and letting `_split_book` see their base rendered chapter:halacha as a daf. They now render
+    # through Sefaria's own title map, which carries the work's CATEGORY — so the Tosefta/Halakhah
+    # base is recognised as not-Talmud and its numbers pass through untouched. What must never come
+    # back is the daf conversion; `test_tosefta_base_never_gets_daf_math` below locks that.
+    ("Maggid_Mishneh_on_Mishneh_Torah,_Plaintiff_and_Defendant.9.7.1",
+     "מגיד משנה על משנה תורה, הלכות טוען ונטען 9:7:1"),
+    ("Tosefta_Kifshutah_on_Bava_Metzia.1.1.1", "תוספתא כפשוטה על בבא מציעא 1:1:1"),
+    ("Tosefta_Bava_Metzia_(Lieberman).1.1", "תוספתא בבא מציעא (ליברמן) 1:1"),
     (None, None),
     ("", None),
 ])
 def test_hebrew_display_ref(ref, expected):
     from chavruta.corpus.refs import hebrew_display_ref
     assert hebrew_display_ref(ref) == expected
+
+
+def test_tosefta_base_never_gets_daf_math():
+    """A Tosefta commentary strips to a base spelled exactly like a Bavli tractate
+    ('Tosefta_Kifshutah_on_Bava_Metzia' → 'Bava Metzia'). Rendering chapter 1 halacha 1 as 'daf 1a'
+    is the specific wrong answer this module has always refused to give — caught live while wiring
+    in the full Sefaria title map, when a derived commentator name let `_split_book` see that base.
+    """
+    from chavruta.corpus.refs import hebrew_display_ref
+    out = hebrew_display_ref("Tosefta_Kifshutah_on_Bava_Metzia.1.1.1")
+    assert out is not None
+    assert "1." not in out.replace("1.1", "")   # no amud mark: it's chapter:halacha, not a daf
+    assert out.endswith("1:1:1")
 
 
 def test_amud_to_corpus_ignores_volume_numbered_works():
@@ -1218,7 +1434,8 @@ def test_metered_charges_lesson_pool_only_when_a_real_lesson_was_produced(monkey
     lesson_charges = []
     settle_calls = []
     monkeypatch.setattr(api, "_charge_lesson_unit",
-                        lambda owner, used_byok: lesson_charges.append((owner, used_byok)))
+                        lambda owner, res, used_byok: (lesson_charges.append((owner, used_byok))
+                                                       or False))
     monkeypatch.setattr(api, "_settle_tokens",
                         lambda owner, reserved, usage, intent, meter=api.db.TOKENS:
                             settle_calls.append(dict(usage)))
@@ -1231,7 +1448,7 @@ def test_metered_charges_lesson_pool_only_when_a_real_lesson_was_produced(monkey
         return api.QueryResponse(answer="למי מיועד השיעור?", citations=[], grounded=False,
                                  intent="lesson", files=[])
 
-    api._metered("owner1", reserved=20_000, intent="lesson", fn=_prelim)()
+    api._metered("owner1", reserved=api.Reservation(20_000), intent="lesson", fn=_prelim)()
     assert lesson_charges == [], "a preliminary (no-lesson-yet) turn must not touch the lesson pool"
     assert settle_calls[-1] == {"prompt_tokens": 500, "completion_tokens": 120, "calls": 1}, \
         "a preliminary turn's real token spend must settle as an ordinary conversation-token charge"
@@ -1244,7 +1461,7 @@ def test_metered_charges_lesson_pool_only_when_a_real_lesson_was_produced(monkey
                                  files=[api.FileOut(name="x.doc", title="x", content="c")],
                                  lesson_id="abc123")
 
-    api._metered("owner1", reserved=20_000, intent="lesson", fn=_real_lesson)()
+    api._metered("owner1", reserved=api.Reservation(20_000), intent="lesson", fn=_real_lesson)()
     assert lesson_charges == [("owner1", False)], "the real-lesson turn must charge exactly one lesson unit"
     assert settle_calls[-1] == {}, \
         "the real-lesson turn's token spend must be suppressed — paid for by the lesson pool instead"
@@ -1477,3 +1694,274 @@ def test_wants_full_lesson_defaults_false_on_llm_failure():
 def test_wants_full_lesson_defaults_false_on_an_unclear_reply():
     llm = _FakeLLM(reply="אולי, קשה לדעת")
     assert api._wants_full_lesson("שאלה כלשהי", llm=llm) is False
+
+
+# ── Fix (caught live 2026-08-11, from a real chat): two failures in one exchange ──────────────
+# The user asked for the Rashi/Tosafot dispute about building the Beit HaMikdash and got
+# "no Rashi commentary found here"; they replied "תנסה" and were served an essay on what the word
+# נסה means in Tanakh. Two separate defects, both of them the system deciding on the model's behalf.
+
+def test_named_commentators_missing_triggers_selffetch_before_declining():
+    """A thematic explain/compare question can miss its named commentators simply because the first
+    retrieval round scored other material higher. The model must get to search for them itself
+    before the pipeline answers "not in the corpus" — the self-fetch loop used to be reachable only
+    when retrieval came back COMPLETELY empty, so a non-empty-but-missing round declined outright."""
+    from chavruta.config.profile import Profile
+    from chavruta.corpus.schema import Intent, Query
+    from chavruta.llm.base import SourceBlock
+    from chavruta.retrieval.base import RankedHit, RetrievalResult
+
+    # Retrieval returns real hits, but none of them are Rashi or Tosafot.
+    other = RankedHit(chunk_id="x", ref="Middot.1.1", text="הר הבית", score=0.4, commentator_id=None)
+    fetched = SourceBlock(marker="", ref="Rashi on Sukkah 41a", commentator_id="rashi",
+                          text="בנין העתיד לבא")
+
+    class _Retriever:
+        def retrieve(self, q, top_k):
+            return RetrievalResult(hits=[other], anchor_refs=[], is_empty=False)
+
+    class _LLM:
+        profile = "cloud"; model_id = "fake"
+        source_fetcher = staticmethod(lambda qs: [fetched])
+
+        def request(self, body_md, *, lang="he", token_budget=None):
+            return ("רש\"י סובר שהמקדש העתידי יורד בנוי [S1]", [fetched])
+
+    prof = Profile(name="cloud", collection="c", top_k=5, relevance_threshold=0.0)
+    pipeline = ChavrutaPipeline.from_backends(prof, embedding=None, store=None, llm=_LLM(),
+                                              retriever=_Retriever(),
+                                              router=SimpleNamespace(route=lambda q: q))
+    q = Query(text="מה המחלוקת בין רש\"י לתוספות", lang="he", intent=Intent.COMPARE,
+              commentator_ids=["rashi", "tosafot"])
+    ans = pipeline.ask(q)
+    assert ans.grounded is True and ans.no_source is False
+    assert any(c.ref == "Rashi on Sukkah 41a" for c in ans.citations)
+
+
+def test_short_followup_retrieves_on_the_previous_topic():
+    """'תנסה' has no topic of its own: retrieval used to embed the bare word and match the corpus's
+    sources about the CONCEPT of a test, so the model explained what ניסיון means instead of
+    retrying. The follow-up's search_text must carry the previous question; the text the MODEL sees
+    must stay exactly what the user typed."""
+    from chavruta.config.profile import Profile
+    from chavruta.corpus.schema import Intent, Query, Turn
+
+    prof = Profile(name="cloud", collection="c", top_k=5, relevance_threshold=0.0)
+    pipeline = ChavrutaPipeline.from_backends(prof, embedding=None, store=None, llm=None,
+                                              retriever=SimpleNamespace(),
+                                              router=SimpleNamespace(route=lambda q: q))
+    prev = "מה המחלוקת בין רש\"י לתוספות לגבי בניית בית המקדש"
+    q = Query(text="תנסה", lang="he", intent=Intent.QA, search_text="תנסה")
+    out = pipeline._anchor_followup(q, [Turn(role="user", text=prev),
+                                        Turn(role="assistant", text="לא נמצא בקורפוס")])
+    assert prev in out.search_text          # retrieval now sees the actual topic
+    assert out.text == "תנסה"               # the model still reads what the user wrote
+
+
+def test_long_followup_is_not_anchored():
+    """A full question mid-conversation stands on its own — anchoring it would drag the previous
+    topic into a deliberate change of subject."""
+    from chavruta.config.profile import Profile
+    from chavruta.corpus.schema import Intent, Query, Turn
+
+    prof = Profile(name="cloud", collection="c", top_k=5, relevance_threshold=0.0)
+    pipeline = ChavrutaPipeline.from_backends(prof, embedding=None, store=None, llm=None,
+                                              retriever=SimpleNamespace(),
+                                              router=SimpleNamespace(route=lambda q: q))
+    new_q = "עכשיו שאלה אחרת לגמרי על הלכות מוקצה בשבת ומה אומר השולחן ערוך"
+    q = Query(text=new_q, lang="he", intent=Intent.QA, search_text=new_q)
+    out = pipeline._anchor_followup(q, [Turn(role="user", text="שאלה קודמת על בית המקדש")])
+    assert out.search_text == new_q
+
+
+def test_followup_without_history_is_unchanged():
+    from chavruta.config.profile import Profile
+    from chavruta.corpus.schema import Intent, Query
+
+    prof = Profile(name="cloud", collection="c", top_k=5, relevance_threshold=0.0)
+    pipeline = ChavrutaPipeline.from_backends(prof, embedding=None, store=None, llm=None,
+                                              retriever=SimpleNamespace(),
+                                              router=SimpleNamespace(route=lambda q: q))
+    q = Query(text="תנסה", lang="he", intent=Intent.QA, search_text="תנסה")
+    assert pipeline._anchor_followup(q, None).search_text == "תנסה"
+
+
+def test_base_source_floor_filters_commentary_by_ref_not_unit_type():
+    """The floor exists to reserve slots for the BASE text (pasuk/mishnah/daf) against its own
+    commentaries. It filtered on unit_type="source" believing commentary couldn't satisfy that — but
+    every point in this corpus carries unit_type="source", and Rashi_on_Bava_Metzia.42.1.1 and
+    Bava_Metzia.42.1 are identical on both work_id and unit_type. The ref shape is the only signal.
+    """
+    from chavruta.corpus.refs import is_commentary_ref
+
+    assert is_commentary_ref("Rashi_on_Bava_Metzia.42.1.1")
+    assert is_commentary_ref("Tosafot_on_Sukkah.81.11.1")
+    assert not is_commentary_ref("Bava_Metzia.42.1")
+    assert not is_commentary_ref("Genesis.1.1")
+
+    import inspect
+
+    from chavruta.retrieval import hybrid
+    src = inspect.getsource(hybrid.HybridRetriever.retrieve)
+    assert 'unit_type": "source"' not in src, (
+        "the base-source floor must not filter on unit_type — it is 'source' for every point"
+    )
+    assert "is_commentary_ref" in src
+
+
+# ── Fix (2026-08-12): a chavruta conversation lost the sugya it had been studying. The tractate fix
+# above recovers the MASECHET from the wording of earlier turns, but not the daf — and a follow-up
+# like "האם הם חולקים?" names nothing at all, so there is nothing to parse. The surest record of
+# which sugya is live is what the earlier ANSWERS already cited: those refs are known-relevant,
+# because the answers were grounded in them. api._prepare_continue was decoding citations out of the
+# DB and then dropping them on the floor when it built Turn(role, text).
+def test_turn_carries_the_refs_it_cited():
+    from chavruta.corpus.schema import Turn
+
+    assert Turn(role="user", text="שאלה").refs == []          # default stays empty
+    assert Turn(role="assistant", text="ת", refs=["Sukkah.81"]).refs == ["Sukkah.81"]
+
+
+def test_carried_refs_are_most_recent_first_and_deduplicated():
+    from chavruta.corpus.schema import Turn
+
+    history = [
+        Turn(role="user", text="q1"),
+        Turn(role="assistant", text="a1", refs=["Genesis.1.1", "Rashi_on_Genesis.1.1.1"]),
+        Turn(role="user", text="q2"),
+        Turn(role="assistant", text="a2", refs=["Sukkah.81", "Genesis.1.1"]),  # repeat must not double
+    ]
+    assert api._carried_refs(history) == ["Sukkah.81", "Genesis.1.1", "Rashi_on_Genesis.1.1.1"]
+
+
+def test_carried_refs_ignores_user_turns_and_missing_refs():
+    from chavruta.corpus.schema import Turn
+
+    assert api._carried_refs([Turn(role="user", text="בסוכה מא")]) == []
+    assert api._carried_refs([]) == []
+    assert api._carried_refs(None) == []
+
+
+def test_carried_refs_is_bounded():
+    from chavruta.corpus.schema import Turn
+
+    many = [f"Sukkah.{i}" for i in range(api._MAX_CARRIED_REFS + 5)]
+    history = [Turn(role="assistant", text="a", refs=many)]
+    assert len(api._carried_refs(history)) == api._MAX_CARRIED_REFS
+
+
+def test_conversation_signals_prefers_cited_refs_over_refs_parsed_from_prose():
+    """A ref the conversation actually grounded an answer in beats one inferred from wording."""
+    from chavruta.corpus.schema import Intent, Query, Turn
+
+    rq = Query(text="האם הם חולקים?", lang="he", intent=Intent.QA)
+    history = [Turn(role="assistant", text="a", refs=["Rashi_on_Sukkah.81.11.2"])]
+    api._conversation_signals(["ומה בבראשית א:א?"], "האם הם חולקים?", rq, history)
+    assert rq.named_refs == ["Rashi_on_Sukkah.81.11.2"]
+
+
+def test_conversation_signals_falls_back_to_parsed_refs_with_no_cited_ones():
+    from chavruta.corpus.schema import Intent, Query
+
+    rq = Query(text="x", lang="he", intent=Intent.QA)
+    api._conversation_signals(["ומה בבראשית א:א?"], "האם הם חולקים?", rq, history=[])
+    assert rq.named_refs == ["Genesis.1.1"]
+
+
+# ── The per-intent generation budgets and the quota RESERVATIONS that pay for them have to move
+# together: a completion is weighted x3, so a budget bigger than a third of its own reservation
+# means a single answer can overspend what was reserved for the whole turn (2026-08-12).
+def test_every_intent_reservation_covers_its_own_generation_budget():
+    import app.plans as plans
+    from chavruta.config.profile import Profile
+    from chavruta.corpus.schema import Intent
+    from chavruta.pipeline.pipeline import _max_tokens_for
+
+    profile = Profile()
+    for intent, name in ((Intent.QA, "qa"), (Intent.EXPLAIN, "explain"),
+                         (Intent.COMPARE, "compare"), (Intent.HALACHA, "halacha")):
+        budget = _max_tokens_for(intent, profile)
+        reserved = plans.token_estimate(name)
+        assert reserved >= budget * plans.COMPLETION_WEIGHT, (
+            f"{name}: reserving {reserved} cannot cover a {budget}-token answer "
+            f"(x{plans.COMPLETION_WEIGHT} = {budget * plans.COMPLETION_WEIGHT})"
+        )
+
+
+def test_every_paid_tier_is_exactly_its_stated_multiple_of_free():
+    """The UI states a RATIO ('3x the usage') and never a number, so the ratio must be literally
+    true in every dimension. Raising the free tier without recomputing the paid ones breaks it."""
+    import app.plans as plans
+
+    free = plans.TIERS[0]
+    assert free.id == "free" and free.multiple == 1
+    for t in plans.TIERS[1:]:
+        assert t.daily_tokens == free.daily_tokens * t.multiple, t.id
+        assert t.weekly_tokens == free.weekly_tokens * t.multiple, t.id
+        assert t.weekly_lessons == free.weekly_lessons * t.multiple, t.id
+
+
+# ── Provider prompt-caching visibility (2026-08-12). Nebius does not document prompt caching, and
+# the question "does it cache, and does OUR prompt shape actually hit" cannot be settled from docs —
+# so read the figure the OpenAI-compatible response already carries. A provider that does not
+# implement it omits the field, and a steady 0 in the logs is itself the answer.
+def test_cached_prompt_tokens_reads_the_openai_field():
+    from types import SimpleNamespace
+    from chavruta.llm.cloud import _cached_prompt_tokens
+
+    usage = SimpleNamespace(prompt_tokens_details=SimpleNamespace(cached_tokens=1024))
+    assert _cached_prompt_tokens(usage) == 1024
+    assert _cached_prompt_tokens(SimpleNamespace(prompt_tokens_details={"cached_tokens": 7})) == 7
+
+
+@pytest.mark.parametrize("usage", [
+    None,                                                     # no usage at all
+    SimpleNamespace(prompt_tokens=10),                        # provider omits the details block
+    SimpleNamespace(prompt_tokens_details=None),
+    SimpleNamespace(prompt_tokens_details=SimpleNamespace(cached_tokens=None)),
+    SimpleNamespace(prompt_tokens_details=SimpleNamespace(cached_tokens="nonsense")),
+])
+def test_cached_prompt_tokens_is_zero_when_unreported(usage):
+    """Reading this must never be able to break a real call — it is diagnostics riding along."""
+    from chavruta.llm.cloud import _cached_prompt_tokens
+
+    assert _cached_prompt_tokens(usage) == 0
+
+
+# ── The session-creation envelope hid every lesson and every citation ─────────
+# _first_query_work returns {"id", "first_q", "created_at", "result": <the answer>}, and both
+# _lesson_id_of and _record_event read the OUTER dict. Every key they wanted was simply absent, so
+# lesson_id came back "" and the lesson pool was never charged — and since the UI starts a new chat
+# per lesson, that was most lessons in the product. grounded/citations came back None too, which is
+# the figure the admin dashboard reports as the product's grounding rate.
+def _lesson_answer():
+    return api.QueryResponse(answer="שיעור", citations=[{"ref": "Genesis.1.1", "text": "t"}],
+                             grounded=True, intent="lesson",
+                             files=[{"name": "a.docx", "title": "t", "content": "c"}],
+                             lesson_id="L1")
+
+
+def test_a_lesson_built_on_the_first_turn_of_a_new_chat_is_still_a_lesson():
+    envelope = {"id": "s1", "first_q": "q", "created_at": "now", "result": _lesson_answer()}
+    assert api._lesson_id_of(envelope) == "L1"
+    assert api._lesson_id_of(_lesson_answer()) == "L1"          # the follow-up shape still works
+
+
+def test_the_envelope_does_not_report_a_grounded_answer_as_ungrounded():
+    envelope = {"id": "s1", "first_q": "q", "created_at": "now", "result": _lesson_answer()}
+    got = api._answer_payload(envelope)
+    assert got["grounded"] is True and len(got["citations"]) == 1
+
+
+def test_a_new_chat_that_produces_a_lesson_charges_the_lesson_pool(monkeypatch, tmp_path):
+    """The end-to-end invariant the two unit tests above only approach from either side."""
+    monkeypatch.setattr(api.db, "DB_PATH", tmp_path / "lessons.db")
+    monkeypatch.setattr(api.db, "_conn", None)
+    api.db.get_conn()
+    monkeypatch.setattr(api, "_record_event", lambda *a, **k: None)
+    monkeypatch.setenv("CHAVRUTA_LESSONS_WEEK_FREE", "5")
+
+    api._metered("teacher1", api.Reservation(20_000), "lesson",
+                 lambda: {"id": "s1", "first_q": "q", "created_at": "now",
+                          "result": _lesson_answer()})()
+    assert api.db.usage_this_week("teacher1", meter=api.db.LESSON) == 1

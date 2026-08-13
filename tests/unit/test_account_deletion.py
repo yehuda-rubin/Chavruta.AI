@@ -6,6 +6,7 @@ else — and the always-exempt 'local' user — untouched.
 """
 from __future__ import annotations
 
+import json
 import urllib.request
 
 import pytest
@@ -75,6 +76,118 @@ def test_run_due_purges_wipes_expired_accounts(fresh_db, monkeypatch):
     assert n == 1
     assert fresh_db.list_sessions("gone") == []            # expired account purged
     assert len(fresh_db.list_sessions("stays")) == 1       # not-yet-due account survives
+
+
+def test_purge_now_deletes_without_any_schedule(fresh_db, monkeypatch):
+    """The immediate path: no grace row is written and nothing waits for a sweep."""
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    _seed_owner(fresh_db, "impatient")
+    _seed_owner(fresh_db, "bystander")
+
+    accounts.purge_now("impatient")
+
+    assert fresh_db.list_sessions("impatient") == []
+    assert fresh_db.list_lessons("impatient") == []
+    assert fresh_db.get_account("impatient") is None
+    assert len(fresh_db.list_sessions("bystander")) == 1
+    # And nothing is left pending — a sweep now has nothing to do.
+    assert fresh_db.due_deletions("2030-01-01T00:00:00+00:00") == []
+
+
+def test_purge_now_refuses_a_school_owner(fresh_db):
+    """The one case it must NOT quietly do: purging the person who administers a school would leave
+    the members spending a pool nobody owns. It raises, so the caller can say so."""
+    import app.orgs as orgs
+    _seed_owner(fresh_db, "principal")
+    orgs.create_org("principal", "בית ספר", "school")
+    with pytest.raises(fresh_db.OwnsOrganisation):
+        accounts.purge_now("principal")
+    assert len(fresh_db.list_sessions("principal")) == 1     # nothing was deleted on the way out
+
+
+# ── Deletion and a live subscription ─────────────────────────────────────────
+def _paying(d, owner, ref="recur-123"):
+    d.upsert_subscription(owner, provider="payplus", provider_ref=ref, status="active",
+                          plan="pro", cycle="monthly", updated_at="2026-08-13T00:00:00+00:00")
+
+
+def test_deletion_stops_the_recurring_charge_before_the_row_holding_it_is_deleted(fresh_db,
+                                                                                  monkeypatch):
+    """purge_owner deletes the subscriptions row, and provider_ref inside it is the ONLY handle on
+    the recurring charge. Cancel after the purge and there is nothing left to cancel with — the card
+    keeps being charged for an account that no longer exists."""
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    called: list[str] = []
+    monkeypatch.setattr("app.billing.payplus.cancel_recurring", lambda ref: called.append(ref))
+    _seed_owner(fresh_db, "payer")
+    _paying(fresh_db, "payer")
+
+    accounts.purge_now("payer")
+
+    assert called == ["recur-123"]
+    assert fresh_db.get_subscription("payer") is None
+
+
+def test_scheduling_stops_the_charge_at_the_request_not_at_the_deadline(fresh_db, monkeypatch):
+    """A monthly subscription renews INSIDE a 30-day grace period. Waiting for the purge would bill
+    someone once more for an account they had already asked us to erase."""
+    called: list[str] = []
+    monkeypatch.setattr("app.billing.payplus.cancel_recurring", lambda ref: called.append(ref))
+    _paying(fresh_db, "leaver")
+
+    accounts.schedule("leaver")
+
+    assert called == ["recur-123"]
+    assert fresh_db.get_subscription("leaver")["cancel_at_period_end"] == 1
+
+
+def test_deletion_is_abandoned_when_the_charge_cannot_be_stopped(fresh_db, monkeypatch):
+    """Refusing to delete is recoverable — everything is still here and the user is told. Deleting
+    anyway is not: the data would be gone and the monthly charge would continue with no local record
+    of what to cancel."""
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+
+    def boom(_ref):
+        raise RuntimeError("provider down")
+
+    monkeypatch.setattr("app.billing.payplus.cancel_recurring", boom)
+    _seed_owner(fresh_db, "payer")
+    _paying(fresh_db, "payer")
+
+    import app.billing.service as billing
+    with pytest.raises(billing.ProviderCancelFailed):
+        accounts.purge_now("payer")
+    assert len(fresh_db.list_sessions("payer")) == 1          # nothing was deleted
+    assert fresh_db.get_subscription("payer") is not None     # the handle is still here to retry
+
+
+def test_a_free_account_has_nothing_to_cancel(fresh_db, monkeypatch):
+    """The provider must not be called for someone who never paid — and a provider outage must not
+    stop a free user from deleting their account."""
+    def boom(_ref):
+        raise AssertionError("the provider must not be called for a free account")
+
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.setattr("app.billing.payplus.cancel_recurring", boom)
+    _seed_owner(fresh_db, "freebie")
+    accounts.purge_now("freebie")
+    assert fresh_db.list_sessions("freebie") == []
+
+
+def test_a_coupon_plan_is_not_sent_to_the_payment_provider(fresh_db, monkeypatch):
+    """A coupon-granted plan stores the coupon CODE in provider_ref. Sending that to PayPlus is a
+    guaranteed error, and under `strict` it would abort a deletion that has nothing wrong with it."""
+    def boom(_ref):
+        raise AssertionError("a coupon code must never reach the payment provider")
+
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.setattr("app.billing.payplus.cancel_recurring", boom)
+    fresh_db.upsert_subscription("couponed", provider="coupon", provider_ref="TORAH25",
+                                 status="active", plan="pro", cycle="coupon",
+                                 updated_at="2026-08-13T00:00:00+00:00")
+    _seed_owner(fresh_db, "couponed")
+    accounts.purge_now("couponed")
+    assert fresh_db.list_sessions("couponed") == []
 
 
 def test_schedule_sets_future_deadline(fresh_db, monkeypatch):
@@ -191,5 +304,152 @@ def test_supabase_user_count_network_failure_is_none(monkeypatch):
     assert accounts.count_supabase_users() is None
 
 
+# ── list_supabase_user_emails: recipient list for broadcasts ─────────────────────────────
+def test_supabase_user_emails_empty_when_not_configured(monkeypatch):
+    """When Supabase is not configured, returns empty list (not None)."""
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    assert accounts.list_supabase_user_emails() == []
+
+
+def test_supabase_user_emails_single_page(monkeypatch):
+    """Collects email addresses from a single page of users."""
+    monkeypatch.setenv("SUPABASE_URL", "https://x.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "k")
+
+    users_page = json.dumps({
+        "users": [
+            {"id": "1", "email": "user1@example.com"},
+            {"id": "2", "email": "user2@example.com"},
+            {"id": "3", "email": "user3@example.com"},
+        ]
+    }).encode()
+
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda req, timeout=10: _FakeResponse(users_page))
+    emails = accounts.list_supabase_user_emails()
+    assert emails == ["user1@example.com", "user2@example.com", "user3@example.com"]
+
+
+def test_supabase_user_emails_paginates(monkeypatch):
+    """Collects email addresses across multiple pages."""
+    monkeypatch.setenv("SUPABASE_URL", "https://x.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "k")
+
+    page1 = json.dumps({"users": [{"id": str(i), "email": f"user{i}@example.com"} for i in range(1000)]}).encode()
+    page2 = json.dumps({"users": [{"id": str(i), "email": f"user{i}@example.com"} for i in range(1000, 2000)]}).encode()
+    page3 = json.dumps({"users": [{"id": str(i), "email": f"user{i}@example.com"} for i in range(2000, 2042)]}).encode()
+
+    pages = iter([page1, page2, page3])
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda req, timeout=10: _FakeResponse(next(pages)))
+    emails = accounts.list_supabase_user_emails()
+    assert len(emails) == 2042
+    assert emails[0] == "user0@example.com"
+    assert emails[1000] == "user1000@example.com"
+    assert emails[2000] == "user2000@example.com"
+
+
+def test_supabase_user_emails_skips_missing_email(monkeypatch):
+    """Users without email addresses are skipped (defensive)."""
+    monkeypatch.setenv("SUPABASE_URL", "https://x.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "k")
+
+    users_page = json.dumps({
+        "users": [
+            {"id": "1", "email": "user1@example.com"},
+            {"id": "2"},  # No email
+            {"id": "3", "email": "user3@example.com"},
+            {"id": "4", "email": None},  # Null email
+        ]
+    }).encode()
+
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda req, timeout=10: _FakeResponse(users_page))
+    emails = accounts.list_supabase_user_emails()
+    assert emails == ["user1@example.com", "user3@example.com"]
+
+
+def test_supabase_user_emails_network_failure_returns_empty(monkeypatch):
+    """Network error returns empty list (not None)."""
+    monkeypatch.setenv("SUPABASE_URL", "https://x.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "k")
+
+    def boom(req, timeout=10):
+        raise OSError("network down")
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    assert accounts.list_supabase_user_emails() == []
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ── An org owner's deletion must not half-happen ─────────────────────────────
+def test_the_sweeper_skips_an_org_owner_without_destroying_their_login(monkeypatch, tmp_path):
+    """The two steps used to run in the other order: the Supabase user was deleted, purge_owner then
+    refused, and the result was an account that could not sign in whose data was fully intact —
+    retried and re-logged every sweep, forever. An unfulfilled erasure that LOOKS fulfilled is the
+    worst of both."""
+    import app.accounts as accounts
+    import app.orgs as orgs
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "purge.db")
+    monkeypatch.setattr(db, "_conn", None)
+    db.get_conn()
+    deleted_logins = []
+    monkeypatch.setattr(accounts, "_delete_supabase_user", lambda o: deleted_logins.append(o))
+
+    school = orgs.create_org("headmaster", "בית ספר", "institution")
+    db.create_session("a question", owner_id="headmaster")
+    db.schedule_deletion("headmaster", "2000-01-01T00:00:00", "2000-01-08T00:00:00")
+    db.create_session("another", owner_id="ordinary")
+    db.schedule_deletion("ordinary", "2000-01-01T00:00:00", "2000-01-08T00:00:00")
+
+    assert accounts.run_due_purges("2026-01-01T00:00:00") == 1   # the count is what really happened
+    assert deleted_logins == ["ordinary"]                        # the owner's login was NOT touched
+    assert orgs.get_org(school) is not None
+    assert db.list_sessions("headmaster")                        # ...and neither was their data
+    assert db.list_sessions("ordinary") == []
+
+
+def test_purge_removes_what_the_person_wrote_and_reported(monkeypatch, tmp_path):
+    """feedback holds their free text and message_reports holds their id against a message that
+    cascade-deletes with the session — so the report was not only kept but became invisible to the
+    operator's own review screen, which inner-joins messages. Retained data nothing can see is data
+    nothing will ever clean up."""
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "wrote.db")
+    monkeypatch.setattr(db, "_conn", None)
+    db.get_conn()
+    sid = db.create_session("a question", owner_id="author")
+    mid = db.save_message(sid, "assistant", "an answer")
+    db.submit_feedback("author", "something they typed")
+    db.report_message(mid, "author", "wrong")
+
+    db.purge_owner("author")
+
+    with db._LOCK:
+        conn = db.get_conn()
+        assert conn.execute("SELECT COUNT(*) FROM feedback WHERE owner_id=?",
+                            ("author",)).fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM message_reports WHERE owner_id=?",
+                            ("author",)).fetchone()[0] == 0
+
+
+def test_a_purge_pattern_cannot_match_other_accounts(monkeypatch, tmp_path):
+    """The org counter delete builds a LIKE PATTERN from the owner id, so `%` and `_` inside it would
+    be wildcards. Every API-key-mode id already contains an underscore."""
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "like.db")
+    monkeypatch.setattr(db, "_conn", None)
+    db.get_conn()
+    for who in ("org:o1:u_alice", "org:o1:u_bob", "org:o1:literal"):
+        db.bump_usage(who, 0, units=5)
+
+    db.purge_owner("%")            # a pattern, not an account: must match nothing
+    db.purge_owner("u_alice")      # ...and a real id must take only its own row
+
+    with db._LOCK:
+        left = {r[0] for r in db.get_conn().execute(
+            "SELECT owner_id FROM usage_counters").fetchall()}
+    assert left == {"org:o1:u_bob", "org:o1:literal"}

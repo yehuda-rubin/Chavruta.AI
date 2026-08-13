@@ -154,3 +154,11 @@ docs/DEV_MODELS.local.md
 # ---- Poster: brand-licensed Nebius assets/fonts + heavy PDF/PNG exports — keep the WHOLE folder out of git ----
 design/brand/
 design/poster/
+
+# ---- Harvested production questions — REAL USER TEXT, never commit ----
+# scripts/harvest_failed_questions.py pulls the questions behind failed retrievals so they can be
+# studied. Reviewing them internally is permitted (privacy policy 2); publishing them to a public
+# repository is not, and no paraphrase makes a user's words ours to publish. Eval rows go in written
+# from scratch, describing the RETRIEVAL PATTERN that failed — never a user's sentence.
+harvested_failures*.jsonl
+eval/harvested*.jsonl

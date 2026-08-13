@@ -10,7 +10,9 @@ This module is where grounding is *enforced*, not merely requested:
 from __future__ import annotations
 
 import re
+from typing import NamedTuple
 
+from chavruta.corpus.refs import COMMENTATOR_HE, commentator_from_ref, commentator_title
 from chavruta.corpus.schema import Answer, Citation, Intent, LessonPlan, LessonSection
 from chavruta.llm.base import GroundedPrompt, SourceBlock
 from chavruta.llm.base import Turn as LLMTurn
@@ -52,13 +54,42 @@ SYSTEM_QA = (
     "When a claim characterizes a specific real, identifiable person (a historical figure, a "
     "posek, a living or recently-deceased rabbi) — especially their conduct, motives, or "
     "character — stay close to that source's own wording rather than your own paraphrase, and "
-    "do not add evaluative or judgmental language the source itself does not state."
+    "do not add evaluative or judgmental language the source itself does not state. "
+    "The interface renders plain text plus **bold** and line breaks ONLY — never use Markdown "
+    "headers (#, ##, ###) or leading '>' blockquote lines; they show up as literal, ugly "
+    "characters. Use a **bold** phrase instead of a header, and put quotes inline in regular "
+    "quotation marks, not on their own '>' line. If a source's own text is in a different "
+    "language than your answer (e.g. an English-translated responsum in an otherwise-Hebrew "
+    "answer), translate it into the answer's language rather than quoting it verbatim in the "
+    "other language — the citation marker still links the reader to the original. "
+    "Do not require a literal word-match between the question and a source: if the question is "
+    "about a modern case or a term that never appears verbatim in the sources (a device, a "
+    "situation, a present-day action), infer the underlying principle FROM the sources you were "
+    "given and apply it to the case asked — the way a real posek reasons from precedent — rather "
+    "than only answering when the exact case is named. That kind of inference (a fortiori, a "
+    "shared underlying principle) is legitimate as long as every step still traces back to what a "
+    "provided source actually says — it is not the same as inventing a source or a ruling that "
+    "doesn't follow from them. "
+    "This is one continuous conversation, not a series of unrelated questions. Read the "
+    "conversation so far before answering: a short follow-up ('and what about…', 'why?') refers to "
+    "what was just discussed, and the sources already quoted earlier still count — don't make the "
+    "user repeat themselves. Each turn, choose deliberately: answer from what you already have "
+    "(this conversation and its sources) if that genuinely suffices; ask for more sources if it "
+    "doesn't; or, when the request is truly ambiguous and the answer would differ materially "
+    "depending on the reading, ask the user one short clarifying question instead of guessing."
 )
 
 SYSTEM_EXPLAIN = SYSTEM_QA + (
     " When explaining or comparing commentators, present each view grounded in that "
     "commentator's words, attribute it correctly, and surface disagreements rather than "
-    "flattening them into one opinion."
+    "flattening them into one opinion. But do not treat 'is there a dispute?' as a yes/no "
+    "question: very often two commentators are not disagreeing at all but speaking on different "
+    "levels — one about the spiritual dimension and the other the physical, one peshat and the "
+    "other derash, one the cause and the other the effect. Where the sources show two directions "
+    "that do not contradict, present them as exactly that and say plainly that these are "
+    "complementary layers rather than opposed opinions — that is itself the reconciliation when "
+    "one is asked for. And never answer 'no dispute was found' merely because no source used the "
+    "word 'disagrees': show what each one says, and where precisely they part."
 )
 
 SYSTEM_LESSON = SYSTEM_QA + (
@@ -77,7 +108,23 @@ SYSTEM_BASE_HE = (
     "אם המקורות אינם עונים על השאלה — אמור זאת בפשטות. ייחס כל דבר לפרשן הנכון. "
     "כשטענה מתארת דמות מזוהה וממשית (דמות היסטורית, פוסק, רב חי או שנפטר לאחרונה) — במיוחד "
     "לגבי התנהגותו, כוונותיו או אופיו — הישאר קרוב ללשון המקור עצמו ולא לניסוח חופשי משלך, "
-    "ואל תוסיף הערכה או שיפוט שאינם עולים מן המקור עצמו."
+    "ואל תוסיף הערכה או שיפוט שאינם עולים מן המקור עצמו. "
+    "הממשק מציג טקסט רגיל ועוד **מודגש** וירידות שורה בלבד — לעולם אל תשתמש בכותרות Markdown "
+    "(#, ##, ###) או בשורת ציטוט שמתחילה ב-'>'; הם מוצגים כתווים גולמיים ומכוערים. השתמש "
+    "בביטוי **מודגש** במקום כותרת, והבא ציטוטים בתוך הטקסט במרכאות רגילות, לא בשורת '>' נפרדת. "
+    "אם לשון מקור מסוים כתובה בשפה שונה משפת התשובה (למשל תשובה שתורגמה לאנגלית, בתוך תשובה "
+    "בעברית) — תרגם אותה לשפת התשובה במקום לצטט אותה כלשונה בשפה הזרה; סימון ה-[S#] עדיין "
+    "מקשר את הקורא למקור המקורי. "
+    "אל תדרוש התאמת-מילים מילולית בין השאלה למקור: אם השאלה עוסקת במקרה מודרני או במונח שלא "
+    "מופיע כלשונו במקורות (מכשיר, מצב, או פעולה עכשווית) — הסק את העיקרון העולה מן המקורות "
+    "שסופקו והחל אותו על המקרה הנשאל, כפי שפוסק אמיתי מסיק מתקדים, ולא רק כשהמקרה עצמו נזכר "
+    "במפורש. הסקה כזו (קל וחומר, עיקרון משותף) לגיטימית כל עוד כל צעד בה נשען בפועל על לשון "
+    "מקור שסופק — וזה שונה לגמרי מהמצאת מקור או פסק שאינו עולה מהם. "
+    "זו שיחה אחת מתמשכת, לא רצף שאלות מנותקות. קרא את השיחה שעד כה לפני שאתה עונה: שאלת המשך "
+    "קצרה ('ומה אם…', 'למה?') מתייחסת למה שנדון זה עתה, והמקורות שכבר הובאו קודם עדיין עומדים — "
+    "אל תגרום למשתמש לחזור על עצמו. בכל תור בחר במודע: ענה ממה שכבר יש לך (השיחה הזו והמקורות "
+    "שבה) אם זה באמת מספיק; בקש מקורות נוספים אם לא; או, כשהבקשה באמת דו-משמעית והתשובה תשתנה "
+    "מהותית לפי הפירוש — שאל את המשתמש שאלת הבהרה אחת קצרה במקום לנחש."
 )
 
 # QA stays short and direct; explain/lesson must NOT inherit that brevity instruction.
@@ -85,7 +132,12 @@ SYSTEM_QA_HE = SYSTEM_BASE_HE + " ענה תשובה קצרה וישירה, בל�
 
 SYSTEM_EXPLAIN_HE = SYSTEM_BASE_HE + (
     " כשאתה מסביר או משווה פרשנים — הצג כל שיטה מתוך דברי הפרשן עצמו, ייחס נכון, "
-    "והצג מחלוקות כפי שהן, בלי לטשטש."
+    "והצג מחלוקות כפי שהן, בלי לטשטש. "
+    "אבל אל תתייחס ל'מחלוקת' כשאלת כן/לא: הרבה פעמים שני פרשנים אינם חולקים כלל אלא מדברים "
+    "ברבדים שונים — האחד בכיוון הרוחני והשני בגשמי, האחד בפשט והשני בדרש, האחד בסיבה והשני "
+    "בתוצאה. אם המקורות מראים שני כיוונים שאינם סותרים — הצג אותם ככאלה ואמור במפורש שאין כאן "
+    "חולקים אלא רבדים משלימים; זהו גם היישוב עצמו כשמבקשים ליישב. ואל תאמר 'לא נמצאה מחלוקת' "
+    "רק משום שאף מקור לא כתב את המילה 'חולק' — הַראה מה כל אחד אומר, ובמה בדיוק הם נבדלים."
 )
 
 SYSTEM_LESSON_HE = SYSTEM_BASE_HE + (
@@ -236,7 +288,18 @@ _QUOTE_RE = re.compile(r'["“„״]([^"“”״\n]{12,})["”״]')  # gershayim
 # truncated fragment that then — correctly, but for the wrong reason — fails the corpus-containment
 # check: a real, faithfully-quoted source gets flagged as fabricated. _protect_abbreviations masks
 # those internal marks before matching so only genuine quote boundaries are treated as delimiters.
-_ABBREV_MARK_RE = re.compile(r'(?<=[א-ת])["״](?=[א-ת])')
+#
+# "between two Hebrew letters" alone is NOT enough, though, and getting that wrong cost the guard its
+# teeth. Hebrew attaches one-letter prefixes straight onto an opening quote — ש"אסור לטלטל…",
+# ו"היה אם שמוע…", ה"כלל הגדול…" — and that opening mark also sits between two Hebrew letters. Masking
+# it deleted the opening delimiter, so the whole quotation went invisible to the checker and a
+# FABRICATED quote written that way passed unflagged (reproduced 2026-08-11 on realistic halachic
+# prose). A false negative here is far worse than the false positive the mask was added for.
+#
+# What separates the two is what FOLLOWS the mark: an abbreviation ends almost immediately (רש"י,
+# רמב"ם, שו"ע, ב"ק — one letter, occasionally two), while a quotation runs on into a word. So the
+# mask applies only when at most two Hebrew letters remain before the next boundary.
+_ABBREV_MARK_RE = re.compile(r'(?<=[א-ת])["״](?=[א-ת]{1,2}(?![א-ת]))')
 
 
 def _protect_abbreviations(s: str) -> str:
@@ -258,12 +321,238 @@ def unverified_quotes(text: str, sources, min_len: int = 14) -> list[str]:
         return []
     text = text or ""
     bad = []
-    for m in _QUOTE_RE.finditer(_protect_abbreviations(text)):
-        raw = text[m.start(1):m.end(1)]   # same span, original characters (abbreviation marks intact)
+    for start, end in _quoted_spans(_protect_abbreviations(text)):
+        raw = text[start:end]             # same span, original characters (abbreviation marks intact)
         q = _heb_skeleton(raw)
         if len(q) >= min_len and q[:min_len] not in corpus:   # opening not found in any source
             bad.append(raw.strip()[:60])
     return bad
+
+
+def _quoted_spans(masked: str) -> list[tuple[int, int]]:
+    """Spans between quote marks, paired IN ORDER — 1st with 2nd, 3rd with 4th, and so on.
+
+    The regex this replaces let any mark pair with any later mark, so one short quoted word threw
+    the parity off and every following pair was wrong: the guard then reported the model's OWN prose
+    as a fabricated quote. Real examples from a 26-question run —
+        "(ייאוש, ויתור על החפץ) כבר קיים באופן עקרוני"      ← not a quote at all
+        "מתייחסת לכל ערי ארץ ישראל חוץ מירושלים [S14], והתקנה הורחבה"
+    Sequential pairing is how quotation actually nests in a sentence, and it keeps the parity honest.
+
+    A span containing a citation marker is never a quote: [S#] markers are written by the model
+    AROUND its sources, never inside one, so a span that swallows one is a mis-pairing by
+    construction. Same for a span crossing a line break.
+    """
+    marks = [i for i, ch in enumerate(masked) if ch in '"“”„״']
+    spans: list[tuple[int, int]] = []
+    for a, b in zip(marks[0::2], marks[1::2]):
+        inner_start, inner_end = a + 1, b
+        inner = masked[inner_start:inner_end]
+        if "\n" in inner or _MARKER_RE.search(inner):
+            continue
+        # An ELLIPSIS means the writer abridged — the span is deliberately not verbatim, so holding
+        # it to a verbatim-containment check reports honest abridgement as fabrication.
+        if "…" in inner or "..." in inner:
+            continue
+        # A span opening on punctuation or markdown is a mis-pairing, not a quotation: no one starts
+        # a quote with a comma or a dash. (", בניגוד לניסיונות האחרים…", "– כלומר, די בהשערה…")
+        if inner.lstrip()[:1] in {",", "–", "-", ":", ";", ".", "*", ")"}:
+            continue
+        spans.append((inner_start, inner_end))
+    return spans
+
+
+# ── Attribution faithfulness: the quote is real — but is it THIS commentator's? ─────────────────
+# `unverified_quotes` only asks whether a quoted span exists in SOME retrieved source. That leaves a
+# hole with teeth, reproduced 2026-08-13 against these very functions with two Sukkah 41a chunks:
+#
+#     רש"י כותב במפורש [S1]: "ולעולם יבנה בידי אדם ואין סתירה בין הדברים"
+#
+# where that wording is the TOSAFOT chunk's, not Rashi's. Every guard passed — the marker resolved,
+# `grounded` was True, `unverified_quotes` returned []. The reader was shown a fabrication in the one
+# dimension a beis midrash cares about most: who said it. Quoting a real source under the wrong name
+# is not a lesser error than inventing one; it is the same error wearing a citation.
+#
+# The whole design here is biased toward SILENCE. A false positive — telling a user that a faithful,
+# correctly-attributed answer misquotes a commentator — would destroy trust in the guard and get it
+# switched off, at which point it catches nothing at all. So every ambiguity below resolves to "say
+# nothing", and the check fires only when the mismatch is demonstrable against the sources the model
+# was actually handed.
+
+# Sefaria/corpus commentator ids are the join key on both sides: the source side derives its id from
+# the ref (`commentator_from_ref` — the payload field is empty on all 2.4M points), and the prose side
+# resolves a Hebrew/English NAME to the same id. Two name tables already exist and neither alone is
+# enough: refs.COMMENTATOR_HE is broad (tosafot, ran, meiri, bartenura…) but holds one spelling each,
+# while router.COMMENTATOR_ALIASES carries the gershayim-less and English variants a model actually
+# writes (רשי / רמבן / "Rashi"). Merged, with collisions dropped — see `_attribution_aliases`.
+_GERSHAYIM_TRANS = str.maketrans({"״": '"', "”": '"', "“": '"', "„": '"'})
+
+_ATTR_WINDOW = 60   # chars of prose before the opening quote that count as its introduction
+_ATTR_TRAIL = 40    # …and after the closing one, for a trailing "(תוספות שם)" attribution
+_ATTR_BREAKS = ("\n", ". ", "! ", "? ")   # a name in a PREVIOUS sentence introduces nothing here
+
+_attr_aliases: list[tuple[re.Pattern[str], str]] | None = None
+
+
+def _alias_pattern(alias: str) -> re.Pattern[str]:
+    """A whole-word matcher for one commentator name, tolerating Hebrew's glued one-letter prefixes.
+
+    Mirrors intents/router.py::_alias_hit, including its warning: ש is NOT a safe prefix on a bare
+    name, because 'שרשי' would then match 'רשי' (and 'שרשי' is an ordinary word). It IS safe on a name
+    carrying gershayim — no Hebrew word contains one — and 'שרש"י כותב' is how a model writes it, so
+    the prefix set widens only for those.
+    """
+    a = alias.strip().translate(_GERSHAYIM_TRANS)
+    if re.search(r"[א-ת]", a):
+        pre = "והבכלמש" if '"' in a else "והבכלמ"
+        return re.compile(f"(?<![א-ת])[{pre}]{{0,2}}{re.escape(a)}(?![א-ת])")
+    return re.compile(rf"(?<![a-z]){re.escape(a.lower())}(?![a-z])", re.IGNORECASE)
+
+
+def _attribution_aliases() -> list[tuple[re.Pattern[str], str]]:
+    """name-pattern → commentator id, built once from the two existing tables.
+
+    A name claimed by TWO different ids is dropped rather than resolved to either — 'תרגום יונתן' is
+    both `targum_yonatan` (refs) and `targum_jonathan` (router), and picking the loser would invent a
+    mismatch against a source that is in fact exactly the work named: a false positive manufactured
+    out of our own duplicate bookkeeping.
+    """
+    global _attr_aliases
+    if _attr_aliases is None:
+        # Lazy: the intent layer is a peer of generation, not a dependency of it — importing it at
+        # module scope would make `generation` un-importable on its own the day router grows an import.
+        from chavruta.intents.router import COMMENTATOR_ALIASES
+
+        by_name: dict[str, str | None] = {}
+
+        def _put(name: str, cid: str) -> None:
+            n = (name or "").strip().translate(_GERSHAYIM_TRANS)
+            if not n:
+                return
+            if n in by_name and by_name[n] != cid:
+                by_name[n] = None                       # ambiguous → refuse to resolve it at all
+            else:
+                by_name.setdefault(n, cid)
+
+        for cid, he in COMMENTATOR_HE.items():
+            _put(he, cid)
+        for cid, aliases in COMMENTATOR_ALIASES.items():
+            for a in aliases:
+                _put(a, cid)
+        _attr_aliases = [(_alias_pattern(n), cid) for n, cid in by_name.items() if cid]
+    return _attr_aliases
+
+
+def _names_in(window: str) -> set[str]:
+    return {cid for pat, cid in _attribution_aliases() if pat.search(window)}
+
+
+def _attribution_window(text: str, start: int) -> str:
+    """The prose that introduces the quote opening at `start`: back to the previous sentence end."""
+    win = text[max(0, start - _ATTR_WINDOW):start]
+    cut = 0
+    for b in _ATTR_BREAKS:
+        i = win.rfind(b)
+        if i != -1:
+            cut = max(cut, i + len(b))
+    return win[cut:]
+
+
+class Misattribution(NamedTuple):
+    """A quoted span whose prose credits one commentator while the words belong to another.
+
+    `found_in` is the id(s) of the retrieved source(s) that actually carry the wording — plural
+    because two commentaries can share a phrase, and reporting all of them keeps the note honest.
+    """
+
+    quote: str
+    claimed: str
+    found_in: tuple[str, ...]
+
+
+def misattributed_quotes(text: str, sources, min_len: int = 24) -> list[Misattribution]:
+    """Attribution guard: verbatim quotes credited to a named commentator whose words they are not.
+
+    Complements `unverified_quotes` and never overlaps it: a quote found in NO source is that
+    function's finding and is skipped here, so a single fabrication is never reported twice.
+
+    Fires ONLY when all of the following hold — each condition removed a class of false positive:
+      • the quoted span is long enough to identify a source (≥ `min_len` Hebrew letters);
+      • it is carried by at least one retrieved source, and by no BASE text. A commentator quoting
+        the pasuk or daf he is commenting on is the normal shape of Torah prose, not a misquote, and
+        base texts have no commentator to disagree with (constraint: never flag a bare pasuk);
+      • exactly ONE commentator is named in the introducing sentence. 'רש"י ותוספות נחלקו… וכתב: "…"'
+        is genuinely ambiguous about whose words follow, and guessing there is how a guard earns a
+        reputation for crying wolf;
+      • that commentator is not among the sources holding the quote, and is not named again right
+        after the quote ('…" (תוספות שם)' is a trailing attribution, not a contradiction);
+      • a source BY the named commentator was actually retrieved. This is the strictest condition and
+        the reason the finding is worth showing: the model had that commentator's own text in front of
+        it, and the words it put in his mouth are visibly someone else's. Without a source by him we
+        cannot distinguish a misquote from a nested attribution ('כפי שהביא הרמב"ן בשם רש"י') or from
+        an author quoting his own dibbur hamatchil, so we stay quiet.
+
+    Consequently this is blind to works filed WITHOUT the '<Title>_on_<Base>' commentary form —
+    Shulchan Arukh, Mishnah Berurah, Mishneh Torah — because `commentator_from_ref` correctly yields
+    None for them and they are treated as base texts. Widening that would mean guessing an author out
+    of a work title, which is exactly the guesswork this guard refuses elsewhere.
+    """
+    text = text or ""
+    # Derive each source's commentator from its ref, NOT from the payload field: `commentator_id` is
+    # empty on every point in the commercial corpus and is a read-time derivation (docs/CORPUS.md
+    # §7.2b). The payload is still consulted as a fallback for sources built by other paths.
+    by_cid: list[tuple[str | None, str]] = []
+    for s in (sources or []):
+        body = getattr(s, "text", None) or getattr(s, "quote", "") or ""
+        cid = commentator_from_ref(getattr(s, "ref", "") or "") or (
+            getattr(s, "commentator_id", None) or None)
+        by_cid.append((cid, _heb_skeleton(body)))
+    retrieved = {cid for cid, _ in by_cid if cid}
+    if not retrieved:
+        return []
+
+    # Quote-mark variants folded to ASCII so a name written רש״י resolves like רש"י. 1-for-1, so the
+    # span offsets computed on the original text still index this string correctly.
+    normalized = text.translate(_GERSHAYIM_TRANS)
+
+    out: list[Misattribution] = []
+    for start, end in _quoted_spans(_protect_abbreviations(text)):
+        raw = text[start:end]
+        q = _heb_skeleton(raw)
+        if len(q) < min_len:
+            continue
+        key = q[:min_len]
+        holders = {cid for cid, skel in by_cid if key in skel}
+        if not holders or None in holders:
+            continue
+        named = _names_in(_attribution_window(normalized, start))
+        if len(named) != 1:
+            continue
+        claimed = next(iter(named))
+        if claimed in holders or claimed not in retrieved:
+            continue
+        if _names_in(normalized[end + 1:end + 1 + _ATTR_TRAIL].split("\n")[0]) & holders:
+            continue
+        out.append(Misattribution(raw.strip()[:60], claimed, tuple(sorted(str(c) for c in holders))))
+    return out
+
+
+def misattribution_note(lang: str, findings: list[Misattribution]) -> str:
+    """Caveat text for a misattribution. Names BOTH sides on purpose: 'unverified quote' would be a
+    lie here — the quote is in the corpus, it just isn't the commentator's the answer credits, and
+    telling the reader which source does carry it is what lets them check in one click."""
+    if not findings:
+        return ""
+    f = findings[0]
+    if lang == "he":
+        claimed = COMMENTATOR_HE.get(f.claimed, f.claimed)
+        actual = ", ".join(COMMENTATOR_HE.get(c, c) for c in f.found_in)
+        return (f"הערה: הציטוט «{f.quote}» יוחס ל{claimed}, אך לשון זו נמצאת במקור של {actual} "
+                f"— יש לאמת את הייחוס.")
+    claimed = commentator_title(f.claimed).replace("_", " ")
+    actual = ", ".join(commentator_title(c).replace("_", " ") for c in f.found_in)
+    return (f"Note: the quote «{f.quote}» is attributed to {claimed}, but that wording appears in "
+            f"the {actual} source — verify the attribution.")
 
 
 def work_not_loaded_answer(lang: str, missing_works: list[str], intent: Intent) -> Answer:
@@ -314,12 +603,15 @@ def no_source_answer(lang: str, intent: Intent = Intent.QA) -> Answer:
 
 
 def build_lesson_walkthrough_prompt(plan: LessonPlan, question: str, lang: str = "he",
-                                    shut: bool = False):
+                                    shut: bool = False, history=None):
     """Prompt the model to deliver the lesson — or responsa (`shut=True`) — as a flowing
     walkthrough (the "מהלך"), laying out the arc's stages in order with sources as [S#].
 
     Returns (GroundedPrompt, marker_map) — marker_map values are the plan's Citations, so
     enforce_citations resolves the cited sources and lets the caller keep only those.
+
+    `history` (the conversation so far) is carried onto the prompt so a lesson/responsa turn can
+    be a follow-up rather than a standalone question — this used to be hard-coded empty.
     """
     seen: dict[str, str] = {}
     sources: list[SourceBlock] = []
@@ -354,7 +646,9 @@ def build_lesson_walkthrough_prompt(plan: LessonPlan, question: str, lang: str =
         lines += ["", "Now write the full walkthrough following these stages — open straight "
                   "from the source, without restating the question."]
         system = SYSTEM_SHUT_WALKTHROUGH if shut else SYSTEM_LESSON_WALKTHROUGH
-    prompt = GroundedPrompt(system=system, sources=sources, question="\n".join(lines), history=[])
+    llm_history = [LLMTurn(role=t.role, text=t.text) for t in (history or [])]
+    prompt = GroundedPrompt(system=system, sources=sources, question="\n".join(lines),
+                            history=llm_history)
     return prompt, marker_map
 
 

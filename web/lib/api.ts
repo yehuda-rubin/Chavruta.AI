@@ -210,8 +210,10 @@ export const api = {
   ready: () => req<{ status: string; points?: number; reason?: string }>("/ready"),
   me: () => req<Me>("/me"),
 
-  // Account deletion (scheduled, with a grace period). deleteAccount schedules it; cancel undoes it.
-  deleteAccount: () => req<Deletion>("/account/delete", { method: "POST" }),
+  // Account deletion. By default it is SCHEDULED after a grace period and `cancel` undoes it;
+  // `immediate` skips the wait and erases everything at once, which nothing can undo.
+  deleteAccount: (immediate = false) =>
+    req<Deletion>("/account/delete", { method: "POST", body: JSON.stringify({ immediate }) }),
   cancelAccountDeletion: () => req<Deletion>("/account/delete/cancel", { method: "POST" }),
 
   // Billing: is it available, start a checkout (returns a hosted payment URL), cancel the subscription.
@@ -235,6 +237,10 @@ export const api = {
       body: JSON.stringify({ reason }),
     }),
 
+  // General comment/correction/suggestion — not tied to any specific message (unlike reportMessage).
+  submitFeedback: (text: string) =>
+    req<{ ok: boolean }>("/feedback/submit", { method: "POST", body: JSON.stringify({ text }) }),
+
   // BYOK: validate a candidate key/base-url/model BEFORE saving it (see setUserLLMKey et al.) — the
   // candidate key is sent explicitly as a header (overriding whatever is already saved) so this
   // checks what the user just typed, not necessarily what's persisted yet.
@@ -244,6 +250,50 @@ export const api = {
       headers: { "X-User-LLM-Key": candidateKey },
       body: JSON.stringify({ model, base_url: baseUrl }),
     }),
+
+  // School panel (spec 004). `demo` is the OPERATOR's inspection path — a fixed synthetic school,
+  // gated on _is_admin server-side. It deliberately takes no org id: there is nothing here that can
+  // be pointed at a real school, which is what makes it a simulator rather than impersonation.
+  orgs: {
+    panel: (demo = false) => req<OrgPanel>(`/orgs/panel${demo ? "?demo=true" : ""}`),
+    invite: (role: string, maxUses = 1) =>
+      req<{ code: string; role: string; max_uses: number; expires_days: number }>("/orgs/invite", {
+        method: "POST",
+        body: JSON.stringify({ role, max_uses: maxUses }),
+      }),
+    invites: () => req<{ invites: OrgInvite[] }>("/orgs/invites"),
+    revokeInvite: (code: string) =>
+      req<{ revoked: boolean }>("/orgs/invite/revoke", {
+        method: "POST",
+        body: JSON.stringify({ code }),
+      }),
+    join: (code: string) =>
+      req<{ org_id: string; name: string; role: string }>("/orgs/join", {
+        method: "POST",
+        body: JSON.stringify({ code }),
+      }),
+    leave: () => req<{ left: boolean }>("/orgs/leave", { method: "POST" }),
+    // The owner closes their school rather than leaving it — there is no ownership transfer, and
+    // without this the paying admin could neither leave, nor delete their account, nor wind up.
+    close: () => req<{ closed: boolean; org_id: string }>("/orgs/close", { method: "POST" }),
+    removeMember: (ownerId: string) =>
+      req<{ removed: boolean }>("/orgs/members/remove", {
+        method: "POST",
+        body: JSON.stringify({ owner_id: ownerId }),
+      }),
+    // A removal sticks — the person cannot re-enter on the class code every classmate holds — so
+    // there has to be a way back for an administrator who removed the wrong account.
+    readmitMember: (ownerId: string) =>
+      req<{ readmitted: boolean }>("/orgs/members/readmit", {
+        method: "POST",
+        body: JSON.stringify({ owner_id: ownerId }),
+      }),
+    setCap: (ownerId: string, dailyCap: number) =>
+      req<{ owner_id: string; daily_cap: number }>("/orgs/members/cap", {
+        method: "POST",
+        body: JSON.stringify({ owner_id: ownerId, daily_cap: dailyCap }),
+      }),
+  },
 
   // Owner-only admin dashboard (see app/api.py's /admin/* routes and _is_admin). Goes through req()
   // (not a bare fetch, unlike /billing/limits) so the bearer token is attached — this data is gated.
@@ -255,12 +305,74 @@ export const api = {
       req<UsageByIntentRow[]>(`/admin/usage-by-intent?since=${since}`),
     usageByWeek: (since: AdminWindow) =>
       req<UsageByWeekRow[]>(`/admin/usage-by-week?since=${since}`),
+    // What the watching guards caught. They show nothing to users on purpose; this is the evidence
+    // on which that decision gets revisited — see src/chavruta/generation/guards.py.
+    guards: (since: AdminWindow, kind = "", limit = 100) =>
+      req<GuardFindings>(`/admin/guards?since=${since}&kind=${kind}&limit=${limit}`),
     flaggedMessages: (reviewed = false) =>
       req<FlaggedMessage[]>(`/admin/flagged-messages?reviewed=${reviewed}`),
     reviewMessage: (reportId: number) =>
       req<{ ok: boolean }>(`/admin/flagged-messages/${reportId}/review`, { method: "POST" }),
+    feedback: (reviewed = false) =>
+      req<FeedbackItem[]>(`/admin/feedback?reviewed=${reviewed}`),
+    reviewFeedback: (feedbackId: number) =>
+      req<{ ok: boolean }>(`/admin/feedback/${feedbackId}/review`, { method: "POST" }),
+    coupons: () => req<Coupon[]>("/admin/coupons"),
+    createCoupon: (body: CouponIn) =>
+      req<{ code: string }>("/admin/coupons", { method: "POST", body: JSON.stringify(body) }),
+    // Revokes; also removes the row when the code was never redeemed (`deleted` says which).
+    deleteCoupon: (code: string) =>
+      req<{ ok: boolean; deleted: boolean }>(`/admin/coupons/${encodeURIComponent(code)}`,
+                                             { method: "DELETE" }),
+    grant: (body: GrantIn) =>
+      req<GrantResult>("/admin/grant", { method: "POST", body: JSON.stringify(body) }),
   },
 };
+
+export interface Coupon {
+  code: string;
+  kind: "plan" | "credits";
+  plan: string | null;
+  days: number | null;
+  credits: number | null;
+  max_redemptions: number;      // 0 = unlimited
+  redeemed_count: number;
+  expires_at: string | null;    // null = never
+  active: number;               // 0 = revoked
+  note: string | null;
+  created_at: string;
+}
+
+export interface CouponIn {
+  kind: "plan" | "credits";
+  plan?: string;
+  days?: number;
+  credits?: number;
+  code?: string;                // blank → generated
+  max_redemptions?: number;
+  expires_in_days?: number | null;
+  note?: string;
+}
+
+export interface GrantIn {
+  owner_id: string;
+  kind: "plan" | "credits";
+  plan?: string;
+  days?: number;
+  credits?: number;
+  note?: string;
+}
+
+export interface GrantResult {
+  ok: boolean;
+  code: string;                 // the single-use code minted to carry the grant
+  kind: string;
+  mode: string;                 // grant | discount | boost | credits
+  plan: string | null;
+  until: string | null;
+  credits_added: number;
+  credits_balance: number;
+}
 
 // Account + today's free-tier quota (GET /me). daily_quota / remaining are null when unlimited
 // (the local user, or quota disabled) — the UI then shows no counter.
@@ -288,6 +400,7 @@ export interface Me {
   cycle: string;                            // 'monthly' | 'annual' | 'coupon'
   cancel_at_period_end: boolean;            // cancelled: access runs to plan_until, then lapses
   deletion_scheduled_for: string | null;   // ISO ts if the account is pending deletion
+  deletion_grace_days: number;             // how long the grace period is — stated before committing
   blocked: boolean;
   blocked_until: string | null;             // ISO ts the block lifts (null + blocked ⇒ permanent)
   blocked_reason: string;
@@ -297,6 +410,56 @@ export interface Me {
   // Admin dashboard link — see app/api.py::_is_admin. UI convenience only; the real gate is the
   // 404 every /admin/* route raises for a non-admin owner.
   is_admin: boolean;
+  // Organisation membership. `org_role` decides whether the school-panel button is rendered at all:
+  // students belong to a school but have nothing to manage, so they never see it. UI convenience —
+  // /orgs/* enforces the role server-side and 404s whatever the client draws.
+  org_id: string;
+  org_name: string;
+  org_role: string;                         // 'admin' | 'teacher' | 'student' | '' (not in one)
+}
+
+export interface OrgMember {
+  owner_id: string;
+  role: string;
+  // -1 blocks this member outright, 0 is the tier default, >0 is an explicit ceiling. The first two
+  // were one value until it turned out an admin setting 0 to stop a student was handing them the
+  // largest cap in the system.
+  daily_cap: number;
+  accepted: boolean;
+  tokens_today: number;
+  tokens_week: number;
+}
+
+export interface OrgInvite {
+  code: string;
+  role: string;
+  max_uses: number;
+  used_count: number;
+  created_by: string;
+  created_at: string;
+  expires_at: string | null;
+}
+
+export interface OrgPanel {
+  org_id: string;
+  name: string;
+  role: string;                             // the CALLER's role in this org
+  plan: string;
+  seats: number;
+  seats_used: number;
+  is_demo: boolean;
+  pool_daily: number;
+  pool_weekly: number;
+  pool_used_today: number;
+  pool_used_week: number;
+  pool_pct_today: number;
+  warn_80: boolean;
+  weekly_lessons: number;
+  lessons_used_week: number;
+  members: OrgMember[];
+  // Mode counts only. There is deliberately no field here that could carry the text of anything a
+  // member wrote — see spec 004 decision 1.
+  topics: { intent: string; requests: number; tokens: number }[];
 }
 
 export interface Tier {
@@ -322,6 +485,7 @@ export interface Redeemed {
 
 export interface Deletion {
   deletion_scheduled_for: string | null;
+  deleted?: boolean;                       // true ⇒ already erased; there is nothing left to cancel
 }
 
 // Admin dashboard — mirrors app/db.py's aggregate helpers (usage_health, count_accounts,
@@ -339,6 +503,21 @@ export interface AdminOverview {
     by_plan: { plan: string | null; currency: string; total: number; charges: number }[];
     totals: Record<string, number>;
   };
+}
+
+// A finding from one of the watching guards (app/db.py guard_findings). `detail`'s shape depends on
+// `kind` — the three guards have nothing in common to normalise, so the panel renders per kind.
+export interface GuardFinding {
+  id: number;
+  at: string;
+  kind: "misattribution" | "deontic" | "calendar" | string;
+  intent: string | null;
+  detail: Record<string, string>;
+}
+
+export interface GuardFindings {
+  counts: Record<string, number>;
+  findings: GuardFinding[];
 }
 
 export interface UsageByOwnerRow {
@@ -377,4 +556,12 @@ export interface FlaggedMessage {
   role: string;
   text: string;
   session_id: string;
+}
+
+export interface FeedbackItem {
+  id: number;
+  owner_id: string;
+  text: string;
+  reviewed_at: string | null;
+  created_at: string;
 }

@@ -262,14 +262,33 @@ export default function Home() {
     return res.message;
   }, [refreshMe]);
 
-  const deleteAccount = useCallback(async () => {
+  // Joining changes both the quota this account spends and whether the header shows the school
+  // button, so /me is refreshed the same way a coupon redemption does it.
+  const joinOrg = useCallback(async (code: string) => {
+    const joined = await api.orgs.join(code);
+    refreshMe();
+    return `הצטרפת ל${joined.name}`;
+  }, [refreshMe]);
+
+  // Resolves with an error message to show, or null on success. Deletion is the one place a silent
+  // failure is unacceptable: the server refuses when it cannot stop a recurring charge, and that
+  // refusal has to reach the person who would otherwise keep being billed.
+  const deleteAccount = useCallback(async (immediate: boolean): Promise<string | null> => {
     try {
-      await api.deleteAccount();
-    } catch {
-      /* ignore */
+      const res = await api.deleteAccount(immediate);
+      if (res.deleted) {
+        // Nothing is left to come back to: staying signed in would render a list of chats that no
+        // longer exist and 401 on the next call. End the session with the data it belonged to.
+        await auth.signOut();
+        return null;
+      }
+    } catch (e) {
+      refreshMe();
+      return e instanceof Error ? e.message : "המחיקה נכשלה";
     }
     refreshMe();
-  }, [refreshMe]);
+    return null;
+  }, [refreshMe, auth]);
 
   const cancelAccountDeletion = useCallback(async () => {
     try {
@@ -367,7 +386,7 @@ export default function Home() {
   // Auth gate (Supabase mode only). While the initial session check runs, show a minimal splash;
   // if no user, show the sign-in screen. In local mode auth.enabled is false and neither fires.
   if (auth.enabled && auth.loading) {
-    return <div className="min-h-screen grid place-items-center text-ink/50">{tr(lang, "authWorking")}</div>;
+    return <div className="min-h-dvh grid place-items-center text-ink/50">{tr(lang, "authWorking")}</div>;
   }
   if (auth.enabled && !auth.user) {
     return <SignIn lang={lang} />;
@@ -420,18 +439,17 @@ export default function Home() {
   );
 
   return (
-    <div className="flex flex-col h-screen">
+    <div className="flex flex-col h-dvh">
       <Header
         lang={lang}
         theme={effectiveDark ? "dark" : "light"}
-        dayLeft={me?.day_left ?? null}
-        weekLeft={me?.week_left ?? null}
         onToggleLang={() => setLang((l) => (l === "he" ? "en" : "he"))}
         onToggleTheme={() => setTheme(effectiveDark ? "light" : "dark")}
         onOpenSessions={() => setMobileSessions(true)}
         onOpenSources={() => setMobileSources(true)}
         onNewChat={newDiscussion}
         isAdmin={me?.is_admin}
+        orgRole={me?.org_role}
       />
       <div className="flex flex-1 overflow-hidden px-4 pb-4 gap-4">
         {/* Sessions — desktop inline only (hidden on mobile, opened as a drawer). lg:contents keeps
@@ -543,6 +561,7 @@ export default function Home() {
         onSrcDefaultOpen={setSrcDefaultOpen}
         onClearHistory={clearHistory}
         deletionScheduledFor={me?.deletion_scheduled_for ?? null}
+        deletionGraceDays={me?.deletion_grace_days}
         onDeleteAccount={deleteAccount}
         onCancelDeletion={cancelAccountDeletion}
         plan={me?.plan}
@@ -551,6 +570,7 @@ export default function Home() {
         credits={me?.credits}
         cycle={me?.cycle}
         cancelAtPeriodEnd={me?.cancel_at_period_end}
+        dayLeft={me?.day_left ?? null}
         weekLeft={me?.week_left ?? null}
         lessonsLeft={me?.lessons_left ?? null}
         billingEnabled={billingEnabled}

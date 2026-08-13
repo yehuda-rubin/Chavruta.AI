@@ -1,0 +1,23 @@
+# Wakes the nightly evaluation every 30 minutes, ALL DAY. That is deliberate.
+#
+# The schedule the user asked for is stated in Israel local time — every night 00:00-05:00, and
+# Saturday 00:00-16:00 — while this host runs on UTC, and Israel moves between UTC+2 and UTC+3. A
+# timer with the hours baked in would drift by an hour twice a year and start a heavy batch job in
+# the evening, while people are using the site. So the timer only provides ticks; the window lives
+# in scripts/nightly_eval.py, which reads Asia/Jerusalem and exits immediately outside it.
+#
+# The cost of a tick outside the window is one container exec that returns in milliseconds.
+
+[Unit]
+Description=Wake the Chavruta.AI nightly retrieval evaluation
+
+[Timer]
+OnCalendar=*-*-* *:00,30:00
+# A tick missed because the box was down should not skip the night entirely.
+Persistent=true
+# Without this every tick fires at exactly :00 and :30 alongside every other timer on the host.
+RandomizedDelaySec=120
+Unit=chavruta-nightly-eval.service
+
+[Install]
+WantedBy=timers.target

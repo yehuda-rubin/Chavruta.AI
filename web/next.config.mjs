@@ -46,6 +46,10 @@ const nextConfig = {
       ...proxy("health"),
       ...proxy("ready"),
       ...proxy("admin"),      // owner-only dashboard — see app/api.py::_is_admin
+      // Not proxy("feedback"): bare /feedback is a real page (app/feedback/page.tsx), sharing the
+      // exact path with nothing else — only /feedback/submit is the API route. See docker/nginx.conf
+      // for why this one couldn't just be a prefix like /admin.
+      { source: "/feedback/submit", destination: `${api}/feedback/submit` },
     ];
   },
 };

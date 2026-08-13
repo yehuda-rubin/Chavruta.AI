@@ -8,19 +8,16 @@ import { Icon } from "./Icon";
 export function Header({
   lang,
   theme,
-  dayLeft,
-  weekLeft,
   onToggleLang,
   onToggleTheme,
   onOpenSessions,
   onOpenSources,
   onNewChat,
   isAdmin = false,
+  orgRole = "",
 }: {
   lang: Lang;
   theme: "light" | "dark";
-  dayLeft?: number | null;     // fraction of today's conversation allowance left; null = uncapped
-  weekLeft?: number | null;    // fraction of the week's left — the gauge shows whichever is lower
   onToggleLang: () => void;
   onToggleTheme: () => void;
   onOpenSessions?: () => void;  // mobile only — opens the sessions drawer
@@ -28,7 +25,12 @@ export function Header({
   onNewChat?: () => void;       // mobile only — starts a new chat directly, no drawer detour
   isAdmin?: boolean;            // from me.is_admin (app/api.py::_is_admin) — hidden entirely, not
                                 // just disabled, for the near-everyone who isn't the admin account.
+  orgRole?: string;             // from me.org_role. The school button shows for 'admin' and
+                                // 'teacher' ONLY: a student belongs to a school but has nothing to
+                                // manage there, so a button leading to a page of other people's
+                                // usage would be a confusing dead end at best.
 }) {
+  const canManageOrg = orgRole === "admin" || orgRole === "teacher";
   return (
     <header className="h-[70px] flex items-center justify-between px-4 lg:px-8 shrink-0">
       <div className="flex items-center gap-2 lg:gap-3">
@@ -54,30 +56,9 @@ export function Header({
         <h1 className="font-serif text-2xl font-bold text-tekhelet hidden sm:block">{tr(lang, "brand")}</h1>
       </div>
       <div className="flex items-center gap-2">
-        {/* A gauge of whichever pool is closest to empty — no absolute figure, by design (see
-            app/plans.py). The daily fraction alone would read as "plenty left" right up to the
-            moment the WEEK runs out, which is the one thing a user needs to see coming. */}
-        {(() => {
-          const pools = [dayLeft, weekLeft].filter((v): v is number => typeof v === "number");
-          if (!pools.length) return null;
-          const left = Math.min(...pools);
-          const pct = Math.round(left * 100);
-          const tone = left === 0 ? "text-red-500" : left <= 0.15 ? "text-amber-600" : "text-ink/60";
-          const bar = left === 0 ? "bg-red-500" : left <= 0.15 ? "bg-amber-500" : "bg-tekhelet/60";
-          return (
-            <span
-              className={"px-3 py-1.5 rounded-full glass text-xs font-semibold flex items-center gap-2 " + tone}
-              title={`${tr(lang, "usageLeft")} — ${pct}%`}
-              role="img"
-              aria-label={`${tr(lang, "usageLeft")}: ${pct}%`}
-            >
-              <span className="hidden sm:inline">{tr(lang, "usageLeft")}</span>
-              <span className="w-12 h-1.5 rounded-full bg-ink/10 overflow-hidden" aria-hidden="true">
-                <span className={"block h-full rounded-full " + bar} style={{ width: `${pct}%` }} />
-              </span>
-            </span>
-          );
-        })()}
+        {/* Usage-remaining is Settings-only now (see SettingsModal) — the header stayed crowded at
+            narrow widths / larger accessibility text-scale, and this pill was the easiest thing to
+            move without losing the information anywhere. */}
         <button
           onClick={onOpenSources}
           className="lg:hidden h-10 w-10 rounded-full glass grid place-items-center text-tekhelet"
@@ -87,7 +68,7 @@ export function Header({
         </button>
         <button
           onClick={onToggleLang}
-          className="px-4 py-2 rounded-full glass text-ink/70 text-sm"
+          className="px-4 py-2 rounded-full glass text-ink/70 text-sm whitespace-nowrap"
           title="עברית · EN"
         >
           עברית · EN
@@ -99,6 +80,15 @@ export function Header({
         >
           <Icon name={theme === "dark" ? "light_mode" : "dark_mode"} />
         </button>
+        {canManageOrg && (
+          <Link
+            href="/school"
+            className="h-10 w-10 rounded-full glass grid place-items-center text-tekhelet"
+            title="פאנל המוסד"
+          >
+            <Icon name="school" />
+          </Link>
+        )}
         {isAdmin && (
           <Link
             href="/admin"

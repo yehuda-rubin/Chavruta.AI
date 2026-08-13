@@ -76,6 +76,15 @@ Both optional; unset means off. `CHAVRUTA_ADMIN_OWNERS` is a dedicated allowlist
 | `CHAVRUTA_ADMIN_OWNERS` | Comma-separated Supabase owner_ids allowed to see `/admin` | `""` (nobody) | `app/api.py::_is_admin` |
 | `SENTRY_DSN` | Backend error tracking (sentry.io, free tier) — sign up, create a Python/FastAPI project, paste its DSN | `""` (off) | `app/api.py::_configure_sentry` |
 
+## Email sending (Resend)
+
+Optional; unset means off. Used for operator-initiated broadcasts (e.g. policy updates), not auth/transactional emails (those go through Supabase). Recipients are sent via BCC for privacy — no recipient sees another recipient's address. The module follows the project's "no value = inert" convention: if not configured, `send_email()` returns `False` and logs a warning rather than raising an exception.
+
+| Variable | Purpose | Default | Where read |
+|----------|---------|---------|------------|
+| `RESEND_API_KEY` | Resend API key — get one at https://resend.com (free tier: 100 emails/day) | `""` (off) | `app/email.py` |
+| `RESEND_FROM` | Sender email address — use `@resend.dev` for initial testing without a verified domain | `""` (off) | `app/email.py` |
+
 ## Plans, quotas & billing
 
 These variables override the default subscription tiers and credit costs defined in `app/plans.py`. The tier IDs are: `free`, `basic`, `pro`, `institution`.
@@ -156,3 +165,4 @@ model is unmeasured until the eval is run against it.
 - Several PayPlus-specific variables (`PAYPLUS_MODE`, `PAYPLUS_API_KEY`, `PAYPLUS_SECRET_KEY`, `PAYPLUS_PAYMENT_PAGE_UID`, `PAYPLUS_ANNUAL_RECURRING_TYPE`, `PAYPLUS_REFUND_PATH`) are used by `app/billing/payplus.py` but are not prefixed with `CHAVRUTA_` because they are provider-specific.
 - `PAYPLUS_REFUND_PATH` (default `Transactions/RefundByTransactionUID`) and `CHAVRUTA_INVOICE_CREDIT_TYPE` (default `330`, חשבונית זיכוי) exist because neither call has been exercised against a live account. They are escape hatches for the first real refund, not knobs to tune — see `scripts/refund.py`.
 - Supabase-specific variables (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) are used by `app/auth_supabase.py` for authentication and are not prefixed with `CHAVRUTA_` because they are provider-specific.
+- Resend-specific variables (`RESEND_API_KEY`, `RESEND_FROM`) are used by `app/email.py` for operator broadcasts and are not prefixed with `CHAVRUTA_` because they are provider-specific.
