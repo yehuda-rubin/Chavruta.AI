@@ -10,7 +10,9 @@ This module is where grounding is *enforced*, not merely requested:
 from __future__ import annotations
 
 import re
+from typing import NamedTuple
 
+from chavruta.corpus.refs import COMMENTATOR_HE, commentator_from_ref, commentator_title
 from chavruta.corpus.schema import Answer, Citation, Intent, LessonPlan, LessonSection
 from chavruta.llm.base import GroundedPrompt, SourceBlock
 from chavruta.llm.base import Turn as LLMTurn
@@ -358,6 +360,199 @@ def _quoted_spans(masked: str) -> list[tuple[int, int]]:
             continue
         spans.append((inner_start, inner_end))
     return spans
+
+
+# ── Attribution faithfulness: the quote is real — but is it THIS commentator's? ─────────────────
+# `unverified_quotes` only asks whether a quoted span exists in SOME retrieved source. That leaves a
+# hole with teeth, reproduced 2026-08-13 against these very functions with two Sukkah 41a chunks:
+#
+#     רש"י כותב במפורש [S1]: "ולעולם יבנה בידי אדם ואין סתירה בין הדברים"
+#
+# where that wording is the TOSAFOT chunk's, not Rashi's. Every guard passed — the marker resolved,
+# `grounded` was True, `unverified_quotes` returned []. The reader was shown a fabrication in the one
+# dimension a beis midrash cares about most: who said it. Quoting a real source under the wrong name
+# is not a lesser error than inventing one; it is the same error wearing a citation.
+#
+# The whole design here is biased toward SILENCE. A false positive — telling a user that a faithful,
+# correctly-attributed answer misquotes a commentator — would destroy trust in the guard and get it
+# switched off, at which point it catches nothing at all. So every ambiguity below resolves to "say
+# nothing", and the check fires only when the mismatch is demonstrable against the sources the model
+# was actually handed.
+
+# Sefaria/corpus commentator ids are the join key on both sides: the source side derives its id from
+# the ref (`commentator_from_ref` — the payload field is empty on all 2.4M points), and the prose side
+# resolves a Hebrew/English NAME to the same id. Two name tables already exist and neither alone is
+# enough: refs.COMMENTATOR_HE is broad (tosafot, ran, meiri, bartenura…) but holds one spelling each,
+# while router.COMMENTATOR_ALIASES carries the gershayim-less and English variants a model actually
+# writes (רשי / רמבן / "Rashi"). Merged, with collisions dropped — see `_attribution_aliases`.
+_GERSHAYIM_TRANS = str.maketrans({"״": '"', "”": '"', "“": '"', "„": '"'})
+
+_ATTR_WINDOW = 60   # chars of prose before the opening quote that count as its introduction
+_ATTR_TRAIL = 40    # …and after the closing one, for a trailing "(תוספות שם)" attribution
+_ATTR_BREAKS = ("\n", ". ", "! ", "? ")   # a name in a PREVIOUS sentence introduces nothing here
+
+_attr_aliases: list[tuple[re.Pattern[str], str]] | None = None
+
+
+def _alias_pattern(alias: str) -> re.Pattern[str]:
+    """A whole-word matcher for one commentator name, tolerating Hebrew's glued one-letter prefixes.
+
+    Mirrors intents/router.py::_alias_hit, including its warning: ש is NOT a safe prefix on a bare
+    name, because 'שרשי' would then match 'רשי' (and 'שרשי' is an ordinary word). It IS safe on a name
+    carrying gershayim — no Hebrew word contains one — and 'שרש"י כותב' is how a model writes it, so
+    the prefix set widens only for those.
+    """
+    a = alias.strip().translate(_GERSHAYIM_TRANS)
+    if re.search(r"[א-ת]", a):
+        pre = "והבכלמש" if '"' in a else "והבכלמ"
+        return re.compile(f"(?<![א-ת])[{pre}]{{0,2}}{re.escape(a)}(?![א-ת])")
+    return re.compile(rf"(?<![a-z]){re.escape(a.lower())}(?![a-z])", re.IGNORECASE)
+
+
+def _attribution_aliases() -> list[tuple[re.Pattern[str], str]]:
+    """name-pattern → commentator id, built once from the two existing tables.
+
+    A name claimed by TWO different ids is dropped rather than resolved to either — 'תרגום יונתן' is
+    both `targum_yonatan` (refs) and `targum_jonathan` (router), and picking the loser would invent a
+    mismatch against a source that is in fact exactly the work named: a false positive manufactured
+    out of our own duplicate bookkeeping.
+    """
+    global _attr_aliases
+    if _attr_aliases is None:
+        # Lazy: the intent layer is a peer of generation, not a dependency of it — importing it at
+        # module scope would make `generation` un-importable on its own the day router grows an import.
+        from chavruta.intents.router import COMMENTATOR_ALIASES
+
+        by_name: dict[str, str | None] = {}
+
+        def _put(name: str, cid: str) -> None:
+            n = (name or "").strip().translate(_GERSHAYIM_TRANS)
+            if not n:
+                return
+            if n in by_name and by_name[n] != cid:
+                by_name[n] = None                       # ambiguous → refuse to resolve it at all
+            else:
+                by_name.setdefault(n, cid)
+
+        for cid, he in COMMENTATOR_HE.items():
+            _put(he, cid)
+        for cid, aliases in COMMENTATOR_ALIASES.items():
+            for a in aliases:
+                _put(a, cid)
+        _attr_aliases = [(_alias_pattern(n), cid) for n, cid in by_name.items() if cid]
+    return _attr_aliases
+
+
+def _names_in(window: str) -> set[str]:
+    return {cid for pat, cid in _attribution_aliases() if pat.search(window)}
+
+
+def _attribution_window(text: str, start: int) -> str:
+    """The prose that introduces the quote opening at `start`: back to the previous sentence end."""
+    win = text[max(0, start - _ATTR_WINDOW):start]
+    cut = 0
+    for b in _ATTR_BREAKS:
+        i = win.rfind(b)
+        if i != -1:
+            cut = max(cut, i + len(b))
+    return win[cut:]
+
+
+class Misattribution(NamedTuple):
+    """A quoted span whose prose credits one commentator while the words belong to another.
+
+    `found_in` is the id(s) of the retrieved source(s) that actually carry the wording — plural
+    because two commentaries can share a phrase, and reporting all of them keeps the note honest.
+    """
+
+    quote: str
+    claimed: str
+    found_in: tuple[str, ...]
+
+
+def misattributed_quotes(text: str, sources, min_len: int = 24) -> list[Misattribution]:
+    """Attribution guard: verbatim quotes credited to a named commentator whose words they are not.
+
+    Complements `unverified_quotes` and never overlaps it: a quote found in NO source is that
+    function's finding and is skipped here, so a single fabrication is never reported twice.
+
+    Fires ONLY when all of the following hold — each condition removed a class of false positive:
+      • the quoted span is long enough to identify a source (≥ `min_len` Hebrew letters);
+      • it is carried by at least one retrieved source, and by no BASE text. A commentator quoting
+        the pasuk or daf he is commenting on is the normal shape of Torah prose, not a misquote, and
+        base texts have no commentator to disagree with (constraint: never flag a bare pasuk);
+      • exactly ONE commentator is named in the introducing sentence. 'רש"י ותוספות נחלקו… וכתב: "…"'
+        is genuinely ambiguous about whose words follow, and guessing there is how a guard earns a
+        reputation for crying wolf;
+      • that commentator is not among the sources holding the quote, and is not named again right
+        after the quote ('…" (תוספות שם)' is a trailing attribution, not a contradiction);
+      • a source BY the named commentator was actually retrieved. This is the strictest condition and
+        the reason the finding is worth showing: the model had that commentator's own text in front of
+        it, and the words it put in his mouth are visibly someone else's. Without a source by him we
+        cannot distinguish a misquote from a nested attribution ('כפי שהביא הרמב"ן בשם רש"י') or from
+        an author quoting his own dibbur hamatchil, so we stay quiet.
+
+    Consequently this is blind to works filed WITHOUT the '<Title>_on_<Base>' commentary form —
+    Shulchan Arukh, Mishnah Berurah, Mishneh Torah — because `commentator_from_ref` correctly yields
+    None for them and they are treated as base texts. Widening that would mean guessing an author out
+    of a work title, which is exactly the guesswork this guard refuses elsewhere.
+    """
+    text = text or ""
+    # Derive each source's commentator from its ref, NOT from the payload field: `commentator_id` is
+    # empty on every point in the commercial corpus and is a read-time derivation (docs/CORPUS.md
+    # §7.2b). The payload is still consulted as a fallback for sources built by other paths.
+    by_cid: list[tuple[str | None, str]] = []
+    for s in (sources or []):
+        body = getattr(s, "text", None) or getattr(s, "quote", "") or ""
+        cid = commentator_from_ref(getattr(s, "ref", "") or "") or (
+            getattr(s, "commentator_id", None) or None)
+        by_cid.append((cid, _heb_skeleton(body)))
+    retrieved = {cid for cid, _ in by_cid if cid}
+    if not retrieved:
+        return []
+
+    # Quote-mark variants folded to ASCII so a name written רש״י resolves like רש"י. 1-for-1, so the
+    # span offsets computed on the original text still index this string correctly.
+    normalized = text.translate(_GERSHAYIM_TRANS)
+
+    out: list[Misattribution] = []
+    for start, end in _quoted_spans(_protect_abbreviations(text)):
+        raw = text[start:end]
+        q = _heb_skeleton(raw)
+        if len(q) < min_len:
+            continue
+        key = q[:min_len]
+        holders = {cid for cid, skel in by_cid if key in skel}
+        if not holders or None in holders:
+            continue
+        named = _names_in(_attribution_window(normalized, start))
+        if len(named) != 1:
+            continue
+        claimed = next(iter(named))
+        if claimed in holders or claimed not in retrieved:
+            continue
+        if _names_in(normalized[end + 1:end + 1 + _ATTR_TRAIL].split("\n")[0]) & holders:
+            continue
+        out.append(Misattribution(raw.strip()[:60], claimed, tuple(sorted(str(c) for c in holders))))
+    return out
+
+
+def misattribution_note(lang: str, findings: list[Misattribution]) -> str:
+    """Caveat text for a misattribution. Names BOTH sides on purpose: 'unverified quote' would be a
+    lie here — the quote is in the corpus, it just isn't the commentator's the answer credits, and
+    telling the reader which source does carry it is what lets them check in one click."""
+    if not findings:
+        return ""
+    f = findings[0]
+    if lang == "he":
+        claimed = COMMENTATOR_HE.get(f.claimed, f.claimed)
+        actual = ", ".join(COMMENTATOR_HE.get(c, c) for c in f.found_in)
+        return (f"הערה: הציטוט «{f.quote}» יוחס ל{claimed}, אך לשון זו נמצאת במקור של {actual} "
+                f"— יש לאמת את הייחוס.")
+    claimed = commentator_title(f.claimed).replace("_", " ")
+    actual = ", ".join(commentator_title(c).replace("_", " ") for c in f.found_in)
+    return (f"Note: the quote «{f.quote}» is attributed to {claimed}, but that wording appears in "
+            f"the {actual} source — verify the attribution.")
 
 
 def work_not_loaded_answer(lang: str, missing_works: list[str], intent: Intent) -> Answer:

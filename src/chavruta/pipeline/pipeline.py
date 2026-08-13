@@ -11,6 +11,7 @@ Grounding is enforced here and in `generation.grounded`, never trusted to the mo
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 from dataclasses import replace
 
@@ -19,8 +20,10 @@ from chavruta.corpus.links import LinkGraph
 from chavruta.corpus.refs import canon_corpus_ref, with_ref_variants
 from chavruta.corpus.registry import CorpusRegistry, default_registry
 from chavruta.corpus.schema import Answer, Intent, Query, Turn
-from chavruta.generation import grounded
+from chavruta.generation import deontic, grounded
 from chavruta.retrieval.hybrid import HybridRetriever
+
+_log = logging.getLogger("chavruta.pipeline")
 
 
 def _detect_lang(text: str) -> str:
@@ -462,6 +465,32 @@ class ChavrutaPipeline:
             answer.caveats.append(("הערה: ציטוט/ים שלא נמצאו במקורות שנשלפו: «" + "», «".join(bad_q[:2]) + "» — יש לאמת.")
                                   if query.lang != "en" else
                                   ("Note: quote(s) not found in the retrieved sources: «" + "», «".join(bad_q[:2]) + "» — verify."))
+        # A SECOND kind of fabrication, which every check above passes clean: a quote that really is
+        # in the corpus, under a different name than the prose credits. Tosafot's words introduced as
+        # "רש״י כותב במפורש" satisfies unverified_quotes (the string exists in a retrieved source) and
+        # satisfies enforce_citations (the marker points at a real chunk) — and a reader has still
+        # been shown something Rashi never said. Reproduced against these functions on 2026-08-13.
+        wrong_name = grounded.misattributed_quotes(text, list(result.hits) + list(fetched or []))
+        if wrong_name:
+            answer.caveats.append(grounded.misattribution_note(query.lang, wrong_name))
+        # Deontic self-contradiction is LOGGED, NOT SHOWN — deliberately, and for now. Telling a user
+        # "this answer may contradict itself" is a strong claim, and this check has never run against
+        # real traffic: its false-positive rate is argued from its own test set, not measured. So it
+        # watches first. Read the log for a week; make it user-facing only if what it caught was
+        # worth catching. (Measurement before action — the same reason the reward function was built
+        # as a metric before anyone proposed training on it.)
+        try:
+            if conflicts := deontic.deontic_conflicts(text):
+                # `attribution` is in the line on purpose: 'inherited' means the second verdict was
+                # never attributed to anyone and took the name of the last speaker in scope. That is
+                # the weakest of the two paths, and an operator triaging these should be able to
+                # discount it without reading the code.
+                for c in conflicts[:2]:
+                    _log.warning("deontic: %s %s/%s (%s) — %r || %r", c.authority, c.axis,
+                                 c.attribution, len(conflicts), c.first.sentence[:70],
+                                 c.second.sentence[:70])
+        except Exception:                   # noqa: BLE001 — a watching check must never break an answer
+            _log.exception("deontic check failed")
         return grounded.maybe_halacha_caveat(answer, query.lang)
 
     def _lesson_answer(self, query, result, llm=None, *, history=None):
