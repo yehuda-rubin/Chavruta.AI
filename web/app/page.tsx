@@ -270,14 +270,20 @@ export default function Home() {
     return `הצטרפת ל${joined.name}`;
   }, [refreshMe]);
 
-  const deleteAccount = useCallback(async () => {
+  const deleteAccount = useCallback(async (immediate: boolean) => {
     try {
-      await api.deleteAccount();
+      const res = await api.deleteAccount(immediate);
+      if (res.deleted) {
+        // Nothing is left to come back to: staying signed in would render a list of chats that no
+        // longer exist and 401 on the next call. End the session with the data it belonged to.
+        await auth.signOut();
+        return;
+      }
     } catch {
-      /* ignore */
+      /* ignore — /me below re-reads the real state, so a failed request shows as "not scheduled" */
     }
     refreshMe();
-  }, [refreshMe]);
+  }, [refreshMe, auth]);
 
   const cancelAccountDeletion = useCallback(async () => {
     try {
@@ -550,6 +556,7 @@ export default function Home() {
         onSrcDefaultOpen={setSrcDefaultOpen}
         onClearHistory={clearHistory}
         deletionScheduledFor={me?.deletion_scheduled_for ?? null}
+        deletionGraceDays={me?.deletion_grace_days}
         onDeleteAccount={deleteAccount}
         onCancelDeletion={cancelAccountDeletion}
         plan={me?.plan}

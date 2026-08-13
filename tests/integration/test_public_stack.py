@@ -230,6 +230,43 @@ def test_account_deletion_schedule_reflect_cancel(client, monkeypatch):
     assert client.get("/me", headers=h).json()["deletion_scheduled_for"] is None
 
 
+def test_immediate_deletion_erases_now_and_leaves_nothing_scheduled(client, monkeypatch):
+    """The user who says "I asked to be deleted, why is it a month away" gets what they asked for in
+    the app instead of having to email the operator. Nothing is left pending afterwards — a deletion
+    that still shows as "scheduled" would suggest it had not happened."""
+    monkeypatch.setenv("CHAVRUTA_API_KEYS", "k")
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    h = {"Authorization": "Bearer k"}
+    # Seeded straight into the DB: POST /sessions runs a real generation, and this test is about
+    # what deletion removes, not about the model.
+    owner = client.get("/me", headers=h).json()["owner"]
+    db.create_session("שאלה", mode="qa", owner_id=owner)
+    assert len(client.get("/sessions", headers=h).json()) == 1
+
+    got = client.post("/account/delete", json={"immediate": True}, headers=h).json()
+    assert got["deleted"] is True and got["deletion_scheduled_for"] is None
+    assert client.get("/me", headers=h).json()["deletion_scheduled_for"] is None
+    assert client.get("/sessions", headers=h).json() == []          # the data really is gone
+
+
+def test_deletion_defaults_to_the_grace_period_when_no_body_is_sent(client, monkeypatch):
+    """An older client posts no body at all. It must still get the SAFE path, never the irreversible
+    one — a missing field defaulting to "delete now" would be the worst possible default."""
+    monkeypatch.setenv("CHAVRUTA_API_KEYS", "k")
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    h = {"Authorization": "Bearer k"}
+    got = client.post("/account/delete", headers=h).json()
+    assert got["deleted"] is False and got["deletion_scheduled_for"]
+
+
+def test_me_states_the_grace_period_length(client, monkeypatch):
+    """The UI names the number before the user commits, so it has to come from the server that will
+    actually apply it — not a 30 hardcoded in the frontend next to a configurable backend."""
+    monkeypatch.setenv("CHAVRUTA_API_KEYS", "k")
+    monkeypatch.setenv("CHAVRUTA_ACCOUNT_DELETION_GRACE_DAYS", "7")
+    assert client.get("/me", headers={"Authorization": "Bearer k"}).json()["deletion_grace_days"] == 7
+
+
 def test_account_deletion_rejected_in_local_mode(client):
     # No auth ⇒ owner 'local' ⇒ no account to delete.
     assert client.post("/account/delete").status_code == 400

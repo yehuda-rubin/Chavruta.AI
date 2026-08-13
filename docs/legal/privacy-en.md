@@ -6,7 +6,17 @@
 
 # Privacy Policy — Chavruta AI
 
-**Version 1.8 · Effective 10 August 2026**
+**Version 1.9 · Effective 13 August 2026**
+
+Changes in version 1.9: two clarifications, both of which widen your rights rather than narrow them.
+**(a) Immediate deletion:** until now account deletion always ran after a grace period of about 30
+days. You can now choose, at the moment of deletion, between deletion at the end of the grace period
+(cancellable) and **immediate deletion** (not cancellable) — a user asked for this explicitly, and
+rightly: a grace period exists to make an accidental click reversible, not to delay a deliberate
+request (section 6). **(b) A deletion request stops section 2's use at once:** from the moment you
+request deletion, your conversations are no longer included in quality review, service improvement or
+model development — even though the data itself still exists until the grace period ends. Cancelling
+the deletion restores the previous state (sections 6, 12).
 
 Changes in version 1.8: a new section (12) has been added — **starting 10 August 2026, at 00:00**,
 we may review conversation content (not only flagged messages, as today) and use it for internal
@@ -157,9 +167,14 @@ disclose information if required by law.
 
 ## 6. Your Rights
 - **Access and deletion:** you can view and delete your conversations and lessons at any time in the app.
-- **Account deletion:** you can request account deletion from Settings. Deletion is carried out after a
-  grace period (about 30 days), during which you can cancel it. At the end of the period, all data
+- **Account deletion:** you can request account deletion from Settings, and choose between two
+  options. **Deletion at the end of a grace period** (about 30 days) — the default, during which you
+  can cancel it; it exists so that an accidental click is reversible. **Immediate deletion** — the
+  data is erased at once, with no grace period and no way to cancel. In both cases all data
   associated with the account is permanently erased (as is the login, where configured).
+- **A deletion request stops section 2's use immediately:** from the moment of the request — not at
+  the end of the grace period — your conversations are no longer included in quality review, service
+  improvement, or model development and fine-tuning. Cancelling the deletion brings them back in.
 - **Correction:** you can update details in account settings.
 - **Response times:** we will answer an access request within 30 days (extendable by a further 15 days
   as permitted by law). Following a deletion or correction, we will also notify parties to whom the
@@ -248,6 +263,10 @@ mark it otherwise.
 **Global exclusion:** Settings has an additional toggle that excludes **all** of your conversations at
 once, for anyone who would rather not go conversation by conversation. This toggle overrides the
 per-conversation setting.
+
+**Requesting account deletion also excludes, with no toggle needed:** an account pending deletion
+(section 6) is excluded from this use from the moment of the request — even though the data still
+exists until the grace period ends. Cancelling the deletion cancels this exclusion too.
 
 In practice, review or use of conversation content begins **24 hours** after the effective date —
 that is, from **11 August 2026** — to give real time to mark an exclusion before anything is actually

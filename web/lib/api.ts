@@ -210,8 +210,10 @@ export const api = {
   ready: () => req<{ status: string; points?: number; reason?: string }>("/ready"),
   me: () => req<Me>("/me"),
 
-  // Account deletion (scheduled, with a grace period). deleteAccount schedules it; cancel undoes it.
-  deleteAccount: () => req<Deletion>("/account/delete", { method: "POST" }),
+  // Account deletion. By default it is SCHEDULED after a grace period and `cancel` undoes it;
+  // `immediate` skips the wait and erases everything at once, which nothing can undo.
+  deleteAccount: (immediate = false) =>
+    req<Deletion>("/account/delete", { method: "POST", body: JSON.stringify({ immediate }) }),
   cancelAccountDeletion: () => req<Deletion>("/account/delete/cancel", { method: "POST" }),
 
   // Billing: is it available, start a checkout (returns a hosted payment URL), cancel the subscription.
@@ -394,6 +396,7 @@ export interface Me {
   cycle: string;                            // 'monthly' | 'annual' | 'coupon'
   cancel_at_period_end: boolean;            // cancelled: access runs to plan_until, then lapses
   deletion_scheduled_for: string | null;   // ISO ts if the account is pending deletion
+  deletion_grace_days: number;             // how long the grace period is — stated before committing
   blocked: boolean;
   blocked_until: string | null;             // ISO ts the block lifts (null + blocked ⇒ permanent)
   blocked_reason: string;
@@ -478,6 +481,7 @@ export interface Redeemed {
 
 export interface Deletion {
   deletion_scheduled_for: string | null;
+  deleted?: boolean;                       // true ⇒ already erased; there is nothing left to cancel
 }
 
 // Admin dashboard — mirrors app/db.py's aggregate helpers (usage_health, count_accounts,

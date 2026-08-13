@@ -441,6 +441,7 @@ export function SettingsModal({
   onSrcDefaultOpen,
   onClearHistory,
   deletionScheduledFor,
+  deletionGraceDays,
   onDeleteAccount,
   onCancelDeletion,
   plan,
@@ -472,7 +473,8 @@ export function SettingsModal({
   onSrcDefaultOpen: (v: boolean) => void;
   onClearHistory: () => void;
   deletionScheduledFor?: string | null;   // ISO ts if the account is pending deletion
-  onDeleteAccount?: () => void;
+  deletionGraceDays?: number;             // /me — the length of the wait, named before the user commits
+  onDeleteAccount?: (immediate: boolean) => void;
   onCancelDeletion?: () => void;
   plan?: string;                           // tier id — see app/plans.py
   planName?: string;                       // localized tier name from /me
@@ -494,6 +496,7 @@ export function SettingsModal({
 }) {
   const auth = useAuth();
   const [idCopied, setIdCopied] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const fmtDate = (iso: string) =>
     new Date(iso).toLocaleDateString(lang === "he" ? "he-IL" : "en-US",
       { year: "numeric", month: "long", day: "numeric" });
@@ -680,7 +683,12 @@ export function SettingsModal({
             {/* BYOK — only offered when the backend has a provider-key concept at all (not 'bridge'). */}
             {byokSupported && <ByokKeyField lang={lang} />}
 
-            {/* Account deletion — scheduled with a grace period, cancellable until the deadline. */}
+            {/* Account deletion. Two paths, both named up front with what they cost: wait out the
+                grace period and keep the option to change your mind, or go now and lose it. The old
+                version was one window.confirm that said "after a grace period" without saying how
+                long — the length only appeared once the deletion was already filed, which a user
+                read as us stalling ("why is the deletion delayed by a month, that is strange"). The
+                number is the server's own (deletionGraceDays from /me), not a copy of it here. */}
             {deletionScheduledFor ? (
               <div className="mt-2 p-3 rounded-2xl bg-red-500/5 ring-1 ring-red-500/15 flex flex-col gap-2">
                 <p className="text-xs text-red-600/90 leading-relaxed">
@@ -693,11 +701,48 @@ export function SettingsModal({
                   {tr(lang, "cancelDeletion")}
                 </button>
               </div>
+            ) : confirmDelete ? (
+              <div className="mt-2 p-3 rounded-2xl bg-red-500/5 ring-1 ring-red-500/15 flex flex-col gap-2">
+                <p className="text-xs text-ink/80 leading-relaxed">{tr(lang, "deleteAccountIntro")}</p>
+
+                <button
+                  onClick={() => { setConfirmDelete(false); onDeleteAccount?.(false); }}
+                  className="py-2 px-3 rounded-2xl glass text-red-500 font-semibold text-sm hover:bg-red-500/10 transition text-start"
+                >
+                  {tr(lang, "deleteAfterDays").replace("{days}", String(deletionGraceDays ?? 30))}
+                  <span className="block font-normal text-[11px] text-ink/55 mt-0.5">
+                    {tr(lang, "deleteAfterDaysHint")}
+                  </span>
+                </button>
+
+                {/* The irreversible one keeps a second confirmation. Not to discourage it — it is a
+                    legitimate choice and the reason this option exists — but because nothing after
+                    it can be taken back, and it sits one tap from the reversible option above. */}
+                <button
+                  onClick={() => {
+                    if (window.confirm(tr(lang, "deleteNowConfirm"))) {
+                      setConfirmDelete(false);
+                      onDeleteAccount?.(true);
+                    }
+                  }}
+                  className="py-2 px-3 rounded-2xl glass text-red-500 font-semibold text-sm hover:bg-red-500/10 transition text-start"
+                >
+                  {tr(lang, "deleteNow")}
+                  <span className="block font-normal text-[11px] text-ink/55 mt-0.5">
+                    {tr(lang, "deleteNowHint")}
+                  </span>
+                </button>
+
+                <button
+                  onClick={() => setConfirmDelete(false)}
+                  className="py-2 rounded-2xl grad text-white font-semibold text-sm hover:opacity-95 transition"
+                >
+                  {tr(lang, "deleteKeep")}
+                </button>
+              </div>
             ) : (
               <button
-                onClick={() => {
-                  if (window.confirm(tr(lang, "deleteAccountConfirm"))) onDeleteAccount?.();
-                }}
+                onClick={() => setConfirmDelete(true)}
                 className="mt-2 w-full py-2 rounded-2xl glass text-red-500 font-semibold text-sm hover:bg-red-500/10 transition"
               >
                 {tr(lang, "deleteAccount")}

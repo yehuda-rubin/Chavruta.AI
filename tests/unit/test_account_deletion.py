@@ -78,6 +78,33 @@ def test_run_due_purges_wipes_expired_accounts(fresh_db, monkeypatch):
     assert len(fresh_db.list_sessions("stays")) == 1       # not-yet-due account survives
 
 
+def test_purge_now_deletes_without_any_schedule(fresh_db, monkeypatch):
+    """The immediate path: no grace row is written and nothing waits for a sweep."""
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    _seed_owner(fresh_db, "impatient")
+    _seed_owner(fresh_db, "bystander")
+
+    accounts.purge_now("impatient")
+
+    assert fresh_db.list_sessions("impatient") == []
+    assert fresh_db.list_lessons("impatient") == []
+    assert fresh_db.get_account("impatient") is None
+    assert len(fresh_db.list_sessions("bystander")) == 1
+    # And nothing is left pending — a sweep now has nothing to do.
+    assert fresh_db.due_deletions("2030-01-01T00:00:00+00:00") == []
+
+
+def test_purge_now_refuses_a_school_owner(fresh_db):
+    """The one case it must NOT quietly do: purging the person who administers a school would leave
+    the members spending a pool nobody owns. It raises, so the caller can say so."""
+    import app.orgs as orgs
+    _seed_owner(fresh_db, "principal")
+    orgs.create_org("principal", "בית ספר", "school")
+    with pytest.raises(fresh_db.OwnsOrganisation):
+        accounts.purge_now("principal")
+    assert len(fresh_db.list_sessions("principal")) == 1     # nothing was deleted on the way out
+
+
 def test_schedule_sets_future_deadline(fresh_db, monkeypatch):
     monkeypatch.setenv("CHAVRUTA_ACCOUNT_DELETION_GRACE_DAYS", "30")
     when = accounts.schedule("u9")

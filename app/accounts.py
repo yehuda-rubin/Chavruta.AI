@@ -163,6 +163,27 @@ def list_supabase_user_emails() -> list[str]:
         return []
 
 
+def purge_now(owner_id: str) -> None:
+    """Delete one account's data and login immediately, with no grace period.
+
+    For the user who says "I asked to be deleted, why is it a month away" — the grace period protects
+    an accidental click, and someone who deliberately refuses it should not have to email us to get
+    what they already asked for in the app.
+
+    DATA first, login second. The login is the recoverable half — a person locked out can be helped,
+    data that was supposed to be gone and isn't cannot be un-kept. In the old order any failure at all
+    (a lock, an org created inside the window, an FK error) left an account that could not sign in
+    whose data was fully intact, retried and re-logged every sweep forever. That is the worst of both.
+
+    Raises whatever db.purge_owner raises (it refuses an account that owns a school) — deliberately
+    NOT swallowed, so the caller can tell the user it did not happen instead of reporting a success it
+    cannot back up.
+    """
+    db.purge_owner(owner_id)
+    _delete_supabase_user(owner_id)         # best-effort; swallows its own errors
+    _log.info("account %s purged immediately at the user's request", owner_id)
+
+
 def run_due_purges(now_iso: str | None = None) -> int:
     """Purge every account whose grace period has lapsed. Returns how many were actually purged."""
     now_iso = now_iso or datetime.now(UTC).isoformat()
@@ -180,16 +201,8 @@ def run_due_purges(now_iso: str | None = None) -> int:
                        "transfer the school, then the deletion will proceed.", owner_id)
             continue
         try:
-            # DATA first, login second. The login is the recoverable half — a person locked out can
-            # be helped, data that was supposed to be gone and isn't cannot be un-kept. In the old
-            # order any failure at all (a lock, an org created inside the window, an FK error) left
-            # an account that could not sign in whose data was fully intact, retried and re-logged
-            # every sweep forever. That is the worst of both, and it was reachable by more than the
-            # org case the check above catches.
-            db.purge_owner(owner_id)
-            _delete_supabase_user(owner_id)     # best-effort; swallows its own errors
+            purge_now(owner_id)                 # data first, login second — see there for why
             purged += 1
-            _log.info("account %s purged", owner_id)
         except Exception:                       # noqa: BLE001 — one bad row must not stop the rest
             _log.exception("failed to purge account %s", owner_id)
     return purged

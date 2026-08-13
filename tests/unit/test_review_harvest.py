@@ -1,8 +1,9 @@
 """The review/eval-harvest path: the privacy gate, and the mechanical pair harvester.
 
-db.reviewable_questions is the single place the three promises made to users on 2026-08-10 are
-enforced (not retroactive, per-chat opt-out, account-wide opt-out). Every one of them is pinned
-here, because a privacy condition that is only enforced by a comment is not enforced.
+db.reviewable_questions is the single place the promises made to users about this use are enforced
+(not retroactive, per-chat opt-out, account-wide opt-out, and — since a user asked why deletion was
+delayed by a month — a pending deletion request). Every one of them is pinned here, because a privacy
+condition that is only enforced by a comment is not enforced.
 """
 
 from __future__ import annotations
@@ -92,6 +93,33 @@ def test_unknown_opt_out_list_returns_nothing_rather_than_everything(fresh_db):
     _session("s1", "u1", AFTER)
     _msg("s1", "שאלה כלשהי")
     assert db.reviewable_questions(opted_out_owners=None) == []
+
+
+# ── Promise 4: a pending deletion request stops the reading at once ───────────
+def test_an_account_pending_deletion_is_excluded_from_the_moment_of_the_request(fresh_db):
+    """Someone who asked to be deleted withdrew their consent to be read. That the data survives the
+    30-day grace period is how an accidental click stays reversible — not a licence to keep using it
+    meanwhile. Without this the deletion request bought nothing for a month."""
+    _session("s1", "leaving", AFTER)
+    _msg("s1", "שאלה של מי שביקש להימחק")
+    _session("s2", "staying", AFTER)
+    _msg("s2", "שאלה של מי שנשאר")
+
+    db.schedule_deletion("leaving", "2026-08-13T00:00:00+00:00", "2026-09-12T00:00:00+00:00")
+    got = db.reviewable_questions(opted_out_owners=set())
+    assert [r["text"] for r in got] == ["שאלה של מי שנשאר"]
+
+
+def test_cancelling_the_deletion_puts_the_account_back_in_scope(fresh_db):
+    """The exclusion tracks the pending request, not a flag set once and forgotten — a user who
+    changes their mind is a user who is back in, without anyone having to remember to undo this."""
+    _session("s1", "wavering", AFTER)
+    _msg("s1", "שאלה")
+    db.schedule_deletion("wavering", "2026-08-13T00:00:00+00:00", "2026-09-12T00:00:00+00:00")
+    assert db.reviewable_questions(opted_out_owners=set()) == []
+
+    db.cancel_deletion("wavering")
+    assert [r["text"] for r in db.reviewable_questions(opted_out_owners=set())] == ["שאלה"]
 
 
 # ── Only the user's own words, never the assistant's ──────────────────────────

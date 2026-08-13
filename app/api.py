@@ -2387,6 +2387,12 @@ class MeOut(BaseModel):
     cycle: str = "monthly"           # 'monthly' | 'annual' | 'coupon'
     cancel_at_period_end: bool = False   # true ⇒ cancelled, access runs to plan_until then lapses
     deletion_scheduled_for: str | None = None   # ISO ts if the account is pending deletion
+    # How long the grace period is, so the confirmation can say it BEFORE the user commits. It used to
+    # say only "after a grace period", and the length appeared afterwards — a user read that as the
+    # deletion being stalled ("why is it delayed by a month, that is strange"). Sent rather than
+    # hardcoded in the UI because it is deployment config (CHAVRUTA_ACCOUNT_DELETION_GRACE_DAYS), and
+    # a number the interface promises has to be the number the server will use.
+    deletion_grace_days: int = 30
     blocked: bool = False            # account on the blocklist
     blocked_until: str | None = None  # ISO ts the block lifts (None + blocked ⇒ permanent)
     blocked_reason: str = ""
@@ -2486,6 +2492,7 @@ def me(owner: str = Depends(current_owner)):
         cycle=sub.get("cycle") or "monthly",
         cancel_at_period_end=bool(sub.get("cancel_at_period_end")),
         deletion_scheduled_for=None if owner == "local" else accounts.scheduled_for(owner),
+        deletion_grace_days=accounts.grace_days(),
         blocked=ban is not None,
         blocked_until=ban["until"] if ban else None,
         blocked_reason=ban["reason"] if ban else "",
@@ -2679,12 +2686,26 @@ def admin_grant(req: GrantIn, owner: str = Depends(_require_admin)):
 # ── Account deletion (scheduled, with a grace period + cancel) ────────────────
 class DeletionOut(BaseModel):
     deletion_scheduled_for: str | None = None
+    deleted: bool = False            # true ⇒ it already happened; there is nothing to cancel
+
+
+class DeletionRequest(BaseModel):
+    # Skip the grace period entirely. The grace period exists to make an ACCIDENTAL click reversible,
+    # which is no reason to hold a deliberate request for a month: a user asked exactly that ("why is
+    # the deletion delayed by a month, that is strange"), and without this the only way to get what
+    # the app had already offered was to email the operator and have them do it by hand.
+    immediate: bool = False
 
 
 @app.post("/account/delete", response_model=DeletionOut)
-def request_account_deletion(owner: str = Depends(current_owner)):
-    """Schedule this account for deletion after a grace period. The user can cancel until then; at the
-    deadline the background sweeper purges all their data (and the Supabase login, if configured)."""
+def request_account_deletion(req: DeletionRequest = DeletionRequest(),
+                             owner: str = Depends(current_owner)):
+    """Schedule this account for deletion after a grace period — or, with `immediate`, delete it now.
+
+    Scheduled is the default: the user can cancel until the deadline, and at it the background sweeper
+    purges all their data (and the Supabase login, if configured). `immediate` runs that same purge
+    synchronously and cannot be undone.
+    """
     if owner == "local":
         # No account to delete in local/offline mode (the single-user store isn't an account).
         raise HTTPException(status_code=400, detail="no account in local mode")
@@ -2696,6 +2717,12 @@ def request_account_deletion(owner: str = Depends(current_owner)):
             status_code=409,
             detail="החשבון הזה מנהל מוסד. כדי למחוק אותו, יש לסגור תחילה את המוסד — מחיקה עכשיו "
                    "הייתה משאירה את חברי המוסד בלי מי שמנהל את המכסה שלהם. פנו אלינו ונסייע.")
+    if req.immediate:
+        # Not wrapped in a try: purge_owner raising means the deletion did NOT happen, and a 500 the
+        # user sees beats a 200 they believe. The one case it refuses (owning a school) is already
+        # answered above with a message that says what to do about it.
+        accounts.purge_now(owner)
+        return DeletionOut(deletion_scheduled_for=None, deleted=True)
     return DeletionOut(deletion_scheduled_for=accounts.schedule(owner))
 
 

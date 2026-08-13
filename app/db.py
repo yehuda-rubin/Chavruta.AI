@@ -777,6 +777,11 @@ def set_session_excluded(sid: str, owner_id: str, excluded: bool) -> bool:
 #   3. The account-wide opt-out, which lives in Supabase user_metadata (data_review_opt_out) and so
 #      cannot be read from here — the caller passes the opted-out owner ids in. It OVERRIDES the
 #      per-chat setting, which is why it is applied as an exclusion rather than merged.
+#   4. A PENDING DELETION REQUEST. Someone who has asked to be deleted has withdrawn their consent to
+#      be read; that the data still physically exists for another 30 days is an implementation detail
+#      of making an accidental click reversible, not a licence to keep using it in the meantime. The
+#      request is the moment the reading stops, not the purge. Cancelling the deletion puts the
+#      account back in scope on its own — the row simply reappears in this query.
 #
 # Passing opted_out_owners=None means "the caller has not established who opted out", which is
 # treated as ALL owners opted out rather than none: failing closed on a privacy gate is the only
@@ -800,6 +805,8 @@ def reviewable_questions(*, since: str | None = None, limit: int = 200,
                FROM messages m JOIN sessions s ON s.id = m.session_id
                WHERE m.role = 'user'
                  AND s.excluded_from_review = 0
+                 AND s.owner_id NOT IN (SELECT owner_id FROM accounts
+                                        WHERE deletion_scheduled_for IS NOT NULL)
                  AND s.created_at >= ?
                ORDER BY m.id ASC
                LIMIT ?""",
