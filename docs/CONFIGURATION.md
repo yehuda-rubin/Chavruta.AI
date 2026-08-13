@@ -74,6 +74,7 @@ Both optional; unset means off. `CHAVRUTA_ADMIN_OWNERS` is a dedicated allowlist
 | Variable | Purpose | Default | Where read |
 |----------|---------|---------|------------|
 | `CHAVRUTA_ADMIN_OWNERS` | Comma-separated Supabase owner_ids allowed to see `/admin` | `""` (nobody) | `app/api.py::_is_admin` |
+| `CHAVRUTA_SUGYA_BETA_OWNERS` | Comma-separated owner_ids allowed into the sugya game, or `*` for everyone. Its routes 404 for anyone else — an unreleased feature should not announce itself. See `docs/SUGYA_GAME.md` | `""` (nobody) | `app/api.py::_sugya_enabled` |
 | `SENTRY_DSN` | Backend error tracking (sentry.io, free tier) — sign up, create a Python/FastAPI project, paste its DSN | `""` (off) | `app/api.py::_configure_sentry` |
 
 ## Email sending (Resend)

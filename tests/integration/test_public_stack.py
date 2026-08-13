@@ -336,3 +336,58 @@ def test_plan_based_quota_switch(client, monkeypatch):
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ── The sugya game's beta gate (docs/SUGYA_GAME.md) ──────────────────────────
+def _sugya_client(client, monkeypatch, *, allowed: bool):
+    monkeypatch.setenv("CHAVRUTA_API_KEYS", "k")
+    owner = client.get("/me", headers={"Authorization": "Bearer k"}).json()["owner"]
+    monkeypatch.setenv("CHAVRUTA_SUGYA_BETA_OWNERS", owner if allowed else "someone-else")
+    return {"Authorization": "Bearer k"}
+
+
+def test_the_sugya_game_is_invisible_outside_the_allowlist(client, monkeypatch):
+    """404, not 403. An unreleased feature should not advertise its own existence to accounts that
+    cannot use it — and the gate is server-side, so hiding a button proves nothing."""
+    h = _sugya_client(client, monkeypatch, allowed=False)
+    assert client.get("/sugya", headers=h).status_code == 404
+    assert client.get("/sugya/shnayim-ochazin", headers=h).status_code == 404
+    assert client.post("/sugya/shnayim-ochazin/mishnah/check",
+                       json={"ref": "Bava_Metzia.3.1"}, headers=h).status_code == 404
+
+
+def test_an_allowlisted_account_gets_the_levels_but_never_the_answers(client, monkeypatch):
+    """`teach_he` is the point of the level and must not ship with the question — sending it up
+    front would put the answer in the browser's network tab, which is the whole game."""
+    h = _sugya_client(client, monkeypatch, allowed=True)
+    listing = client.get("/sugya", headers=h).json()["sugyot"]
+    assert any(s["id"] == "shnayim-ochazin" for s in listing)
+
+    body = client.get("/sugya/shnayim-ochazin", headers=h).json()
+    assert [lv["id"] for lv in body["levels"]][0] == "mishnah"
+    blob = str(body)
+    assert "teach_he" not in blob
+    assert "accept_refs" not in blob, "the accepted refs ARE the answer"
+    # The first level starts with an empty inventory; a later one holds every earlier source.
+    assert body["levels"][0]["inventory"] == []
+    assert "Bava_Metzia.3.1" in body["levels"][1]["inventory"]
+
+
+def test_checking_an_answer_reports_why_without_keeping_score(client, monkeypatch):
+    h = _sugya_client(client, monkeypatch, allowed=True)
+    ok = client.post("/sugya/shnayim-ochazin/mishnah/check",
+                     json={"ref": "Bava_Metzia.3.1"}, headers=h).json()
+    assert ok["correct"] and ok["unlocked_ref"] == "Bava_Metzia.3.1"
+    assert ok["message_he"].strip()
+
+    bad = client.post("/sugya/shnayim-ochazin/mishnah/check",
+                      json={"ref": "Bava_Metzia.3.5"}, headers=h).json()
+    assert not bad["correct"] and bad["status"] == "wrong_source"
+
+
+def test_the_source_endpoint_only_serves_refs_this_sugya_uses(client, monkeypatch):
+    """Otherwise a beta flag would be a way to read the whole corpus around every other limit the
+    product has."""
+    h = _sugya_client(client, monkeypatch, allowed=True)
+    r = client.get("/sugya/shnayim-ochazin/source?ref=Genesis.1.1", headers=h)
+    assert r.status_code == 404

@@ -36,6 +36,13 @@ version = {attr = "chavruta.__version__"}
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# The curated sugyot are CONTENT that lives inside the package, not code, and setuptools does not
+# ship non-Python files unless told to. The Docker image happens to `pip install -e .`, so it works
+# there by accident of the editable path — a real wheel would install a sugya module with no sugyot
+# in it, and the failure would look like an empty menu rather than a packaging mistake.
+[tool.setuptools.package-data]
+"chavruta.sugya" = ["data/*.json"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"

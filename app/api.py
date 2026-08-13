@@ -252,6 +252,7 @@ from chavruta.corpus.refs import (
 )
 from chavruta.corpus.schema import Intent, Query, Turn
 from chavruta.generation import computed, guards
+from chavruta import sugya as sugya_mod
 from chavruta.retrieval.base import RetrievalResult
 from chavruta.llm import metering
 from chavruta.llm.agentic import is_degrade_message
@@ -1584,6 +1585,20 @@ def _calendar_modes_enabled(owner_id: str) -> bool:
         return True
     allowed = {o.strip() for o in raw.split(",") if o.strip()}
     return owner_id in allowed
+
+
+def _sugya_enabled(owner_id: str) -> bool:
+    """The sugya game's rollout gate — same shape as the calendar one above, and separate from it on
+    purpose: these are different features and being in one beta should not enrol you in the other.
+
+    CHAVRUTA_SUGYA_BETA_OWNERS is a comma-separated allowlist of owner_ids, or "*" once it is open
+    to everyone; empty (the default) means nobody. Enforced HERE, on the server — the frontend
+    hiding a button is decoration, and this is checked whether or not the request came through it.
+    """
+    raw = os.environ.get("CHAVRUTA_SUGYA_BETA_OWNERS", "").strip()
+    if raw == "*":
+        return True
+    return owner_id in {o.strip() for o in raw.split(",") if o.strip()}
 
 
 def _is_admin(owner_id: str) -> bool:
@@ -3368,6 +3383,96 @@ def _org_for(owner: str, demo: bool = False) -> dict:
     if not m:
         raise HTTPException(status_code=404, detail="not found")
     return m
+
+
+# ── The sugya game (beta — see docs/SUGYA_GAME.md) ───────────────────────────
+# A guided path through one sugya, one source per level, checked mechanically on PROVENANCE only:
+# is this really that source, and are the quoted words really in it. Never on understanding — there
+# is no compiler for that, and the module refuses to pretend there is.
+#
+# Every route below 404s (not 403) for an account outside the allowlist: an unreleased feature
+# should not advertise its own existence to people who cannot use it.
+def _require_sugya_beta(owner: str = Depends(current_owner)) -> str:
+    if not _sugya_enabled(owner):
+        raise HTTPException(status_code=404, detail="not found")
+    return owner
+
+
+def _fetch_refs(refs) -> list:
+    """Look sources up by ref for the checker. Wrapped so `sugya.check` stays free of any store
+    import — it has to run in tests with no Qdrant at all."""
+    p = _get_pipeline()
+    return p.store.fetch_by_refs(p.profile.collection, list(refs), limit=4)
+
+
+class SugyaAnswer(BaseModel):
+    ref: str = ""
+    quote: str = ""      # optional: if given, it must actually appear in that source
+
+
+@app.get("/sugya")
+def sugya_list(owner: str = Depends(_require_sugya_beta)):
+    return {"sugyot": sugya_mod.available()}
+
+
+@app.get("/sugya/{sugya_id}")
+def sugya_detail(sugya_id: str, owner: str = Depends(_require_sugya_beta)):
+    """The whole sugya: its levels, and for each one the inventory of refs unlocked BEFORE it.
+
+    `hint_he` and `goal_he` ship with it, `teach_he` does NOT — that is the point of the level and
+    is returned only once the answer is right. Sending it up front would put the answer in the
+    browser's network tab, which is the whole game.
+    """
+    try:
+        s = sugya_mod.load(sugya_id)
+    except sugya_mod.SugyaNotFound:
+        raise HTTPException(status_code=404, detail="not found") from None
+    return {
+        "id": s.id, "title_he": s.title_he, "source_he": s.source_he, "intro_he": s.intro_he,
+        "levels": [{"id": lv.id, "title_he": lv.title_he, "move_he": lv.move_he,
+                    "goal_he": lv.goal_he, "hint_he": lv.hint_he,
+                    "inventory": list(s.inventory_at(lv.id))} for lv in s.levels],
+    }
+
+
+@app.get("/sugya/{sugya_id}/source")
+def sugya_source(sugya_id: str, ref: str, owner: str = Depends(_require_sugya_beta)):
+    """The text of one source — but ONLY one this sugya actually uses.
+
+    The `ref` is checked against the sugya's own list rather than passed through to the store: an
+    open text endpoint gated on a beta flag would be a way to read the corpus around every other
+    limit the product has.
+    """
+    try:
+        s = sugya_mod.load(sugya_id)
+    except sugya_mod.SugyaNotFound:
+        raise HTTPException(status_code=404, detail="not found") from None
+    known = {lv.unlocks_ref for lv in s.levels} | {r for lv in s.levels for r in lv.accept_refs}
+    if ref not in known:
+        raise HTTPException(status_code=404, detail="not found")
+    hits = _fetch_refs([ref])
+    if not hits:
+        raise HTTPException(status_code=404, detail="not found")
+    p = getattr(hits[0], "payload", None) or {}
+    return {"ref": ref, "text_he": p.get("text_he") or p.get("text") or "",
+            "deep_link": p.get("deep_link") or ""}
+
+
+@app.post("/sugya/{sugya_id}/{level_id}/check")
+def sugya_check(sugya_id: str, level_id: str, req: SugyaAnswer,
+                owner: str = Depends(_require_sugya_beta)):
+    """Was the right source brought, and does it really say what was quoted from it?
+
+    No score is kept and nothing is written down. A wrong answer leaves the level open, the way a
+    Lean proof does not fail but simply has not closed yet.
+    """
+    try:
+        s = sugya_mod.load(sugya_id)
+        res = sugya_mod.check(s, level_id, req.ref, req.quote, fetch=_fetch_refs)
+    except (sugya_mod.SugyaNotFound, sugya_mod.LevelNotFound):
+        raise HTTPException(status_code=404, detail="not found") from None
+    return {"correct": res.correct, "status": res.status, "message_he": res.message_he,
+            "unlocked_ref": res.unlocked_ref}
 
 
 @app.get("/orgs/panel", response_model=OrgPanelOut)
