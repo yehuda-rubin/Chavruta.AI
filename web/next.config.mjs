@@ -53,6 +53,8 @@ const nextConfig = {
       ...proxy("orgs"),
       ...proxy("messages"),   // /messages/{id}/report — reporting a bad answer
       ...proxy("byok"),       // /byok/check — validating a personal API key
+      ...proxy("helper"),     // /helper/status|accept|decline|messages — the dev-helper's own side
+      ...proxy("sugya"),      // the sugya game (beta-gated server-side)
       ...proxy("health"),
       ...proxy("ready"),
       ...proxy("admin"),      // owner-only dashboard — see app/api.py::_is_admin

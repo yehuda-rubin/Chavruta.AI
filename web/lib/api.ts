@@ -309,6 +309,30 @@ export const api = {
     // on which that decision gets revisited — see src/chavruta/generation/guards.py.
     guards: (since: AdminWindow, kind = "", limit = 100) =>
       req<GuardFindings>(`/admin/guards?since=${since}&kind=${kind}&limit=${limit}`),
+
+    // Development helpers (app/devhelpers.py). Inviting grants nothing — the person has to accept.
+    helpers: () => req<{ helpers: DevHelper[]; features: HelperFeature[] }>("/admin/helpers"),
+    inviteHelper: (ownerId: string, note: string, features: string[]) =>
+      req<DevHelper>("/admin/helpers", {
+        method: "POST",
+        body: JSON.stringify({ owner_id: ownerId, note, features }),
+      }),
+    setHelperFeatures: (ownerId: string, features: string[]) =>
+      req<{ features: string[] }>(`/admin/helpers/${encodeURIComponent(ownerId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ features }),
+      }),
+    revokeHelper: (ownerId: string) =>
+      req<{ revoked: boolean }>(`/admin/helpers/${encodeURIComponent(ownerId)}/revoke`,
+        { method: "POST" }),
+    removeHelper: (ownerId: string) =>
+      req<{ removed: boolean }>(`/admin/helpers/${encodeURIComponent(ownerId)}`,
+        { method: "DELETE" }),
+    noticeHelpers: (ownerIds: string[], body: string) =>
+      req<{ sent: number }>("/admin/helpers/notice", {
+        method: "POST",
+        body: JSON.stringify({ owner_ids: ownerIds, body }),
+      }),
     flaggedMessages: (reviewed = false) =>
       req<FlaggedMessage[]>(`/admin/flagged-messages?reviewed=${reviewed}`),
     reviewMessage: (reportId: number) =>
@@ -326,6 +350,15 @@ export const api = {
                                              { method: "DELETE" }),
     grant: (body: GrantIn) =>
       req<GrantResult>("/admin/grant", { method: "POST", body: JSON.stringify(body) }),
+  },
+
+  // The helper's own side. `status` is called on every load by every account, so it answers
+  // {status:"none"} rather than 404ing for the many who are not helpers.
+  helper: {
+    status: () => req<HelperStatus>("/helper/status"),
+    accept: () => req<HelperStatus>("/helper/accept", { method: "POST" }),
+    decline: () => req<HelperStatus>("/helper/decline", { method: "POST" }),
+    markRead: (id: number) => req<{ read: boolean }>(`/helper/messages/${id}/read`, { method: "POST" }),
   },
 };
 
@@ -518,6 +551,35 @@ export interface GuardFinding {
 export interface GuardFindings {
   counts: Record<string, number>;
   findings: GuardFinding[];
+}
+
+// A development helper as the operator sees them (app/devhelpers.py).
+export interface DevHelper {
+  owner_id: string;
+  added_at: string;
+  added_by: string;
+  note: string | null;
+  features: string[];
+  accepted_at: string | null;
+  declined_at: string | null;
+  revoked_at: string | null;
+  active: boolean;
+  status: "invited" | "accepted" | "declined" | "revoked" | string;
+  unread?: number;
+}
+
+export interface HelperFeature {
+  id: string;
+  label_he: string;
+}
+
+// The same person's own view. `status: "none"` is the normal answer for almost every account.
+export interface HelperStatus {
+  status: "none" | "invited" | "accepted" | "declined" | "revoked" | string;
+  note?: string;
+  features: string[];
+  plan?: string;
+  unread: { id: number; at: string; body: string; read_at: string | null }[];
 }
 
 export interface UsageByOwnerRow {

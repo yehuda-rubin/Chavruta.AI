@@ -174,3 +174,24 @@ def test_deleting_the_operator_leaves_the_helpers_but_not_their_name(fresh_db):
     row = devhelpers.get(HELPER)
     assert row is not None, "the helper's own row is not the operator's to delete"
     assert row["added_by"] == fresh_db.DELETED_OWNER
+
+
+# ── The admin panel's per-account view ───────────────────────────────────────
+def test_top_users_excludes_the_anonymised_rows_of_deleted_accounts(fresh_db):
+    """purge_owner NULLs usage_events.owner_id instead of deleting the row, so the measurements stay
+    true. A plain GROUP BY then collapses everyone who ever left into one nameless row — which
+    ranked fourth in "top users" on the live panel and would only climb. It is not a user."""
+    def _event(owner, tokens):
+        fresh_db.record_usage_event(
+            at="2026-08-13T10:00:00+00:00", hour_local=13, dow=4, owner_id=owner, plan="free",
+            intent="qa", lang="he", prompt_tokens=10, completion_tokens=10, billed_tokens=tokens,
+            llm_calls=1, ms=1000, concurrent_at_start=1, grounded=1, no_source=0, citations=2,
+            audience=None, grade_band=None, length=None, attachments=0, error=None)
+
+    _event(HELPER, 40)
+    _event(None, 99999)          # what a purged account's request becomes
+
+    rows = fresh_db.usage_by_owner()
+    assert [r["owner_id"] for r in rows] == [HELPER]
+    # The anonymised request is still counted where it belongs — only the per-ACCOUNT view drops it.
+    assert fresh_db.usage_health()["requests"] == 2

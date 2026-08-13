@@ -10,7 +10,9 @@ import {
   type FeedbackItem,
   type FlaggedMessage,
   type GrantResult,
+  type DevHelper,
   type GuardFindings,
+  type HelperFeature,
   type UsageByOwnerRow,
 } from "@/lib/api";
 
@@ -23,7 +25,7 @@ import {
 // what this page renders (see app/api.py::_require_admin). The gate below is UX only — showing a
 // plain "not authorized" instead of a broken dashboard to someone who typed the URL without access.
 
-type Section = "overview" | "inbox" | "guards" | "coupons";
+type Section = "overview" | "inbox" | "guards" | "helpers" | "coupons";
 
 // The sortable columns of the top-users table, and how many rows a page may hold.
 type OwnerSortKey = "owner_id" | "requests" | "tokens" | "avg_ms";
@@ -33,6 +35,7 @@ const SECTIONS: { id: Section; label: string; icon: string }[] = [
   { id: "overview", label: "סקירה", icon: "monitoring" },
   { id: "inbox", label: "משוב ודיווחים", icon: "inbox" },
   { id: "guards", label: "בקרת איכות", icon: "policy" },
+  { id: "helpers", label: "עוזרי פיתוח", icon: "group" },
   { id: "coupons", label: "קופונים והרשאות", icon: "confirmation_number" },
 ];
 
@@ -483,10 +486,231 @@ export default function AdminDashboard() {
             </>
           )}
 
+          {section === "helpers" && <HelpersSection />}
+
           {section === "coupons" && <CouponsSection />}
         </div>
       </main>
     </div>
+  );
+}
+
+// ── Development helpers ─────────────────────────────────────────────────────
+// Accounts invited to test the product (app/devhelpers.py). Inviting grants NOTHING — the person has
+// to accept — so the status column is the part to read, not the row's existence.
+//
+// Identified by owner_id because that is the only key that exists here: the app database stores no
+// email addresses at all. The overview table above is where one gets copied from.
+const HELPER_STATUS_HE: Record<string, string> = {
+  invited: "ממתין לאישור",
+  accepted: "פעיל",
+  declined: "סירב",
+  revoked: "בוטל",
+};
+
+function HelpersSection() {
+  const [rows, setRows] = useState<DevHelper[] | null>(null);
+  const [features, setFeatures] = useState<HelperFeature[]>([]);
+  const [ownerId, setOwnerId] = useState("");
+  const [note, setNote] = useState("");
+  const [newFeatures, setNewFeatures] = useState<string[]>([]);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [notice, setNotice] = useState("");
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = () =>
+    api.admin
+      .helpers()
+      .then((r) => {
+        setRows(r.helpers);
+        setFeatures(r.features);
+      })
+      .catch(() => setRows([]));
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function run(fn: () => Promise<unknown>, ok: string) {
+    setBusy(true);
+    setMsg("");
+    try {
+      await fn();
+      setMsg(ok);
+      await load();
+      return true;
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "הפעולה נכשלה");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const toggle = (list: string[], id: string) =>
+    list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
+
+  return (
+    <>
+      <h2 className="font-serif text-2xl font-bold text-tekhelet">עוזרי פיתוח</h2>
+      <p className="text-xs text-ink/50 leading-relaxed -mt-2">
+        חשבונות שהזמנת לעזור בבדיקת המוצר. הזמנה לבדה אינה מעניקה דבר — עד שהאדם מאשר, המכסה
+        והיכולות שלו אינן משתנות. &quot;פעיל&quot; פירושו שאישר.
+      </p>
+
+      <section className="glass rounded-[24px] p-5 flex flex-col gap-3">
+        <h3 className="font-serif text-lg font-bold text-tekhelet">הזמנת עוזר</h3>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input
+            value={ownerId}
+            onChange={(e) => setOwnerId(e.target.value)}
+            placeholder="מזהה חשבון (owner_id) — מהטבלה בסקירה"
+            aria-label="מזהה חשבון"
+            className="flex-1 px-3 py-2 rounded-2xl glass text-sm font-mono text-ink/80 outline-none"
+          />
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="הערה לזיהוי (מוצגת גם לו)"
+            aria-label="הערה לזיהוי"
+            className="flex-1 px-3 py-2 rounded-2xl glass text-sm text-ink/80 outline-none"
+          />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {features.map((f) => (
+            <label key={f.id} className="flex items-center gap-1.5 text-xs text-ink/70 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={newFeatures.includes(f.id)}
+                onChange={() => setNewFeatures((c) => toggle(c, f.id))}
+                className="accent-tekhelet"
+              />
+              {f.label_he}
+            </label>
+          ))}
+        </div>
+        <button
+          disabled={busy || !ownerId.trim()}
+          onClick={async () => {
+            const ok = await run(
+              () => api.admin.inviteHelper(ownerId.trim(), note.trim(), newFeatures),
+              "ההזמנה נשלחה — היא תופיע אצלו לאישור",
+            );
+            if (ok) {
+              setOwnerId("");
+              setNote("");
+              setNewFeatures([]);
+            }
+          }}
+          className="self-start px-4 py-2 rounded-2xl grad text-white font-semibold text-sm disabled:opacity-40"
+        >
+          הזמן
+        </button>
+      </section>
+
+      <section className="glass rounded-[24px] p-5 flex flex-col gap-3">
+        <h3 className="font-serif text-lg font-bold text-tekhelet">שליחת הודעה</h3>
+        <p className="text-xs text-ink/50">
+          {picked.length ? `נבחרו ${picked.length} נמענים` : "סמן נמענים ברשימה למטה"}
+        </p>
+        <textarea
+          value={notice}
+          onChange={(e) => setNotice(e.target.value)}
+          rows={3}
+          aria-label="תוכן ההודעה"
+          placeholder="ההודעה תופיע להם בתוך האפליקציה"
+          className="px-3 py-2 rounded-2xl glass text-sm text-ink/80 outline-none resize-y"
+        />
+        <button
+          disabled={busy || !notice.trim() || !picked.length}
+          onClick={async () => {
+            const n = picked.length;
+            const ok = await run(() => api.admin.noticeHelpers(picked, notice.trim()), `נשלח ל-${n}`);
+            if (ok) {
+              setNotice("");
+              setPicked([]);
+            }
+          }}
+          className="self-start px-4 py-2 rounded-2xl grad text-white font-semibold text-sm disabled:opacity-40"
+        >
+          שלח
+        </button>
+      </section>
+
+      {msg && <p className="text-sm text-tekhelet/80">{msg}</p>}
+
+      <section className="glass rounded-[24px] p-5 flex flex-col gap-2">
+        {(rows ?? []).map((h) => (
+          <div key={h.owner_id} className="rounded-2xl bg-ink/5 p-3 flex flex-col gap-2">
+            <div className="flex items-start justify-between gap-2">
+              <label className="flex items-start gap-2 min-w-0 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={picked.includes(h.owner_id)}
+                  onChange={() => setPicked((c) => toggle(c, h.owner_id))}
+                  aria-label={`בחר נמען ${h.note || h.owner_id}`}
+                  className="accent-tekhelet mt-1"
+                />
+                <span className="min-w-0">
+                  <span className="block text-sm text-ink/80 font-semibold truncate">
+                    {h.note || "(ללא הערה)"}
+                  </span>
+                  <span className="block text-[11px] font-mono text-ink/40 truncate">{h.owner_id}</span>
+                </span>
+              </label>
+              <span
+                className={`text-xs font-semibold shrink-0 ${h.active ? "text-tekhelet" : "text-ink/40"}`}
+              >
+                {HELPER_STATUS_HE[h.status] ?? h.status}
+                {!!h.unread && <span className="text-gold"> · {h.unread} לא נקראו</span>}
+              </span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {features.map((f) => (
+                <label key={f.id} className="flex items-center gap-1.5 text-xs text-ink/60 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={h.features.includes(f.id)}
+                    onChange={() =>
+                      run(
+                        () => api.admin.setHelperFeatures(h.owner_id, toggle(h.features, f.id)),
+                        "היכולות עודכנו",
+                      )
+                    }
+                    className="accent-tekhelet"
+                  />
+                  {f.label_he}
+                </label>
+              ))}
+              <span className="flex-1" />
+              {!h.revoked_at && (
+                <button
+                  onClick={() => run(() => api.admin.revokeHelper(h.owner_id), "בוטל")}
+                  className="px-3 py-1 rounded-full glass text-ink/60 text-xs font-semibold hover:bg-ink/5"
+                >
+                  בטל
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  if (window.confirm("להסיר לגמרי? ההודעות שנשלחו אליו יימחקו גם הן.")) {
+                    run(() => api.admin.removeHelper(h.owner_id), "הוסר");
+                  }
+                }}
+                className="px-3 py-1 rounded-full glass text-red-500 text-xs font-semibold hover:bg-red-500/10"
+              >
+                הסר
+              </button>
+            </div>
+          </div>
+        ))}
+        {(rows ?? []).length === 0 && (
+          <p className="text-sm text-ink/40 text-center py-2">אין עוזרי פיתוח עדיין.</p>
+        )}
+      </section>
+    </>
   );
 }
 

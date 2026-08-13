@@ -144,8 +144,16 @@ def test_purging_an_account_anonymises_its_events_without_losing_the_counts(d):
 
     assert d.usage_health()["requests"] == 2                       # nothing lost
     owners = {r["owner_id"] for r in d.usage_by_owner()}
-    assert "u-1" not in owners and None in owners                  # identity detached
-    assert "u-2" in owners
+    assert "u-1" not in owners and "u-2" in owners                 # identity detached
+    # …and the detached row does NOT come back as a nameless entry in the per-account view. It used
+    # to, and on the live panel every account ever deleted had collapsed into one anonymous row
+    # sitting fourth in "top users" — a figure that is not a user and would only climb. The raw row
+    # is still there with a NULL owner, which is what keeps usage_health above honest.
+    assert None not in owners
+    with d._LOCK:
+        detached = d.get_conn().execute(
+            "SELECT COUNT(*) FROM usage_events WHERE owner_id IS NULL").fetchone()[0]
+    assert detached == 1
 
 
 # ── Retention ─────────────────────────────────────────────────────────────────

@@ -6,6 +6,7 @@ import { commentatorTag, isHe, renderText } from "@/lib/format";
 import { downloadDoc } from "@/lib/doc";
 import { api } from "@/lib/api";
 import { Icon } from "./Icon";
+import { HelperPrompt } from "./HelperPrompt";
 import { IntentBar } from "./IntentBar";
 import { LessonOptions, LessonFields } from "./LessonOptions";
 
@@ -248,6 +249,12 @@ export function ChatPane({
         aria-relevant="additions"
         className="flex-1 overflow-y-auto px-8 py-8 flex flex-col gap-6 max-w-2xl mx-auto w-full"
       >
+        {/* Dev-helper invitation and notices. Placed at the TOP of the scroller rather than as an
+            overlay: an invitation is not urgent enough to interrupt someone mid-question, and a
+            modal that blocks the app to ask a favour is the wrong shape for a favour. It renders
+            nothing at all for almost every account. */}
+        <HelperPrompt />
+
         {messages.length === 0 ? (
           <div className="m-auto text-center px-6">
             <div className="h-16 w-16 rounded-3xl grad grid place-items-center text-white font-serif text-3xl font-black mx-auto mb-5 shadow-lg shadow-tekhelet/20">

@@ -1107,14 +1107,27 @@ def _agg(sql: str, args: tuple = ()) -> list[dict[str, Any]]:
 
 
 def usage_by_owner(since: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
-    """Per-account totals — who is using it and what they cost."""
-    where = "WHERE at >= ?" if since else ""
+    """Per-account totals — who is using it and what they cost.
+
+    Anonymised rows are EXCLUDED. purge_owner sets usage_events.owner_id to NULL rather than deleting
+    the row, so the measurements stay true (see there) — but a plain GROUP BY then collapses every
+    account ever deleted into a single nameless row, which ranked fourth in "top users" and would
+    only climb. It is not a user: it is the sum of people who left. The totals that should include
+    those requests (usage_health, revenue, by-intent) still do — this is the one view that is per
+    ACCOUNT, and an event with no account has nothing to say in it.
+    """
+    clauses = ["owner_id IS NOT NULL"]
+    args: list[Any] = []
+    if since:
+        clauses.append("at >= ?")
+        args.append(since)
+    where = "WHERE " + " AND ".join(clauses)
     return _agg(
         f"SELECT owner_id, COUNT(*) AS requests, SUM(billed_tokens) AS tokens, "   # noqa: S608
         f"SUM(llm_calls) AS calls, AVG(ms) AS avg_ms, "
         f"SUM(CASE WHEN grounded=1 THEN 1 ELSE 0 END) AS grounded "
         f"FROM usage_events {where} GROUP BY owner_id ORDER BY tokens DESC LIMIT ?",
-        ((since, limit) if since else (limit,)))
+        (*args, limit))
 
 
 def usage_by_intent(since: str | None = None) -> list[dict[str, Any]]:
