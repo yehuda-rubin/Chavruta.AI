@@ -20,7 +20,7 @@ from chavruta.corpus.links import LinkGraph
 from chavruta.corpus.refs import canon_corpus_ref, with_ref_variants
 from chavruta.corpus.registry import CorpusRegistry, default_registry
 from chavruta.corpus.schema import Answer, Intent, Query, Turn
-from chavruta.generation import deontic, grounded
+from chavruta.generation import deontic, grounded, guards
 from chavruta.retrieval.hybrid import HybridRetriever
 
 # Its own name, not chavruta.pipeline: these lines are the only record the watching guards leave,
@@ -479,6 +479,7 @@ class ChavrutaPipeline:
         #
         # `_guard_log` is its own logger so one name follows every guard at once, without the rest
         # of the pipeline's chatter in the way.
+        intent_name = getattr(query.intent, "value", None) or str(query.intent or "qa")
         try:
             # A quote that really IS in the corpus, under a different name than the prose credits.
             # Tosafot's words introduced as "רש״י כותב במפורש" satisfies unverified_quotes (the
@@ -487,17 +488,25 @@ class ChavrutaPipeline:
             # against these functions on 2026-08-13.
             for m in grounded.misattributed_quotes(
                     text, list(result.hits) + list(fetched or []))[:2]:
-                _guard_log.warning("misattribution: credited to %s, text is from %s — %r",
-                                   m.claimed, m.found_in, m.quote[:70])
+                # `found_in` is a TUPLE — two commentaries can carry the same phrase, and naming all
+                # of them is what keeps the finding honest. Flattened to a string here because the
+                # panel renders it as text; a raw tuple would arrive there as a JSON array.
+                found = ", ".join(m.found_in)
+                guards.report("misattribution", intent_name,
+                              {"claimed": m.claimed, "found_in": found, "quote": m.quote[:300]},
+                              summary=f"credited to {m.claimed}, text is from {found}")
         except Exception:                   # noqa: BLE001 — a watching check must never break an answer
             _guard_log.exception("misattribution check failed")
         try:
-            # `attribution` is in the line on purpose: 'inherited' means the second verdict named
-            # nobody and took the last speaker in scope. That is the weaker of the two paths, and an
+            # `attribution` is carried on purpose: 'inherited' means the second verdict named nobody
+            # and took the last speaker in scope. That is the weaker of the two paths, and an
             # operator triaging these should be able to discount it without reading the code.
             for c in deontic.deontic_conflicts(text)[:2]:
-                _guard_log.warning("deontic: %s %s/%s — %r || %r", c.authority, c.axis,
-                                   c.attribution, c.first.sentence[:70], c.second.sentence[:70])
+                guards.report("deontic", intent_name,
+                              {"authority": c.authority, "axis": c.axis,
+                               "attribution": c.attribution,
+                               "first": c.first.sentence[:300], "second": c.second.sentence[:300]},
+                              summary=f"{c.authority} {c.axis}/{c.attribution}")
         except Exception:                   # noqa: BLE001
             _guard_log.exception("deontic check failed")
         return grounded.maybe_halacha_caveat(answer, query.lang)

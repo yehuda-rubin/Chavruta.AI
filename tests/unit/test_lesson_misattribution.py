@@ -15,6 +15,7 @@ import logging
 from types import SimpleNamespace
 
 import app.api as api
+from chavruta.generation import guards
 
 
 class _StubLLM:
@@ -50,15 +51,25 @@ def _build(monkeypatch):
         tpl=None, history=None, owner_id="local", llm=_StubLLM())
 
 
-def test_misattribution_is_logged_not_shown(monkeypatch, caplog):
-    """Both halves matter. The finding must reach the log — and must NOT reach the teacher, because
-    the guard has not yet earned the right to put a warning on someone's lesson."""
-    with caplog.at_level(logging.WARNING, logger="chavruta.guards"):
-        res = _build(monkeypatch)
+def test_misattribution_is_recorded_not_shown(monkeypatch, caplog):
+    """Both halves matter, and the recorded half matters more than the logged one: the admin panel
+    reads the STORED finding, so an assertion on log wording would pass while the screen stayed
+    empty. The finding must reach the sink — and must NOT reach the teacher, because the guard has
+    not yet earned the right to put a warning on someone's lesson."""
+    seen: list[tuple[str, str, dict]] = []
+    guards.set_sink(lambda kind, intent, detail: seen.append((kind, intent, detail)))
+    try:
+        with caplog.at_level(logging.WARNING, logger="chavruta.guards"):
+            res = _build(monkeypatch)
+    finally:
+        guards.set_sink(None)
 
-    logged = " ".join(r.getMessage() for r in caplog.records)
-    assert "misattribution (lesson)" in logged, f"guard did not log: {logged!r}"
-    assert "rashi" in logged and "tosafot" in logged, logged
+    assert seen, "the guard recorded nothing — the admin panel would show an empty screen"
+    kind, intent, detail = seen[0]
+    assert (kind, intent) == ("misattribution", "lesson")
+    assert detail["claimed"] == "rashi" and "tosafot" in detail["found_in"]
+    # A string, not a list: `found_in` is a tuple at the source and the panel renders it as text.
+    assert isinstance(detail["found_in"], str), detail
     assert not any("רש" in c and "תוספות" in c for c in res.caveats), \
         f"internal-only guard leaked into a user-visible caveat: {res.caveats}"
 

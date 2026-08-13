@@ -305,6 +305,10 @@ export const api = {
       req<UsageByIntentRow[]>(`/admin/usage-by-intent?since=${since}`),
     usageByWeek: (since: AdminWindow) =>
       req<UsageByWeekRow[]>(`/admin/usage-by-week?since=${since}`),
+    // What the watching guards caught. They show nothing to users on purpose; this is the evidence
+    // on which that decision gets revisited — see src/chavruta/generation/guards.py.
+    guards: (since: AdminWindow, kind = "", limit = 100) =>
+      req<GuardFindings>(`/admin/guards?since=${since}&kind=${kind}&limit=${limit}`),
     flaggedMessages: (reviewed = false) =>
       req<FlaggedMessage[]>(`/admin/flagged-messages?reviewed=${reviewed}`),
     reviewMessage: (reportId: number) =>
@@ -499,6 +503,21 @@ export interface AdminOverview {
     by_plan: { plan: string | null; currency: string; total: number; charges: number }[];
     totals: Record<string, number>;
   };
+}
+
+// A finding from one of the watching guards (app/db.py guard_findings). `detail`'s shape depends on
+// `kind` — the three guards have nothing in common to normalise, so the panel renders per kind.
+export interface GuardFinding {
+  id: number;
+  at: string;
+  kind: "misattribution" | "deontic" | "calendar" | string;
+  intent: string | null;
+  detail: Record<string, string>;
+}
+
+export interface GuardFindings {
+  counts: Record<string, number>;
+  findings: GuardFinding[];
 }
 
 export interface UsageByOwnerRow {

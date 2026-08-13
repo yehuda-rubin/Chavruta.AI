@@ -251,7 +251,7 @@ from chavruta.corpus.refs import (
     with_ref_variants,
 )
 from chavruta.corpus.schema import Intent, Query, Turn
-from chavruta.generation import computed
+from chavruta.generation import computed, guards
 from chavruta.retrieval.base import RetrievalResult
 from chavruta.llm import metering
 from chavruta.llm.agentic import is_degrade_message
@@ -354,6 +354,10 @@ async def lifespan(app: FastAPI):
     db.get_conn()          # initialise DB + run migrations
     accounts.start_sweeper()   # background purge of accounts past their deletion grace period
     billing.start_sweeper()    # background downgrade of expired-cancelled subscriptions (if billing on)
+    # The watching guards keep their findings only in the log unless something is listening. This is
+    # what makes them visible in the admin panel; without it the engine still runs (the CLI and the
+    # tests have no database), it just has nowhere to write them down.
+    guards.set_sink(db.record_guard_finding)
     p = _get_pipeline()    # warm up bge-m3 + Qdrant connection at startup
     try:
         p.embedding.embed_query("warmup")   # load the embedder BEFORE any qdrant_client use
@@ -1008,8 +1012,11 @@ def _generate_lesson_from_hits(topic: str, hits, lang: str, he: bool, *, audienc
     # quote would report our own correct formatting as a fabrication, on every lesson ever built.
     try:
         for _m in misattributed_quotes(fl, hits)[:2]:
-            _guard_log.warning("misattribution (lesson): credited to %s, text is from %s — %r",
-                               _m.claimed, _m.found_in, _m.quote[:70])
+            guards.report("misattribution", "lesson",
+                          {"claimed": _m.claimed, "found_in": ", ".join(_m.found_in),
+                           "quote": _m.quote[:300]},
+                          summary=f"credited to {_m.claimed}, text is from "
+                                  f"{', '.join(_m.found_in)}")
     except Exception:                       # noqa: BLE001 — a watching check must never break a lesson
         _guard_log.exception("misattribution check failed")
     # Calendar-determinate claims: a perfectly cited lesson can still name the wrong daf. Cache-first
@@ -1019,8 +1026,10 @@ def _generate_lesson_from_hits(topic: str, hits, lang: str, he: bool, *, audienc
     try:
         _cal = computed.check_calendar_claims(fl, computed.resolve_facts(load_cached=db.get_calendar_cache))
         for _mm in _cal.mismatches[:2]:
-            _guard_log.warning("calendar (lesson): said %s, actually %s — %r",
-                               _mm.stated, _mm.expected, _mm.span[:70])
+            guards.report("calendar", "lesson",
+                          {"claim": _mm.kind, "stated": _mm.stated, "expected": _mm.expected,
+                           "span": _mm.span[:300]},
+                          summary=f"said {_mm.stated}, actually {_mm.expected}")
     except Exception:                       # noqa: BLE001
         _guard_log.exception("calendar check failed")
 
@@ -2569,6 +2578,20 @@ def admin_overview(since: str = "30d", owner: str = Depends(_require_admin)):
 @app.get("/admin/usage-by-owner")
 def admin_usage_by_owner(since: str = "30d", limit: int = 50, owner: str = Depends(_require_admin)):
     return db.usage_by_owner(_since_cutoff(since), limit)
+
+
+@app.get("/admin/guards")
+def admin_guard_findings(since: str = "30d", kind: str = "", limit: int = 100,
+                         owner: str = Depends(_require_admin)):
+    """What the watching guards caught — misattribution, self-contradiction, wrong calendar claims.
+
+    These checks show nothing to users on purpose (see chavruta/generation/guards.py): none has met
+    real traffic, and a warning on a correct answer spends credit the honest ones earned. This route
+    is how that decision gets revisited on evidence instead of on a hunch — the counts say whether a
+    guard fires at all, and the rows say whether what it caught was worth catching.
+    """
+    return {"counts": db.guard_finding_counts(_since_cutoff(since)),
+            "findings": db.list_guard_findings(_since_cutoff(since), kind, limit)}
 
 
 @app.get("/admin/usage-by-intent")

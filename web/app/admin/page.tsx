@@ -10,6 +10,7 @@ import {
   type FeedbackItem,
   type FlaggedMessage,
   type GrantResult,
+  type GuardFindings,
   type UsageByOwnerRow,
 } from "@/lib/api";
 
@@ -22,7 +23,7 @@ import {
 // what this page renders (see app/api.py::_require_admin). The gate below is UX only — showing a
 // plain "not authorized" instead of a broken dashboard to someone who typed the URL without access.
 
-type Section = "overview" | "inbox" | "coupons";
+type Section = "overview" | "inbox" | "guards" | "coupons";
 
 // The sortable columns of the top-users table, and how many rows a page may hold.
 type OwnerSortKey = "owner_id" | "requests" | "tokens" | "avg_ms";
@@ -31,8 +32,17 @@ const OWNER_PAGE_SIZES = [10, 20, 50, 100];
 const SECTIONS: { id: Section; label: string; icon: string }[] = [
   { id: "overview", label: "סקירה", icon: "monitoring" },
   { id: "inbox", label: "משוב ודיווחים", icon: "inbox" },
+  { id: "guards", label: "בקרת איכות", icon: "policy" },
   { id: "coupons", label: "קופונים והרשאות", icon: "confirmation_number" },
 ];
+
+// Hebrew names for the guard kinds. Kept beside the filter buttons that use the same ids, so the
+// label and the query string can't drift apart.
+const GUARD_LABELS: Record<string, string> = {
+  misattribution: "ייחוס שגוי",
+  deontic: "סתירה עצמית",
+  calendar: "תאריך/דף שגוי",
+};
 
 const PLANS = [
   { id: "basic", label: "בסיסי" },
@@ -50,6 +60,8 @@ export default function AdminDashboard() {
   const [byOwner, setByOwner] = useState<UsageByOwnerRow[] | null>(null);
   const [flagged, setFlagged] = useState<FlaggedMessage[] | null>(null);
   const [feedback, setFeedback] = useState<FeedbackItem[] | null>(null);
+  const [guards, setGuards] = useState<GuardFindings | null>(null);
+  const [guardKind, setGuardKind] = useState("");
   const [dataLoading, setDataLoading] = useState(true);
   const [error, setError] = useState(false);
 
@@ -81,16 +93,18 @@ export default function AdminDashboard() {
       api.admin.usageByOwner(since, 500),
       api.admin.flaggedMessages(false),
       api.admin.feedback(false),
+      api.admin.guards(since, guardKind, 200),
     ])
-      .then(([ov, owners, flags, fb]) => {
+      .then(([ov, owners, flags, fb, gd]) => {
         setOverview(ov);
         setByOwner(owners);
         setFlagged(flags);
         setFeedback(fb);
+        setGuards(gd);
       })
       .catch(() => setError(true))
       .finally(() => setDataLoading(false));
-  }, [isAdmin, since]);
+  }, [isAdmin, since, guardKind]);
 
   async function reviewMessage(reportId: number) {
     await api.admin.reviewMessage(reportId);
@@ -390,6 +404,81 @@ export default function AdminDashboard() {
                     <p className="text-sm text-ink/40 text-center py-2">אין משוב ממתין לבדיקה 🎉</p>
                   )}
                 </div>
+              </section>
+            </>
+          )}
+
+          {/* Quality control — what the watching guards caught. These checks deliberately show
+              NOTHING to users (src/chavruta/generation/guards.py): none has met real traffic, and a
+              warning on a correct answer spends the credit the honest ones earned. This screen is
+              how that decision gets revisited on evidence: the counts say whether a guard fires at
+              all, the rows say whether what it caught was worth catching. */}
+          {section === "guards" && (
+            <>
+              <h2 className="font-serif text-2xl font-bold text-tekhelet">בקרת איכות</h2>
+              <p className="text-xs text-ink/50 leading-relaxed -mt-2">
+                שלוש בדיקות שרצות על כל תשובה ואינן מוצגות למשתמש. הן נאספות כאן כדי שנחליט,
+                לפי מה שהן תפסו בפועל, אילו מהן ראויות להיות גלויות.
+              </p>
+
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { id: "", label: "הכול" },
+                  { id: "misattribution", label: "ייחוס שגוי" },
+                  { id: "deontic", label: "סתירה עצמית" },
+                  { id: "calendar", label: "תאריך/דף שגוי" },
+                ].map((k) => (
+                  <button
+                    key={k.id}
+                    onClick={() => setGuardKind(k.id)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-semibold transition ${
+                      guardKind === k.id ? "grad text-white" : "glass text-ink/70 hover:bg-ink/5"
+                    }`}
+                  >
+                    {k.label}
+                    {k.id && guards?.counts?.[k.id] ? ` (${guards.counts[k.id]})` : ""}
+                  </button>
+                ))}
+              </div>
+
+              <section className="glass rounded-[24px] p-5 flex flex-col gap-2">
+                {(guards?.findings ?? []).map((g) => (
+                  <div key={g.id} className="rounded-2xl bg-ink/5 p-3 flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between gap-2 text-xs text-ink/50">
+                      <span className="font-semibold text-tekhelet">{GUARD_LABELS[g.kind] ?? g.kind}</span>
+                      <span>{g.intent || "—"} · {new Date(g.at).toLocaleString("he-IL")}</span>
+                    </div>
+                    {/* Rendered per kind rather than as one shape: the three guards report genuinely
+                        different things, and a shared "detail" column would be a JSON blob. */}
+                    {g.kind === "misattribution" && (
+                      <p className="text-sm text-ink/80 leading-relaxed">
+                        יוחס ל<b>{g.detail.claimed}</b>, והטקסט הוא של <b>{g.detail.found_in}</b>
+                        {g.detail.quote && <span className="block text-ink/60 mt-1">«{g.detail.quote}»</span>}
+                      </p>
+                    )}
+                    {g.kind === "deontic" && (
+                      <p className="text-sm text-ink/80 leading-relaxed">
+                        <b>{g.detail.authority}</b>
+                        {g.detail.attribution === "inherited" && (
+                          <span className="text-ink/40"> (ללא ייחוס מפורש — אות חלש יותר)</span>
+                        )}
+                        <span className="block text-ink/60 mt-1">«{g.detail.first}»</span>
+                        <span className="block text-ink/60">«{g.detail.second}»</span>
+                      </p>
+                    )}
+                    {g.kind === "calendar" && (
+                      <p className="text-sm text-ink/80 leading-relaxed">
+                        נכתב <b>{g.detail.stated}</b>, ובפועל <b>{g.detail.expected}</b>
+                        {g.detail.span && <span className="block text-ink/60 mt-1">«{g.detail.span}»</span>}
+                      </p>
+                    )}
+                  </div>
+                ))}
+                {(guards?.findings ?? []).length === 0 && (
+                  <p className="text-sm text-ink/40 text-center py-2">
+                    לא נמצא דבר בחלון הזה — מה שאומר או שהתשובות נקיות, או שהבדיקות שמרניות מדי.
+                  </p>
+                )}
               </section>
             </>
           )}

@@ -67,7 +67,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 28
+SCHEMA_VERSION = 29
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -326,6 +326,22 @@ def _migrate(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_usage_events_at ON usage_events(at DESC);
         CREATE INDEX IF NOT EXISTS idx_usage_events_owner ON usage_events(owner_id);
+
+        -- What the watching guards caught (src/chavruta/generation/guards.py). These checks add
+        -- nothing a user sees; this table is the only place their findings survive, and it is what
+        -- the admin panel reads. Deliberately has NO owner_id and NO session_id: a finding records
+        -- how well the SYSTEM wrote, never who asked. That is also why it needs no handling in
+        -- purge_owner — there is nothing here belonging to a person to delete. `detail` is JSON
+        -- whose shape depends on `kind`, because the three guards have nothing in common to
+        -- normalise into columns and inventing shared ones would only produce empty fields.
+        CREATE TABLE IF NOT EXISTS guard_findings (
+            id     INTEGER PRIMARY KEY AUTOINCREMENT,
+            at     TEXT NOT NULL,        -- ISO ts (UTC)
+            kind   TEXT NOT NULL,        -- misattribution | deontic | calendar
+            intent TEXT,                 -- qa | explain | lesson | halacha | chavruta …
+            detail TEXT NOT NULL         -- JSON
+        );
+        CREATE INDEX IF NOT EXISTS idx_guard_findings_at ON guard_findings(at DESC);
 
         -- Accounting ledger. Deliberately has NO owner_id and is NEVER purged: tax law requires
         -- keeping records of what was charged for ~7 years, while a user may ask to be forgotten
@@ -1283,6 +1299,60 @@ def list_charges(since: str | None = None, until: str | None = None) -> list[dic
     with _LOCK:
         rows = get_conn().execute(sql + " ORDER BY charged_at DESC", args).fetchall()
     return [dict(r) for r in rows]
+
+
+# ── Guard findings (what the watching checks caught) ──────────────────────────
+def record_guard_finding(kind: str, intent: str, detail: dict[str, Any],
+                         at: str | None = None) -> None:
+    """Store one finding. Never raises: this is called from the answer path, and a diagnostic that
+    can break a user's answer is worse than a diagnostic nobody has."""
+    try:
+        with _tx(get_conn()) as conn:
+            conn.execute(
+                "INSERT INTO guard_findings (at, kind, intent, detail) VALUES (?,?,?,?)",
+                (at or _now(), kind, intent or None, json.dumps(detail, ensure_ascii=False)))
+    except Exception:                       # noqa: BLE001
+        _log.exception("failed to record guard finding (%s)", kind)
+
+
+def list_guard_findings(since: str | None = None, kind: str = "",
+                        limit: int = 100) -> list[dict[str, Any]]:
+    """Newest first. `detail` comes back PARSED — a caller that has to json.loads every row is a
+    caller that will eventually forget to, and render a JSON blob at the operator."""
+    sql = "SELECT id, at, kind, intent, detail FROM guard_findings"
+    where, args = [], []
+    if since:
+        where.append("at >= ?")
+        args.append(since)
+    if kind:
+        where.append("kind = ?")
+        args.append(kind)
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    with _LOCK:
+        rows = get_conn().execute(sql + " ORDER BY at DESC LIMIT ?",
+                                  [*args, max(1, int(limit))]).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["detail"] = json.loads(d["detail"])
+        except (TypeError, ValueError):
+            d["detail"] = {"raw": d["detail"]}   # never lose the row over a bad parse
+        out.append(d)
+    return out
+
+
+def guard_finding_counts(since: str | None = None) -> dict[str, int]:
+    """How many of each kind — the number that says whether a guard is worth showing to users yet."""
+    sql = "SELECT kind, COUNT(*) n FROM guard_findings"
+    args: list[Any] = []
+    if since:
+        sql += " WHERE at >= ?"
+        args.append(since)
+    with _LOCK:
+        rows = get_conn().execute(sql + " GROUP BY kind", args).fetchall()
+    return {r["kind"]: r["n"] for r in rows}
 
 
 def revenue_total(since: str | None = None, until: str | None = None) -> float:
