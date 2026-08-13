@@ -12,9 +12,9 @@ reconciling our own totals against a real Nebius invoice: 4.81M input tokens rec
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from types import SimpleNamespace
 
 import app.api as api
+
 from chavruta.llm import metering
 
 
