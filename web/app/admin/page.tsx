@@ -13,6 +13,7 @@ import {
   type DevHelper,
   type GuardFindings,
   type HelperFeature,
+  type UsageOverTime,
   type UsageByOwnerRow,
 } from "@/lib/api";
 
@@ -65,6 +66,8 @@ export default function AdminDashboard() {
   const [feedback, setFeedback] = useState<FeedbackItem[] | null>(null);
   const [guards, setGuards] = useState<GuardFindings | null>(null);
   const [guardKind, setGuardKind] = useState("");
+  const [spend, setSpend] = useState<UsageOverTime | null>(null);
+  const [spendBucket, setSpendBucket] = useState<"day" | "week">("day");
   const [dataLoading, setDataLoading] = useState(true);
   const [error, setError] = useState(false);
 
@@ -97,17 +100,19 @@ export default function AdminDashboard() {
       api.admin.flaggedMessages(false),
       api.admin.feedback(false),
       api.admin.guards(since, guardKind, 200),
+      api.admin.usageOverTime(since, spendBucket),
     ])
-      .then(([ov, owners, flags, fb, gd]) => {
+      .then(([ov, owners, flags, fb, gd, sp]) => {
         setOverview(ov);
         setByOwner(owners);
         setFlagged(flags);
         setFeedback(fb);
         setGuards(gd);
+        setSpend(sp);
       })
       .catch(() => setError(true))
       .finally(() => setDataLoading(false));
-  }, [isAdmin, since, guardKind]);
+  }, [isAdmin, since, guardKind, spendBucket]);
 
   async function reviewMessage(reportId: number) {
     await api.admin.reviewMessage(reportId);
@@ -137,6 +142,12 @@ export default function AdminDashboard() {
     );
   }
 
+  // Totals for the spend section. Computed here rather than server-side: the rows are already
+  // in hand, and a second endpoint for a sum would be a round trip for arithmetic.
+  const spendTotal = (spend?.rows ?? []).reduce(
+    (a, r) => ({ billed: a.billed + (r.billed ?? 0) }), { billed: 0 });
+  const spendMax = Math.max(1, ...(spend?.rows ?? []).map((r) => r.billed ?? 0));
+  const fmtInt = (n: number | null) => (n ?? 0).toLocaleString("he-IL");
   const money = (n: number) => `₪${n.toLocaleString("he-IL", { maximumFractionDigits: 0 })}`;
   // Request latency as minutes:seconds — a raw "3233ms" makes people do the division in their
   // head; most requests here are single-digit seconds, so this reads as "0:03" rather than "0
@@ -357,6 +368,84 @@ export default function AdminDashboard() {
                   })()}
                 </>
               )}
+
+              {/* Token spend over time. Input and output are shown SEPARATELY and on purpose: the
+                  measured ratio is ~15:1 in favour of input (6,550 sent per model call against 442
+                  returned), so a single "tokens" number would hide the side that both costs the most
+                  and is the one that can be reduced without shortening a single answer.
+
+                  `billed` is the normalized unit the quota is metered in (prompt + 3x completion) —
+                  what a turn actually costs — so the bar is drawn from that. Money is shown only if
+                  CHAVRUTA_COST_PER_M_TOKENS is set; there is no default rate, because a guessed one
+                  would render an authoritative-looking figure that is not. */}
+              <section className="glass rounded-[24px] p-5 flex flex-col gap-3">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <h3 className="font-serif text-lg font-bold text-tekhelet">צריכת טוקנים לאורך זמן</h3>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-ink/50">
+                      סה&quot;כ {fmtInt(spendTotal.billed)} מנורמלים
+                      {spend?.cost_per_m_billed
+                        ? ` · ${money((spendTotal.billed / 1_000_000) * spend.cost_per_m_billed)}`
+                        : ""}
+                    </span>
+                    <select
+                      value={spendBucket}
+                      onChange={(e) => setSpendBucket(e.target.value as "day" | "week")}
+                      aria-label="רזולוציה"
+                      className="px-2 py-1 rounded-xl glass text-xs text-ink/70 outline-none"
+                    >
+                      <option value="day">לפי יום</option>
+                      <option value="week">לפי שבוע</option>
+                    </select>
+                  </div>
+                </div>
+
+                {!spend?.rows.length ? (
+                  <p className="text-sm text-ink/40 text-center py-2">אין נתונים בחלון הזה.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm min-w-[560px]">
+                      <thead>
+                        <tr className="text-ink/45 text-xs">
+                          <th className="text-right font-normal pb-2">תקופה</th>
+                          <th className="text-right font-normal pb-2">בקשות</th>
+                          <th className="text-right font-normal pb-2">קריאות למודל</th>
+                          <th className="text-right font-normal pb-2">קלט</th>
+                          <th className="text-right font-normal pb-2">פלט</th>
+                          <th className="text-right font-normal pb-2">מנורמל</th>
+                          <th className="text-right font-normal pb-2 w-[22%]"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {spend.rows.map((r) => (
+                          <tr key={r.bucket} className="border-t border-ink/5">
+                            <td className="py-1.5 text-ink/70 font-mono text-xs">{r.bucket}</td>
+                            <td className="py-1.5 text-ink/60">{fmtInt(r.requests)}</td>
+                            <td className="py-1.5 text-ink/60">{fmtInt(r.calls)}</td>
+                            <td className="py-1.5 text-ink/70">{fmtInt(r.prompt)}</td>
+                            <td className="py-1.5 text-ink/50">{fmtInt(r.completion)}</td>
+                            <td className="py-1.5 text-tekhelet font-semibold">{fmtInt(r.billed)}</td>
+                            <td className="py-1.5">
+                              {/* A bar rather than a chart library: no dependency, and it reads at a
+                                  glance which day cost what. */}
+                              <span className="block h-2 rounded-full bg-tekhelet/15">
+                                <span
+                                  className="block h-2 rounded-full grad"
+                                  style={{ width: `${spendMax ? ((r.billed ?? 0) / spendMax) * 100 : 0}%` }}
+                                />
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                <p className="text-[11px] text-ink/40 leading-relaxed">
+                  &quot;מנורמל&quot; = קלט + פי־3 פלט — היחידה שהמכסה נמדדת בה, ולפיה מחושבת העלות.
+                  שים לב ליחס בין הקלט לפלט: הקלט הוא הצד הגדול, והיחיד שאפשר לצמצם בלי לקצר תשובה.
+                </p>
+              </section>
             </>
           )}
 

@@ -2632,6 +2632,26 @@ def admin_usage_by_intent(since: str = "30d", owner: str = Depends(_require_admi
     return db.usage_by_intent(_since_cutoff(since))
 
 
+@app.get("/admin/usage-over-time")
+def admin_usage_over_time(since: str = "30d", bucket: str = "day",
+                          owner: str = Depends(_require_admin)):
+    """Token spend per day or week, with input and output kept apart.
+
+    `cost_per_m_billed` is echoed back from CHAVRUTA_COST_PER_M_TOKENS so the panel can turn tokens
+    into money — and is 0 unless someone sets it. There is no default price here on purpose: a made-up
+    rate would produce a number that looks authoritative and is not, and the provider's pricing is not
+    ours to guess at.
+    """
+    if bucket not in ("day", "week"):
+        raise HTTPException(status_code=422, detail="bucket must be 'day' or 'week'")
+    try:
+        rate = float(os.environ.get("CHAVRUTA_COST_PER_M_TOKENS", "") or 0)
+    except ValueError:
+        rate = 0.0
+    return {"bucket": bucket, "cost_per_m_billed": rate,
+            "rows": db.usage_over_time(_since_cutoff(since), bucket)}
+
+
 @app.get("/admin/usage-by-week")
 def admin_usage_by_week(since: str = "30d", owner: str = Depends(_require_admin)):
     return db.usage_by_week(_since_cutoff(since))

@@ -225,3 +225,39 @@ def test_a_dry_run_reports_what_would_go(d):
     cutoff = (datetime.now(UTC) - timedelta(days=90)).isoformat()
     assert d.count_sessions_older_than(cutoff) == 1
     assert len(d.list_sessions("u-1")) == 2          # counting changes nothing
+
+
+# ── Spend over time ──────────────────────────────────────────────────────────
+def test_spend_keeps_input_and_output_apart_and_buckets_by_day(d):
+    """A single "tokens" figure would hide the ratio that turned out to matter: 6,550 input per model
+    call against 442 output, measured 2026-08-13. The input side is both the larger cost and the only
+    one that can be cut without shortening an answer, so it gets its own column."""
+    _event(d, owner_id="u-1", at="2026-08-12T10:00:00+00:00")
+    _event(d, owner_id="u-1", at="2026-08-13T10:00:00+00:00")
+    _event(d, owner_id="u-2", at="2026-08-13T11:00:00+00:00")
+
+    rows = d.usage_over_time()
+    assert [r["bucket"] for r in rows] == ["2026-08-12", "2026-08-13"]
+    assert rows[1]["requests"] == 2 and rows[1]["users"] == 2
+    for key in ("prompt", "completion", "billed", "calls"):
+        assert rows[1][key] is not None, f"{key} missing — the spend view needs it"
+
+
+def test_spend_still_counts_requests_from_deleted_accounts(d):
+    """The opposite rule to usage_by_owner. A request made by someone who has since deleted their
+    account still cost what it cost — a spend total that quietly drops history would be wrong in the
+    one direction that matters."""
+    _event(d, owner_id="u-1", at="2026-08-13T10:00:00+00:00")
+    _event(d, owner_id="u-2", at="2026-08-13T11:00:00+00:00")
+    d.purge_owner("u-1")
+
+    rows = d.usage_over_time()
+    assert sum(r["requests"] for r in rows) == 2
+    assert [r["owner_id"] for r in d.usage_by_owner()] == ["u-2"]
+
+
+def test_weekly_buckets_collapse_the_days(d):
+    _event(d, owner_id="u-1", at="2026-08-12T10:00:00+00:00")
+    _event(d, owner_id="u-1", at="2026-08-13T10:00:00+00:00")
+    rows = d.usage_over_time(bucket="week")
+    assert len(rows) == 1 and rows[0]["requests"] == 2

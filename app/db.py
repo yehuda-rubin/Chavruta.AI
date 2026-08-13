@@ -1260,6 +1260,33 @@ def usage_by_week(since: str | None = None) -> list[dict[str, Any]]:
         ((since,) if since else ()))
 
 
+def usage_over_time(since: str | None = None, bucket: str = "day") -> list[dict[str, Any]]:
+    """Token spend per day or per week — what was actually consumed, and in which direction.
+
+    `prompt` and `completion` are kept SEPARATE rather than summed, because the ratio between them is
+    the number that turned out to matter: measured on 2026-08-13 it was 6,550 in to 442 out per model
+    call, 15:1. A single "tokens" figure hides that entirely, and the input side is both the larger
+    cost and the one that can be reduced without shortening a single answer.
+
+    `billed` is the normalized unit (prompt + 3x completion) the quota is metered in — it is what a
+    turn costs us, so it is what a spend figure has to be counted in.
+
+    Anonymised rows ARE included, unlike usage_by_owner: a request made by someone who has since
+    deleted their account still cost what it cost, and a spend total that quietly drops history would
+    be wrong in the one direction that matters.
+    """
+    fmt = "%Y-W%W" if bucket == "week" else "%Y-%m-%d"
+    where = "WHERE at >= ?" if since else ""
+    return _agg(
+        f"SELECT strftime('{fmt}', at) AS bucket, COUNT(*) AS requests, "          # noqa: S608
+        f"SUM(llm_calls) AS calls, "
+        f"SUM(prompt_tokens) AS prompt, SUM(completion_tokens) AS completion, "
+        f"SUM(billed_tokens) AS billed, "
+        f"COUNT(DISTINCT owner_id) AS users "
+        f"FROM usage_events {where} GROUP BY bucket ORDER BY bucket",
+        ((since,) if since else ()))
+
+
 def count_accounts() -> dict[str, Any]:
     """How many accounts exist in total, and by plan — registered accounts, not just ones that have
     generated anything (that's usage_health()'s 'users', a different, usage-based count)."""

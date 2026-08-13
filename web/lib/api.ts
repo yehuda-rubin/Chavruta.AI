@@ -305,6 +305,10 @@ export const api = {
       req<UsageByIntentRow[]>(`/admin/usage-by-intent?since=${since}`),
     usageByWeek: (since: AdminWindow) =>
       req<UsageByWeekRow[]>(`/admin/usage-by-week?since=${since}`),
+    // Token spend over time. Input and output stay separate: the 15:1 ratio between them is the
+    // number that matters, and a single "tokens" figure hides it.
+    usageOverTime: (since: AdminWindow, bucket: "day" | "week" = "day") =>
+      req<UsageOverTime>(`/admin/usage-over-time?since=${since}&bucket=${bucket}`),
     // What the watching guards caught. They show nothing to users on purpose; this is the evidence
     // on which that decision gets revisited — see src/chavruta/generation/guards.py.
     guards: (since: AdminWindow, kind = "", limit = 100) =>
@@ -580,6 +584,22 @@ export interface HelperStatus {
   features: string[];
   plan?: string;
   unread: { id: number; at: string; body: string; read_at: string | null }[];
+}
+
+export interface UsageOverTimeRow {
+  bucket: string;              // YYYY-MM-DD, or YYYY-Wnn for the weekly bucket
+  requests: number;
+  calls: number | null;        // model calls — a turn is ~3 of them
+  prompt: number | null;
+  completion: number | null;
+  billed: number | null;       // the normalized unit quota is metered in (prompt + 3x completion)
+  users: number;
+}
+
+export interface UsageOverTime {
+  bucket: "day" | "week";
+  cost_per_m_billed: number;   // 0 unless CHAVRUTA_COST_PER_M_TOKENS is set — never a guess
+  rows: UsageOverTimeRow[];
 }
 
 export interface UsageByOwnerRow {

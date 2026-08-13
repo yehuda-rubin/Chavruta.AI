@@ -75,6 +75,7 @@ Both optional; unset means off. `CHAVRUTA_ADMIN_OWNERS` is a dedicated allowlist
 |----------|---------|---------|------------|
 | `CHAVRUTA_ADMIN_OWNERS` | Comma-separated Supabase owner_ids allowed to see `/admin` | `""` (nobody) | `app/api.py::_is_admin` |
 | `CHAVRUTA_SUGYA_BETA_OWNERS` | Comma-separated owner_ids allowed into the sugya game, or `*` for everyone. Its routes 404 for anyone else — an unreleased feature should not announce itself. See `docs/SUGYA_GAME.md` | `""` (nobody) | `app/api.py::_sugya_enabled` |
+| `CHAVRUTA_COST_PER_M_TOKENS` | Price per MILLION normalized tokens (prompt + 3x completion). Unset ⇒ the admin panel's spend view reports tokens only and no money, on purpose — a guessed rate renders an authoritative-looking figure that is not | `0` (tokens only) | `app/api.py::admin_usage_over_time` |
 | `SENTRY_DSN` | Backend error tracking (sentry.io, free tier) — sign up, create a Python/FastAPI project, paste its DSN | `""` (off) | `app/api.py::_configure_sentry` |
 
 ## Email sending (Resend)
