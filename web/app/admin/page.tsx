@@ -24,6 +24,10 @@ import {
 
 type Section = "overview" | "inbox" | "coupons";
 
+// The sortable columns of the top-users table, and how many rows a page may hold.
+type OwnerSortKey = "owner_id" | "requests" | "tokens" | "avg_ms";
+const OWNER_PAGE_SIZES = [10, 20, 50, 100];
+
 const SECTIONS: { id: Section; label: string; icon: string }[] = [
   { id: "overview", label: "סקירה", icon: "monitoring" },
   { id: "inbox", label: "משוב ודיווחים", icon: "inbox" },
@@ -49,10 +53,22 @@ export default function AdminDashboard() {
   const [dataLoading, setDataLoading] = useState(true);
   const [error, setError] = useState(false);
 
+  // The top-users table. Paged and sorted in the browser over one generous fetch, rather than a
+  // request per page: the row count here is in the hundreds at most, and a round trip per click
+  // would be slower AND would make sorting need a server change it does not otherwise need.
+  const [ownerPageSize, setOwnerPageSize] = useState(20);
+  const [ownerPage, setOwnerPage] = useState(0);
+  const [ownerSort, setOwnerSort] = useState<OwnerSortKey>("tokens");
+  const [ownerAsc, setOwnerAsc] = useState(false);
+
   useEffect(() => {
     api.me().then((me) => setIsAdmin(me.is_admin)).catch(() => setIsAdmin(false))
       .finally(() => setMeLoading(false));
   }, []);
+
+  // Sorting or resizing while on page 7 would otherwise leave the reader on a page that no longer
+  // holds what they were looking at — or past the end of a shorter list, staring at nothing.
+  useEffect(() => setOwnerPage(0), [ownerSort, ownerAsc, ownerPageSize, since]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -60,7 +76,9 @@ export default function AdminDashboard() {
     setError(false);
     Promise.all([
       api.admin.overview(since),
-      api.admin.usageByOwner(since, 20),
+      // Fetched once, deep enough that paging has something to page through. 20 was the whole
+      // table before, so there was nothing beyond the first screen to reach.
+      api.admin.usageByOwner(since, 500),
       api.admin.flaggedMessages(false),
       api.admin.feedback(false),
     ])
@@ -217,34 +235,109 @@ export default function AdminDashboard() {
                     <Card label="הכנסות" value={money(overview.revenue.totals.ILS ?? 0)} />
                   </div>
 
-                  <section className="glass rounded-[24px] p-5 flex flex-col gap-3">
-                    <h3 className="font-serif text-lg font-bold text-tekhelet">משתמשים מובילים לפי שימוש</h3>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b border-ink/10">
-                            <th className="py-2 px-3 font-semibold text-tekhelet text-start">משתמש</th>
-                            <th className="py-2 px-3 font-semibold text-tekhelet text-start">בקשות</th>
-                            <th className="py-2 px-3 font-semibold text-tekhelet text-start">טוקנים</th>
-                            <th className="py-2 px-3 font-semibold text-tekhelet text-start">זמן ממוצע (דק:שנ)</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {(byOwner ?? []).map((row) => (
-                            <tr key={row.owner_id ?? "unknown"} className="border-b border-ink/5 last:border-0">
-                              <td className="py-2 px-3 font-mono text-xs text-ink/70">{row.owner_id ?? "—"}</td>
-                              <td className="py-2 px-3 text-ink/70">{row.requests}</td>
-                              <td className="py-2 px-3 text-ink/70">{row.tokens ?? 0}</td>
-                              <td className="py-2 px-3 text-ink/70">{row.avg_ms ? duration(row.avg_ms) : "—"}</td>
-                            </tr>
-                          ))}
-                          {(byOwner ?? []).length === 0 && (
-                            <tr><td colSpan={4} className="py-3 text-center text-ink/40">אין נתונים בחלון הזה</td></tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </section>
+                  {(() => {
+                    const all = byOwner ?? [];
+                    const dir = ownerAsc ? 1 : -1;
+                    const sorted = [...all].sort((a, b) => {
+                      if (ownerSort === "owner_id") {
+                        return dir * (a.owner_id ?? "").localeCompare(b.owner_id ?? "");
+                      }
+                      return dir * ((a[ownerSort] ?? 0) - (b[ownerSort] ?? 0));
+                    });
+                    const pages = Math.max(1, Math.ceil(sorted.length / ownerPageSize));
+                    const page = Math.min(ownerPage, pages - 1);
+                    const start = page * ownerPageSize;
+                    const rows = sorted.slice(start, start + ownerPageSize);
+                    const cols: { key: OwnerSortKey; label: string }[] = [
+                      { key: "owner_id", label: "משתמש" },
+                      { key: "requests", label: "בקשות" },
+                      { key: "tokens", label: "טוקנים" },
+                      { key: "avg_ms", label: "זמן ממוצע (דק:שנ)" },
+                    ];
+                    return (
+                      <section className="glass rounded-[24px] p-5 flex flex-col gap-3">
+                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                          <h3 className="font-serif text-lg font-bold text-tekhelet">
+                            משתמשים מובילים לפי שימוש
+                          </h3>
+                          <label className="flex items-center gap-2 text-xs text-ink/60">
+                            שורות בעמוד
+                            <select
+                              value={ownerPageSize}
+                              onChange={(e) => setOwnerPageSize(Number(e.target.value))}
+                              className="glass rounded-xl px-2 py-1 text-ink/80"
+                            >
+                              {OWNER_PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
+                            </select>
+                          </label>
+                        </div>
+
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b border-ink/10">
+                                {cols.map((c) => (
+                                  <th key={c.key} className="py-2 px-3 text-start">
+                                    <button
+                                      onClick={() => {
+                                        if (ownerSort === c.key) setOwnerAsc((v) => !v);
+                                        else { setOwnerSort(c.key); setOwnerAsc(false); }
+                                      }}
+                                      className="font-semibold text-tekhelet hover:opacity-70 transition inline-flex items-center gap-1"
+                                      title="מיון לפי העמודה הזו"
+                                    >
+                                      {c.label}
+                                      <span className={ownerSort === c.key ? "text-tekhelet" : "text-ink/20"}>
+                                        {ownerSort === c.key ? (ownerAsc ? "▲" : "▼") : "▽"}
+                                      </span>
+                                    </button>
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {rows.map((row) => (
+                                <tr key={row.owner_id ?? "unknown"} className="border-b border-ink/5 last:border-0">
+                                  <td className="py-2 px-3 font-mono text-xs text-ink/70">{row.owner_id ?? "—"}</td>
+                                  <td className="py-2 px-3 text-ink/70">{row.requests}</td>
+                                  <td className="py-2 px-3 text-ink/70">{(row.tokens ?? 0).toLocaleString("he-IL")}</td>
+                                  <td className="py-2 px-3 text-ink/70">{row.avg_ms ? duration(row.avg_ms) : "—"}</td>
+                                </tr>
+                              ))}
+                              {sorted.length === 0 && (
+                                <tr><td colSpan={4} className="py-3 text-center text-ink/40">אין נתונים בחלון הזה</td></tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {sorted.length > 0 && (
+                          <div className="flex items-center justify-between gap-3 flex-wrap text-xs text-ink/60">
+                            <span>
+                              מציג {start + 1}–{Math.min(start + ownerPageSize, sorted.length)} מתוך {sorted.length}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <button
+                                disabled={page <= 0}
+                                onClick={() => setOwnerPage(page - 1)}
+                                className="px-3 py-1.5 rounded-xl glass text-tekhelet font-semibold disabled:opacity-30"
+                              >
+                                הקודם
+                              </button>
+                              <span className="tabular-nums">עמוד {page + 1} מתוך {pages}</span>
+                              <button
+                                disabled={page >= pages - 1}
+                                onClick={() => setOwnerPage(page + 1)}
+                                className="px-3 py-1.5 rounded-xl glass text-tekhelet font-semibold disabled:opacity-30"
+                              >
+                                הבא
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </section>
+                    );
+                  })()}
                 </>
               )}
             </>
