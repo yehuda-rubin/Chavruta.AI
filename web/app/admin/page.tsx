@@ -778,7 +778,27 @@ function HelpersSection() {
                 </label>
               ))}
               <span className="flex-1" />
-              {!h.revoked_at && (
+              {/* Someone who stopped — whether they declined, or you ended it — can be asked again,
+                  and asking again is a fresh consent: the backend clears the old answer so the
+                  invitation panel renders for them exactly as it did the first time. Without this
+                  button it was still possible, but only by copying the id out of this row and
+                  pasting it back into the form at the top of the page, which is not a thing anyone
+                  discovers. Their features are re-sent as they stand; a decline already cleared
+                  them, so a returning helper starts from nothing and you re-tick what they get. */}
+              {(h.status === "declined" || h.status === "revoked") && (
+                <button
+                  onClick={() =>
+                    run(
+                      () => api.admin.inviteHelper(h.owner_id, h.note || "", h.features),
+                      "ההזמנה נשלחה שוב — היא תופיע אצלו לאישור",
+                    )
+                  }
+                  className="px-3 py-1 rounded-full glass text-tekhelet text-xs font-semibold hover:bg-tekhelet/10"
+                >
+                  הזמן שוב
+                </button>
+              )}
+              {!h.revoked_at && h.status !== "declined" && (
                 <button
                   onClick={() => run(() => api.admin.revokeHelper(h.owner_id), "בוטל")}
                   className="px-3 py-1 rounded-full glass text-ink/60 text-xs font-semibold hover:bg-ink/5"

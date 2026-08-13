@@ -254,3 +254,39 @@ def test_revoking_does_not_lock_the_person_out_of_the_rest_of_the_period(fresh_d
     allowed, _, _ = fresh_db.bump_usage(HELPER, 200_000, weekly_limit=525_000, units=20_000,
                                         meter=fresh_db.TOKENS)
     assert allowed, "revoked, then locked out of the free tier they fell back to"
+
+
+@pytest.mark.parametrize("stop", ["declined", "revoked"])
+def test_every_way_of_stopping_is_asked_again_before_it_resumes(fresh_db, stop):
+    """The operator's rule, stated plainly: recruiting someone shows THEM the request — including an
+    old helper who stopped and is being brought back.
+
+    Both ways of stopping have to satisfy it, and they reach it differently. A decline clears
+    `accepted_at` itself; a revoke leaves it set, so `invite` has to clear it or the row springs
+    back to "accepted" and the invitation panel — which renders only for status "invited" — never
+    appears. The person is enrolled again without being asked, which is the one thing this module
+    exists to prevent.
+    """
+    devhelpers.invite(HELPER, by=BOSS, features=["sugya"])
+    devhelpers.accept(HELPER)
+    (devhelpers.decline if stop == "declined" else devhelpers.revoke)(HELPER)
+
+    devhelpers.invite(HELPER, by=BOSS, note="בחזרה", features=["sugya"])
+
+    assert devhelpers.status_for(HELPER)["status"] == "invited", "re-enrolled without being asked"
+    assert not devhelpers.is_active(HELPER)
+    assert devhelpers.plan_floor(HELPER) is None, "the allowance came back before the answer did"
+    assert not devhelpers.has_feature(HELPER, "sugya"), "a feature opened before consent"
+
+    devhelpers.accept(HELPER)
+    assert devhelpers.is_active(HELPER) and devhelpers.has_feature(HELPER, "sugya")
+
+
+def test_editing_an_active_helper_does_not_re_ask_them(fresh_db):
+    """The other side of the same rule. Correcting a note on someone who is currently helping must
+    not throw them back to "invited" — that would un-enrol a person as a side effect of typing."""
+    devhelpers.invite(HELPER, by=BOSS)
+    devhelpers.accept(HELPER)
+    devhelpers.invite(HELPER, by=BOSS, note="שם מתוקן")
+    assert devhelpers.status_for(HELPER)["status"] == "accepted"
+    assert devhelpers.is_active(HELPER)
