@@ -68,7 +68,16 @@ _INTENT_TOP_K = {
     Intent.QA: 8,
     Intent.EXPLAIN: 16,
     Intent.COMPARE: 24,
-    Intent.LESSON: 48,
+    # Lowered 48 -> 32 on 2026-08-13 (user decision), to match responsa. Measured over the first 11
+    # days: INPUT is 93.7% of every token spent — 4.81M in against 326K out — and lessons are the
+    # second-largest consumer. This is the one lever that cuts cost and latency without shortening a
+    # single answer, which is why it was chosen over the output budget (long answers stay a feature).
+    #
+    # Worth knowing before judging the result: responsa at 32 already averages MORE input per request
+    # than lessons did at 48 (22.4K vs 20.6K), so the retrieved sources are not the whole prompt —
+    # the job template, the conversation history and whatever the agentic loop fetches for itself all
+    # sit alongside them. Expect a real reduction, not a third.
+    Intent.LESSON: 32,
     Intent.HALACHA: 32,        # responsa pulls a wide net of sources + poskim
 }
 
