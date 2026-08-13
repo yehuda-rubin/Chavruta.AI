@@ -266,6 +266,7 @@ import app.orgs as orgs
 import app.auth_supabase as sb
 import app.billing.service as billing
 import app.coupons as coupons
+import app.devhelpers as devhelpers
 import app.db as db
 from app import plans
 from app.billing import payplus
@@ -1587,6 +1588,18 @@ def _calendar_modes_enabled(owner_id: str) -> bool:
     return owner_id in allowed
 
 
+def _plan_for(owner_id: str) -> str:
+    """The tier this account's allowance is drawn from, everywhere a request needs to know.
+
+    One resolver instead of four `db.get_plan` calls, because a floor that applies in three of them
+    and not the fourth is worse than no floor: the quota would be granted and then the gauge, or the
+    lesson counter, would disagree with it. `orgs.effective_plan` folds in both adjustments that
+    exist — a school member draws on the school's tier, and a dev helper is lifted to basic — and
+    both are floors over what the account itself holds, never overrides.
+    """
+    return plans.canonical(orgs.effective_plan(owner_id))
+
+
 def _sugya_enabled(owner_id: str) -> bool:
     """The sugya game's rollout gate — same shape as the calendar one above, and separate from it on
     purpose: these are different features and being in one beta should not enrol you in the other.
@@ -1598,7 +1611,12 @@ def _sugya_enabled(owner_id: str) -> bool:
     raw = os.environ.get("CHAVRUTA_SUGYA_BETA_OWNERS", "").strip()
     if raw == "*":
         return True
-    return owner_id in {o.strip() for o in raw.split(",") if o.strip()}
+    if owner_id in {o.strip() for o in raw.split(",") if o.strip()}:
+        return True
+    # …or the operator opened it for this person specifically. The env var is the blunt instrument
+    # (a redeploy to change who is in); dev-helper grants are the one that can be edited from the
+    # panel, and they carry the consent the env var cannot.
+    return devhelpers.has_feature(owner_id, "sugya")
 
 
 def _is_admin(owner_id: str) -> bool:
@@ -2020,7 +2038,7 @@ def _charge_lesson_unit(owner: str, res: Reservation, used_byok: bool) -> bool:
         # Returning True tells _metered to settle this turn at REAL usage instead, so it comes out of
         # the token pool, shows up in the figures, and counts against the member's own cap.
         return True
-    limit = plans.weekly_lessons(db.get_plan(owner))
+    limit = plans.weekly_lessons(_plan_for(owner))
     if limit <= 0:
         return False
     # If credits already paid to ADMIT this turn, they have paid for it — checked BEFORE the bump,
@@ -2106,7 +2124,7 @@ def _reserve_tokens(owner: str, lang: str, intent: str, user_key: str = "") -> R
         # the cap the school set for them, which is the single control an admin has over the pool.
         raise HTTPException(status_code=429, detail=_pool_quota_message(charge.refused, lang, ctx))
 
-    plan = db.get_plan(owner)
+    plan = _plan_for(owner)
     daily, weekly = plans.daily_tokens(plan), plans.weekly_tokens(plan)
     if daily <= 0 and weekly <= 0:
         return Reservation(0)
@@ -2323,7 +2341,7 @@ def _record_event(owner: str, intent: str, req: QueryRequest | None, usage: dict
             hour_local=local.hour,
             dow=(local.weekday() + 1) % 7,          # 0 = Sunday, the week this product works in
             owner_id=None if owner == "local" else owner,
-            plan=None if owner == "local" else plans.canonical(db.get_plan(owner)),
+            plan=None if owner == "local" else _plan_for(owner),
             intent=(got.get("intent") or intent or "qa"),
             lang=(req.lang if req else "") or "he",
             prompt_tokens=usage.get("prompt_tokens", 0),
@@ -2466,7 +2484,7 @@ class MeOut(BaseModel):
 def me(owner: str = Depends(current_owner)):
     """Account + today's quota state — lets the UI show who's signed in, their plan, how many questions
     remain, whether a deletion is pending, and whether the account is blocked."""
-    plan = "free" if owner == "local" else plans.canonical(db.get_plan(owner))
+    plan = "free" if owner == "local" else _plan_for(owner)
     is_local = owner == "local"
     ban = None if is_local else accounts.active_ban(owner)
     sub = (None if is_local else db.get_subscription(owner)) or {}
@@ -3383,6 +3401,104 @@ def _org_for(owner: str, demo: bool = False) -> dict:
     if not m:
         raise HTTPException(status_code=404, detail="not found")
     return m
+
+
+# ── Development helpers (see app/devhelpers.py) ──────────────────────────────
+# Two audiences on purpose. /admin/helpers* is the operator's; /helper/* is the person's own, and a
+# helper can only ever see and change their own row — an id in a request body is not proof of who
+# it belongs to.
+class HelperInvite(BaseModel):
+    owner_id: str
+    note: str = ""
+    features: list[str] = []
+
+
+class HelperFeatures(BaseModel):
+    features: list[str] = []
+
+
+class HelperNotice(BaseModel):
+    owner_ids: list[str]
+    body: str
+
+
+@app.get("/admin/helpers")
+def admin_helpers(owner: str = Depends(_require_admin)):
+    return {"helpers": devhelpers.listing(),
+            "features": [{"id": f, "label_he": devhelpers.label(f)} for f in devhelpers.FEATURES]}
+
+
+@app.post("/admin/helpers")
+def admin_helper_invite(req: HelperInvite, owner: str = Depends(_require_admin)):
+    """Offer helper status to an account id. Nothing applies until they accept — see devhelpers."""
+    try:
+        return devhelpers.invite(req.owner_id.strip(), by=owner, note=req.note.strip(),
+                                 features=req.features)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.patch("/admin/helpers/{helper_id}")
+def admin_helper_features(helper_id: str, req: HelperFeatures,
+                          owner: str = Depends(_require_admin)):
+    if not devhelpers.get(helper_id):
+        raise HTTPException(status_code=404, detail="not found")
+    return {"features": devhelpers.set_features(helper_id, req.features)}
+
+
+@app.post("/admin/helpers/{helper_id}/revoke")
+def admin_helper_revoke(helper_id: str, owner: str = Depends(_require_admin)):
+    if not devhelpers.revoke(helper_id):
+        raise HTTPException(status_code=404, detail="not found")
+    return {"revoked": True}
+
+
+@app.delete("/admin/helpers/{helper_id}")
+def admin_helper_remove(helper_id: str, owner: str = Depends(_require_admin)):
+    if not devhelpers.remove(helper_id):
+        raise HTTPException(status_code=404, detail="not found")
+    return {"removed": True}
+
+
+@app.post("/admin/helpers/notice")
+def admin_helper_notice(req: HelperNotice, owner: str = Depends(_require_admin)):
+    """Send one notice to one or more helpers. Only to people already on the list — this is not a
+    channel for messaging users at large, and letting it become one would put an unreviewed
+    broadcast tool one text box away from the panel."""
+    try:
+        sent = devhelpers.send(req.owner_ids, req.body, by=owner)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"sent": sent}
+
+
+@app.get("/helper/status")
+def helper_status(owner: str = Depends(current_owner)):
+    """What this account needs to know about its own helper status — invited, accepted, what was
+    opened for it, and any unread notices. Returns status 'none' for everyone else rather than
+    404ing, because the app calls it on every load and an error is not an answer."""
+    if owner == "local":
+        return {"status": "none", "features": [], "unread": []}
+    return devhelpers.status_for(owner)
+
+
+@app.post("/helper/accept")
+def helper_accept(owner: str = Depends(current_owner)):
+    if not devhelpers.accept(owner):
+        raise HTTPException(status_code=404, detail="not found")
+    return devhelpers.status_for(owner)
+
+
+@app.post("/helper/decline")
+def helper_decline(owner: str = Depends(current_owner)):
+    if not devhelpers.decline(owner):
+        raise HTTPException(status_code=404, detail="not found")
+    return devhelpers.status_for(owner)
+
+
+@app.post("/helper/messages/{message_id}/read")
+def helper_message_read(message_id: int, owner: str = Depends(current_owner)):
+    return {"read": devhelpers.mark_read(owner, message_id)}
 
 
 # ── The sugya game (beta — see docs/SUGYA_GAME.md) ───────────────────────────

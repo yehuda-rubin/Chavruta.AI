@@ -6,7 +6,18 @@
 
 # Privacy Policy — Chavruta AI
 
-**Version 1.9 · Effective 13 August 2026**
+**Version 1.10 · Effective 13 August 2026**
+
+Changes in version 1.10: a **development helpers** programme has been added — users the
+operator invites to help test the product. Section 1 sets out what is stored about them: the
+account id, when they were invited and answered, which capabilities were opened, the
+operator's identifying label (**which is also shown to the helper** — there is no hidden
+record), and notices sent inside the Service together with when they were read. Database
+purpose 9 was added (section 11). **This does not touch anyone who is not taking part:**
+joining is by invitation and explicit acceptance, and anyone not invited — or invited and not
+accepting — has no such record at all. It therefore applies from publication without
+individual advance notice; anyone invited sees this detail on the acceptance screen itself,
+before deciding.
 
 Changes in version 1.9: two clarifications, both of which widen your rights rather than narrow them.
 **(a) Immediate deletion:** until now account deletion always ran after a grace period of about 30
@@ -98,6 +109,13 @@ email address for sign-in); sources you attach are provided voluntarily, at your
   **We do not store in these records the content of the question, answer, sources or attached files**
   — only measurements. In addition, basic technical records are kept (request id, IP address) for
   security and rate limiting.
+- **Development helpers (only if you joined):** if you were invited to be a development helper
+  and accepted, we also store: **your account id, when you were invited and when you answered,
+  which capabilities were opened for you, and a label the operator writes to identify you in the
+  list** — that label is **also shown to you** on the helpers screen; there is no hidden record
+  about you. We also store **notices the operator sends you inside the Service and when you read
+  them.** All of it is deleted when the account is deleted. Anyone who was not invited, or was
+  invited and did not accept, has no such record at all.
 - **Local preferences:** language, theme and display settings are stored in your browser (localStorage).
 - **Your own API key (if you choose to use one — see the Terms of Use):** the API key, a custom
   provider base URL and a custom model name are **not collected or stored by us at all** — they stay
@@ -233,7 +251,9 @@ purposes only:
 7. understanding aggregate usage patterns in order to improve the Service;
 8. internal quality review, improving the Service, and developing or fine-tuning models by the
    operator — only for conversations from 10 August 2026 onward, and subject to the exclusion
-   mechanism (section 12).
+   mechanism (section 12);
+9. running the development-helpers programme and communicating with its participants — only for
+   those invited who joined voluntarily (section 1).
 
 **We do not use the information for any other purpose and we do not sell it.** Use for a new purpose
 would require an update to this policy and advance notice.

@@ -67,7 +67,7 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 29
+SCHEMA_VERSION = 30
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -342,6 +342,38 @@ def _migrate(conn: sqlite3.Connection) -> None:
             detail TEXT NOT NULL         -- JSON
         );
         CREATE INDEX IF NOT EXISTS idx_guard_findings_at ON guard_findings(at DESC);
+
+        -- Development helpers: people the operator invites to test the product with a basic-tier
+        -- allowance and early access to whatever has been opened for them. See app/devhelpers.py.
+        --
+        -- `accepted_at` is NULL until the person says yes, and NOTHING applies before then. Being
+        -- made a helper changes someone's quota and exposes them to unreleased features, so it is
+        -- an offer and not an assignment — an operator who could quietly enrol accounts from a text
+        -- box would be able to hand strangers a feature nobody has reviewed.
+        CREATE TABLE IF NOT EXISTS dev_helpers (
+            owner_id    TEXT PRIMARY KEY,
+            added_at    TEXT NOT NULL,
+            added_by    TEXT NOT NULL,
+            note        TEXT,                 -- the operator's own label, e.g. "David — lessons"
+            features    TEXT NOT NULL DEFAULT '[]',   -- JSON list of feature ids
+            accepted_at TEXT,                 -- NULL ⇒ invited, nothing granted yet
+            declined_at TEXT,                 -- they said no; kept so the offer is not re-sent blind
+            revoked_at  TEXT
+        );
+
+        -- Operator → helper notices, fanned out at send time (one row per recipient) rather than
+        -- stored once with a recipient list: read state is per person, and a shared row would need
+        -- a second table to track it.
+        CREATE TABLE IF NOT EXISTS helper_messages (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            at       TEXT NOT NULL,
+            sent_by  TEXT NOT NULL,
+            owner_id TEXT NOT NULL,
+            body     TEXT NOT NULL,
+            read_at  TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_helper_messages_owner
+            ON helper_messages(owner_id, read_at);
 
         -- Accounting ledger. Deliberately has NO owner_id and is NEVER purged: tax law requires
         -- keeping records of what was charged for ~7 years, while a user may ask to be forgotten
@@ -2099,6 +2131,18 @@ def purge_owner(owner_id: str) -> None:
         # invited_by is the same kind of residue one statement up: a teacher who deletes their
         # account was still named on the row of every student they ever admitted.
         conn.execute("UPDATE org_members SET invited_by=? WHERE invited_by=?",
+                     (DELETED_OWNER, owner_id))
+        # Dev-helper enrolment and the notices sent to them. Unlike guard_findings — which carries no
+        # owner_id precisely so it needs nothing here — both of these are ABOUT a person: one records
+        # that they agreed to test, the other holds messages addressed to them. Deleted outright, not
+        # anonymised: there is no aggregate anyone reports from them that de-identifying would keep
+        # true, so keeping the rows would buy nothing and retain an identifier.
+        conn.execute("DELETE FROM dev_helpers WHERE owner_id=?", (owner_id,))
+        conn.execute("DELETE FROM helper_messages WHERE owner_id=?", (owner_id,))
+        # …and the operator's own trace on notices they sent, if it is the OPERATOR being deleted.
+        conn.execute("UPDATE helper_messages SET sent_by=? WHERE sent_by=?",
+                     (DELETED_OWNER, owner_id))
+        conn.execute("UPDATE dev_helpers SET added_by=? WHERE added_by=?",
                      (DELETED_OWNER, owner_id))
 
 
