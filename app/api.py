@@ -383,11 +383,13 @@ async def lifespan(app: FastAPI):
 from fastapi import Depends, Header  # noqa: E402
 
 from app.security import (  # noqa: E402
+    UnsafeProviderURL,
     body_size_middleware,
     current_owner,
     rate_limit_middleware,
     request_context_middleware,
     require_auth,
+    validate_provider_base_url,
 )
 
 app = FastAPI(
@@ -1915,7 +1917,15 @@ def _byok_llm(user_key: str, base_url: str = "", model: str = ""):
     # model gets no floor rather than a guessed one; a caller picking a reasoning model elsewhere
     # accepts that risk themselves (it is exactly what /byok/check's cost/support disclaimer covers).
     custom_model = model.strip()
-    llm = CloudLLM(custom_model or profile.llm_model, base_url.strip() or profile.llm_base_url,
+    # The generation path takes the same caller-supplied URL as /byok/check and must be gated the
+    # same way — validating only at check time would gate the door and leave the window, since
+    # X-User-LLM-Base-URL is sent per request and never has to have passed through /byok/check.
+    if custom_base := base_url.strip():
+        try:
+            validate_provider_base_url(custom_base)
+        except UnsafeProviderURL as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+    llm = CloudLLM(custom_model or profile.llm_model, custom_base or profile.llm_base_url,
                    user_key, timeout_s=profile.llm_timeout_s, max_retries=profile.llm_max_retries,
                    min_output_tokens=0 if custom_model else getattr(profile, "llm_min_output_tokens", 0))
     pipeline.wire_source_fetcher(llm)
@@ -1949,6 +1959,14 @@ def byok_check(req: ByokCheckRequest, lang: str = "he", owner: str = Depends(cur
                             detail="this deployment's backend has no provider-key concept (bridge)")
     base_url = req.base_url.strip() or _get_pipeline().profile.llm_base_url
     model = req.model.strip()
+    # Only if the CALLER named it. This deployment's own configured base URL is not user input and is
+    # not subject to the policy — an operator may legitimately point the service at a provider on a
+    # private network, and that decision is theirs to make.
+    if req.base_url.strip():
+        try:
+            validate_provider_base_url(base_url)
+        except UnsafeProviderURL as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
 
     from chavruta.llm.cloud import list_models
     try:
@@ -3615,31 +3633,35 @@ def sugya_inventory(sugya_id: str, level_id: str, req: SugyaAnswer,
 
 
 @app.get("/sugya/{sugya_id}/source")
-def sugya_source(sugya_id: str, ref: str, req_level: str = "",
+def sugya_source(sugya_id: str, ref: str, proof: str = "",
                  owner: str = Depends(_require_sugya_beta)):
-    """The text of one source — but ONLY one this sugya actually uses.
+    """The text of one source — but ONLY one this sugya uses, and only once you have reached it.
 
     The `ref` is checked against the sugya's own list rather than passed through to the store: an
     open text endpoint gated on a beta flag would be a way to read the corpus around every other
     limit the product has.
+
+    Reaching it is proved the same way as in `sugya_inventory`, and for the same reason: there is no
+    progress table, so "have you got here" can only mean "can you produce the answer that got you
+    here". `proof` is the PREVIOUS level's answer, exactly as that route wants it.
+
+    The first version of this took a `req_level` parameter and scoped the sources to that level's
+    inventory. It read as a gate and was none: the caller picked `req_level` themselves, and every
+    level id is listed in `GET /sugya/{id}`, so naming the LAST level returned the whole file. A
+    control that the person being controlled gets to set is decoration.
     """
     try:
         s = sugya_mod.load(sugya_id)
     except sugya_mod.SugyaNotFound:
         raise HTTPException(status_code=404, detail="not found") from None
-    # Only a source the caller has demonstrably reached: the one this level unlocks, or one unlocked
-    # by an earlier level. Serving every ref in the file let a player read all five sources — and
-    # therefore work out every answer — before answering anything.
-    lv = None
-    for candidate in s.levels:
-        if (req_level or "") == candidate.id:
-            lv = candidate
-            break
-    if lv is None:
+    # Which level hands this ref out? Everything before it is already earned; the ref itself needs
+    # the level before it solved. An unknown ref 404s here, as an unknown ref should.
+    idx = next((i for i, lv in enumerate(s.levels) if lv.unlocks_ref == ref), None)
+    if idx is None:
         raise HTTPException(status_code=404, detail="not found")
-    allowed = set(s.inventory_at(lv.id)) | {lv.unlocks_ref}
-    if ref not in allowed:
-        raise HTTPException(status_code=404, detail="not found")
+    if idx > 0 and (proof or "").strip() not in s.levels[idx - 1].accept_refs:
+        raise HTTPException(status_code=403,
+                            detail="פתור קודם את השלב הקודם כדי לקרוא את המקור הזה")
     hits = _fetch_refs([ref])
     if not hits:
         raise HTTPException(status_code=404, detail="not found")

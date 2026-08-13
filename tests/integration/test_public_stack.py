@@ -409,3 +409,35 @@ def test_the_source_endpoint_only_serves_refs_this_sugya_uses(client, monkeypatc
     h = _sugya_client(client, monkeypatch, allowed=True)
     r = client.get("/sugya/shnayim-ochazin/source?ref=Genesis.1.1", headers=h)
     assert r.status_code == 404
+
+
+def test_a_later_source_is_not_served_to_a_player_who_has_not_reached_it(client, monkeypatch):
+    """The scope on this endpoint used to be a `req_level` query parameter, and a control the
+    controlled party sets is decoration: every level id is listed by `GET /sugya/{id}`, so naming
+    the LAST one returned the union of every level's inventory — the whole file. It now takes the
+    same proof `.../inventory` does, the previous level's answer.
+    """
+    h = _sugya_client(client, monkeypatch, allowed=True)
+    last = "Tosafot_on_Bava_Metzia.3.1.2"          # what level 5 hands out
+    # The permitted paths reach the corpus, which this stack has no connection to. Stubbed at the
+    # fetch so the test stays about the GATE — the refusals below never get this far anyway.
+    import app.api as api_mod
+
+    from types import SimpleNamespace
+    monkeypatch.setattr(api_mod, "_fetch_refs",
+                        lambda refs: [SimpleNamespace(payload={"text_he": "טקסט", "deep_link": ""})])
+
+    # The old bypass: ask for the last source while having answered nothing.
+    assert client.get(f"/sugya/shnayim-ochazin/source?ref={last}", headers=h).status_code == 403
+    # Naming a level you have not reached is not proof of anything either.
+    blind = client.get(f"/sugya/shnayim-ochazin/source?ref={last}&proof=Bava_Metzia.3.1", headers=h)
+    assert blind.status_code == 403
+
+    # The first source needs no proof — nothing comes before it.
+    opening = client.get("/sugya/shnayim-ochazin/source?ref=Bava_Metzia.3.1", headers=h)
+    assert opening.status_code == 200
+    assert opening.json()["ref"] == "Bava_Metzia.3.1"
+
+    # And the real answer to the level before opens the one after it.
+    earned = client.get(f"/sugya/shnayim-ochazin/source?ref={last}&proof=Bava_Metzia.3.6", headers=h)
+    assert earned.status_code == 200

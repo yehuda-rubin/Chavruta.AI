@@ -66,6 +66,82 @@ def start_checkout(owner_id: str, email: str, name: str, *,
                                        amount=plans.price_ils(tier, cyc), cycle=cyc)["link"]
 
 
+def _tier_affordable_at(amount: float, cycle: str) -> str | None:
+    """The most expensive tier this much money actually buys on this cycle, or None for too little."""
+    best: str | None = None
+    for t in plans.TIERS:
+        price = plans.price_ils(t.id, cycle)
+        if price > 0 and price <= amount + 0.01 and (best is None or plans.rank(t.id) > plans.rank(best)):
+            best = t.id
+    return best
+
+
+def _tier_actually_paid_for(owner: str, sub: dict, *, amount: float, cycle: str,
+                            is_renewal: bool) -> str:
+    """Which tier this charge bought — decided by the money, not by a row the customer can rewrite.
+
+    `subscriptions.plan` used to answer this on its own, and it is not a safe answer: `start_checkout`
+    writes the SELECTED tier into that row before any money moves, merging it over a live
+    subscription. So the row states an intention, and the customer sets it for free, as often as they
+    like. Two ways that paid out:
+
+      1. Open a checkout for `basic` (₪49), then open one for `institution_100` — the second
+         overwrites the row — then pay the FIRST link. The callback carries ₪49; the row says
+         `institution_100`; the account was granted 40M tokens a day and 100 seats for ₪49.
+      2. Simpler, and needing no second payment link: an ordinary ₪49 subscriber opens a checkout
+         for `institution_100` and abandons it. Their next ordinary renewal — ₪49, unchanged, from
+         the recurring mandate they signed — reads the row and grants the top tier. Every month.
+
+    Both are reproduced in tests/unit/test_billing.py. So:
+
+    * A RENEWAL grants what the account already holds. A recurring charge is the continuation of a
+      mandate that was authorised once; it is not a purchase, and it must not be able to select a
+      product. This also protects a customer on a grandfathered price — repricing happened on
+      2026-08-12 and will happen again — because their renewal is measured against what they have,
+      never against today's list price.
+    * A NEW charge may only buy what it covers. If the money is short of the selected tier, the
+      charge is honoured at the best tier it does cover rather than refused: the money has already
+      moved, and refusing here would take payment and grant nothing.
+
+    Two rules keep this from becoming a worse bug than the one it fixes, because the failure mode of
+    a price check is silently downgrading people who paid:
+
+      * **An absent or zero amount decides nothing.** If the callback carries no figure — a payload
+        shape we do not parse, a provider change — we are not entitled to conclude the customer
+        underpaid. It falls back to the selected tier, exactly as before this check existed, and
+        says so in the log. A check that turns "I could not read the amount" into "downgrade every
+        renewal to free" would take the whole paying base out in one deploy.
+      * **It never lands below what the account already holds.** This function may decline to
+        UPGRADE on money that does not cover the upgrade; taking away a tier someone is already
+        using is not its job, and belongs to the cancellation sweep.
+    """
+    selected = plans.canonical(sub.get("plan") or "pro")
+    held = plans.canonical(db.get_plan(owner) or "free")
+    if is_renewal:
+        if held != "free":
+            if plans.rank(selected) > plans.rank(held):
+                _log.error("BILLING/TIER MISMATCH: renewal of ₪%.2f for %s carries plan=%s on the "
+                           "subscription row but the account holds %s — granting %s. A pending "
+                           "checkout was left open over a live subscription.",
+                           amount, owner, selected, held, held)
+            return held
+        return selected                      # a renewal for an account with nothing granted yet
+    if amount <= 0:
+        _log.warning("billing: no amount on a charge for %s — granting the selected tier %s "
+                     "unchecked, as before. If this is not a one-off, the payload shape changed.",
+                     owner, selected)
+        return selected
+    expected = plans.price_ils(selected, cycle)
+    if amount + 0.01 >= expected:
+        return selected
+    affordable = _tier_affordable_at(amount, cycle) or "free"
+    granted = affordable if plans.rank(affordable) > plans.rank(held) else held
+    _log.error("BILLING/UNDERPAID: %s was charged ₪%.2f but the checkout row selected %s (₪%.2f) — "
+               "granting %s instead. Check for a stale payment link.",
+               owner, amount, selected, expected, granted)
+    return granted
+
+
 def handle_event(normalized: dict, *, now: datetime | None = None) -> None:
     """Apply a verified PayPlus callback: activate/renew the paid plan and issue an invoice. Ignores
     events with no owner id or a non-success status (logged, not raised)."""
@@ -78,8 +154,10 @@ def handle_event(normalized: dict, *, now: datetime | None = None) -> None:
     # basket. A renewal reads the same stored row — and on either cycle that grants another MONTH,
     # since an annual plan is twelve monthly instalments rather than one yearly charge.
     sub = db.get_subscription(owner) or {}
-    tier = plans.canonical(sub.get("plan") or "pro")
     cycle = plans.canonical_cycle(sub.get("cycle"))
+    amount = float(normalized.get("amount") or 0.0)
+    tier = _tier_actually_paid_for(owner, sub, amount=amount, cycle=cycle,
+                                   is_renewal=bool(normalized.get("is_renewal")))
     period_end = (now + timedelta(days=plans.period_days(cycle))).isoformat()
     db.upsert_subscription(owner, provider="payplus", provider_ref=normalized.get("recurring_uid"),
                            status="active", plan=tier, cycle=cycle, current_period_end=period_end,
@@ -100,7 +178,6 @@ def handle_event(normalized: dict, *, now: datetime | None = None) -> None:
                    "— this charge grants nothing; refund or remove the membership", owner, tier)
     _log.info("subscription active for %s: %s/%s (renewal=%s) until %s",
               owner, tier, cycle, normalized.get("is_renewal"), period_end)
-    amount = float(normalized.get("amount") or 0.0)
 
     # Record the charge in the accounting ledger BEFORE issuing the invoice. The money has already
     # moved by the time this callback arrives, so the record of it must not depend on a third-party

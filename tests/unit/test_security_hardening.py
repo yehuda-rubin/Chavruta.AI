@@ -162,3 +162,69 @@ def test_template_body_read_stays_inside_the_repo(tmp_path, monkeypatch):
     payload = {"dir": "data", "files": {"full_lesson": f"../../../../{secret}"}}
     api._attach_template_bodies(payload)
     assert "_full_lesson" not in payload
+
+
+# ── 2026-08-14 review: the ban/consent exemption was a prefix list ────────────
+# "A blocked account may still reach /me and /account/*" was implemented as
+# `path.startswith(("/me", "/account"))`. Every path that merely BEGINS with those letters was
+# exempt too — and two real routes do.
+def test_the_ban_exemption_does_not_leak_to_routes_that_merely_start_the_same_way():
+    from app.security import _ban_exempt
+
+    assert _ban_exempt("/me")                       # see why you are blocked
+    assert _ban_exempt("/account/delete")           # and manage your own account
+    assert _ban_exempt("/account/delete/cancel")
+
+    # A permanently blocked account kept a live write path into the operator's moderation queue,
+    # and both of these were reachable by an account that had accepted no terms and no age check.
+    assert not _ban_exempt("/messages/41/report")
+    assert not _ban_exempt("/metrics")
+    assert not _ban_exempt("/sessions")
+    assert not _ban_exempt("/query")
+
+
+# ── 2026-08-14 review: BYOK base_url was an SSRF primitive ────────────────────
+# The caller names the provider URL and the SERVER fetches it — GET {base}/models at check time,
+# POST {base}/chat/completions on every BYOK generation — with the /models response echoed back in
+# the reply. Unvalidated, that is a request generator aimed at our own network from inside it.
+@pytest.mark.parametrize("url", [
+    "http://127.0.0.1:8080",            # the API itself
+    "https://127.0.0.1",
+    "https://localhost:6333",           # Qdrant
+    "https://[::1]/v1",
+    "http://10.0.0.5:6333",
+    "http://192.168.1.1",
+    "http://172.17.0.1:8080",           # the docker bridge gateway
+    "http://169.254.169.254/latest",    # cloud metadata
+    "file:///etc/passwd",
+    "https://user:pw@example.com/v1",   # credentials that make a hostile host read as a familiar one
+    "",
+])
+def test_a_byok_provider_url_the_server_must_not_fetch_is_refused(url):
+    from app.security import UnsafeProviderURL, validate_provider_base_url
+
+    with pytest.raises(UnsafeProviderURL):
+        validate_provider_base_url(url)
+
+
+@pytest.mark.parametrize("url", [
+    "http://127.0.0.1:8080", "http://10.0.0.5:6333", "http://169.254.169.254/latest",
+])
+def test_the_local_http_escape_hatch_still_refuses_internal_addresses(url, monkeypatch):
+    """CHAVRUTA_BYOK_ALLOW_HTTP exists so a developer can point at a plain-http provider. It must
+    relax the SCHEME rule only — if it also relaxed the address rule it would hand back the whole
+    SSRF surface to anyone who could get the flag set."""
+    import app.security as security
+
+    monkeypatch.setattr(security, "_BYOK_ALLOW_HTTP", True)
+    with pytest.raises(security.UnsafeProviderURL):
+        security.validate_provider_base_url(url)
+
+
+def test_the_byok_routes_are_rate_limited():
+    """Not for tokens — /byok drives no generation. Each call parks a sync-threadpool worker for the
+    length of an outbound request to a host the CALLER picked, so a few concurrent calls to a
+    blackholed address stall every other sync route in the app, which is nearly all of them."""
+    from app.security import _METERED_PREFIXES
+
+    assert "/byok".startswith(_METERED_PREFIXES)

@@ -290,3 +290,57 @@ def test_editing_an_active_helper_does_not_re_ask_them(fresh_db):
     devhelpers.invite(HELPER, by=BOSS, note="שם מתוקן")
     assert devhelpers.status_for(HELPER)["status"] == "accepted"
     assert devhelpers.is_active(HELPER)
+
+
+# ── The counter reset is a free period of generation. Who may trigger it, and how often. ──────
+def test_declining_cannot_be_used_to_reset_your_own_quota(fresh_db):
+    """A security review found this live in the branch, and it was mine.
+
+    Clearing the period counters was wired into decline() for the same reason as revoke — don't lock
+    someone out on a limit they no longer have. But decline() is the one stop the SUBJECT initiates,
+    it is reachable self-service at POST /helper/decline, it returned True for any existing row, the
+    row is never deleted, and nothing rate-limits it. So: spend the daily cap, press decline, spend
+    it again, repeat. Unmetered generation on the operator's API key for anyone ever invited —
+    including someone already revoked, i.e. whose access was deliberately withdrawn.
+    """
+    devhelpers.invite(HELPER, by=BOSS)
+    devhelpers.accept(HELPER)
+    fresh_db.bump_usage(HELPER, 200_000, weekly_limit=525_000, units=200_000, meter=fresh_db.TOKENS)
+
+    assert devhelpers.decline(HELPER) is True
+    assert fresh_db.usage_today(HELPER, meter=fresh_db.TOKENS) == 200_000, "declining refunded spend"
+
+    # …and it is not a matter of firing once: a repeat must not reach the counters at all.
+    for _ in range(3):
+        assert devhelpers.decline(HELPER) is False
+        assert fresh_db.usage_today(HELPER, meter=fresh_db.TOKENS) == 200_000
+    allowed, _, _ = fresh_db.bump_usage(HELPER, 200_000, weekly_limit=525_000, units=20_000,
+                                        meter=fresh_db.TOKENS)
+    assert not allowed, "a spent cap came back by pressing decline"
+
+
+def test_revoking_an_invitation_never_accepted_hands_back_nothing(fresh_db):
+    """The counters may only be cleared for someone who actually HELD the raised allowance. An
+    invitation that was never accepted raised no limit, so clearing is not a refund — it is a free
+    period handed to an account on the strength of an offer it ignored."""
+    devhelpers.invite(HELPER, by=BOSS)
+    fresh_db.bump_usage(HELPER, 200_000, weekly_limit=525_000, units=200_000, meter=fresh_db.TOKENS)
+
+    devhelpers.revoke(HELPER)
+
+    assert fresh_db.usage_today(HELPER, meter=fresh_db.TOKENS) == 200_000
+
+
+def test_revoking_twice_does_not_hand_back_two_periods(fresh_db):
+    """Idempotence, for the same reason: the reset is worth a period of free generation, so it must
+    happen at most once per enrolment no matter how many times the button is pressed."""
+    devhelpers.invite(HELPER, by=BOSS)
+    devhelpers.accept(HELPER)
+    fresh_db.bump_usage(HELPER, 600_000, weekly_limit=1_575_000, units=600_000, meter=fresh_db.TOKENS)
+
+    assert devhelpers.revoke(HELPER) is True          # the legitimate refund
+    assert fresh_db.usage_today(HELPER, meter=fresh_db.TOKENS) == 0
+    fresh_db.bump_usage(HELPER, 200_000, weekly_limit=525_000, units=150_000, meter=fresh_db.TOKENS)
+
+    assert devhelpers.revoke(HELPER) is False
+    assert fresh_db.usage_today(HELPER, meter=fresh_db.TOKENS) == 150_000, "a second refund"

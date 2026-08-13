@@ -20,6 +20,27 @@ import app.api as api
 import chavruta.llm.cloud as cloud_mod
 
 
+@pytest.fixture(autouse=True)
+def _resolvable_example_hosts(monkeypatch):
+    """These tests are about the base_url/model PLUMBING, and they use RFC 2606 `.example` names on
+    purpose so nothing can ever leave the machine. Since 2026-08-14 a caller-supplied base URL is
+    checked against `security.validate_provider_base_url`, which resolves the host — and a reserved
+    name resolves nowhere, so every one of them would fail on DNS rather than on what it asserts.
+
+    DNS is stubbed to one public address rather than the check being disabled: the URL policy itself
+    has its own tests in test_security_hardening.py, and switching it off here would leave the
+    generation path — which is where an unvetted URL actually gets fetched — with no test at all.
+    """
+    import socket
+
+    import app.security as security
+
+    monkeypatch.setattr(
+        security.socket, "getaddrinfo",
+        lambda host, port, *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "",
+                                      ("93.184.216.34", port or 443))])
+
+
 @pytest.fixture
 def api_backend(monkeypatch):
     fake = SimpleNamespace(

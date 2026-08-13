@@ -12,11 +12,14 @@ replica you'd move the window to Redis — noted, not built, because it isn't ne
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import logging
 import os
+import socket
 import threading
 import time
 import uuid
+from urllib.parse import urlsplit
 
 from fastapi import Header, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -27,9 +30,73 @@ from app import auth_supabase as sb
 
 _log = logging.getLogger("chavruta.request")
 
-# A blocked account is still allowed to reach these path prefixes — so it can see WHY it's blocked
-# (/me reports the block) and manage its own account (/account/*). Everything else is 403'd.
-_BAN_EXEMPT_PREFIXES = ("/me", "/account")
+# A blocked account is still allowed to reach these — so it can see WHY it's blocked (/me reports
+# the block) and manage its own account (/account/*). Everything else is 403'd, and so is every
+# route for an account that never accepted the Terms or confirmed 18+.
+#
+# `/me` is matched EXACTLY and only `/account/` by prefix. Written as ("/me", "/account") and tested
+# with str.startswith, the tuple also exempted every path that merely BEGINS with those letters —
+# `/messages/{id}/report` and `/metrics` both do. A permanently blocked account kept a live write
+# path into the operator's own moderation queue, and both routes were reachable by an account that
+# had accepted nothing. A prefix list is the wrong shape for a rule about routes; the bug is not the
+# entries, it is that `startswith` was ever asked the question.
+_BAN_EXEMPT_PATHS = frozenset({"/me"})
+_BAN_EXEMPT_PREFIXES = ("/account/",)
+
+
+def _ban_exempt(path: str) -> bool:
+    return path in _BAN_EXEMPT_PATHS or path.startswith(_BAN_EXEMPT_PREFIXES)
+
+
+# ── Outbound URL policy (BYOK) ────────────────────────────────────────────────
+# A BYOK caller supplies the provider base URL their key belongs to, and the SERVER then makes
+# requests to it — GET {base}/models to validate the model, POST {base}/chat/completions to generate.
+# Unvalidated, that is a request generator aimed at our own network from inside it: Qdrant on :6333,
+# the API itself on :8080, a cloud metadata endpoint on 169.254.169.254. And it is not even blind —
+# the /models listing is echoed back to the caller in the response.
+#
+# What this does NOT solve, said plainly rather than left implied: the name is resolved HERE and
+# connected to LATER by the OpenAI client, which resolves it again. A host that answers with a public
+# address now and a private one a moment afterwards defeats the check. Closing that means pinning the
+# connection to the address that was vetted; what follows rejects the direct cases and is not a
+# substitute for that.
+_BYOK_ALLOW_HTTP = os.environ.get("CHAVRUTA_BYOK_ALLOW_HTTP", "").strip().lower() in {"1", "true", "yes"}
+
+
+class UnsafeProviderURL(ValueError):
+    """A user-supplied provider URL that the server must not fetch."""
+
+
+def validate_provider_base_url(url: str) -> str:
+    """Return `url` unchanged if the server may call it, else raise UnsafeProviderURL."""
+    raw = (url or "").strip()
+    if not raw:
+        raise UnsafeProviderURL("empty provider URL")
+    parts = urlsplit(raw)
+    if parts.scheme not in ("https", "http"):
+        raise UnsafeProviderURL("the provider URL must start with https://")
+    if parts.scheme == "http" and not _BYOK_ALLOW_HTTP:
+        raise UnsafeProviderURL("the provider URL must use https")
+    if parts.username or parts.password:
+        # Credentials in the URL are never needed here — the key travels in a header — and they are
+        # a well-worn way of making a hostile host read as a familiar one.
+        raise UnsafeProviderURL("the provider URL must not embed credentials")
+    host = parts.hostname
+    if not host:
+        raise UnsafeProviderURL("the provider URL has no host")
+    try:
+        infos = socket.getaddrinfo(host, parts.port or (443 if parts.scheme == "https" else 80),
+                                   proto=socket.IPPROTO_TCP)
+    except OSError as exc:
+        raise UnsafeProviderURL("the provider host could not be resolved") from exc
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        # `is_global` is False for every range that matters here at once — private, loopback,
+        # link-local (169.254.169.254 included), multicast, reserved, unspecified — and it keeps
+        # being right as ranges are assigned, which a hand-written CIDR list would not.
+        if not ip.is_global:
+            raise UnsafeProviderURL("the provider URL resolves to an internal address")
+    return raw
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -115,7 +182,7 @@ def require_auth(
         owner = payload.get("sub")
         if not owner:
             raise HTTPException(status_code=401, detail="missing or invalid bearer token")
-        if not _has_consented(payload) and not path.startswith(_BAN_EXEMPT_PREFIXES):
+        if not _has_consented(payload) and not _ban_exempt(path):
             raise HTTPException(status_code=403, detail={
                 "error": "consent_required",
                 "message": "Terms of Use and age (18+) confirmation are required to use the service.",
@@ -125,7 +192,7 @@ def require_auth(
         owner = _owner_from_key(authorization, x_api_key)
     request.state.owner = owner
 
-    if owner != "local" and not path.startswith(_BAN_EXEMPT_PREFIXES):
+    if owner != "local" and not _ban_exempt(path):
         ban = accts.active_ban(owner)
         if ban:
             raise HTTPException(status_code=403, detail={
@@ -187,7 +254,11 @@ _hour = _SlidingWindow(_RPH, 3600.0)
 
 # Only the generation routes are metered — they're the ones that cost tokens. Health, session
 # listing, and reads are exempt so a dashboard/poller isn't throttled.
-_METERED_PREFIXES = ("/query", "/sessions")   # POST to these drives the LLM
+# /byok is here for a different reason from the other two: it drives no generation, but every call
+# blocks a sync-threadpool worker for the length of an outbound HTTP request to a host the CALLER
+# chose. Unmetered, a handful of concurrent requests to a blackholed address pin every worker in the
+# pool and stall every other sync route in the app — which is nearly all of them.
+_METERED_PREFIXES = ("/query", "/sessions", "/byok")   # POST: drives the LLM, or an outbound call
 _EXEMPT = ("/health", "/ready")
 _last_sweep = [0.0]
 

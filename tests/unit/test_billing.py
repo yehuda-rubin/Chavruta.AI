@@ -12,9 +12,9 @@ import hmac
 import json
 from datetime import UTC, datetime
 
-import pytest
-
 import app.db as db
+import pytest
+from app import plans
 from app.billing import payplus, service
 
 
@@ -75,9 +75,11 @@ def test_handle_event_activates_paid(fresh_db, monkeypatch):
     monkeypatch.setattr(service.greeninvoice, "issue_receipt", lambda **k: None)   # no network
     service.handle_event({"owner_id": "u-1", "success": True, "recurring_uid": "rec_9",
                           "is_renewal": False, "amount": 49.9}, now=datetime(2026, 7, 19, tzinfo=UTC))
-    # The webhook grants the tier recorded at checkout; with none recorded it defaults to pro,
-    # which is what the legacy 'paid' value has always meant.
-    assert fresh_db.get_plan("u-1") == "pro"
+    # No checkout row, so the tier defaults to the legacy 'pro' — but ₪49.90 is the pre-2026-08-12
+    # pro price and pro now costs ₪169, so the MONEY decides and it buys basic. This assertion used
+    # to read `== "pro"`, which was the old ladder frozen into a test; granting a tier the charge
+    # does not cover is the whole defect the resolver exists to stop.
+    assert fresh_db.get_plan("u-1") == "basic"
     sub = fresh_db.get_subscription("u-1")
     assert sub["status"] == "active" and sub["provider_ref"] == "rec_9"
     assert sub["current_period_end"] > "2026-08"     # ~30 days out
@@ -240,3 +242,100 @@ def test_free_tier_cannot_be_checked_out(fresh_db, monkeypatch):
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ── Paying for one tier must not grant another ───────────────────────────────
+# `start_checkout` writes the SELECTED tier into the subscriptions row before any money moves, and
+# `handle_event` used to read that row as the answer to "what was bought". The row is therefore a
+# statement of intent that the customer can rewrite for free, as often as they like, by opening a
+# checkout and walking away. Found in a security review of 2026-08-14.
+def _charge(owner, amount, *, renewal=False):
+    service.handle_event({"owner_id": owner, "success": True, "amount": amount,
+                          "recurring_uid": "rec-" + owner, "is_renewal": renewal},
+                         now=datetime(2026, 8, 14, tzinfo=UTC))
+
+
+@pytest.fixture(autouse=True)
+def _no_invoice_network(monkeypatch):
+    monkeypatch.setattr(service.greeninvoice, "issue_receipt", lambda **k: None)
+
+
+def test_a_stale_cheap_payment_link_cannot_buy_the_expensive_tier(fresh_db):
+    """Open a checkout for basic, open one for institution_100 (which overwrites the row), then pay
+    the FIRST link. ₪49 arrives; the row says institution_100."""
+    db.upsert_subscription("u-x", provider="payplus", status="pending", plan="basic",
+                           cycle="monthly", updated_at="2026-08-14")
+    db.upsert_subscription("u-x", provider="payplus", status="pending", plan="institution_100",
+                           cycle="monthly", updated_at="2026-08-14")
+
+    _charge("u-x", plans.price_ils("basic", "monthly"))
+
+    assert fresh_db.get_plan("u-x") == "basic", "₪49 bought a ₪2,799 tier"
+
+
+def test_an_abandoned_upgrade_does_not_ride_in_on_the_next_renewal(fresh_db):
+    """The variant that needs no second payment link at all, and repeats every month: a ₪49
+    subscriber opens a checkout for the top tier and abandons it. Their ordinary renewal — same
+    mandate, same ₪49 — used to read the row and grant institution_100."""
+    db.upsert_subscription("u-y", provider="payplus", status="active", plan="basic",
+                           cycle="monthly", provider_ref="rec-u-y", updated_at="2026-08-14")
+    db.set_plan("u-y", "basic")
+    db.upsert_subscription("u-y", provider="payplus", status="pending", plan="institution_100",
+                           cycle="monthly", updated_at="2026-08-14")
+
+    _charge("u-y", plans.price_ils("basic", "monthly"), renewal=True)
+
+    assert fresh_db.get_plan("u-y") == "basic"
+
+
+@pytest.mark.parametrize("tier_id", [t.id for t in plans.TIERS if t.id != "free"])
+@pytest.mark.parametrize("cycle", ["monthly", "annual"])
+def test_an_honest_purchase_of_every_tier_still_works(fresh_db, tier_id, cycle):
+    """The check must not cost anyone the thing they actually paid for — on either cycle, where the
+    annual charge is one of twelve instalments and not the year's headline figure."""
+    owner = f"buy-{tier_id}-{cycle}"
+    db.upsert_subscription(owner, provider="payplus", status="pending", plan=tier_id, cycle=cycle,
+                           updated_at="2026-08-14")
+
+    _charge(owner, plans.price_ils(tier_id, cycle))
+
+    assert fresh_db.get_plan(owner) == tier_id
+
+
+def test_a_renewal_below_todays_list_price_does_not_downgrade_a_customer(fresh_db):
+    """Prices were raised on 2026-08-12 and will be again. A customer renewing on the rate they
+    signed up at must keep their tier: their renewal is measured against what they hold, never
+    against today's price list."""
+    db.upsert_subscription("u-old", provider="payplus", status="active", plan="pro",
+                           cycle="monthly", provider_ref="rec-u-old", updated_at="2026-08-14")
+    db.set_plan("u-old", "pro")
+
+    _charge("u-old", 49.90, renewal=True)      # the price pro used to cost
+
+    assert fresh_db.get_plan("u-old") == "pro"
+
+
+def test_a_callback_with_no_amount_grants_the_selected_tier_rather_than_downgrading(fresh_db):
+    """The failure mode of a price check is worse than the hole it closes. If the callback carries
+    no figure — an unparsed payload, a provider change — we cannot conclude the customer underpaid,
+    and turning that into "downgrade to free" would take out the whole paying base in one deploy."""
+    db.upsert_subscription("u-z", provider="payplus", status="pending", plan="pro",
+                           cycle="monthly", updated_at="2026-08-14")
+
+    service.handle_event({"owner_id": "u-z", "success": True, "recurring_uid": "rec-z"},
+                         now=datetime(2026, 8, 14, tzinfo=UTC))
+
+    assert fresh_db.get_plan("u-z") == "pro"
+
+
+def test_an_underpaid_upgrade_never_takes_away_the_tier_already_held(fresh_db):
+    """Declining to upgrade is this function's job; confiscating what someone already uses is not."""
+    db.upsert_subscription("u-w", provider="payplus", status="active", plan="pro",
+                           cycle="monthly", provider_ref="rec-u-w", updated_at="2026-08-14")
+    db.set_plan("u-w", "pro")
+    db.upsert_subscription("u-w", provider="payplus", status="pending", plan="institution_100",
+                           cycle="monthly", updated_at="2026-08-14")
+
+    _charge("u-w", 5.0)        # a new charge, nowhere near anything
+
+    assert fresh_db.get_plan("u-w") == "pro"

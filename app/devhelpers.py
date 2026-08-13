@@ -123,23 +123,37 @@ def decline(owner_id: str) -> bool:
     row = get(owner_id)
     if not row:
         return False
+    if row["declined_at"] or row["revoked_at"]:
+        # Already stopped. Returning False here is what makes the route 404 on a repeat, and it is
+        # deliberate rather than tidiness — see the note on _clear_period_usage about why anything
+        # this path does must happen at most once.
+        return False
     with db._tx(db.get_conn()) as conn:
         conn.execute(
             "UPDATE dev_helpers SET declined_at=?, accepted_at=NULL, note='', features='[]' "
             "WHERE owner_id=?", (_now(), owner_id))
         conn.execute("DELETE FROM helper_messages WHERE owner_id=?", (owner_id,))
-    _clear_period_usage(owner_id)       # same reason as revoke: the allowance drops out from under
+    # NOTE: the period counters are deliberately NOT cleared here, unlike revoke(). This is the one
+    # stop the SUBJECT initiates, and a reset the beneficiary can trigger is a reset they can farm.
+    # Someone who chooses to stop after spending a helper's allowance keeps that spend on the meter
+    # and waits for the period to roll over; they took the benefit, on their own timing.
     _log.info("dev helper %s declined", owner_id)
     return True
 
 
 def revoke(owner_id: str) -> bool:
     """Withdraw helper status. Takes back only what was given — no consent needed for that."""
-    if not get(owner_id):
-        return False
+    row = get(owner_id)
+    if not row or row["revoked_at"]:
+        return False                    # never enrolled, or already off — nothing to take back
+    was_active = row["active"]
     with db._tx(db.get_conn()) as conn:
         conn.execute("UPDATE dev_helpers SET revoked_at=? WHERE owner_id=?", (_now(), owner_id))
-    _clear_period_usage(owner_id)
+    if was_active:
+        # Only for someone who actually HELD the raised allowance. Revoking an invitation that was
+        # never accepted takes nothing away, so there is nothing to hand back and clearing would be
+        # a plain gift of a free period.
+        _clear_period_usage(owner_id)
     _log.info("dev helper %s revoked", owner_id)
     return True
 
@@ -157,6 +171,18 @@ def _clear_period_usage(owner_id: str) -> None:
     The counters are cleared rather than clamped because clamping to the lower cap leaves them at
     the ceiling, which is the same lockout. It hands back at most one period's free allowance to
     someone the operator invited personally; that is the cheaper mistake by a wide margin.
+
+    **Two rules govern every caller, and both are load-bearing.** This function is a free period of
+    generation on the operator's own API key, so:
+
+      1. Only an OPERATOR action may reach it — revoke and remove, both behind the admin gate. It
+         was briefly wired to decline() too, which the person themself calls, and that made
+         `POST /helper/decline` a repeatable self-service quota reset: spend the cap, decline, spend
+         it again. The row is never deleted on a decline, so the button stayed live forever, and
+         nothing rate-limits it. Anyone ever invited — including someone already revoked — had
+         unmetered generation for as long as they cared to keep pressing.
+      2. It may fire only for a row that was ACTIVE, and only once. An invitation that was never
+         accepted raised no limit, so there is nothing to give back.
     """
     try:
         with db._tx(db.get_conn()) as conn:
@@ -174,9 +200,12 @@ def _clear_period_usage(owner_id: str) -> None:
 def remove(owner_id: str) -> bool:
     """Delete the row entirely, and the notices sent to them with it — for taking someone off the
     list rather than merely switching them off."""
+    was_active = (get(owner_id) or {}).get("active", False)
     with db._tx(db.get_conn()) as conn:
         cur = conn.execute("DELETE FROM dev_helpers WHERE owner_id=?", (owner_id,))
         conn.execute("DELETE FROM helper_messages WHERE owner_id=?", (owner_id,))
+    if was_active:
+        _clear_period_usage(owner_id)   # takes the allowance away exactly as revoke does
     return cur.rowcount > 0
 
 
