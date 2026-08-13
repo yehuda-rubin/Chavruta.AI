@@ -253,7 +253,7 @@ export function ChatPane({
             overlay: an invitation is not urgent enough to interrupt someone mid-question, and a
             modal that blocks the app to ask a favour is the wrong shape for a favour. It renders
             nothing at all for almost every account. */}
-        <HelperPrompt />
+        <HelperPrompt lang={lang} />
 
         {messages.length === 0 ? (
           <div className="m-auto text-center px-6">

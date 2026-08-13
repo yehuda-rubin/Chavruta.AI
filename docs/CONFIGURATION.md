@@ -105,8 +105,8 @@ These variables override the default subscription tiers and credit costs defined
 
 | Variable | Purpose | Default | Where read |
 |----------|---------|---------|------------|
-| `CHAVRUTA_SUB_PERIOD_DAYS` | Days of access a monthly subscription buys | `30` | `app/plans.py:200` |
-| `CHAVRUTA_ANNUAL_PERIOD_DAYS` | Days of access an annual subscription buys | `365` | `app/plans.py:199` |
+| `CHAVRUTA_SUB_PERIOD_DAYS` | Days of access a monthly subscription buys | `30` | `app/plans.py:295` |
+| `CHAVRUTA_ANNUAL_PERIOD_DAYS` | Days of access **one annual instalment** buys. Annual is billed as 12 monthly instalments, so this is `30`, not `365` — raising it grants a year of access for one payment | `30` | `app/plans.py:294` |
 | `CHAVRUTA_SUB_PRICE_ILS` | Legacy single-price knob (pro tier monthly, superseded by tier-specific prices) | `49.9` | `app/plans.py:214` |
 | `CHAVRUTA_SUB_DESCRIPTION` | Invoice line description (empty = auto-generated Hebrew description) | `""` | `app/billing/service.py:30` |
 | `CHAVRUTA_BILLING_SWEEP_INTERVAL_S` | Interval for the billing downgrade sweeper (seconds) | `3600` | `app/billing/service.py:155` |

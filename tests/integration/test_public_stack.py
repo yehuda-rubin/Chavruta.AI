@@ -368,9 +368,27 @@ def test_an_allowlisted_account_gets_the_levels_but_never_the_answers(client, mo
     blob = str(body)
     assert "teach_he" not in blob
     assert "accept_refs" not in blob, "the accepted refs ARE the answer"
-    # The first level starts with an empty inventory; a later one holds every earlier source.
-    assert body["levels"][0]["inventory"] == []
-    assert "Bava_Metzia.3.1" in body["levels"][1]["inventory"]
+    # …and neither does the inventory, which was the SAME answers by another name: every level's
+    # unlocks_ref is its own accepted ref, so shipping level N+1's inventory shipped level N's
+    # solution. This test used to assert that leak two lines after asserting the opposite.
+    assert "Bava_Metzia.3.1" not in blob, "a later level's inventory is an earlier level's answer"
+    assert all("inventory" not in lv for lv in body["levels"])
+
+
+def test_the_inventory_is_released_only_to_someone_who_solved_the_level_before(client, monkeypatch):
+    h = _sugya_client(client, monkeypatch, allowed=True)
+    # The first level has nothing before it, so there is nothing to withhold.
+    first = client.post("/sugya/shnayim-ochazin/mishnah/inventory", json={}, headers=h)
+    assert first.status_code == 200 and first.json()["inventory"] == []
+
+    # The second level's inventory is the first level's answer — no answer, no inventory.
+    blind = client.post("/sugya/shnayim-ochazin/rashi-ochazin/inventory", json={}, headers=h)
+    assert blind.status_code == 403
+
+    earned = client.post("/sugya/shnayim-ochazin/rashi-ochazin/inventory",
+                         json={"ref": "Bava_Metzia.3.1"}, headers=h)
+    assert earned.status_code == 200
+    assert earned.json()["inventory"] == ["Bava_Metzia.3.1"]
 
 
 def test_checking_an_answer_reports_why_without_keeping_score(client, monkeypatch):

@@ -195,3 +195,62 @@ def test_top_users_excludes_the_anonymised_rows_of_deleted_accounts(fresh_db):
     assert [r["owner_id"] for r in rows] == [HELPER]
     # The anonymised request is still counted where it belongs — only the per-ACCOUNT view drops it.
     assert fresh_db.usage_health()["requests"] == 2
+
+
+# ── Findings from the pre-deploy review, 2026-08-13 ──────────────────────────
+def test_re_inviting_a_revoked_person_asks_again(fresh_db):
+    """The door the module's docstring says cannot exist. `invite` cleared revoked_at but left
+    accepted_at, so a revoked person went straight back to active — new features and all — without
+    ever seeing a prompt, because the invitation panel only renders for status 'invited'."""
+    devhelpers.invite(HELPER, by=BOSS)
+    devhelpers.accept(HELPER)
+    devhelpers.revoke(HELPER)
+
+    devhelpers.invite(HELPER, by=BOSS, features=["sugya"])
+
+    row = devhelpers.get(HELPER)
+    assert row["status"] == "invited" and not row["active"]
+    assert not devhelpers.has_feature(HELPER, "sugya")
+    assert orgs.effective_plan(HELPER) == "free"
+    assert devhelpers.accept(HELPER) and devhelpers.has_feature(HELPER, "sugya")
+
+
+def test_declining_erases_the_note_and_the_messages(fresh_db):
+    """A refusal should not leave the operator's description of that person on file, nor a mailbox
+    that keeps filling. What survives is the minimum that stops a blind re-invitation."""
+    devhelpers.invite(HELPER, by=BOSS, note="בודק שיעורים", features=["sugya"])
+    devhelpers.send([HELPER], "הודעה", by=BOSS)
+
+    devhelpers.decline(HELPER)
+
+    row = devhelpers.get(HELPER)
+    assert row["status"] == "declined"
+    assert row["note"] == "" and row["features"] == []
+    assert devhelpers.inbox(HELPER) == []
+
+
+def test_a_refusal_stops_the_notices(fresh_db):
+    """Filtering only on revoked_at let someone who pressed 'no thank you' keep receiving operator
+    messages, with a read receipt recorded for each."""
+    devhelpers.invite(HELPER, by=BOSS)
+    devhelpers.decline(HELPER)
+    assert devhelpers.send([HELPER], "עוד הודעה", by=BOSS) == 0
+    assert devhelpers.inbox(HELPER) == []
+
+
+def test_revoking_does_not_lock_the_person_out_of_the_rest_of_the_period(fresh_db):
+    """Quota compares an accumulated counter against the CURRENT limit. A helper who spent their
+    basic allowance testing and was then revoked had every later request refused until midnight —
+    and until Sunday for the weekly cap — with a message telling them to buy a subscription."""
+    devhelpers.invite(HELPER, by=BOSS)
+    devhelpers.accept(HELPER)
+    fresh_db.bump_usage(HELPER, 600_000, weekly_limit=1_575_000, units=600_000,
+                        meter=fresh_db.TOKENS)
+
+    devhelpers.revoke(HELPER)
+
+    assert fresh_db.usage_today(HELPER, meter=fresh_db.TOKENS) == 0
+    assert fresh_db.usage_this_week(HELPER, meter=fresh_db.TOKENS) == 0
+    allowed, _, _ = fresh_db.bump_usage(HELPER, 200_000, weekly_limit=525_000, units=20_000,
+                                        meter=fresh_db.TOKENS)
+    assert allowed, "revoked, then locked out of the free tier they fell back to"

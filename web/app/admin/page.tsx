@@ -545,7 +545,11 @@ export default function AdminDashboard() {
                     {g.kind === "misattribution" && (
                       <p className="text-sm text-ink/80 leading-relaxed">
                         יוחס ל<b>{g.detail.claimed}</b>, והטקסט הוא של <b>{g.detail.found_in}</b>
-                        {g.detail.quote && <span className="block text-ink/60 mt-1">«{g.detail.quote}»</span>}
+                        {/* No excerpt: guard_findings has no owner_id and so cannot honour the
+                            per-chat review opt-out, which means answer text must not live in it. */}
+                        {g.detail.quote_len && (
+                          <span className="block text-ink/40 mt-1">ציטוט באורך {g.detail.quote_len} תווים</span>
+                        )}
                       </p>
                     )}
                     {g.kind === "deontic" && (
@@ -554,14 +558,14 @@ export default function AdminDashboard() {
                         {g.detail.attribution === "inherited" && (
                           <span className="text-ink/40"> (ללא ייחוס מפורש — אות חלש יותר)</span>
                         )}
-                        <span className="block text-ink/60 mt-1">«{g.detail.first}»</span>
-                        <span className="block text-ink/60">«{g.detail.second}»</span>
+                        {g.detail.verdicts && (
+                          <span className="block text-ink/60 mt-1">{g.detail.verdicts}</span>
+                        )}
                       </p>
                     )}
                     {g.kind === "calendar" && (
                       <p className="text-sm text-ink/80 leading-relaxed">
                         נכתב <b>{g.detail.stated}</b>, ובפועל <b>{g.detail.expected}</b>
-                        {g.detail.span && <span className="block text-ink/60 mt-1">«{g.detail.span}»</span>}
                       </p>
                     )}
                   </div>

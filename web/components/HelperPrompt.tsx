@@ -2,6 +2,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api, type HelperStatus } from "@/lib/api";
+import { tr } from "@/lib/i18n";
+import type { Lang } from "@/lib/types";
 import { Icon } from "./Icon";
 
 // The dev-helper side the PERSON sees: the invitation, and any notices the operator sent them.
@@ -14,7 +16,7 @@ import { Icon } from "./Icon";
 //
 // Renders nothing at all for the overwhelming majority of accounts, which is why it is safe to mount
 // unconditionally: /helper/status answers {status:"none"} rather than erroring for them.
-export function HelperPrompt() {
+export function HelperPrompt({ lang }: { lang: Lang }) {
   const [st, setSt] = useState<HelperStatus | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -56,30 +58,27 @@ export function HelperPrompt() {
           className="glass rounded-[24px] p-5 flex flex-col gap-3 ring-1 ring-tekhelet/20"
         >
           <h2 id="helper-invite-title" className="font-serif text-lg font-bold text-tekhelet">
-            הוזמנת לעזור בבדיקת המערכת
+            {tr(lang, "helperInviteTitle")}
           </h2>
-          {st.note && <p className="text-xs text-ink/50">הערת המזמין: {st.note}</p>}
+          {st.note && (
+            <p className="text-xs text-ink/50">{tr(lang, "helperInviteNote")} {st.note}</p>
+          )}
 
           <div className="text-sm text-ink/75 leading-relaxed flex flex-col gap-2">
-            <p>
-              <b>מה תקבל:</b> מכסת שימוש בגובה התוכנית הבסיסית, ויכולות שטרם נפתחו לכולם. אם כבר יש
-              לך מנוי בתשלום — הוא לא נפגע, והמכסה הגבוהה מבין השתיים חלה.
-            </p>
-            <p>
-              <b>מה יישמר עליך:</b> שהצטרפת ומתי, אילו יכולות נפתחו, ההערה שלמעלה, והודעות שיישלחו
-              אליך כאן — כולל מתי קראת אותן. הכול נמחק אם תמחק את החשבון.
-            </p>
-            <p>
-              <b>מה זה לא:</b> זו אינה עבודה ואין עליה תשלום. אין מטלות, אין שעות, ואפשר להפסיק בכל
-              רגע. יכולות שטרם שוחררו עלולות להיות חלקיות או להשתנות.
-            </p>
+            <p><b>{tr(lang, "helperGetLabel")}</b> {tr(lang, "helperGetBody")}</p>
+            <p><b>{tr(lang, "helperStoredLabel")}</b> {tr(lang, "helperStoredBody")}</p>
+            <p><b>{tr(lang, "helperNotLabel")}</b> {tr(lang, "helperNotBody")}</p>
           </div>
 
           <p className="text-[11px] text-ink/40">
-            הפירוט המלא ב
-            <Link href="/terms" className="text-tekhelet/70 hover:underline"> תנאי השימוש</Link>
-            {" (סעיף 11א) וב"}
-            <Link href="/privacy" className="text-tekhelet/70 hover:underline">מדיניות הפרטיות</Link>.
+            {tr(lang, "helperDetailsPre")}
+            <Link href="/terms" className="text-tekhelet/70 hover:underline">
+              {tr(lang, "helperDetailsTerms")}
+            </Link>
+            {tr(lang, "helperDetailsMid")}
+            <Link href="/privacy" className="text-tekhelet/70 hover:underline">
+              {tr(lang, "helperDetailsPrivacy")}
+            </Link>.
           </p>
 
           <div className="flex gap-2">
@@ -88,16 +87,57 @@ export function HelperPrompt() {
               onClick={() => answer(true)}
               className="px-4 py-2 rounded-2xl grad text-white font-semibold text-sm disabled:opacity-40"
             >
-              מאשר, אני בעניין
+              {tr(lang, "helperAccept")}
             </button>
             <button
               disabled={busy}
               onClick={() => answer(false)}
               className="px-4 py-2 rounded-2xl glass text-ink/60 font-semibold text-sm disabled:opacity-40"
             >
-              לא תודה
+              {tr(lang, "helperDecline")}
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Already helping. Two promises live here, both of which the panel used to make and not keep:
+          Terms 11a says "you may stop at any time" — which had no control anywhere in the product
+          once the invitation panel disappeared — and the privacy policy says the operator's note is
+          shown to you, which held for the invitation screen and then stopped holding, even though
+          the operator can edit that note afterwards. */}
+      {st.status === "accepted" && (
+        <div className="glass rounded-[24px] p-4 flex flex-col gap-2 ring-1 ring-tekhelet/15">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="text-sm text-ink/75">
+              {tr(lang, "helperActiveLabel")}
+              {st.plan ? ` — ${tr(lang, "helperActiveQuota")} ${st.plan}` : ""}.
+            </span>
+            <button
+              onClick={() => {
+                // Confirmed, because stopping is destructive on the operator's side too: it erases
+                // their note about you and the notices they sent. Right for a refusal — a person who
+                // is out should not have our description of them on file — but not something a
+                // mis-click should do, which is what a bare button on an always-visible panel is.
+                if (window.confirm(tr(lang, "helperStopConfirm"))) {
+                  answer(false);
+                }
+              }}
+              disabled={busy}
+              className="px-3 py-1.5 rounded-full glass text-ink/60 text-xs font-semibold hover:bg-ink/5 disabled:opacity-40"
+            >
+              {tr(lang, "helperStop")}
+            </button>
+          </div>
+          {st.note && (
+            <p className="text-xs text-ink/50">
+              {tr(lang, "helperNoteOnYou")} {st.note}
+            </p>
+          )}
+          {!!st.features.length && (
+            <p className="text-xs text-ink/50">
+              {tr(lang, "helperOpenedForYou")} {st.features.join(" · ")}
+            </p>
+          )}
         </div>
       )}
 
@@ -111,13 +151,13 @@ export function HelperPrompt() {
           <div className="min-w-0 flex-1">
             <p className="text-sm text-ink/80 whitespace-pre-line break-words">{m.body}</p>
             <p className="text-[11px] text-ink/40 mt-1">
-              {new Date(m.at).toLocaleString("he-IL")}
+              {new Date(m.at).toLocaleString(lang === "he" ? "he-IL" : "en-US")}
             </p>
           </div>
           <button
             onClick={() => dismiss(m.id)}
-            aria-label="סמן כנקרא"
-            title="סמן כנקרא"
+            aria-label={tr(lang, "helperMarkRead")}
+            title={tr(lang, "helperMarkRead")}
             className="shrink-0 h-8 w-8 rounded-full glass grid place-items-center text-ink/50 hover:text-tekhelet"
           >
             <Icon name="close" className="text-[18px]" />

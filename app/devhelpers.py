@@ -70,11 +70,20 @@ def invite(owner_id: str, *, by: str, note: str = "", features: list[str] | None
         raise ValueError("cannot enrol yourself as your own helper")
     feats = _clean_features(features)
     existing = get(owner_id)
+    # Re-inviting someone whose status was REVOKED must ask again. Clearing `revoked_at` while
+    # leaving `accepted_at` in place re-armed a consent that had already been ended: the row went
+    # straight back to "accepted", the basic-tier floor returned, and any newly-ticked feature
+    # applied — with no prompt, because the invitation panel only renders for status "invited". That
+    # is exactly the door this module's docstring says cannot exist. An accepted row that was never
+    # revoked keeps its consent (editing a note or a grant must not silently un-enrol someone).
+    reask = bool(existing and existing.get("revoked_at"))
     with db._tx(db.get_conn()) as conn:
         if existing:
             conn.execute(
-                "UPDATE dev_helpers SET note=?, features=?, revoked_at=NULL, declined_at=NULL "
-                "WHERE owner_id=?", (note or existing.get("note") or "", json.dumps(feats), owner_id))
+                "UPDATE dev_helpers SET note=?, features=?, revoked_at=NULL, declined_at=NULL"
+                + (", accepted_at=NULL" if reask else "")
+                + " WHERE owner_id=?",
+                (note or existing.get("note") or "", json.dumps(feats), owner_id))
         else:
             conn.execute(
                 "INSERT INTO dev_helpers (owner_id, added_at, added_by, note, features) "
@@ -98,14 +107,28 @@ def accept(owner_id: str) -> bool:
 
 
 def decline(owner_id: str) -> bool:
-    """The person says no. The row is KEPT, marked declined — so the operator can see they were
-    asked and answered, rather than wondering whether the invitation ever arrived."""
+    """The person says no.
+
+    What survives is the MINIMUM that keeps the operator from asking again blindly: the account id,
+    the fact of a refusal, and when. The operator's free-text note about them is **erased**, and so
+    are any notices already sent — a person who refused should not be carrying our description of
+    them around, and should not keep receiving messages.
+
+    Keeping the row at all is a deliberate trade. Deleting it outright would mean the operator sees
+    nothing and re-invites the same person indefinitely, which is worse for them than a two-column
+    record that exists to prevent exactly that. It is disclosed in the privacy policy rather than
+    justified here alone (section 1) — an earlier draft of that section claimed no record existed for
+    someone who refused, which was simply untrue of this code.
+    """
     row = get(owner_id)
     if not row:
         return False
     with db._tx(db.get_conn()) as conn:
-        conn.execute("UPDATE dev_helpers SET declined_at=?, accepted_at=NULL WHERE owner_id=?",
-                     (_now(), owner_id))
+        conn.execute(
+            "UPDATE dev_helpers SET declined_at=?, accepted_at=NULL, note='', features='[]' "
+            "WHERE owner_id=?", (_now(), owner_id))
+        conn.execute("DELETE FROM helper_messages WHERE owner_id=?", (owner_id,))
+    _clear_period_usage(owner_id)       # same reason as revoke: the allowance drops out from under
     _log.info("dev helper %s declined", owner_id)
     return True
 
@@ -116,8 +139,36 @@ def revoke(owner_id: str) -> bool:
         return False
     with db._tx(db.get_conn()) as conn:
         conn.execute("UPDATE dev_helpers SET revoked_at=? WHERE owner_id=?", (_now(), owner_id))
+    _clear_period_usage(owner_id)
     _log.info("dev helper %s revoked", owner_id)
     return True
+
+
+def _clear_period_usage(owner_id: str) -> None:
+    """Zero this account's CURRENT day and week counters when their allowance drops.
+
+    Quota compares an accumulated counter against the CURRENT limit, so lowering the limit applies
+    retroactively to spend already made under the higher one. A helper who used their basic-tier
+    allowance during a day of testing and was then revoked found every further request refused —
+    until midnight for the daily cap and until Sunday for the weekly one — with a message telling
+    them to buy a subscription. Being thanked for helping by being locked out is not a defensible
+    outcome, and the spend was legitimate when it happened.
+
+    The counters are cleared rather than clamped because clamping to the lower cap leaves them at
+    the ceiling, which is the same lockout. It hands back at most one period's free allowance to
+    someone the operator invited personally; that is the cheaper mistake by a wide margin.
+    """
+    try:
+        with db._tx(db.get_conn()) as conn:
+            # The whole CURRENT WEEK, not just today: the weekly cap is summed across the week's
+            # daily rows (db._counts -> week_days), so clearing only today would leave the weekly
+            # total above a lowered weekly limit and the lockout would simply last until Sunday.
+            days = db.week_days(db.today_il())
+            conn.execute(
+                f"DELETE FROM usage_counters WHERE owner_id=? "        # noqa: S608 — placeholders
+                f"AND day IN ({','.join('?' * len(days))})", (owner_id, *days))
+    except Exception:                   # noqa: BLE001 — never let this fail an operator action
+        _log.exception("failed to clear period usage for %s", owner_id)
 
 
 def remove(owner_id: str) -> bool:
@@ -199,15 +250,20 @@ MAX_BODY = 2000
 def send(owner_ids: list[str], body: str, *, by: str) -> int:
     """Send one notice to one or more helpers. Returns how many were actually written.
 
-    Only to people on the list — including those who have not accepted yet, because "would you help
+    Only to people on the list — including those who have not answered yet, because "would you help
     me test?" is exactly the kind of thing worth being able to say alongside the offer. Never to an
     arbitrary account: this is not a channel for messaging users at large, and letting it become one
     would put an unreviewed broadcast tool one text box away.
+
+    **Never to someone who declined or was revoked.** Filtering on `revoked_at` alone let a refusal
+    be ignored: the person pressed "no thank you" and kept receiving notices, with a read receipt
+    recorded for each. That is the one case where continuing to write to them is not a grey area.
     """
     body = (body or "").strip()[:MAX_BODY]
     if not body:
         raise ValueError("empty message")
-    known = {h["owner_id"] for h in listing() if not h.get("revoked_at")}
+    known = {h["owner_id"] for h in listing()
+             if not h.get("revoked_at") and not h.get("declined_at")}
     targets = [o for o in dict.fromkeys(owner_ids) if o in known]
     if not targets:
         return 0

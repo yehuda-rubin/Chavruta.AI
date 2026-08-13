@@ -1024,7 +1024,7 @@ def _generate_lesson_from_hits(topic: str, hits, lang: str, he: bool, *, audienc
         for _m in misattributed_quotes(fl, hits)[:2]:
             guards.report("misattribution", "lesson",
                           {"claimed": _m.claimed, "found_in": ", ".join(_m.found_in),
-                           "quote": _m.quote[:300]},
+                           "quote_len": str(len(_m.quote))},
                           summary=f"credited to {_m.claimed}, text is from "
                                   f"{', '.join(_m.found_in)}")
     except Exception:                       # noqa: BLE001 — a watching check must never break a lesson
@@ -1036,9 +1036,10 @@ def _generate_lesson_from_hits(topic: str, hits, lang: str, he: bool, *, audienc
     try:
         _cal = computed.check_calendar_claims(fl, computed.resolve_facts(load_cached=db.get_calendar_cache))
         for _mm in _cal.mismatches[:2]:
+            # `stated` and `expected` are the two calendar VALUES, not lesson prose — a daf name
+            # and a daf name. The surrounding sentence is dropped for the same reason as above.
             guards.report("calendar", "lesson",
-                          {"claim": _mm.kind, "stated": _mm.stated, "expected": _mm.expected,
-                           "span": _mm.span[:300]},
+                          {"claim": _mm.kind, "stated": _mm.stated, "expected": _mm.expected},
                           summary=f"said {_mm.stated}, actually {_mm.expected}")
     except Exception:                       # noqa: BLE001
         _guard_log.exception("calendar check failed")
@@ -3571,16 +3572,51 @@ def sugya_detail(sugya_id: str, owner: str = Depends(_require_sugya_beta)):
         s = sugya_mod.load(sugya_id)
     except sugya_mod.SugyaNotFound:
         raise HTTPException(status_code=404, detail="not found") from None
+    # NO `inventory` here. Every level's `unlocks_ref` IS its own accepted answer, so a level's
+    # inventory — the refs unlocked before it — is the previous level's solution. Returning them all
+    # in one payload handed the player four of five answers in the network tab, while the same
+    # response carefully withheld `teach_he` for being the answer. Withholding one and shipping the
+    # other is not a gate.
+    #
+    # The inventory now comes from /sugya/{id}/{level_id}/inventory, which serves it only for a
+    # level whose predecessor the caller has already solved.
     return {
         "id": s.id, "title_he": s.title_he, "source_he": s.source_he, "intro_he": s.intro_he,
         "levels": [{"id": lv.id, "title_he": lv.title_he, "move_he": lv.move_he,
-                    "goal_he": lv.goal_he, "hint_he": lv.hint_he,
-                    "inventory": list(s.inventory_at(lv.id))} for lv in s.levels],
+                    "goal_he": lv.goal_he, "hint_he": lv.hint_he} for lv in s.levels],
     }
 
 
+@app.post("/sugya/{sugya_id}/{level_id}/inventory")
+def sugya_inventory(sugya_id: str, level_id: str, req: SugyaAnswer,
+                    owner: str = Depends(_require_sugya_beta)):
+    """The refs unlocked before this level — released only to a caller who can name the PREVIOUS
+    level's answer.
+
+    Stateless by design (docs/SUGYA_GAME.md 7: no progress table), so "have you solved it" can only
+    mean "can you produce it". That is not a security boundary and is not meant to be one — a
+    determined player can read the corpus elsewhere. It is the difference between a game whose
+    answers are one click away in a payload nobody asked for, and one where you have to have got
+    there.
+    """
+    try:
+        s = sugya_mod.load(sugya_id)
+        s.level(level_id)                       # 404 on an unknown level, before anything else
+    except (sugya_mod.SugyaNotFound, sugya_mod.LevelNotFound):
+        raise HTTPException(status_code=404, detail="not found") from None
+    inv = list(s.inventory_at(level_id))
+    if not inv:
+        return {"inventory": []}                # the first level starts empty; nothing to prove
+    previous = s.levels[len(inv) - 1]
+    if (req.ref or "").strip() not in previous.accept_refs:
+        raise HTTPException(status_code=403,
+                            detail="פתור קודם את השלב הקודם כדי לראות את המקורות שנפתחו")
+    return {"inventory": inv}
+
+
 @app.get("/sugya/{sugya_id}/source")
-def sugya_source(sugya_id: str, ref: str, owner: str = Depends(_require_sugya_beta)):
+def sugya_source(sugya_id: str, ref: str, req_level: str = "",
+                 owner: str = Depends(_require_sugya_beta)):
     """The text of one source — but ONLY one this sugya actually uses.
 
     The `ref` is checked against the sugya's own list rather than passed through to the store: an
@@ -3591,8 +3627,18 @@ def sugya_source(sugya_id: str, ref: str, owner: str = Depends(_require_sugya_be
         s = sugya_mod.load(sugya_id)
     except sugya_mod.SugyaNotFound:
         raise HTTPException(status_code=404, detail="not found") from None
-    known = {lv.unlocks_ref for lv in s.levels} | {r for lv in s.levels for r in lv.accept_refs}
-    if ref not in known:
+    # Only a source the caller has demonstrably reached: the one this level unlocks, or one unlocked
+    # by an earlier level. Serving every ref in the file let a player read all five sources — and
+    # therefore work out every answer — before answering anything.
+    lv = None
+    for candidate in s.levels:
+        if (req_level or "") == candidate.id:
+            lv = candidate
+            break
+    if lv is None:
+        raise HTTPException(status_code=404, detail="not found")
+    allowed = set(s.inventory_at(lv.id)) | {lv.unlocks_ref}
+    if ref not in allowed:
         raise HTTPException(status_code=404, detail="not found")
     hits = _fetch_refs([ref])
     if not hits:

@@ -501,8 +501,14 @@ class ChavrutaPipeline:
                 # of them is what keeps the finding honest. Flattened to a string here because the
                 # panel renders it as text; a raw tuple would arrive there as a JSON array.
                 found = ", ".join(m.found_in)
+                # No excerpt. The finding names WHICH commentator was credited and which source
+                # actually carries the words — enough to triage — while the answer text itself
+                # stays out of a table that has no owner_id and therefore cannot honour the
+                # per-chat or account-wide review opt-out (privacy policy 12). Storing content
+                # there was a second reading path around a switch users were promised.
                 guards.report("misattribution", intent_name,
-                              {"claimed": m.claimed, "found_in": found, "quote": m.quote[:300]},
+                              {"claimed": m.claimed, "found_in": found,
+                               "quote_len": str(len(m.quote))},
                               summary=f"credited to {m.claimed}, text is from {found}")
         except Exception:                   # noqa: BLE001 — a watching check must never break an answer
             _guard_log.exception("misattribution check failed")
@@ -511,10 +517,11 @@ class ChavrutaPipeline:
             # and took the last speaker in scope. That is the weaker of the two paths, and an
             # operator triaging these should be able to discount it without reading the code.
             for c in deontic.deontic_conflicts(text)[:2]:
+                # Same rule: the shape of the contradiction, not the sentences that carried it.
                 guards.report("deontic", intent_name,
                               {"authority": c.authority, "axis": c.axis,
                                "attribution": c.attribution,
-                               "first": c.first.sentence[:300], "second": c.second.sentence[:300]},
+                               "verdicts": f"{c.first.verdict} / {c.second.verdict}"},
                               summary=f"{c.authority} {c.axis}/{c.attribution}")
         except Exception:                   # noqa: BLE001
             _guard_log.exception("deontic check failed")

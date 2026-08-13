@@ -13,11 +13,10 @@ operator invites to help test the product. Section 1 sets out what is stored abo
 account id, when they were invited and answered, which capabilities were opened, the
 operator's identifying label (**which is also shown to the helper** — there is no hidden
 record), and notices sent inside the Service together with when they were read. Database
-purpose 9 was added (section 11). **This does not touch anyone who is not taking part:**
-joining is by invitation and explicit acceptance, and anyone not invited — or invited and not
-accepting — has no such record at all. It therefore applies from publication without
-individual advance notice; anyone invited sees this detail on the acceptance screen itself,
-before deciding.
+purpose 9 was added (section 11). **This does not touch anyone who is not invited:** a record
+is created only for someone the operator invites personally, and joining itself requires explicit
+acceptance. It therefore applies from publication without individual advance notice; anyone invited
+sees the full detail on the invitation screen itself, before deciding.
 
 Changes in version 1.9: two clarifications, both of which widen your rights rather than narrow them.
 **(a) Immediate deletion:** until now account deletion always ran after a grace period of about 30
@@ -109,13 +108,20 @@ email address for sign-in); sources you attach are provided voluntarily, at your
   **We do not store in these records the content of the question, answer, sources or attached files**
   — only measurements. In addition, basic technical records are kept (request id, IP address) for
   security and rate limiting.
-- **Development helpers (only if you joined):** if you were invited to be a development helper
-  and accepted, we also store: **your account id, when you were invited and when you answered,
-  which capabilities were opened for you, and a label the operator writes to identify you in the
-  list** — that label is **also shown to you** on the helpers screen; there is no hidden record
-  about you. We also store **notices the operator sends you inside the Service and when you read
-  them.** All of it is deleted when the account is deleted. Anyone who was not invited, or was
-  invited and did not accept, has no such record at all.
+- **Development helpers (only if you were invited):** **from the moment you are invited** — before
+  you answer — a record exists holding your account id, the invitation time, and a label the
+  operator writes to identify you in the list. **That label is also shown to you**, beside the
+  invitation and for as long as you are helping; there is no hidden record about you.
+  **If you accept**, we additionally store when you accepted, which capabilities were opened for
+  you, and notices the operator sends you inside the Service — including when you read them.
+  **If you decline**, the label, the capabilities and the notices are deleted, and only your account
+  id and the fact and time of the refusal remain — the minimum that stops us inviting you again
+  without knowing you already answered. No further notices are sent after a refusal.
+  **If we end the participation**, the time it ended is stored too, and the capabilities and quota
+  revert to what they were. The label and earlier notices remain until you delete the account or
+  decline a fresh invitation.
+  All of it is deleted when the account is deleted. **Anyone who was never invited has no such
+  record at all.**
 - **Local preferences:** language, theme and display settings are stored in your browser (localStorage).
 - **Your own API key (if you choose to use one — see the Terms of Use):** the API key, a custom
   provider base URL and a custom model name are **not collected or stored by us at all** — they stay
@@ -193,6 +199,13 @@ disclose information if required by law.
 - **A deletion request stops section 2's use immediately:** from the moment of the request — not at
   the end of the grace period — your conversations are no longer included in quality review, service
   improvement, or model development and fine-tuning. Cancelling the deletion brings them back in.
+- **The one case where deletion is refused:** if your account **owns an institution** (a school or
+  organisation you bought a subscription for), deletion will not proceed while that institution
+  exists. The reason is structural, not discretionary: your account is the only link between the
+  institution and the person responsible for it, and deleting it would leave a live institution whose
+  members keep drawing on it and which nobody can administer or close. The request is refused
+  **immediately and explicitly**, rather than left pending — so that you know, and can close the
+  institution or transfer ownership and then delete. There is no other refusal.
 - **Correction:** you can update details in account settings.
 - **Response times:** we will answer an access request within 30 days (extendable by a further 15 days
   as permitted by law). Following a deletion or correction, we will also notify parties to whom the
