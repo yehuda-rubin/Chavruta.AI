@@ -43,6 +43,16 @@ const nextConfig = {
       ...proxy("account"),    // /account/delete, /account/delete/cancel
       ...proxy("billing"),    // /billing/config, /checkout, /cancel
       ...proxy("coupons"),    // /coupons/redeem
+      // These three were all missing, and none failed loudly — each feature reported the 404 HTML
+      // in its own words instead. tests/unit/test_api_proxy_coverage.py derives this list from
+      // web/lib/api.ts so the next one cannot go unnoticed; it found the last two on its first run.
+      //
+      // /orgs/panel, /orgs/invite[s], /orgs/join, /orgs/leave, /orgs/close — the whole institution
+      // feature, whose failure surfaced as the school panel's "no permission" screen. /school is
+      // the page and nothing owns bare /orgs, so the prefix is safe.
+      ...proxy("orgs"),
+      ...proxy("messages"),   // /messages/{id}/report — reporting a bad answer
+      ...proxy("byok"),       // /byok/check — validating a personal API key
       ...proxy("health"),
       ...proxy("ready"),
       ...proxy("admin"),      // owner-only dashboard — see app/api.py::_is_admin

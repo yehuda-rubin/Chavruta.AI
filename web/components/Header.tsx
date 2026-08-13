@@ -30,7 +30,13 @@ export function Header({
                                 // manage there, so a button leading to a page of other people's
                                 // usage would be a confusing dead end at best.
 }) {
-  const canManageOrg = orgRole === "admin" || orgRole === "teacher";
+  // The operator belongs to no school, so their org_role is empty and this button never appeared for
+  // them — the only way in was a link buried in the admin dashboard's sidebar, which is not where
+  // anyone looks for it. The server already lets them in (/orgs/panel?demo=true, gated on _is_admin)
+  // and opens the SYNTHETIC school, never a real one, so showing the button costs nothing and the
+  // title says which school it is going to open.
+  const canManageOrg = orgRole === "admin" || orgRole === "teacher" || !!isAdmin;
+  const orgButtonTitle = orgRole ? "פאנל המוסד" : "פאנל מוסד (בית ספר לדוגמה)";
   return (
     <header className="h-[70px] flex items-center justify-between px-4 lg:px-8 shrink-0">
       <div className="flex items-center gap-2 lg:gap-3">
@@ -84,7 +90,7 @@ export function Header({
           <Link
             href="/school"
             className="h-10 w-10 rounded-full glass grid place-items-center text-tekhelet"
-            title="פאנל המוסד"
+            title={orgButtonTitle}
           >
             <Icon name="school" />
           </Link>
