@@ -55,6 +55,12 @@ PAIRS = str(OUT_ROOT / "harvested_pairs_v1.jsonl")
 # Re-harvesting every night would burn the window re-deriving pairs that have not changed — the
 # corpus is static between loads. Refresh only when the file is missing or older than this.
 PAIRS_MAX_AGE_DAYS = 14
+# ...but AGE was the only test, and that was the whole reason the first week produced nothing. A run
+# with an early `--target 150` left 105 pairs behind; the file was then "current" for a fortnight, so
+# every night re-tuned on a set far too small to separate anything, and returned a different answer
+# each time. Size is the condition that actually matters: below this the tuner refuses to run at all
+# (tune_retrieval.MIN_HITS), so a small pool means the window is burnt for nothing.
+PAIRS_MIN = 2000
 
 
 def window_for(now: datetime) -> tuple[datetime, int] | None:
@@ -94,12 +100,28 @@ def _run(cmd: list[str], *, cpus: int, deadline_s: int, log) -> int:
             return 124
 
 
-def _pairs_are_stale() -> bool:
+def _pairs_count(path: Path) -> int:
+    """Data lines in the pairs file — the leading `#` header is not evidence."""
+    try:
+        with path.open(encoding="utf-8") as fh:
+            return sum(1 for ln in fh if ln.strip() and not ln.startswith("#"))
+    except OSError:
+        return 0
+
+
+def _harvest_reason() -> str:
+    """Why this run should re-harvest, or "" to skip. Size first: a pool too small to measure with
+    is a worse reason to skip than a pool that is merely old."""
     path = Path(PAIRS)
     if not path.exists():
-        return True
+        return "no pairs file yet"
+    have = _pairs_count(path)
+    if have < PAIRS_MIN:
+        return f"only {have} pairs, need at least {PAIRS_MIN} for the tuner to have any power"
     age = datetime.now().timestamp() - path.stat().st_mtime
-    return age > PAIRS_MAX_AGE_DAYS * 86400
+    if age > PAIRS_MAX_AGE_DAYS * 86400:
+        return f"pairs older than {PAIRS_MAX_AGE_DAYS}d"
+    return ""
 
 
 def main() -> int:
@@ -107,7 +129,11 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--force", action="store_true", help="run regardless of the window (for testing)")
     ap.add_argument("--cpus", type=int, default=0, help="override the window's CPU budget")
-    ap.add_argument("--sample", type=int, default=400)   # see tune_retrieval.py for why 400
+    # Sized from the measured hit rate, not picked round. The tuner refuses to run below
+    # tune_retrieval.MIN_HITS answered pairs, and harvested recall runs near 0.096 — so it needs
+    # ~312 pairs in the tune half, which is a 640 sample split two ways. At the measured 1.55s a
+    # query that is ~9 min a candidate and ~3h for a full 20-candidate sweep, inside a 5h window.
+    ap.add_argument("--sample", type=int, default=640)
     ap.add_argument("--target", type=int, default=5000, help="pairs to harvest when refreshing")
     args = ap.parse_args()
 
@@ -126,14 +152,18 @@ def main() -> int:
                   f"| window ends {ends_at:%H:%M} ({budget_s // 60} min)\n\n")
 
         py = sys.executable
-        if _pairs_are_stale():
-            log.write(f"== harvest (pairs missing or older than {PAIRS_MAX_AGE_DAYS}d)\n")
+        if reason := _harvest_reason():
+            log.write(f"== harvest ({reason})\n")
             # Half the window at most: a harvest that eats the whole night leaves nothing measured.
+            # It writes only on success, so a harvest killed here leaves the previous pool intact
+            # and the next night simply tries again with the same budget.
             _run([py, str(ROOT / "scripts" / "harvest_pairs.py"),
                   "--target", str(args.target), "--out", PAIRS],
                  cpus=cpus, deadline_s=budget_s // 2, log=log)
+            log.write(f"   pool is now {_pairs_count(Path(PAIRS))} pairs\n")
         else:
-            log.write("== harvest skipped (pairs are current)\n")
+            log.write(f"== harvest skipped ({_pairs_count(Path(PAIRS))} pairs, "
+                      f"under {PAIRS_MAX_AGE_DAYS}d old)\n")
 
         remaining = max(60, int((ends_at - datetime.now(ISRAEL)).total_seconds()))
         log.write(f"\n== tune ({remaining // 60} min left in the window)\n")

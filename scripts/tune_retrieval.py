@@ -66,6 +66,21 @@ KNOBS: dict[str, list] = {
 HUMAN_SETS = ("eval/torah_questions_v1.jsonl", "eval/regressions_v1.jsonl",
               "eval/user_questions_v1.jsonl")
 
+# How much evidence a run needs before its answer means anything.
+#
+# MIN_HITS is the number of harvested pairs that must actually be ANSWERED — not the number of pairs
+# in the file. Coordinate descent over five answered questions finds whichever candidate got lucky,
+# which is exactly what the first week produced: identical inputs, three runs, three different
+# winners. Thirty is the point where one item flipping (~0.033 of mrr) stops dwarfing the effects
+# being measured; it is a floor, not a target.
+MIN_HITS = 30
+# And a candidate has to beat the incumbent by more than one question's worth of luck. mrr averages
+# over the whole set, so a single item going from missed to first place moves it by 1/len(tune_set) —
+# any "gain" smaller than that is one item, not an effect. That floor scales itself with the sample
+# instead of being a constant I would have to remember to retune; the relative term only takes over
+# once mrr is large enough for 2% of it to exceed a single item.
+MIN_GAIN_REL = 0.02
+
 
 def _load(path: Path) -> list[dict]:
     if not path.exists():
@@ -188,8 +203,27 @@ def main() -> int:
               f"hit rates run near 12%, so a few hundred pairs are needed before differences show).")
         return 1
 
+    # An objective that is merely NEAR zero is barely better than one that is zero. At a ~10% hit
+    # rate, 52 pairs answer about five questions, and a single one of them moving changes mrr by
+    # ~0.02 — larger than any difference these knobs produce. Three runs on one night, over identical
+    # inputs, then returned three different "winners": 0.2 / 0.05 / 0.05 for TRACTATE_BOOST alone.
+    # That is not tuning, it is sampling noise with a 130-second stopwatch attached.
+    hits = round(base_tuned["recall"] * len(tune_set))
+    if hits < MIN_HITS:
+        print(f"TOO THIN: only ~{hits} of {len(tune_set)} harvested pairs are answered at all "
+              f"(recall={base_tuned['recall']:.3f}).\nOne of them flipping moves mrr by roughly "
+              f"{1.0 / max(1, hits):.3f}, which swamps every difference these knobs make — so a "
+              f"'winner'\nhere is whichever candidate got lucky. Harvest more pairs "
+              f"(at least {MIN_HITS} answered; scripts/harvest_pairs.py --target 5000) and re-run.")
+        return 1
+
     best = dict(baseline)
     best_score, best_human = base_tuned["mrr"], base_human["mrr"]
+    # One question flipping from missed to first place moves mrr by exactly this much.
+    one_item = 1.0 / max(1, len(tune_set))
+    min_gain = max(one_item, best_score * MIN_GAIN_REL)
+    print(f"a candidate must gain more than {min_gain:.5f} mrr to be accepted "
+          f"(one question of {len(tune_set)} is worth {one_item:.5f})\n")
 
     for knob, candidates in KNOBS.items():
         print(f"── {knob} (currently {best[knob]})")
@@ -204,11 +238,18 @@ def main() -> int:
             elapsed = time.monotonic() - t0
             # THE VETO: a gain on harvested pairs that costs anything on real questions is refused.
             vetoed = h["mrr"] < best_human - 1e-9
+            # A bare `>` on floats calls a difference in the fourth decimal a win. That is how the
+            # first live run "accepted" 0.02 (mrr 0.1013) over four candidates that all scored higher
+            # on the human set (0.106) — the log printed three decimals and showed them all as ties,
+            # so the decision was invisible to anyone reading it. A candidate now has to clear a real
+            # margin, and the print carries enough precision to check the arithmetic by eye.
+            gain = s["mrr"] - best_score
+            wins = gain > min_gain
             verdict = "VETOED (hurts real questions)" if vetoed else \
-                      ("accepted" if s["mrr"] > best_score else "no gain")
-            print(f"   {value!r:>6}  harvested mrr={s['mrr']:.3f}  human mrr={h['mrr']:.3f}"
+                      ("accepted" if wins else f"no gain (+{gain:.5f}, needs +{min_gain:.5f})")
+            print(f"   {value!r:>6}  harvested mrr={s['mrr']:.5f}  human mrr={h['mrr']:.5f}"
                   f"  [{elapsed:.0f}s] {verdict}")
-            if not vetoed and s["mrr"] > best_score:
+            if not vetoed and wins:
                 best, best_score, best_human = trial, s["mrr"], h["mrr"]
         _apply(best)
         print(f"   → keeping {knob} = {best[knob]}\n")
