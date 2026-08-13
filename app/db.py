@@ -67,6 +67,35 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
+#
+# WHY A PLAIN COUNTER AND NOT 30.1 / 31
+# -------------------------------------
+# `PRAGMA user_version` is a 32-bit signed INTEGER. It cannot hold "30.1" — that is SQLite's
+# constraint, not a style choice. The nearest thing would be encoding major*100 + minor (3000, 3010,
+# 3100), which preserves ordering and is what a project with real major/minor schema eras should do.
+# This one does not have them: every migration here is additive and idempotent (CREATE TABLE IF NOT
+# EXISTS, or ALTER TABLE ADD COLUMN behind a PRAGMA table_info check), there is no downgrade path,
+# and nothing branches on the number beyond "have the steps up to here run yet". A two-part version
+# would encode a distinction the code never reads.
+#
+# What was actually missing is below: WHAT each bump added. When a migration goes wrong the question
+# is never "was that major or minor", it is "what changed at 28". Reconstructed from git history.
+#
+#   30  dev_helpers, helper_messages                              2026-08-13
+#   29  guard_findings                                            2026-08-13
+#   28  org_members.removed_at (a re-joinable block)              2026-08-13
+#   27  orgs, org_members, org_invites, org_access_log            2026-08-12
+#   26  usage_events.concurrent_at_start                          2026-08-07
+#   25  sessions.excluded_from_review                             2026-08-06
+#   24  calendar_cache                                            2026-08-05
+#   23  sessions.title, sessions.pinned_at                        2026-08-04
+#   22  message_reports; accounts/usage analytics columns         2026-08-02
+#   21  coupon_redemptions ↔ subscriptions coupon columns         2026-07-29
+#   20  billing_ledger.txn_uid (refunds are issued against it)    2026-07-27
+#   19  usage_counters meter column (tokens vs lessons)           2026-07-26
+#   18  billing_ledger                                            2026-07-26
+#   17  coupons                                                   2026-07-26
+#   ≤16 subscriptions, bans, deletion scheduling, per-owner scoping — see git log -G'^SCHEMA_VERSION'
 SCHEMA_VERSION = 30
 
 
