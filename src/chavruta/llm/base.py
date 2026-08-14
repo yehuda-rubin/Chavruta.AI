@@ -8,8 +8,29 @@ in-session, no external API). Grounding is enforced by the pipeline, not trusted
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
+
+# Whether this request should ask the model to close with its own list of the works it used, behind
+# the HHH sentinel (app/api.py::_split_source_note cuts it back out). A ContextVar rather than a
+# parameter because `render_messages` is reached through build_prompt, the pipeline, the agentic
+# loop and both backends — threading a display flag through all of that would put a presentation
+# concern into five signatures that are otherwise about grounding.
+#
+# Set and reset per request in app/api.py. It is read on the request's own thread, before any
+# fan-out; see llm/metering.py for the one place where a ContextVar and a thread pool do meet, and
+# what that cost.
+_SOURCE_NOTE: ContextVar[bool] = ContextVar("chavruta_source_note", default=False)
+
+
+def set_source_note(on: bool):
+    """Enable/disable the trailing source list for this request. Returns a reset token."""
+    return _SOURCE_NOTE.set(bool(on))
+
+
+def reset_source_note(token) -> None:
+    _SOURCE_NOTE.reset(token)
 
 
 @dataclass
@@ -99,7 +120,8 @@ def render_messages(prompt: GroundedPrompt, lang: str) -> list[dict]:
         # The English ref stays on the line: it is what `enforce_citations` and the source sheet key
         # on, and a model that wants to be precise can still copy it. The Hebrew name is what it can
         # actually say out loud in a Hebrew answer.
-        from chavruta.corpus.refs import hebrew_display_ref   # local: keeps llm/ free of a corpus dep
+        # Imported here, not at module scope, to keep llm/ free of a hard dependency on corpus/.
+        from chavruta.corpus.refs import hebrew_display_ref
 
         lines = []
         for s in prompt.sources:
@@ -120,6 +142,18 @@ def render_messages(prompt: GroundedPrompt, lang: str) -> list[dict]:
             f"צרף לכל טענה את סימון המקור, למשל [S1]. "
             f"צטט את לשון המקור כשרלוונטי. אם אין תשובה במקורות — אמור זאת ואל תמציא."
         )
+        if _SOURCE_NOTE.get():
+            # Asked for AFTER the answer, and cut back out before display. The reader gets it beside
+            # the sources; the model gets somewhere to name works without breaking the Hebrew-only
+            # rule mid-sentence. Ordered oldest-first because that is what a learner asked for on
+            # 2026-08-14 — "סדר בצורה כרונולוגית לפי המקור הקדום ביותר ותן קצת מידע על כל ספר" —
+            # and the model can order what it was given even where retrieval ranking cannot yet.
+            user += (
+                "\n\nבסוף התשובה, אחרי שורה שבה כתוב HHH בלבד, כתוב רשימה של המקורות שהשתמשת בהם "
+                "בפועל — שורה לכל מקור, מהקדום לְמאוחר: שם החיבור בעברית, המחבר ותקופתו אם ידועים לך "
+                "מן המקור עצמו, ומשפט קצר על מה הוא. אל תכתוב שם של חיבור שלא הופיע במקורות שקיבלת, "
+                "ואל תשער תאריך שאינו ידוע לך — כתוב 'לא ידוע'. הרשימה הזו אינה חלק מן התשובה עצמה."
+            )
     else:
         user = (
             f"SOURCES (the only knowledge you may use):\n{sources_block}\n\n"

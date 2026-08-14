@@ -110,6 +110,37 @@ def _strip_foreign_parens(text: str) -> str:
     return _PAREN_RE.sub(repl, text)
 
 
+# The model's own list of what it leaned on, emitted after the answer behind this sentinel and cut
+# out of the displayed text — the same treatment [S#] markers get, for the same reason: it is
+# addressed to the app, not to the reader. The reader sees it rendered beside the answer instead.
+#
+# Why the model is asked to write it at all, when the citations are already derived from the markers:
+# a marker says WHICH chunk, and nothing a person can read. The names never reached the reader (see
+# `render_messages` — a Latin ref in a Hebrew answer is scrubbed as foreign bleed), so a user asked
+# where the quotes came from and got "מופיע ב-  וב-:" nineteen times. This is the channel where the
+# model can say, in Hebrew, which work each quote is from and what that work is.
+#
+# HHH rather than a word: it must survive a model that likes to translate its own delimiters, and it
+# must never occur in Torah prose. Tolerant of the same decorations _LESSON_SPLIT_RE tolerates —
+# bolding, indentation, RTL marks — because the model applies them unprompted.
+_SOURCE_NOTE_RE = re.compile(r"^[ \t>*‏‎]*={0,3}\s*HHH\s*={0,3}[ \t*]*$", re.M)
+
+
+def _split_source_note(text: str) -> tuple[str, str]:
+    """(answer, the model's source list) — ('…', '') when it did not emit one.
+
+    Split BEFORE any cleaning runs. The note names works, and a work's name is often the only Latin
+    text in a Hebrew answer; left in place it trips `_has_bleed`, and `_fix_bleeding_sentences` would
+    spend a model call per line rewriting the very names this exists to preserve.
+    """
+    if not text:
+        return "", ""
+    m = _SOURCE_NOTE_RE.search(text)
+    if not m:
+        return text, ""
+    return text[:m.start()].rstrip(), text[m.end():].strip()
+
+
 def _strip_markers(text: str, he: bool = False) -> str:
     # Load-bearing markers first ("ב[S2]" → nothing, not "ב"), then every remaining plain marker.
     t = _CARRIER_MARKER_RE.sub("", text or "")
@@ -278,6 +309,7 @@ from chavruta import sugya as sugya_mod
 from chavruta.retrieval.base import RetrievalResult
 from chavruta.llm import metering
 from chavruta.llm.agentic import is_degrade_message
+from chavruta.llm import base as llm_base
 from chavruta.llm.base import GroundedPrompt
 from chavruta.pipeline.pipeline import _max_tokens_for
 from chavruta.intents.hebrew_refs import detect_tractates, detect_hebrew_refs
@@ -495,6 +527,10 @@ class QueryResponse(BaseModel):
     # message can link the two — the documents live in both places, and deleting the library entry
     # has to be able to find the chat copy.
     lesson_id: str = ""
+    # The model's own account of the works it used, in Hebrew — cut out of `answer` and carried
+    # separately so the client can render it beside the sources rather than inside the prose.
+    # Empty for everyone outside the rollout, and empty whenever the model did not emit one.
+    source_note: str = ""
 
 
 # ── Lesson audience / grade / length ─────────────────────────────────────────
@@ -1249,9 +1285,12 @@ def _generate_chavruta_turn(question: str, hits, lang: str, he: bool, history, w
                                     license=(getattr(h, "license", "") or ""),
                                     version_title=(getattr(h, "version_title", "") or "")))
     raw = _strip_instruction_echo(raw, he)
+    # Split the model's source list off FIRST — see _split_source_note for why it must not reach the
+    # foreign-language pass.
+    raw, note = _split_source_note(raw)
     clean = _strip_markers(_fix_bleeding_sentences(raw, he, llm), he=he)
     return QueryResponse(answer=clean, citations=used, grounded=bool(used),
-                         intent="chavruta", files=[])
+                         intent="chavruta", files=[], source_note=note)
 
 
 def _generate_qa_turn_from_hits(question: str, hits, lang: str, he: bool, history, llm) -> QueryResponse:
@@ -1277,10 +1316,12 @@ def _generate_qa_turn_from_hits(question: str, hits, lang: str, he: bool, histor
         )
 
     text = _strip_instruction_echo(answer.text, he)
+    text, note = _split_source_note(text)
     clean = _strip_markers(_fix_bleeding_sentences(text, he, llm), he=he)
     return QueryResponse(
         answer=clean, citations=[_cite(c) for c in answer.citations],
         grounded=answer.grounded, intent="qa", caveats=list(answer.caveats), files=[],
+        source_note=note,
     )
 
 
@@ -1625,6 +1666,23 @@ def _plan_for(owner_id: str) -> str:
     return plans.canonical(orgs.effective_plan(owner_id))
 
 
+def _source_note_enabled(owner_id: str) -> bool:
+    """Whether to ask the model for its own source list (the HHH block).
+
+    Rolled out to the operator alone first, deliberately: it changes the shape of every Hebrew
+    answer, and a prompt change is the kind that looks fine on three examples and drifts on the
+    hundredth. `CHAVRUTA_SOURCE_NOTE_OWNERS` is the same allowlist shape as the other two gates —
+    comma-separated ids, `*` for everyone, empty for nobody — and dev helpers can be given it
+    individually through the `source_note` capability once it has been lived with.
+    """
+    raw = os.environ.get("CHAVRUTA_SOURCE_NOTE_OWNERS", "").strip()
+    if raw == "*":
+        return True
+    if owner_id and owner_id in {o.strip() for o in raw.split(",") if o.strip()}:
+        return True
+    return bool(owner_id) and devhelpers.has_feature(owner_id, "source_note")
+
+
 def _sugya_enabled(owner_id: str) -> bool:
     """The sugya game's rollout gate — same shape as the calendar one above, and separate from it on
     purpose: these are different features and being in one beta should not enrol you in the other.
@@ -1708,6 +1766,7 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
     citations_out = [_cite(c) for c in answer.citations]
     resolved_llm = llm or _get_pipeline().llm
     text = _strip_instruction_echo(answer.text, he)
+    text, source_note = _split_source_note(text)
     clean = _strip_markers(_fix_bleeding_sentences(text, he, resolved_llm), he=he)
 
     return QueryResponse(
@@ -1718,6 +1777,7 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
         caveats=list(answer.caveats),
         lesson_plan=lesson_plan,
         files=[],
+        source_note=source_note,
     )
 
 
@@ -2463,10 +2523,16 @@ def query(req: QueryRequest, owner: str = Depends(current_owner),
         raise HTTPException(status_code=422, detail="question must not be empty")
     reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key,
                                                     x_user_llm_base_url, x_user_llm_model)
-    return _metered(owner, reserved, req.intent, lambda: _run_query(
-        _augment_question(req.question, req.attachments), req.lang, req.intent, [],
-        audience=req.audience, grade_band=req.grade_band, length=req.length, owner_id=owner, llm=llm),
-        req, meter=meter)()
+    # Set for the whole turn, including the agentic loop's later rounds, and reset in `finally` so
+    # it cannot leak into the next request served by this worker.
+    note_token = llm_base.set_source_note(_source_note_enabled(owner))
+    try:
+        return _metered(owner, reserved, req.intent, lambda: _run_query(
+            _augment_question(req.question, req.attachments), req.lang, req.intent, [],
+            audience=req.audience, grade_band=req.grade_band, length=req.length,
+            owner_id=owner, llm=llm), req, meter=meter)()
+    finally:
+        llm_base.reset_source_note(note_token)
 
 
 class MeOut(BaseModel):

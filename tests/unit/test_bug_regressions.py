@@ -2001,3 +2001,55 @@ def test_a_marker_glued_to_a_word_does_not_eat_the_word():
     """"הכתוב[S1]" must not lose its final ב — the lookbehind is what stops the word's own last
     letter reading as a carrier prefix."""
     assert api._strip_markers("הכתוב[S1] אומר", he=True) == "הכתוב אומר"
+
+
+# ── The model's own source list, behind the HHH sentinel ─────────────────────
+# Added 2026-08-14 after a user asked where an answer's quotes came from and got nothing usable.
+# The block is cut out of the displayed answer and carried beside it, exactly as [S#] markers are.
+def test_the_source_list_is_cut_out_of_the_answer():
+    body, note = api._split_source_note(
+        'תשובה כאן.\n\nHHH\n1. רש"י על בראשית — צרפת, המאה ה-11.')
+    assert body == "תשובה כאן."
+    assert note.startswith("1. רש")
+
+
+@pytest.mark.parametrize("delim", ["HHH", "===HHH===", "  **HHH**  ", "‏HHH"])
+def test_the_sentinel_survives_the_decoration_a_model_adds_unprompted(delim):
+    """Bolded, indented, wrapped in equals signs, prefixed with an RTL mark — the same decorations
+    _LESSON_SPLIT_RE already tolerates, because the model applies them without being asked."""
+    body, note = api._split_source_note(f"תשובה.\n{delim}\nרשימה")
+    assert body == "תשובה." and note == "רשימה"
+
+
+def test_an_answer_without_the_sentinel_is_returned_untouched():
+    assert api._split_source_note("סתם תשובה בלי רשימה") == ("סתם תשובה בלי רשימה", "")
+    assert api._split_source_note("") == ("", "")
+
+
+def test_the_source_list_is_hidden_from_the_foreign_language_pass():
+    """The whole reason the split happens before cleaning. A work's name is often the only Latin
+    text in a Hebrew answer, so left in place the list trips _has_bleed and _fix_bleeding_sentences
+    spends a model call per line rewriting away the very names the list exists to carry."""
+    whole = 'תשובה נקייה לגמרי.\n\nHHH\nBirkat_Asher_on_Torah — לא ידוע.'
+    body, note = api._split_source_note(whole)
+    assert api._has_bleed(whole) is True      # would have been "fixed"
+    assert api._has_bleed(body) is False      # …but the answer itself is clean
+    assert "Birkat_Asher" in note             # and the name survives intact
+
+
+def test_the_instruction_is_off_unless_the_request_turns_it_on():
+    """It reshapes every Hebrew answer, so it ships to the operator alone first."""
+    import chavruta.llm.base as lb
+
+    prompt = lb.GroundedPrompt(system="s", question="q", sources=[
+        lb.SourceBlock(marker="S1", ref="Rashi_on_Genesis.1.1.1", commentator_id="rashi", text="t")])
+
+    assert "HHH" not in lb.render_messages(prompt, "he")[-1]["content"]
+    token = lb.set_source_note(True)
+    try:
+        assert "HHH" in lb.render_messages(prompt, "he")[-1]["content"]
+        # English answers are unchanged — the Latin-ref problem this solves is Hebrew-only.
+        assert "HHH" not in lb.render_messages(prompt, "en")[-1]["content"]
+    finally:
+        lb.reset_source_note(token)
+    assert "HHH" not in lb.render_messages(prompt, "he")[-1]["content"]
