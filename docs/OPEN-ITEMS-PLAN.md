@@ -165,13 +165,23 @@ granting the ₪2,799 tier, and a self-service quota reset — went out on 2026-
 
 ## G. The sources panel misses what the model used without marking it
 
-**Decided with the operator 2026-08-14. Built and deployed 2026-08-14** (`371cae0` —
-`_widen_citations_from_note` in `app/api.py`; `de28c1c` — the raw-ref chip fix in
-`web/lib/format.tsx`). `CHAVRUTA_SOURCE_NOTE_OWNERS` is live on the VM, gated in `_run_query` (the
-shared funnel every route goes through, not just `/query`), and the widening/logging path is verified
-against a real answer through `/sessions/{id}/query`. No `pipeline.ask` contract change was actually
-needed — `_fetch_refs()` already existed and does the validation. Below is the original spec, kept for
-the record.
+**Decided with the operator 2026-08-14. Built, deployed, and rolled out to everyone 2026-08-14**
+(`371cae0` — `_widen_citations_from_note`; `de28c1c` — the raw-ref chip fix; `89608d7` — the
+retrieved_refs validation below). `CHAVRUTA_SOURCE_NOTE_OWNERS=*` on the VM as of 13:29 UTC.
+
+Rollout was gated on real verification, not on the spec alone: the operator alone first, then a
+correctness gap was found and fixed BEFORE widening it — `_widen_citations_from_note` validated a
+named source against the whole corpus, not against what the model was actually shown that turn (see
+`_fetch_refs`, no per-query scoping). Fixed by threading `retrieved_refs` through from `Answer`
+(pipeline) to the widening call; a ref that resolves but was never retrieved is now logged
+(`source_note_not_retrieved`) instead of becoming a citation. Verified on 12 real answers sent through
+the actual `create_session` route after the fix: 12/12 carried the HHH block, and the new check caught
+two real cases live — a halacha answer naming 5 real-but-never-retrieved refs, and a QA answer where
+12 of 27 named refs didn't resolve in the corpus at all. Full detail: [[hhh-rollout-verification]].
+
+No `pipeline.ask` contract change was needed for the base widening mechanism — `_fetch_refs()` already
+existed. The retrieved-set check DID need one (`Answer.retrieved_refs`), found only once real data
+showed the corpus-only check wasn't enough. Below is the original spec, kept for the record.
 
 Measured on a real answer: the panel showed **16** sources, the model's own HHH list named **19**.
 The panel is built from `enforce_citations`, which maps `[S#]` markers back to chunks — so a source
