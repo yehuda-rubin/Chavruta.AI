@@ -99,8 +99,20 @@ Fully specified remediation for the security and correctness items lives in
 **Waiting on other people**
 
 - **Kosher filters.** NetSpark, Rimon, Netfree and Etrog were all sent reclassification requests;
-  NetSpark had classified the site as a search engine. No replies yet. The claim made to them — that
-  the service carries no outbound links — now binds us.
+  NetSpark had classified the site as a search engine. No replies yet.
+
+  **The claim made to them binds us, so quote it exactly:** the site has *no internet search, no ads,
+  no user-generated content, and no way to reach an external site through it **except a link to the
+  source on Sefaria***. That last clause is not a loophole, it is part of the argument — a link to
+  the source is what makes this a library rather than a door, and it was disclosed on purpose.
+
+  An earlier version of this line here compressed all of that to "carries no outbound links". That
+  summary is wrong, and it did damage: a review agent read it, found the `צפה בספריא` anchor in
+  `SourcesPanel.tsx` and the `deep_link` in `rights.py::attribution_line`, and reported a
+  live breach of a commitment to four filters as its single highest-priority item. Removing that link
+  would have deleted the only way a user can catch a fabricated ref, and stripped the Source out of
+  the TASL attribution that `NOTICE.md` publicly says the sheets carry. **Before acting on anything
+  in this bullet, read `kosher-filter-classification` in the memory directory, not this paraphrase.**
 - **Nebius invoice.** The 4.81M vs 6.69M token attribution is asserted, not demonstrated. Reconcile
   against the next real invoice rather than re-deriving it from our own numbers.
 
