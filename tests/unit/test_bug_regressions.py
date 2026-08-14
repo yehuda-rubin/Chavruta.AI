@@ -2143,3 +2143,19 @@ def test_the_source_list_does_not_show_the_reader_raw_markers():
     assert "[S1]" not in note and "[S8]" not in note
     assert note.startswith("נשמת חיים")
     assert "Toldot_Yaakov_Yosef" in note, "the scrub must not have run on the note"
+
+
+def test_the_source_list_gate_covers_every_generation_route():
+    """It was set on /query alone, and the app posts to /sessions/{id}/query — so the trailing
+    source list worked in a direct call and never once through the UI. Six answers went out with an
+    empty note before anyone noticed, because the check that "verified" it bypassed the route.
+
+    _run_query is the one funnel every generation path goes through, so the gate belongs there.
+    """
+    import inspect
+
+    src = inspect.getsource(api._run_query)
+    assert "set_source_note(_source_note_enabled(owner_id))" in src
+    assert "reset_source_note" in src, "the flag would leak into the next request on this worker"
+    # …and no route sets it on its own any more, which would double-set and leave a stale token.
+    assert inspect.getsource(api.query).count("set_source_note") == 0

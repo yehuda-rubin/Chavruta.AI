@@ -1620,7 +1620,14 @@ def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
     of a 500 for the whole request (real HTTPExceptions — e.g. 422 bad intent — still propagate).
     `llm` defaults to the pipeline's own shared backend; a caller may override it (BYOK)."""
     he = (lang or "") != "en"
+    # Every route reaches generation through here — /query, /sessions/{id}/query, its async twin and
+    # the calendar paths. Setting the flag on ONE of them is what made the trailing source list work
+    # in a direct call and never once through the UI: /sessions/{id}/query is what the app actually
+    # posts to, and it went through a different door. Reset in the `finally` below, so a worker
+    # thread cannot carry it into the next request it serves.
+    _note_token = llm_base.set_source_note(_source_note_enabled(owner_id))
     if not _generation_semaphore.acquire(timeout=_GENERATION_QUEUE_TIMEOUT_S):
+        llm_base.reset_source_note(_note_token)
         _log.warning("generation queue timeout — system at capacity (intent=%r)", intent_str)
         return QueryResponse(
             answer=("המערכת עמוסה כרגע — נסו שוב בעוד רגע." if he
@@ -1645,6 +1652,7 @@ def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
         with _in_flight_lock:
             _in_flight_count -= 1
         _generation_semaphore.release()
+        llm_base.reset_source_note(_note_token)
 
 
 def _calendar_modes_enabled(owner_id: str) -> bool:
@@ -2529,16 +2537,11 @@ def query(req: QueryRequest, owner: str = Depends(current_owner),
         raise HTTPException(status_code=422, detail="question must not be empty")
     reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key,
                                                     x_user_llm_base_url, x_user_llm_model)
-    # Set for the whole turn, including the agentic loop's later rounds, and reset in `finally` so
-    # it cannot leak into the next request served by this worker.
-    note_token = llm_base.set_source_note(_source_note_enabled(owner))
-    try:
-        return _metered(owner, reserved, req.intent, lambda: _run_query(
-            _augment_question(req.question, req.attachments), req.lang, req.intent, [],
-            audience=req.audience, grade_band=req.grade_band, length=req.length,
-            owner_id=owner, llm=llm), req, meter=meter)()
-    finally:
-        llm_base.reset_source_note(note_token)
+    # The gate lives in _run_query, which every generation path goes through — see there.
+    return _metered(owner, reserved, req.intent, lambda: _run_query(
+        _augment_question(req.question, req.attachments), req.lang, req.intent, [],
+        audience=req.audience, grade_band=req.grade_band, length=req.length,
+        owner_id=owner, llm=llm), req, meter=meter)()
 
 
 class MeOut(BaseModel):
