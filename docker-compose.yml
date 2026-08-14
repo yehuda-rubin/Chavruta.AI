@@ -95,6 +95,11 @@ services:
       # Parshat HaShavua / Daf Yomi — beta, hand-picked owner_ids only (see app/api.py::
       # _calendar_modes_enabled). Empty = nobody sees the modes yet.
       CHAVRUTA_CALENDAR_BETA_OWNERS: ${CHAVRUTA_CALENDAR_BETA_OWNERS:-}
+      # The sugya study game (app/api.py::_sugya_enabled) and the model's trailing source list
+      # (::_source_note_enabled). Same allowlist shape, separate variables — being in one beta must
+      # not enrol you in another. Empty = nobody.
+      CHAVRUTA_SUGYA_BETA_OWNERS: ${CHAVRUTA_SUGYA_BETA_OWNERS:-}
+      CHAVRUTA_SOURCE_NOTE_OWNERS: ${CHAVRUTA_SOURCE_NOTE_OWNERS:-}
       # Small/fast model for the cheap _wants_full_lesson yes/no classification — deliberately NOT
       # the main generation model (see app/api.py::_classifier_llm).
       CHAVRUTA_CLASSIFIER_MODEL: ${CHAVRUTA_CLASSIFIER_MODEL:-}
