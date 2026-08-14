@@ -6,6 +6,8 @@ right to warn a user?" — gets made on an empty screen that looks like good new
 """
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 import app.db as db
@@ -71,3 +73,18 @@ def test_a_failing_sink_cannot_break_the_answer(fresh_db):
 
     guards.set_sink(explode)
     guards.report("deontic", "qa", {"authority": "rambam"})   # must not raise
+
+
+def test_a_failing_insert_logs_instead_of_raising(fresh_db, monkeypatch, caplog):
+    """The except branch inside record_guard_finding used a logger this module has never had, so the
+    one line meant to keep a diagnostic from breaking a request was itself a NameError. It never
+    fired in a test because it only runs when the insert fails."""
+    import logging
+
+    def broken_tx(_conn):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(fresh_db, "_tx", broken_tx)
+    with caplog.at_level(logging.ERROR, logger="chavruta.telemetry"):
+        fresh_db.record_guard_finding("deontic", "qa", {"authority": "rambam"})   # must not raise
+    assert any("guard finding" in r.getMessage() for r in caplog.records)

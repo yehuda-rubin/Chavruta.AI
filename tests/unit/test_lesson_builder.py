@@ -16,7 +16,11 @@ def test_dynamic_top_k_scales_with_intent():
     p = Profile(name="test", top_k=10)
     # a lesson (whole sugya) pulls far more chunks than a short Q&A
     assert _top_k_for(Intent.LESSON, p) > _top_k_for(Intent.EXPLAIN, p) > _top_k_for(Intent.QA, p)
-    assert _top_k_for(Intent.LESSON, p) == 48
+    # Lessons were lowered from 48 to responsa's 32 on 2026-08-13, once production showed that INPUT
+    # is 93.7% of every token spent. The ORDER is what this test protects — a lesson must still pull
+    # wider than an explanation — and the two exact figures are pinned because they are a cost
+    # decision, not an implementation detail: changing one silently changes the bill.
+    assert _top_k_for(Intent.LESSON, p) == 32
     assert _top_k_for(Intent.HALACHA, p) == 32   # responsa has its own (wide) breadth
 
 

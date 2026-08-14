@@ -201,8 +201,16 @@ def _fix_bleeding_sentences(text: str, he: bool, llm) -> str:
     if len(targets) == 1 or getattr(llm, "serial_only", False):
         rewrites = [_rewrite_bleeding_sentence(parts[i], llm) for i in targets]
     else:
+        # run_in_context, NOT a bare lambda. A pool thread starts with a fresh context, so the
+        # request's token tally is invisible inside it and metering.record() drops the call —
+        # silently, because "outside a metered block" is a legitimate state (the CLI). These calls
+        # still reached the provider and still appeared on the bill: reconciling our own totals
+        # against a real Nebius invoice on 2026-08-13 showed 4.81M input recorded against 6.69M
+        # charged, and this was the leak.
         with ThreadPoolExecutor(max_workers=min(_BLEED_FIX_WORKERS, len(targets))) as pool:
-            rewrites = list(pool.map(lambda i: _rewrite_bleeding_sentence(parts[i], llm), targets))
+            rewrites = list(pool.map(
+                metering.run_in_context(lambda i: _rewrite_bleeding_sentence(parts[i], llm)),
+                targets))
 
     for i, rewritten in zip(targets, rewrites):
         if rewritten:
@@ -252,6 +260,7 @@ from chavruta.corpus.refs import (
 )
 from chavruta.corpus.schema import Intent, Query, Turn
 from chavruta.generation import computed, guards
+from chavruta import sugya as sugya_mod
 from chavruta.retrieval.base import RetrievalResult
 from chavruta.llm import metering
 from chavruta.llm.agentic import is_degrade_message
@@ -265,6 +274,7 @@ import app.orgs as orgs
 import app.auth_supabase as sb
 import app.billing.service as billing
 import app.coupons as coupons
+import app.devhelpers as devhelpers
 import app.db as db
 from app import plans
 from app.billing import payplus
@@ -373,11 +383,13 @@ async def lifespan(app: FastAPI):
 from fastapi import Depends, Header  # noqa: E402
 
 from app.security import (  # noqa: E402
+    UnsafeProviderURL,
     body_size_middleware,
     current_owner,
     rate_limit_middleware,
     request_context_middleware,
     require_auth,
+    validate_provider_base_url,
 )
 
 app = FastAPI(
@@ -1014,7 +1026,7 @@ def _generate_lesson_from_hits(topic: str, hits, lang: str, he: bool, *, audienc
         for _m in misattributed_quotes(fl, hits)[:2]:
             guards.report("misattribution", "lesson",
                           {"claimed": _m.claimed, "found_in": ", ".join(_m.found_in),
-                           "quote": _m.quote[:300]},
+                           "quote_len": str(len(_m.quote))},
                           summary=f"credited to {_m.claimed}, text is from "
                                   f"{', '.join(_m.found_in)}")
     except Exception:                       # noqa: BLE001 — a watching check must never break a lesson
@@ -1026,9 +1038,10 @@ def _generate_lesson_from_hits(topic: str, hits, lang: str, he: bool, *, audienc
     try:
         _cal = computed.check_calendar_claims(fl, computed.resolve_facts(load_cached=db.get_calendar_cache))
         for _mm in _cal.mismatches[:2]:
+            # `stated` and `expected` are the two calendar VALUES, not lesson prose — a daf name
+            # and a daf name. The surrounding sentence is dropped for the same reason as above.
             guards.report("calendar", "lesson",
-                          {"claim": _mm.kind, "stated": _mm.stated, "expected": _mm.expected,
-                           "span": _mm.span[:300]},
+                          {"claim": _mm.kind, "stated": _mm.stated, "expected": _mm.expected},
                           summary=f"said {_mm.stated}, actually {_mm.expected}")
     except Exception:                       # noqa: BLE001
         _guard_log.exception("calendar check failed")
@@ -1586,6 +1599,37 @@ def _calendar_modes_enabled(owner_id: str) -> bool:
     return owner_id in allowed
 
 
+def _plan_for(owner_id: str) -> str:
+    """The tier this account's allowance is drawn from, everywhere a request needs to know.
+
+    One resolver instead of four `db.get_plan` calls, because a floor that applies in three of them
+    and not the fourth is worse than no floor: the quota would be granted and then the gauge, or the
+    lesson counter, would disagree with it. `orgs.effective_plan` folds in both adjustments that
+    exist — a school member draws on the school's tier, and a dev helper is lifted to basic — and
+    both are floors over what the account itself holds, never overrides.
+    """
+    return plans.canonical(orgs.effective_plan(owner_id))
+
+
+def _sugya_enabled(owner_id: str) -> bool:
+    """The sugya game's rollout gate — same shape as the calendar one above, and separate from it on
+    purpose: these are different features and being in one beta should not enrol you in the other.
+
+    CHAVRUTA_SUGYA_BETA_OWNERS is a comma-separated allowlist of owner_ids, or "*" once it is open
+    to everyone; empty (the default) means nobody. Enforced HERE, on the server — the frontend
+    hiding a button is decoration, and this is checked whether or not the request came through it.
+    """
+    raw = os.environ.get("CHAVRUTA_SUGYA_BETA_OWNERS", "").strip()
+    if raw == "*":
+        return True
+    if owner_id in {o.strip() for o in raw.split(",") if o.strip()}:
+        return True
+    # …or the operator opened it for this person specifically. The env var is the blunt instrument
+    # (a redeploy to change who is in); dev-helper grants are the one that can be edited from the
+    # panel, and they carry the consent the env var cannot.
+    return devhelpers.has_feature(owner_id, "sugya")
+
+
 def _is_admin(owner_id: str) -> bool:
     """Admin dashboard access — a dedicated allowlist, separate from the calendar beta gate even
     though today it's the same one account. No "*" wildcard: unlike a beta feature, admin access
@@ -1873,7 +1917,15 @@ def _byok_llm(user_key: str, base_url: str = "", model: str = ""):
     # model gets no floor rather than a guessed one; a caller picking a reasoning model elsewhere
     # accepts that risk themselves (it is exactly what /byok/check's cost/support disclaimer covers).
     custom_model = model.strip()
-    llm = CloudLLM(custom_model or profile.llm_model, base_url.strip() or profile.llm_base_url,
+    # The generation path takes the same caller-supplied URL as /byok/check and must be gated the
+    # same way — validating only at check time would gate the door and leave the window, since
+    # X-User-LLM-Base-URL is sent per request and never has to have passed through /byok/check.
+    if custom_base := base_url.strip():
+        try:
+            validate_provider_base_url(custom_base)
+        except UnsafeProviderURL as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+    llm = CloudLLM(custom_model or profile.llm_model, custom_base or profile.llm_base_url,
                    user_key, timeout_s=profile.llm_timeout_s, max_retries=profile.llm_max_retries,
                    min_output_tokens=0 if custom_model else getattr(profile, "llm_min_output_tokens", 0))
     pipeline.wire_source_fetcher(llm)
@@ -1907,6 +1959,14 @@ def byok_check(req: ByokCheckRequest, lang: str = "he", owner: str = Depends(cur
                             detail="this deployment's backend has no provider-key concept (bridge)")
     base_url = req.base_url.strip() or _get_pipeline().profile.llm_base_url
     model = req.model.strip()
+    # Only if the CALLER named it. This deployment's own configured base URL is not user input and is
+    # not subject to the policy — an operator may legitimately point the service at a provider on a
+    # private network, and that decision is theirs to make.
+    if req.base_url.strip():
+        try:
+            validate_provider_base_url(base_url)
+        except UnsafeProviderURL as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
 
     from chavruta.llm.cloud import list_models
     try:
@@ -2005,7 +2065,7 @@ def _charge_lesson_unit(owner: str, res: Reservation, used_byok: bool) -> bool:
         # Returning True tells _metered to settle this turn at REAL usage instead, so it comes out of
         # the token pool, shows up in the figures, and counts against the member's own cap.
         return True
-    limit = plans.weekly_lessons(db.get_plan(owner))
+    limit = plans.weekly_lessons(_plan_for(owner))
     if limit <= 0:
         return False
     # If credits already paid to ADMIT this turn, they have paid for it — checked BEFORE the bump,
@@ -2091,7 +2151,7 @@ def _reserve_tokens(owner: str, lang: str, intent: str, user_key: str = "") -> R
         # the cap the school set for them, which is the single control an admin has over the pool.
         raise HTTPException(status_code=429, detail=_pool_quota_message(charge.refused, lang, ctx))
 
-    plan = db.get_plan(owner)
+    plan = _plan_for(owner)
     daily, weekly = plans.daily_tokens(plan), plans.weekly_tokens(plan)
     if daily <= 0 and weekly <= 0:
         return Reservation(0)
@@ -2308,7 +2368,7 @@ def _record_event(owner: str, intent: str, req: QueryRequest | None, usage: dict
             hour_local=local.hour,
             dow=(local.weekday() + 1) % 7,          # 0 = Sunday, the week this product works in
             owner_id=None if owner == "local" else owner,
-            plan=None if owner == "local" else plans.canonical(db.get_plan(owner)),
+            plan=None if owner == "local" else _plan_for(owner),
             intent=(got.get("intent") or intent or "qa"),
             lang=(req.lang if req else "") or "he",
             prompt_tokens=usage.get("prompt_tokens", 0),
@@ -2451,7 +2511,7 @@ class MeOut(BaseModel):
 def me(owner: str = Depends(current_owner)):
     """Account + today's quota state — lets the UI show who's signed in, their plan, how many questions
     remain, whether a deletion is pending, and whether the account is blocked."""
-    plan = "free" if owner == "local" else plans.canonical(db.get_plan(owner))
+    plan = "free" if owner == "local" else _plan_for(owner)
     is_local = owner == "local"
     ban = None if is_local else accounts.active_ban(owner)
     sub = (None if is_local else db.get_subscription(owner)) or {}
@@ -2597,6 +2657,26 @@ def admin_guard_findings(since: str = "30d", kind: str = "", limit: int = 100,
 @app.get("/admin/usage-by-intent")
 def admin_usage_by_intent(since: str = "30d", owner: str = Depends(_require_admin)):
     return db.usage_by_intent(_since_cutoff(since))
+
+
+@app.get("/admin/usage-over-time")
+def admin_usage_over_time(since: str = "30d", bucket: str = "day",
+                          owner: str = Depends(_require_admin)):
+    """Token spend per day or week, with input and output kept apart.
+
+    `cost_per_m_billed` is echoed back from CHAVRUTA_COST_PER_M_TOKENS so the panel can turn tokens
+    into money — and is 0 unless someone sets it. There is no default price here on purpose: a made-up
+    rate would produce a number that looks authoritative and is not, and the provider's pricing is not
+    ours to guess at.
+    """
+    if bucket not in ("day", "week"):
+        raise HTTPException(status_code=422, detail="bucket must be 'day' or 'week'")
+    try:
+        rate = float(os.environ.get("CHAVRUTA_COST_PER_M_TOKENS", "") or 0)
+    except ValueError:
+        rate = 0.0
+    return {"bucket": bucket, "cost_per_m_billed": rate,
+            "rows": db.usage_over_time(_since_cutoff(since), bucket)}
 
 
 @app.get("/admin/usage-by-week")
@@ -3368,6 +3448,243 @@ def _org_for(owner: str, demo: bool = False) -> dict:
     if not m:
         raise HTTPException(status_code=404, detail="not found")
     return m
+
+
+# ── Development helpers (see app/devhelpers.py) ──────────────────────────────
+# Two audiences on purpose. /admin/helpers* is the operator's; /helper/* is the person's own, and a
+# helper can only ever see and change their own row — an id in a request body is not proof of who
+# it belongs to.
+class HelperInvite(BaseModel):
+    owner_id: str
+    note: str = ""
+    features: list[str] = []
+
+
+class HelperFeatures(BaseModel):
+    features: list[str] = []
+
+
+class HelperNotice(BaseModel):
+    owner_ids: list[str]
+    body: str
+
+
+@app.get("/admin/helpers")
+def admin_helpers(owner: str = Depends(_require_admin)):
+    return {"helpers": devhelpers.listing(),
+            "features": [{"id": f, "label_he": devhelpers.label(f)} for f in devhelpers.FEATURES]}
+
+
+@app.post("/admin/helpers")
+def admin_helper_invite(req: HelperInvite, owner: str = Depends(_require_admin)):
+    """Offer helper status to an account id. Nothing applies until they accept — see devhelpers."""
+    try:
+        return devhelpers.invite(req.owner_id.strip(), by=owner, note=req.note.strip(),
+                                 features=req.features)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.patch("/admin/helpers/{helper_id}")
+def admin_helper_features(helper_id: str, req: HelperFeatures,
+                          owner: str = Depends(_require_admin)):
+    if not devhelpers.get(helper_id):
+        raise HTTPException(status_code=404, detail="not found")
+    return {"features": devhelpers.set_features(helper_id, req.features)}
+
+
+@app.post("/admin/helpers/{helper_id}/revoke")
+def admin_helper_revoke(helper_id: str, owner: str = Depends(_require_admin)):
+    if not devhelpers.revoke(helper_id):
+        raise HTTPException(status_code=404, detail="not found")
+    return {"revoked": True}
+
+
+@app.delete("/admin/helpers/{helper_id}")
+def admin_helper_remove(helper_id: str, owner: str = Depends(_require_admin)):
+    if not devhelpers.remove(helper_id):
+        raise HTTPException(status_code=404, detail="not found")
+    return {"removed": True}
+
+
+@app.post("/admin/helpers/notice")
+def admin_helper_notice(req: HelperNotice, owner: str = Depends(_require_admin)):
+    """Send one notice to one or more helpers. Only to people already on the list — this is not a
+    channel for messaging users at large, and letting it become one would put an unreviewed
+    broadcast tool one text box away from the panel."""
+    try:
+        sent = devhelpers.send(req.owner_ids, req.body, by=owner)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"sent": sent}
+
+
+@app.get("/helper/status")
+def helper_status(owner: str = Depends(current_owner)):
+    """What this account needs to know about its own helper status — invited, accepted, what was
+    opened for it, and any unread notices. Returns status 'none' for everyone else rather than
+    404ing, because the app calls it on every load and an error is not an answer."""
+    if owner == "local":
+        return {"status": "none", "features": [], "unread": []}
+    return devhelpers.status_for(owner)
+
+
+@app.post("/helper/accept")
+def helper_accept(owner: str = Depends(current_owner)):
+    if not devhelpers.accept(owner):
+        raise HTTPException(status_code=404, detail="not found")
+    return devhelpers.status_for(owner)
+
+
+@app.post("/helper/decline")
+def helper_decline(owner: str = Depends(current_owner)):
+    if not devhelpers.decline(owner):
+        raise HTTPException(status_code=404, detail="not found")
+    return devhelpers.status_for(owner)
+
+
+@app.post("/helper/messages/{message_id}/read")
+def helper_message_read(message_id: int, owner: str = Depends(current_owner)):
+    return {"read": devhelpers.mark_read(owner, message_id)}
+
+
+# ── The sugya game (beta — see docs/SUGYA_GAME.md) ───────────────────────────
+# A guided path through one sugya, one source per level, checked mechanically on PROVENANCE only:
+# is this really that source, and are the quoted words really in it. Never on understanding — there
+# is no compiler for that, and the module refuses to pretend there is.
+#
+# Every route below 404s (not 403) for an account outside the allowlist: an unreleased feature
+# should not advertise its own existence to people who cannot use it.
+def _require_sugya_beta(owner: str = Depends(current_owner)) -> str:
+    if not _sugya_enabled(owner):
+        raise HTTPException(status_code=404, detail="not found")
+    return owner
+
+
+def _fetch_refs(refs) -> list:
+    """Look sources up by ref for the checker. Wrapped so `sugya.check` stays free of any store
+    import — it has to run in tests with no Qdrant at all."""
+    p = _get_pipeline()
+    return p.store.fetch_by_refs(p.profile.collection, list(refs), limit=4)
+
+
+class SugyaAnswer(BaseModel):
+    ref: str = ""
+    quote: str = ""      # optional: if given, it must actually appear in that source
+
+
+@app.get("/sugya")
+def sugya_list(owner: str = Depends(_require_sugya_beta)):
+    return {"sugyot": sugya_mod.available()}
+
+
+@app.get("/sugya/{sugya_id}")
+def sugya_detail(sugya_id: str, owner: str = Depends(_require_sugya_beta)):
+    """The whole sugya: its levels, and for each one the inventory of refs unlocked BEFORE it.
+
+    `hint_he` and `goal_he` ship with it, `teach_he` does NOT — that is the point of the level and
+    is returned only once the answer is right. Sending it up front would put the answer in the
+    browser's network tab, which is the whole game.
+    """
+    try:
+        s = sugya_mod.load(sugya_id)
+    except sugya_mod.SugyaNotFound:
+        raise HTTPException(status_code=404, detail="not found") from None
+    # NO `inventory` here. Every level's `unlocks_ref` IS its own accepted answer, so a level's
+    # inventory — the refs unlocked before it — is the previous level's solution. Returning them all
+    # in one payload handed the player four of five answers in the network tab, while the same
+    # response carefully withheld `teach_he` for being the answer. Withholding one and shipping the
+    # other is not a gate.
+    #
+    # The inventory now comes from /sugya/{id}/{level_id}/inventory, which serves it only for a
+    # level whose predecessor the caller has already solved.
+    return {
+        "id": s.id, "title_he": s.title_he, "source_he": s.source_he, "intro_he": s.intro_he,
+        "levels": [{"id": lv.id, "title_he": lv.title_he, "move_he": lv.move_he,
+                    "goal_he": lv.goal_he, "hint_he": lv.hint_he} for lv in s.levels],
+    }
+
+
+@app.post("/sugya/{sugya_id}/{level_id}/inventory")
+def sugya_inventory(sugya_id: str, level_id: str, req: SugyaAnswer,
+                    owner: str = Depends(_require_sugya_beta)):
+    """The refs unlocked before this level — released only to a caller who can name the PREVIOUS
+    level's answer.
+
+    Stateless by design (docs/SUGYA_GAME.md 7: no progress table), so "have you solved it" can only
+    mean "can you produce it". That is not a security boundary and is not meant to be one — a
+    determined player can read the corpus elsewhere. It is the difference between a game whose
+    answers are one click away in a payload nobody asked for, and one where you have to have got
+    there.
+    """
+    try:
+        s = sugya_mod.load(sugya_id)
+        s.level(level_id)                       # 404 on an unknown level, before anything else
+    except (sugya_mod.SugyaNotFound, sugya_mod.LevelNotFound):
+        raise HTTPException(status_code=404, detail="not found") from None
+    inv = list(s.inventory_at(level_id))
+    if not inv:
+        return {"inventory": []}                # the first level starts empty; nothing to prove
+    previous = s.levels[len(inv) - 1]
+    if (req.ref or "").strip() not in previous.accept_refs:
+        raise HTTPException(status_code=403,
+                            detail="פתור קודם את השלב הקודם כדי לראות את המקורות שנפתחו")
+    return {"inventory": inv}
+
+
+@app.get("/sugya/{sugya_id}/source")
+def sugya_source(sugya_id: str, ref: str, proof: str = "",
+                 owner: str = Depends(_require_sugya_beta)):
+    """The text of one source — but ONLY one this sugya uses, and only once you have reached it.
+
+    The `ref` is checked against the sugya's own list rather than passed through to the store: an
+    open text endpoint gated on a beta flag would be a way to read the corpus around every other
+    limit the product has.
+
+    Reaching it is proved the same way as in `sugya_inventory`, and for the same reason: there is no
+    progress table, so "have you got here" can only mean "can you produce the answer that got you
+    here". `proof` is the PREVIOUS level's answer, exactly as that route wants it.
+
+    The first version of this took a `req_level` parameter and scoped the sources to that level's
+    inventory. It read as a gate and was none: the caller picked `req_level` themselves, and every
+    level id is listed in `GET /sugya/{id}`, so naming the LAST level returned the whole file. A
+    control that the person being controlled gets to set is decoration.
+    """
+    try:
+        s = sugya_mod.load(sugya_id)
+    except sugya_mod.SugyaNotFound:
+        raise HTTPException(status_code=404, detail="not found") from None
+    # Which level hands this ref out? Everything before it is already earned; the ref itself needs
+    # the level before it solved. An unknown ref 404s here, as an unknown ref should.
+    idx = next((i for i, lv in enumerate(s.levels) if lv.unlocks_ref == ref), None)
+    if idx is None:
+        raise HTTPException(status_code=404, detail="not found")
+    if idx > 0 and (proof or "").strip() not in s.levels[idx - 1].accept_refs:
+        raise HTTPException(status_code=403,
+                            detail="פתור קודם את השלב הקודם כדי לקרוא את המקור הזה")
+    hits = _fetch_refs([ref])
+    if not hits:
+        raise HTTPException(status_code=404, detail="not found")
+    p = getattr(hits[0], "payload", None) or {}
+    return {"ref": ref, "text_he": p.get("text_he") or p.get("text") or "",
+            "deep_link": p.get("deep_link") or ""}
+
+
+@app.post("/sugya/{sugya_id}/{level_id}/check")
+def sugya_check(sugya_id: str, level_id: str, req: SugyaAnswer,
+                owner: str = Depends(_require_sugya_beta)):
+    """Was the right source brought, and does it really say what was quoted from it?
+
+    No score is kept and nothing is written down. A wrong answer leaves the level open, the way a
+    Lean proof does not fail but simply has not closed yet.
+    """
+    try:
+        s = sugya_mod.load(sugya_id)
+        res = sugya_mod.check(s, level_id, req.ref, req.quote, fetch=_fetch_refs)
+    except (sugya_mod.SugyaNotFound, sugya_mod.LevelNotFound):
+        raise HTTPException(status_code=404, detail="not found") from None
+    return {"correct": res.correct, "status": res.status, "message_he": res.message_he,
+            "unlocked_ref": res.unlocked_ref}
 
 
 @app.get("/orgs/panel", response_model=OrgPanelOut)

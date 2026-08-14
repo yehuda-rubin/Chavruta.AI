@@ -336,3 +336,108 @@ def test_plan_based_quota_switch(client, monkeypatch):
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ── The sugya game's beta gate (docs/SUGYA_GAME.md) ──────────────────────────
+def _sugya_client(client, monkeypatch, *, allowed: bool):
+    monkeypatch.setenv("CHAVRUTA_API_KEYS", "k")
+    owner = client.get("/me", headers={"Authorization": "Bearer k"}).json()["owner"]
+    monkeypatch.setenv("CHAVRUTA_SUGYA_BETA_OWNERS", owner if allowed else "someone-else")
+    return {"Authorization": "Bearer k"}
+
+
+def test_the_sugya_game_is_invisible_outside_the_allowlist(client, monkeypatch):
+    """404, not 403. An unreleased feature should not advertise its own existence to accounts that
+    cannot use it — and the gate is server-side, so hiding a button proves nothing."""
+    h = _sugya_client(client, monkeypatch, allowed=False)
+    assert client.get("/sugya", headers=h).status_code == 404
+    assert client.get("/sugya/shnayim-ochazin", headers=h).status_code == 404
+    assert client.post("/sugya/shnayim-ochazin/mishnah/check",
+                       json={"ref": "Bava_Metzia.3.1"}, headers=h).status_code == 404
+
+
+def test_an_allowlisted_account_gets_the_levels_but_never_the_answers(client, monkeypatch):
+    """`teach_he` is the point of the level and must not ship with the question — sending it up
+    front would put the answer in the browser's network tab, which is the whole game."""
+    h = _sugya_client(client, monkeypatch, allowed=True)
+    listing = client.get("/sugya", headers=h).json()["sugyot"]
+    assert any(s["id"] == "shnayim-ochazin" for s in listing)
+
+    body = client.get("/sugya/shnayim-ochazin", headers=h).json()
+    assert [lv["id"] for lv in body["levels"]][0] == "mishnah"
+    blob = str(body)
+    assert "teach_he" not in blob
+    assert "accept_refs" not in blob, "the accepted refs ARE the answer"
+    # …and neither does the inventory, which was the SAME answers by another name: every level's
+    # unlocks_ref is its own accepted ref, so shipping level N+1's inventory shipped level N's
+    # solution. This test used to assert that leak two lines after asserting the opposite.
+    assert "Bava_Metzia.3.1" not in blob, "a later level's inventory is an earlier level's answer"
+    assert all("inventory" not in lv for lv in body["levels"])
+
+
+def test_the_inventory_is_released_only_to_someone_who_solved_the_level_before(client, monkeypatch):
+    h = _sugya_client(client, monkeypatch, allowed=True)
+    # The first level has nothing before it, so there is nothing to withhold.
+    first = client.post("/sugya/shnayim-ochazin/mishnah/inventory", json={}, headers=h)
+    assert first.status_code == 200 and first.json()["inventory"] == []
+
+    # The second level's inventory is the first level's answer — no answer, no inventory.
+    blind = client.post("/sugya/shnayim-ochazin/rashi-ochazin/inventory", json={}, headers=h)
+    assert blind.status_code == 403
+
+    earned = client.post("/sugya/shnayim-ochazin/rashi-ochazin/inventory",
+                         json={"ref": "Bava_Metzia.3.1"}, headers=h)
+    assert earned.status_code == 200
+    assert earned.json()["inventory"] == ["Bava_Metzia.3.1"]
+
+
+def test_checking_an_answer_reports_why_without_keeping_score(client, monkeypatch):
+    h = _sugya_client(client, monkeypatch, allowed=True)
+    ok = client.post("/sugya/shnayim-ochazin/mishnah/check",
+                     json={"ref": "Bava_Metzia.3.1"}, headers=h).json()
+    assert ok["correct"] and ok["unlocked_ref"] == "Bava_Metzia.3.1"
+    assert ok["message_he"].strip()
+
+    bad = client.post("/sugya/shnayim-ochazin/mishnah/check",
+                      json={"ref": "Bava_Metzia.3.5"}, headers=h).json()
+    assert not bad["correct"] and bad["status"] == "wrong_source"
+
+
+def test_the_source_endpoint_only_serves_refs_this_sugya_uses(client, monkeypatch):
+    """Otherwise a beta flag would be a way to read the whole corpus around every other limit the
+    product has."""
+    h = _sugya_client(client, monkeypatch, allowed=True)
+    r = client.get("/sugya/shnayim-ochazin/source?ref=Genesis.1.1", headers=h)
+    assert r.status_code == 404
+
+
+def test_a_later_source_is_not_served_to_a_player_who_has_not_reached_it(client, monkeypatch):
+    """The scope on this endpoint used to be a `req_level` query parameter, and a control the
+    controlled party sets is decoration: every level id is listed by `GET /sugya/{id}`, so naming
+    the LAST one returned the union of every level's inventory — the whole file. It now takes the
+    same proof `.../inventory` does, the previous level's answer.
+    """
+    h = _sugya_client(client, monkeypatch, allowed=True)
+    last = "Tosafot_on_Bava_Metzia.3.1.2"          # what level 5 hands out
+    # The permitted paths reach the corpus, which this stack has no connection to. Stubbed at the
+    # fetch so the test stays about the GATE — the refusals below never get this far anyway.
+    import app.api as api_mod
+
+    from types import SimpleNamespace
+    monkeypatch.setattr(api_mod, "_fetch_refs",
+                        lambda refs: [SimpleNamespace(payload={"text_he": "טקסט", "deep_link": ""})])
+
+    # The old bypass: ask for the last source while having answered nothing.
+    assert client.get(f"/sugya/shnayim-ochazin/source?ref={last}", headers=h).status_code == 403
+    # Naming a level you have not reached is not proof of anything either.
+    blind = client.get(f"/sugya/shnayim-ochazin/source?ref={last}&proof=Bava_Metzia.3.1", headers=h)
+    assert blind.status_code == 403
+
+    # The first source needs no proof — nothing comes before it.
+    opening = client.get("/sugya/shnayim-ochazin/source?ref=Bava_Metzia.3.1", headers=h)
+    assert opening.status_code == 200
+    assert opening.json()["ref"] == "Bava_Metzia.3.1"
+
+    # And the real answer to the level before opens the one after it.
+    earned = client.get(f"/sugya/shnayim-ochazin/source?ref={last}&proof=Bava_Metzia.3.6", headers=h)
+    assert earned.status_code == 200

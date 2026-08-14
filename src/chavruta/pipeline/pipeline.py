@@ -68,7 +68,16 @@ _INTENT_TOP_K = {
     Intent.QA: 8,
     Intent.EXPLAIN: 16,
     Intent.COMPARE: 24,
-    Intent.LESSON: 48,
+    # Lowered 48 -> 32 on 2026-08-13 (user decision), to match responsa. Measured over the first 11
+    # days: INPUT is 93.7% of every token spent — 4.81M in against 326K out — and lessons are the
+    # second-largest consumer. This is the one lever that cuts cost and latency without shortening a
+    # single answer, which is why it was chosen over the output budget (long answers stay a feature).
+    #
+    # Worth knowing before judging the result: responsa at 32 already averages MORE input per request
+    # than lessons did at 48 (22.4K vs 20.6K), so the retrieved sources are not the whole prompt —
+    # the job template, the conversation history and whatever the agentic loop fetches for itself all
+    # sit alongside them. Expect a real reduction, not a third.
+    Intent.LESSON: 32,
     Intent.HALACHA: 32,        # responsa pulls a wide net of sources + poskim
 }
 
@@ -492,8 +501,14 @@ class ChavrutaPipeline:
                 # of them is what keeps the finding honest. Flattened to a string here because the
                 # panel renders it as text; a raw tuple would arrive there as a JSON array.
                 found = ", ".join(m.found_in)
+                # No excerpt. The finding names WHICH commentator was credited and which source
+                # actually carries the words — enough to triage — while the answer text itself
+                # stays out of a table that has no owner_id and therefore cannot honour the
+                # per-chat or account-wide review opt-out (privacy policy 12). Storing content
+                # there was a second reading path around a switch users were promised.
                 guards.report("misattribution", intent_name,
-                              {"claimed": m.claimed, "found_in": found, "quote": m.quote[:300]},
+                              {"claimed": m.claimed, "found_in": found,
+                               "quote_len": str(len(m.quote))},
                               summary=f"credited to {m.claimed}, text is from {found}")
         except Exception:                   # noqa: BLE001 — a watching check must never break an answer
             _guard_log.exception("misattribution check failed")
@@ -502,10 +517,11 @@ class ChavrutaPipeline:
             # and took the last speaker in scope. That is the weaker of the two paths, and an
             # operator triaging these should be able to discount it without reading the code.
             for c in deontic.deontic_conflicts(text)[:2]:
+                # Same rule: the shape of the contradiction, not the sentences that carried it.
                 guards.report("deontic", intent_name,
                               {"authority": c.authority, "axis": c.axis,
                                "attribution": c.attribution,
-                               "first": c.first.sentence[:300], "second": c.second.sentence[:300]},
+                               "verdicts": f"{c.first.verdict} / {c.second.verdict}"},
                               summary=f"{c.authority} {c.axis}/{c.attribution}")
         except Exception:                   # noqa: BLE001
             _guard_log.exception("deontic check failed")

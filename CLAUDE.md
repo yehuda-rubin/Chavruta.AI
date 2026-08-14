@@ -13,9 +13,14 @@ grounded jobs in-session, no external API — `src/chavruta/llm/bridge.py`). The
 backend was **removed** (product decision 2026-07-13). **Default runtime (incl. locally) uses the
 Nebius API for generation** — `scripts/serve.ps1`: local CPU embedding + local Qdrant server +
 `CHAVRUTA_LLM_BACKEND=nebius` (key from `.env`); bridge (`scripts/serve_bridge.ps1`) for the no-API path.
-FastAPI backend (`app/api.py`) + SQLite chat history (`app/db.py`) + a **static offline UI**
-(`app/frontend/public/ui/chavruta.html`; local Tailwind + self-hosted fonts; the React SPA in
-`app/frontend/src/` is deprecated). Hebrew RTL + English LTR i18n. Governed by
+FastAPI backend (`app/api.py`) + SQLite chat history (`app/db.py`) + **the production frontend in
+`web/`** — a Next.js app (App Router, Tailwind, self-hosted Heebo, Supabase auth) that is what
+`chavrutaai.org` actually serves: nginx proxies `/` to it and the listed API prefixes to FastAPI
+(`docker/nginx.conf` + `web/next.config.mjs` — **both** files must list a new prefix or the route is
+dead in production only; `tests/unit/test_api_proxy_coverage.py` derives the list from
+`web/lib/api.ts` and fails if either misses one). The **static offline UI**
+(`app/frontend/public/ui/chavruta.html`) still exists for the no-build/offline path, and the old React
+SPA in `app/frontend/src/` is deprecated. Hebrew RTL + English LTR i18n. Governed by
 `.specify/memory/constitution.md` (v1.1.0).
 
 Corpus: the live production collection is **`chavruta_commercial`** (**2,403,599 points**, **15 tiers**,

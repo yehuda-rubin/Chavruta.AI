@@ -278,6 +278,14 @@ class CloudLLM:
 
     def stream(self, prompt: GroundedPrompt, *, lang: str, max_tokens: int,
                temperature: float) -> Iterator[str]:
+        """UNMETERED, and unreachable today — its only caller, Pipeline.ask_stream, has no callers.
+
+        `generate()` above records into `metering` from the usage block the provider returns once the
+        answer is complete. A stream has no such block until it ends, so nothing here counts anything:
+        wiring this to an endpoint as-is would serve tokens that no quota debits and no invoice line
+        explains. Whoever enables streaming must add `stream_options={"include_usage": True}` and
+        record the final usage chunk before this becomes a live path.
+        """
         stream = self._client_().chat.completions.create(
             model=self.model_id,
             messages=render_messages(prompt, lang),

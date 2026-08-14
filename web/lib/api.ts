@@ -305,10 +305,38 @@ export const api = {
       req<UsageByIntentRow[]>(`/admin/usage-by-intent?since=${since}`),
     usageByWeek: (since: AdminWindow) =>
       req<UsageByWeekRow[]>(`/admin/usage-by-week?since=${since}`),
+    // Token spend over time. Input and output stay separate: the 15:1 ratio between them is the
+    // number that matters, and a single "tokens" figure hides it.
+    usageOverTime: (since: AdminWindow, bucket: "day" | "week" = "day") =>
+      req<UsageOverTime>(`/admin/usage-over-time?since=${since}&bucket=${bucket}`),
     // What the watching guards caught. They show nothing to users on purpose; this is the evidence
     // on which that decision gets revisited — see src/chavruta/generation/guards.py.
     guards: (since: AdminWindow, kind = "", limit = 100) =>
       req<GuardFindings>(`/admin/guards?since=${since}&kind=${kind}&limit=${limit}`),
+
+    // Development helpers (app/devhelpers.py). Inviting grants nothing — the person has to accept.
+    helpers: () => req<{ helpers: DevHelper[]; features: HelperFeature[] }>("/admin/helpers"),
+    inviteHelper: (ownerId: string, note: string, features: string[]) =>
+      req<DevHelper>("/admin/helpers", {
+        method: "POST",
+        body: JSON.stringify({ owner_id: ownerId, note, features }),
+      }),
+    setHelperFeatures: (ownerId: string, features: string[]) =>
+      req<{ features: string[] }>(`/admin/helpers/${encodeURIComponent(ownerId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ features }),
+      }),
+    revokeHelper: (ownerId: string) =>
+      req<{ revoked: boolean }>(`/admin/helpers/${encodeURIComponent(ownerId)}/revoke`,
+        { method: "POST" }),
+    removeHelper: (ownerId: string) =>
+      req<{ removed: boolean }>(`/admin/helpers/${encodeURIComponent(ownerId)}`,
+        { method: "DELETE" }),
+    noticeHelpers: (ownerIds: string[], body: string) =>
+      req<{ sent: number }>("/admin/helpers/notice", {
+        method: "POST",
+        body: JSON.stringify({ owner_ids: ownerIds, body }),
+      }),
     flaggedMessages: (reviewed = false) =>
       req<FlaggedMessage[]>(`/admin/flagged-messages?reviewed=${reviewed}`),
     reviewMessage: (reportId: number) =>
@@ -326,6 +354,15 @@ export const api = {
                                              { method: "DELETE" }),
     grant: (body: GrantIn) =>
       req<GrantResult>("/admin/grant", { method: "POST", body: JSON.stringify(body) }),
+  },
+
+  // The helper's own side. `status` is called on every load by every account, so it answers
+  // {status:"none"} rather than 404ing for the many who are not helpers.
+  helper: {
+    status: () => req<HelperStatus>("/helper/status"),
+    accept: () => req<HelperStatus>("/helper/accept", { method: "POST" }),
+    decline: () => req<HelperStatus>("/helper/decline", { method: "POST" }),
+    markRead: (id: number) => req<{ read: boolean }>(`/helper/messages/${id}/read`, { method: "POST" }),
   },
 };
 
@@ -518,6 +555,51 @@ export interface GuardFinding {
 export interface GuardFindings {
   counts: Record<string, number>;
   findings: GuardFinding[];
+}
+
+// A development helper as the operator sees them (app/devhelpers.py).
+export interface DevHelper {
+  owner_id: string;
+  added_at: string;
+  added_by: string;
+  note: string | null;
+  features: string[];
+  accepted_at: string | null;
+  declined_at: string | null;
+  revoked_at: string | null;
+  active: boolean;
+  status: "invited" | "accepted" | "declined" | "revoked" | string;
+  unread?: number;
+}
+
+export interface HelperFeature {
+  id: string;
+  label_he: string;
+}
+
+// The same person's own view. `status: "none"` is the normal answer for almost every account.
+export interface HelperStatus {
+  status: "none" | "invited" | "accepted" | "declined" | "revoked" | string;
+  note?: string;
+  features: string[];
+  plan?: string;
+  unread: { id: number; at: string; body: string; read_at: string | null }[];
+}
+
+export interface UsageOverTimeRow {
+  bucket: string;              // YYYY-MM-DD, or YYYY-Wnn for the weekly bucket
+  requests: number;
+  calls: number | null;        // model calls — a turn is ~3 of them
+  prompt: number | null;
+  completion: number | null;
+  billed: number | null;       // the normalized unit quota is metered in (prompt + 3x completion)
+  users: number;
+}
+
+export interface UsageOverTime {
+  bucket: "day" | "week";
+  cost_per_m_billed: number;   // 0 unless CHAVRUTA_COST_PER_M_TOKENS is set — never a guess
+  rows: UsageOverTimeRow[];
 }
 
 export interface UsageByOwnerRow {

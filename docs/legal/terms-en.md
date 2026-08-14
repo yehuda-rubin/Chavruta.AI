@@ -6,7 +6,17 @@
 
 # Terms of Use — Chavruta AI
 
-**Version 1.11 · Effective 13 August 2026**
+**Version 1.12 · Effective 13 August 2026**
+
+Changes in version 1.12: a new section **11a — Development Helpers** covers users we invite
+to help test the Service. Its central point is stated explicitly precisely because it is not
+obvious: participation is **voluntary and unpaid, and creates no employment relationship or
+business arrangement** — someone receiving a benefit in return for testing might reasonably
+think otherwise, so it is said rather than implied. It also establishes that joining requires
+**explicit acceptance** and can be ended at any time by either side; that the increased
+allowance is a **benefit and not a purchase**, with no monetary value, and **does not reduce
+an existing paid subscription**; and that unreleased capabilities are provided as is and may
+change or disappear. The section does not affect anyone who is not taking part.
 
 Changes in version 1.11: section 10 clarifies the relationship between **account deletion and a paid
 subscription**, which was not stated until now. A deletion request **stops the recurring charge
@@ -207,6 +217,34 @@ Coupons may be offered from time to time. A coupon grants a specific benefit (a 
 or credits). Coupons have an expiration date and are not transferable. A coupon has no cash value and
 cannot be redeemed for money. If a transaction that used a coupon is cancelled, the coupon-granted
 benefit is revoked.
+
+## 11a. Development Helpers
+From time to time we invite users to help test the Service ("development helpers"). The terms, in full:
+
+**Participation is by invitation and your explicit acceptance.** You do not become a development
+helper until you accept, and nothing about your account changes before then. You may stop at any
+time, and we may end the arrangement at any time — without reason and without prior notice.
+
+**This is not work and creates no employment relationship, partnership, agency or business
+arrangement of any kind.** Participation is voluntary and unpaid; you are not entitled to wages,
+compensation, a share of revenue, rights in the Service's intellectual property, or any other
+payment for it. There are no required hours, no binding tasks, and no obligation to report or be
+available.
+
+**What you receive is a benefit, not a purchase.** While participating, your account is allocated a
+usage allowance at the basic-plan level, and capabilities not yet released to all users may be
+opened for you. The benefit has no monetary value, is not transferable and cannot be redeemed. **If
+you already hold a paid subscription, participation does not reduce it** — the higher of the two
+allowances applies. When participation ends, the allowance returns to the plan you purchased, or to
+the free plan if you purchased none.
+
+**Unreleased capabilities are provided as is.** By their nature they may be incomplete, may change,
+may behave incorrectly or may disappear without notice, and content created with them may be lost.
+No commitment attaches to them beyond section 8, and they should not be relied on for anything other
+than testing. Sections 4, 6 and 7 apply to a development helper exactly as to any other user.
+
+**Communication.** While participating we may send you notices inside the Service, and see when they
+were read. For what is stored about a development helper, see the Privacy Policy, section 1.
 
 ## 12. Your Own API Key (Bring Your Own Key)
 The Service optionally lets you enter, in Settings, your own API key and choose which provider and

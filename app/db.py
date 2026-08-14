@@ -67,7 +67,36 @@ def get_conn() -> sqlite3.Connection:
 
 # Bump when the schema changes; _migrate() applies forward steps idempotently on
 # existing persisted databases (tracked via SQLite's PRAGMA user_version).
-SCHEMA_VERSION = 29
+#
+# WHY A PLAIN COUNTER AND NOT 30.1 / 31
+# -------------------------------------
+# `PRAGMA user_version` is a 32-bit signed INTEGER. It cannot hold "30.1" — that is SQLite's
+# constraint, not a style choice. The nearest thing would be encoding major*100 + minor (3000, 3010,
+# 3100), which preserves ordering and is what a project with real major/minor schema eras should do.
+# This one does not have them: every migration here is additive and idempotent (CREATE TABLE IF NOT
+# EXISTS, or ALTER TABLE ADD COLUMN behind a PRAGMA table_info check), there is no downgrade path,
+# and nothing branches on the number beyond "have the steps up to here run yet". A two-part version
+# would encode a distinction the code never reads.
+#
+# What was actually missing is below: WHAT each bump added. When a migration goes wrong the question
+# is never "was that major or minor", it is "what changed at 28". Reconstructed from git history.
+#
+#   30  dev_helpers, helper_messages                              2026-08-13
+#   29  guard_findings                                            2026-08-13
+#   28  org_members.removed_at (a re-joinable block)              2026-08-13
+#   27  orgs, org_members, org_invites, org_access_log            2026-08-12
+#   26  usage_events.concurrent_at_start                          2026-08-07
+#   25  sessions.excluded_from_review                             2026-08-06
+#   24  calendar_cache                                            2026-08-05
+#   23  sessions.title, sessions.pinned_at                        2026-08-04
+#   22  message_reports; accounts/usage analytics columns         2026-08-02
+#   21  coupon_redemptions ↔ subscriptions coupon columns         2026-07-29
+#   20  billing_ledger.txn_uid (refunds are issued against it)    2026-07-27
+#   19  usage_counters meter column (tokens vs lessons)           2026-07-26
+#   18  billing_ledger                                            2026-07-26
+#   17  coupons                                                   2026-07-26
+#   ≤16 subscriptions, bans, deletion scheduling, per-owner scoping — see git log -G'^SCHEMA_VERSION'
+SCHEMA_VERSION = 30
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -342,6 +371,38 @@ def _migrate(conn: sqlite3.Connection) -> None:
             detail TEXT NOT NULL         -- JSON
         );
         CREATE INDEX IF NOT EXISTS idx_guard_findings_at ON guard_findings(at DESC);
+
+        -- Development helpers: people the operator invites to test the product with a basic-tier
+        -- allowance and early access to whatever has been opened for them. See app/devhelpers.py.
+        --
+        -- `accepted_at` is NULL until the person says yes, and NOTHING applies before then. Being
+        -- made a helper changes someone's quota and exposes them to unreleased features, so it is
+        -- an offer and not an assignment — an operator who could quietly enrol accounts from a text
+        -- box would be able to hand strangers a feature nobody has reviewed.
+        CREATE TABLE IF NOT EXISTS dev_helpers (
+            owner_id    TEXT PRIMARY KEY,
+            added_at    TEXT NOT NULL,
+            added_by    TEXT NOT NULL,
+            note        TEXT,                 -- the operator's own label, e.g. "David — lessons"
+            features    TEXT NOT NULL DEFAULT '[]',   -- JSON list of feature ids
+            accepted_at TEXT,                 -- NULL ⇒ invited, nothing granted yet
+            declined_at TEXT,                 -- they said no; kept so the offer is not re-sent blind
+            revoked_at  TEXT
+        );
+
+        -- Operator → helper notices, fanned out at send time (one row per recipient) rather than
+        -- stored once with a recipient list: read state is per person, and a shared row would need
+        -- a second table to track it.
+        CREATE TABLE IF NOT EXISTS helper_messages (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            at       TEXT NOT NULL,
+            sent_by  TEXT NOT NULL,
+            owner_id TEXT NOT NULL,
+            body     TEXT NOT NULL,
+            read_at  TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_helper_messages_owner
+            ON helper_messages(owner_id, read_at);
 
         -- Accounting ledger. Deliberately has NO owner_id and is NEVER purged: tax law requires
         -- keeping records of what was charged for ~7 years, while a user may ask to be forgotten
@@ -1075,14 +1136,27 @@ def _agg(sql: str, args: tuple = ()) -> list[dict[str, Any]]:
 
 
 def usage_by_owner(since: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
-    """Per-account totals — who is using it and what they cost."""
-    where = "WHERE at >= ?" if since else ""
+    """Per-account totals — who is using it and what they cost.
+
+    Anonymised rows are EXCLUDED. purge_owner sets usage_events.owner_id to NULL rather than deleting
+    the row, so the measurements stay true (see there) — but a plain GROUP BY then collapses every
+    account ever deleted into a single nameless row, which ranked fourth in "top users" and would
+    only climb. It is not a user: it is the sum of people who left. The totals that should include
+    those requests (usage_health, revenue, by-intent) still do — this is the one view that is per
+    ACCOUNT, and an event with no account has nothing to say in it.
+    """
+    clauses = ["owner_id IS NOT NULL"]
+    args: list[Any] = []
+    if since:
+        clauses.append("at >= ?")
+        args.append(since)
+    where = "WHERE " + " AND ".join(clauses)
     return _agg(
         f"SELECT owner_id, COUNT(*) AS requests, SUM(billed_tokens) AS tokens, "   # noqa: S608
         f"SUM(llm_calls) AS calls, AVG(ms) AS avg_ms, "
         f"SUM(CASE WHEN grounded=1 THEN 1 ELSE 0 END) AS grounded "
         f"FROM usage_events {where} GROUP BY owner_id ORDER BY tokens DESC LIMIT ?",
-        ((since, limit) if since else (limit,)))
+        (*args, limit))
 
 
 def usage_by_intent(since: str | None = None) -> list[dict[str, Any]]:
@@ -1183,6 +1257,33 @@ def usage_by_week(since: str | None = None) -> list[dict[str, Any]]:
         f"SELECT strftime('%Y-W%W', at) AS week, COUNT(*) AS requests, "           # noqa: S608
         f"COUNT(DISTINCT owner_id) AS users "
         f"FROM usage_events {where} GROUP BY week ORDER BY week",
+        ((since,) if since else ()))
+
+
+def usage_over_time(since: str | None = None, bucket: str = "day") -> list[dict[str, Any]]:
+    """Token spend per day or per week — what was actually consumed, and in which direction.
+
+    `prompt` and `completion` are kept SEPARATE rather than summed, because the ratio between them is
+    the number that turned out to matter: measured on 2026-08-13 it was 6,550 in to 442 out per model
+    call, 15:1. A single "tokens" figure hides that entirely, and the input side is both the larger
+    cost and the one that can be reduced without shortening a single answer.
+
+    `billed` is the normalized unit (prompt + 3x completion) the quota is metered in — it is what a
+    turn costs us, so it is what a spend figure has to be counted in.
+
+    Anonymised rows ARE included, unlike usage_by_owner: a request made by someone who has since
+    deleted their account still cost what it cost, and a spend total that quietly drops history would
+    be wrong in the one direction that matters.
+    """
+    fmt = "%Y-W%W" if bucket == "week" else "%Y-%m-%d"
+    where = "WHERE at >= ?" if since else ""
+    return _agg(
+        f"SELECT strftime('{fmt}', at) AS bucket, COUNT(*) AS requests, "          # noqa: S608
+        f"SUM(llm_calls) AS calls, "
+        f"SUM(prompt_tokens) AS prompt, SUM(completion_tokens) AS completion, "
+        f"SUM(billed_tokens) AS billed, "
+        f"COUNT(DISTINCT owner_id) AS users "
+        f"FROM usage_events {where} GROUP BY bucket ORDER BY bucket",
         ((since,) if since else ()))
 
 
@@ -1312,7 +1413,11 @@ def record_guard_finding(kind: str, intent: str, detail: dict[str, Any],
                 "INSERT INTO guard_findings (at, kind, intent, detail) VALUES (?,?,?,?)",
                 (at or _now(), kind, intent or None, json.dumps(detail, ensure_ascii=False)))
     except Exception:                       # noqa: BLE001
-        _log.exception("failed to record guard finding (%s)", kind)
+        # `_telemetry_log`, not `_log`: this module has never had a bare `_log`, and writing one here
+        # meant the only line in the except branch was itself a NameError. The tests passed because
+        # the branch only runs when the insert fails — a handler that breaks exactly when it is
+        # needed, which is the same shape as the misattribution NameError earlier today.
+        _telemetry_log.exception("failed to record guard finding (%s)", kind)
 
 
 def list_guard_findings(since: str | None = None, kind: str = "",
@@ -2099,6 +2204,18 @@ def purge_owner(owner_id: str) -> None:
         # invited_by is the same kind of residue one statement up: a teacher who deletes their
         # account was still named on the row of every student they ever admitted.
         conn.execute("UPDATE org_members SET invited_by=? WHERE invited_by=?",
+                     (DELETED_OWNER, owner_id))
+        # Dev-helper enrolment and the notices sent to them. Unlike guard_findings — which carries no
+        # owner_id precisely so it needs nothing here — both of these are ABOUT a person: one records
+        # that they agreed to test, the other holds messages addressed to them. Deleted outright, not
+        # anonymised: there is no aggregate anyone reports from them that de-identifying would keep
+        # true, so keeping the rows would buy nothing and retain an identifier.
+        conn.execute("DELETE FROM dev_helpers WHERE owner_id=?", (owner_id,))
+        conn.execute("DELETE FROM helper_messages WHERE owner_id=?", (owner_id,))
+        # …and the operator's own trace on notices they sent, if it is the OPERATOR being deleted.
+        conn.execute("UPDATE helper_messages SET sent_by=? WHERE sent_by=?",
+                     (DELETED_OWNER, owner_id))
+        conn.execute("UPDATE dev_helpers SET added_by=? WHERE added_by=?",
                      (DELETED_OWNER, owner_id))
 
 

@@ -85,9 +85,20 @@ def membership(owner_id: str) -> dict[str, Any] | None:
 
 
 def effective_plan(owner_id: str) -> str:
-    """The tier whose allowance this account draws on — the org's for a member, else their own."""
+    """The tier whose allowance this account draws on — the org's for a member, else their own,
+    lifted to the dev-helper floor if there is one.
+
+    A FLOOR, not an assignment: a helper who also pays for pro keeps pro. Being asked to help test
+    must never cost someone allowance they bought, and writing this as an override rather than a
+    floor is exactly how that would happen. Imported inside the function because devhelpers reads
+    plans, which reads this module — a top-level import would close the cycle.
+    """
+    import app.devhelpers as devhelpers
+
     m = membership(owner_id)
-    return plans.canonical(m["plan"]) if m else plans.canonical(db.get_plan(owner_id))
+    own = plans.canonical(m["plan"]) if m else plans.canonical(db.get_plan(owner_id))
+    floor = devhelpers.plan_floor(owner_id)
+    return devhelpers.rank_at_least(own, floor) if floor else own
 
 
 # What a stored `daily_cap` means. The column is NOT NULL DEFAULT 0 and the two sides of the

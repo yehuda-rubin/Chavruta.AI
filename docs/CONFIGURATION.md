@@ -74,6 +74,8 @@ Both optional; unset means off. `CHAVRUTA_ADMIN_OWNERS` is a dedicated allowlist
 | Variable | Purpose | Default | Where read |
 |----------|---------|---------|------------|
 | `CHAVRUTA_ADMIN_OWNERS` | Comma-separated Supabase owner_ids allowed to see `/admin` | `""` (nobody) | `app/api.py::_is_admin` |
+| `CHAVRUTA_SUGYA_BETA_OWNERS` | Comma-separated owner_ids allowed into the sugya game, or `*` for everyone. Its routes 404 for anyone else — an unreleased feature should not announce itself. See `docs/SUGYA_GAME.md` | `""` (nobody) | `app/api.py::_sugya_enabled` |
+| `CHAVRUTA_COST_PER_M_TOKENS` | Price per MILLION normalized tokens (prompt + 3x completion). Unset ⇒ the admin panel's spend view reports tokens only and no money, on purpose — a guessed rate renders an authoritative-looking figure that is not | `0` (tokens only) | `app/api.py::admin_usage_over_time` |
 | `SENTRY_DSN` | Backend error tracking (sentry.io, free tier) — sign up, create a Python/FastAPI project, paste its DSN | `""` (off) | `app/api.py::_configure_sentry` |
 
 ## Email sending (Resend)
@@ -103,8 +105,8 @@ These variables override the default subscription tiers and credit costs defined
 
 | Variable | Purpose | Default | Where read |
 |----------|---------|---------|------------|
-| `CHAVRUTA_SUB_PERIOD_DAYS` | Days of access a monthly subscription buys | `30` | `app/plans.py:200` |
-| `CHAVRUTA_ANNUAL_PERIOD_DAYS` | Days of access an annual subscription buys | `365` | `app/plans.py:199` |
+| `CHAVRUTA_SUB_PERIOD_DAYS` | Days of access a monthly subscription buys | `30` | `app/plans.py:295` |
+| `CHAVRUTA_ANNUAL_PERIOD_DAYS` | Days of access **one annual instalment** buys. Annual is billed as 12 monthly instalments, so this is `30`, not `365` — raising it grants a year of access for one payment | `30` | `app/plans.py:294` |
 | `CHAVRUTA_SUB_PRICE_ILS` | Legacy single-price knob (pro tier monthly, superseded by tier-specific prices) | `49.9` | `app/plans.py:214` |
 | `CHAVRUTA_SUB_DESCRIPTION` | Invoice line description (empty = auto-generated Hebrew description) | `""` | `app/billing/service.py:30` |
 | `CHAVRUTA_BILLING_SWEEP_INTERVAL_S` | Interval for the billing downgrade sweeper (seconds) | `3600` | `app/billing/service.py:155` |
