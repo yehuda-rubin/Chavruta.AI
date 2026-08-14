@@ -18,12 +18,22 @@ questions and makes them slow, at night, silently. Two limits are applied togeth
 alone is insufficient: `taskset` decides WHICH cores the process may touch, while the BLAS/OMP
 thread caps stop torch from spawning eight worker threads inside those cores and thrashing.
 
-STOPPING
---------
-The run is bounded by the window, not by the work: whatever is unfinished at 05:00 is abandoned and
-picked up the next night. That is why the harvest writes its output before tuning starts, and why
-the tuner's own progress is printed as it goes — a run cut off halfway still leaves the night's
-measurements on disk instead of nothing.
+STOPPING, AND WHY IT USED TO THROW THE NIGHT AWAY
+-------------------------------------------------
+The run is bounded by the window, not by the work. That was always the design, and until 2026-08-14
+the second half of it did not exist: the log said an abandoned step would be "picked up the next
+night", and nothing carried anything over. Every night restarted from the constants in hybrid.py,
+swept partway, and was killed at 05:00. Two consecutive nights ended `rc=124` having accepted a
+value that was never confirmed and never recorded anywhere.
+
+It could not have finished, either. Once the pool grew to a size worth measuring on, a candidate
+went from ~130s to ~1310s, so a full five-knob descent needs 7-9 hours and the weeknight window is 5.
+No number of nights adds up when each one starts over.
+
+So the tuner now keeps state (`tune_retrieval.py --state`) and does ONE knob per night, ending each
+run with the held-out confirmation. A sweep takes about five nights instead of one, and every night
+produces a result that is either applicable or explicitly rejected — instead of nothing, five nights
+running.
 """
 
 from __future__ import annotations
@@ -52,6 +62,11 @@ NIGHTLY_WINDOW = (0, 5, 2)       # 00:00-05:00 on two cores
 OUT_ROOT = Path(os.environ.get("CHAVRUTA_EVAL_OUT") or (ROOT / "eval"))
 LOG_DIR = OUT_ROOT / "nightly"
 PAIRS = str(OUT_ROOT / "harvested_pairs_v1.jsonl")
+# Where the descent's progress lives between nights. Beside the logs and on the same writable volume,
+# because it is generated output — and losing it costs only a repeated sweep, never correctness: the
+# tuner re-derives everything from the constants and the pool, and discards the file outright if
+# either has moved.
+STATE = str(LOG_DIR / "tuning_state.json")
 # Re-harvesting every night would burn the window re-deriving pairs that have not changed — the
 # corpus is static between loads. Refresh only when the file is missing or older than this.
 PAIRS_MAX_AGE_DAYS = 14
@@ -129,11 +144,25 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--force", action="store_true", help="run regardless of the window (for testing)")
     ap.add_argument("--cpus", type=int, default=0, help="override the window's CPU budget")
-    # Sized from the measured hit rate, not picked round. The tuner refuses to run below
-    # tune_retrieval.MIN_HITS answered pairs, and harvested recall runs near 0.096 — so it needs
-    # ~312 pairs in the tune half, which is a 640 sample split two ways. At the measured 1.55s a
-    # query that is ~9 min a candidate and ~3h for a full 20-candidate sweep, inside a 5h window.
-    ap.add_argument("--sample", type=int, default=640)
+    # Sized from what ONE knob-night actually costs, measured on the live box at 1.9s a query:
+    #
+    #   scoring the incumbent          1
+    #   scoring the carried-forward best  1   (only when earlier nights accepted something)
+    #   candidate values               4   (the widest knob has five, minus the current one)
+    #   held-out, before and after     2
+    #                                 ──
+    #                                  8 scoring passes
+    #
+    # At 800 pairs that is ~27 min each and ~216 min of the 298-minute window, leaving real margin —
+    # a run that overruns loses the whole night, so the margin is the point. 640 fits more easily but
+    # buys less evidence, and evidence is the thing in short supply: at a 5.3% harvested hit rate,
+    # 800 pairs are only ~42 actually answered.
+    #
+    # Note what this does NOT fix. Noise falls with the square root, so 640 → 800 shrinks it by about
+    # a ninth, and the gains being chased are the same size as the noise either way. The thing that
+    # makes a result trustworthy here is the held-out confirmation at the end of every run, not the
+    # sample size — which is exactly the step that never once ran before this.
+    ap.add_argument("--sample", type=int, default=800)
     ap.add_argument("--target", type=int, default=5000, help="pairs to harvest when refreshing")
     args = ap.parse_args()
 
@@ -168,14 +197,25 @@ def main() -> int:
         remaining = max(60, int((ends_at - datetime.now(ISRAEL)).total_seconds()))
         log.write(f"\n== tune ({remaining // 60} min left in the window)\n")
         rc = _run([py, str(ROOT / "scripts" / "tune_retrieval.py"),
-                   "--pairs", PAIRS, "--sample", str(args.sample)],
+                   "--pairs", PAIRS, "--sample", str(args.sample), "--state", STATE],
                   cpus=cpus, deadline_s=remaining, log=log)
         log.write(f"\nfinished rc={rc} at {datetime.now(ISRAEL):%H:%M}\n")
 
-    (LOG_DIR / "latest.json").write_text(json.dumps({
-        "ran_at": now.isoformat(), "cpus": cpus, "log": log_path.name,
-        "window_ends": ends_at.isoformat(),
-    }, ensure_ascii=False), encoding="utf-8")
+    # The sweep's position, echoed here so "where is this up to" is one small file rather than
+    # reading a night's log to find out. rc=124 means the window closed mid-knob: the state was not
+    # written, and tonight is simply repeated tomorrow.
+    summary: dict = {"ran_at": now.isoformat(), "cpus": cpus, "log": log_path.name,
+                     "window_ends": ends_at.isoformat(), "rc": rc,
+                     "timed_out": rc == 124, "pairs": _pairs_count(Path(PAIRS))}
+    try:
+        st = json.loads(Path(STATE).read_text(encoding="utf-8"))
+        summary["knobs_done"] = st.get("done", [])
+        summary["best"] = st.get("best")
+        summary["last"] = (st.get("history") or [None])[-1]
+    except (OSError, ValueError):
+        summary["knobs_done"] = []
+    (LOG_DIR / "latest.json").write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"nightly eval done → {log_path}")
     return 0
 

@@ -32,6 +32,25 @@ RUNTIME is dominated by Qdrant, not by us: budget roughly (sample x seconds-per-
 value. Start with --sample 150 to get a result overnight, then re-run the winners at a larger sample
 to confirm they were not noise. Nothing here writes to the codebase: it prints the winning values
 for a human to apply.
+
+RESUMING ACROSS NIGHTS (--state)
+--------------------------------
+A full descent does not fit in one 5-hour window once the pool is big enough to mean anything, and
+for a week it did not fit and nobody noticed: each night restarted from the constants in hybrid.py,
+got partway through the sweep, was killed at 05:00, and threw the evening away. The log said
+"will resume next run", which was simply not true — there was nothing to resume from. Two nights ran
+to `rc=124` having accepted a value that was never confirmed and never written down.
+
+With `--state PATH` this tunes ONE knob per run and persists what it learned, so a sweep spans as
+many nights as it needs. Each run ends with the held-out check on everything accepted so far, which
+means every night produces an answer that is either applicable or explicitly rejected — rather than
+nothing at all until a sweep that never finishes finishes.
+
+The state is abandoned and started over when the ground moves under it: if the constants in
+hybrid.py no longer match the baseline the sweep began from (someone applied a value by hand), or if
+the pairs pool changed. Coordinate descent keeps earlier winners, so every later decision was made
+in the context of the earlier ones; carrying those forward onto a different baseline or different
+data would be quietly comparing things that were never comparable.
 """
 
 from __future__ import annotations
@@ -149,6 +168,55 @@ def _apply(values: dict) -> None:
         setattr(hybrid, name, value)
 
 
+# ── Cross-night state ─────────────────────────────────────────────────────────
+STATE_VERSION = 1
+
+
+def _fingerprint(pairs_path: Path, baseline: dict) -> str:
+    """What the stored progress is only valid FOR.
+
+    Two things invalidate a half-finished descent, and both have to be caught or the resumed sweep
+    silently compares values that were measured under different conditions:
+
+      * the constants in hybrid.py changed — someone applied a winner by hand, so the incumbent the
+        earlier knobs were measured against no longer exists;
+      * the pairs pool changed — a re-harvest replaces the questions, and an mrr on one set of
+        questions is not comparable to an mrr on another.
+    """
+    try:
+        stat = pairs_path.stat()
+        pool = f"{stat.st_size}:{int(stat.st_mtime)}"
+    except OSError:
+        pool = "missing"
+    return json.dumps({"baseline": baseline, "pool": pool}, sort_keys=True)
+
+
+def _load_state(path: Path, fingerprint: str) -> dict:
+    """Stored progress, or a fresh sweep if there is none or it no longer applies."""
+    fresh = {"version": STATE_VERSION, "fingerprint": fingerprint, "best": None, "done": [],
+             "history": []}
+    if not path.exists():
+        return fresh
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return fresh
+    if state.get("version") != STATE_VERSION:
+        print("state file is from an older version — starting the sweep over")
+        return fresh
+    if state.get("fingerprint") != fingerprint:
+        print("the constants or the pairs pool changed since this sweep began — starting over.\n"
+              "Coordinate descent keeps earlier winners, so those decisions were made against a\n"
+              "baseline that no longer exists and cannot be carried forward.")
+        return fresh
+    return state
+
+
+def _save_state(path: Path, state: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -162,6 +230,9 @@ def main() -> int:
     ap.add_argument("--top-k", type=int, default=8)
     ap.add_argument("--holdout", type=float, default=0.5,
                     help="fraction of the harvested pairs kept back to confirm the winner")
+    ap.add_argument("--state", default="",
+                    help="persist progress here and tune ONE knob per run, resuming across nights")
+    ap.add_argument("--reset", action="store_true", help="discard stored progress and start over")
     args = ap.parse_args()
 
     pairs = _load(ROOT / args.pairs)
@@ -184,8 +255,27 @@ def main() -> int:
     retriever = ChavrutaPipeline().retriever
 
     baseline = {k: getattr(hybrid, k) for k in KNOBS}
+
+    # Resume, if asked to. `best` carries forward what earlier nights accepted; `done` is which knobs
+    # no longer need looking at. Both are dropped if the fingerprint no longer matches.
+    state_path = Path(args.state) if args.state else None
+    state: dict = {}
+    if state_path:
+        fp = _fingerprint(ROOT / args.pairs, baseline)
+        if args.reset and state_path.exists():
+            state_path.unlink()
+            print("--reset: stored progress discarded")
+        state = _load_state(state_path, fp)
+        state["fingerprint"] = fp
+
     print(f"tuning on {len(tune_set)} harvested pairs | veto set: {len(human)} human questions")
-    print(f"baseline: {baseline}\n")
+    print(f"baseline: {baseline}")
+    if state:
+        carried = state.get("best") or baseline
+        print(f"resuming: {len(state['done'])}/{len(KNOBS)} knobs done{' — ' + ', '.join(state['done']) if state['done'] else ''}")
+        if carried != baseline:
+            print(f"carried  : {carried}")
+    print()
 
     base_tuned = score(retriever, tune_set, top_k=args.top_k)
     base_human = score(retriever, human, top_k=args.top_k)
@@ -217,15 +307,38 @@ def main() -> int:
               f"(at least {MIN_HITS} answered; scripts/harvest_pairs.py --target 5000) and re-run.")
         return 1
 
-    best = dict(baseline)
+    best = dict(state.get("best") or baseline)
     best_score, best_human = base_tuned["mrr"], base_human["mrr"]
+    # The incumbent is what earlier nights accepted, not the code's constants — so this night's
+    # candidates are compared against the same thing they will actually replace. Scoring it costs one
+    # candidate's worth of window and is not optional: comparing tonight's numbers against a baseline
+    # measured on a different night, with a different pool, is how a sweep accumulates drift.
+    if best != baseline:
+        _apply(best)
+        carried_t, carried_h = score(retriever, tune_set, top_k=args.top_k), \
+            score(retriever, human, top_k=args.top_k)
+        print(f"carried   harvested recall={carried_t['recall']:.3f} mrr={carried_t['mrr']:.3f}"
+              f" | human recall={carried_h['recall']:.3f} mrr={carried_h['mrr']:.3f}\n")
+        best_score, best_human = carried_t["mrr"], carried_h["mrr"]
+
+    # In state mode a run tunes ONE knob and stops. A full descent does not fit in a 5-hour window at
+    # a pool size worth measuring on, and a run that is killed partway through has, in practice,
+    # measured nothing it can keep.
+    todo = [k for k in KNOBS if k not in set(state.get("done", []))]
+    if state_path and not todo:
+        print(f"the sweep is complete — all {len(KNOBS)} knobs tuned.\n"
+              f"baseline : {baseline}\nwinner   : {best}\n"
+              f"Re-run with --reset to start a fresh sweep (worth doing after a re-harvest or a "
+              f"corpus reload).")
+        return 0
+    knobs_this_run = {todo[0]: KNOBS[todo[0]]} if state_path else KNOBS
     # One question flipping from missed to first place moves mrr by exactly this much.
     one_item = 1.0 / max(1, len(tune_set))
     min_gain = max(one_item, best_score * MIN_GAIN_REL)
     print(f"a candidate must gain more than {min_gain:.5f} mrr to be accepted "
           f"(one question of {len(tune_set)} is worth {one_item:.5f})\n")
 
-    for knob, candidates in KNOBS.items():
+    for knob, candidates in knobs_this_run.items():
         print(f"── {knob} (currently {best[knob]})")
         for value in candidates:
             if value == best[knob]:
@@ -264,7 +377,8 @@ def main() -> int:
     print(f"held-out  after  mrr={hold_after['mrr']:.3f} recall={hold_after['recall']:.3f}")
     print(f"\nbaseline : {baseline}")
     print(f"winner   : {best}")
-    if hold_after["mrr"] <= hold_before["mrr"]:
+    survived = hold_after["mrr"] > hold_before["mrr"]
+    if not survived:
         print("\nThe gain did NOT survive the held-out half. Do not apply these values — this is "
               "what overfitting to a tuning split looks like, and it is the expected outcome when "
               "the constants were already near a local optimum.")
@@ -272,6 +386,27 @@ def main() -> int:
         print("\nApply by editing the constants in src/chavruta/retrieval/hybrid.py. Nothing is "
               "written automatically: these are load-bearing product values and deserve a human "
               "reading the numbers first.")
+
+    if state_path:
+        # Written only once the knob is finished AND checked, so a run killed mid-knob leaves the
+        # previous night's state untouched rather than a half-swept knob that reads as done.
+        tuned_now = list(knobs_this_run)
+        state["best"] = best
+        state["done"] = list(state.get("done", [])) + tuned_now
+        state["history"] = list(state.get("history", []))[-40:] + [{
+            "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "knobs": tuned_now,
+            "chose": {k: best[k] for k in tuned_now},
+            "held_out_before": round(hold_before["mrr"], 5),
+            "held_out_after": round(hold_after["mrr"], 5),
+            "survived": survived,
+            "sample": len(tune_set),
+        }]
+        _save_state(state_path, state)
+        left = [k for k in KNOBS if k not in set(state["done"])]
+        print(f"\nprogress saved → {state_path}")
+        print(f"{len(state['done'])}/{len(KNOBS)} knobs done"
+              + (f"; next up: {left[0]}" if left else "; sweep complete"))
     return 0
 
 
