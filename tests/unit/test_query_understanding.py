@@ -221,3 +221,59 @@ def test_router_planner_failure_is_swallowed():
             raise RuntimeError("LLM down")
     q = Router(planner=FailPlanner()).route(Query(text="a general question with no reference at all"))
     assert not q.named_refs   # None or [] — request still routed, no exception
+
+
+# ── The daf named BEFORE the tractate — reported live 2026-08-13 ─────────────
+# Someone opened chavruta mode with "אני באמצע ללמוד את דף עט בחולין", was answered about
+# שיעור ארבע מילין out of a Shulchan Arukh commentary, said "זאת לא הסוגיה", and got the same
+# wrong source a second time. Only when he described the sugya in his own words did retrieval
+# find Chullin.158.6 — which IS daf 79b. The daf was in the corpus the whole time.
+#
+# Every pattern read the tractate FIRST, so this phrasing produced neither a ref nor even a
+# tractate to scope the search to, and retrieval fell back to unscoped semantic search over a
+# sentence that carries almost no meaning on its own.
+@pytest.mark.parametrize("text,expected", [
+    ("אני באמצע ללמוד את דף עט בחולין", ["Chullin.79a", "Chullin.79b"]),
+    ("דף עט בחולין", ["Chullin.79a", "Chullin.79b"]),
+    ("בדף עט בחולין", ["Chullin.79a", "Chullin.79b"]),
+    ("דף עט במסכת חולין", ["Chullin.79a", "Chullin.79b"]),
+    ("אני באמצע ללמוד את דף ב בבבא מציעא", ["Bava Metzia.2a", "Bava Metzia.2b"]),
+    # An explicit amud still wins — it is more specific than "the daf", so don't widen it.
+    ("דף עט. בחולין", ["Chullin.79a"]),
+    ("דף עט: בחולין", ["Chullin.79b"]),
+])
+def test_a_daf_named_before_its_tractate_resolves(text, expected):
+    assert detect_hebrew_refs(text) == expected
+
+
+def test_a_bare_daf_covers_both_amudim():
+    """"דף עט" names the whole daf, and a sugya does not stop at the page turn. The answer this
+    bug was about sat on 79b; anchoring only to 79a would reproduce the miss more quietly."""
+    from chavruta.corpus.refs import with_ref_variants
+
+    refs = detect_hebrew_refs("אני לומד דף עט בחולין")
+    corpus = {v for r in refs for v in with_ref_variants([r])}
+    # Amud-linear: 79a → 157, 79b → 158 (N = 2·daf ∓ 1).
+    assert "Chullin.157.1" in corpus and "Chullin.158.1" in corpus
+
+
+@pytest.mark.parametrize("text", [
+    "ברכות טובות",          # ט = 9; a tractate followed by an innocent word
+    "שבת קודש",             # ק = 100 — the case the amud requirement exists for
+    "דף על השולחן",         # "דף" with no tractate anywhere
+    "אני קורא ספר טוב",
+])
+def test_prose_that_merely_contains_a_tractate_name_still_anchors_nothing(text):
+    """The amud marker was required precisely to stop these. Relaxing it for the daf-first form
+    must not reopen them — the literal word דף is what carries the disambiguation instead."""
+    assert detect_hebrew_refs(text) == []
+
+
+def test_the_tractate_alone_is_scoped_even_in_the_daf_first_order():
+    """The floor beneath the ref. Even when a daf number is implausible or the exact ref misses,
+    an answer from somewhere in Chullin beats one from a Shulchan Arukh commentary on a different
+    subject — which is what the live report got."""
+    from chavruta.intents.hebrew_refs import detect_tractates
+
+    assert detect_tractates("אני באמצע ללמוד את דף עט בחולין") == ["Chullin"]
+    assert detect_tractates("דף ב בבבא מציעא") == ["Bava Metzia"]

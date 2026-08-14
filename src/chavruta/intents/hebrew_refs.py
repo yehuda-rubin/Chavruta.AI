@@ -144,6 +144,26 @@ _TALMUD_RE = re.compile(
     rf"(?P<daf>{_DAF})[{_MARK}]*\s*(?P<amud>{_AMUD})"
 )
 
+# The other word order: the DAF FIRST and the tractate after it — "דף עט בחולין", "בדף ב בבבא
+# מציעא". Every pattern above reads the tractate first, so this phrasing resolved to nothing at
+# all: not a ref, and not even a tractate to scope the search to.
+#
+# It is the sentence a learner actually types. A real report on 2026-08-13: someone opened chavruta
+# mode with "אני באמצע ללמוד את דף עט בחולין", got an answer about שיעור ארבע מילין out of a
+# Shulchan Arukh commentary, said "זאת לא הסוגיה", and got the same wrong source again. The daf was
+# in the corpus the whole time — once he described the topic in words, retrieval found Chullin.158.6,
+# which IS daf 79b. Nothing was missing except the parse.
+#
+# Safe without an amud marker because the literal word דף carries the disambiguation the amud
+# normally provides: "ברכות טובות" has no דף in it. The plausibility bound is kept all the same.
+_DAF_FIRST_RE = re.compile(
+    rf"ב?דף\s+(?P<daf>{_DAF})[{_MARK}]*\s*(?P<amud>{_AMUD})?\s*"
+    rf"(?:ב|ל|מ)?(?:מסכת\s+)?(?P<tractate>{_book_alt(HE_TRACTATES)})"
+)
+
+# The longest tractate is Bava Batra at 176 dapim, so anything outside this was never a citation.
+_DAF_MIN, _DAF_MAX = 2, 180
+
 
 def detect_tanakh_refs(text: str) -> list[str]:
     """Hebrew Tanakh refs → 'Book.ch' or 'Book.ch.verse'.
@@ -183,6 +203,24 @@ def detect_talmud_refs(text: str) -> list[str]:
         ref = f"{HE_TRACTATES[m.group('tractate')]}.{daf}{amud}"
         if ref not in refs:
             refs.append(ref)
+
+    for m in _DAF_FIRST_RE.finditer(text):
+        daf = _daf_value(m.group("daf"))
+        if daf is None or not _DAF_MIN <= daf <= _DAF_MAX:
+            continue
+        tractate = HE_TRACTATES[m.group("tractate")]
+        amud_tok = m.group("amud")
+        if amud_tok:
+            sides = ["b" if ("ב" in amud_tok or ":" in amud_tok) else "a"]
+        else:
+            # "daf 79" names the whole daf, and the sugya on it does not stop at the page turn —
+            # the answer this bug was about sat on 79b. Anchoring only to 79a would reproduce the
+            # miss in a quieter form, so both amudim go in.
+            sides = ["a", "b"]
+        for side in sides:
+            ref = f"{tractate}.{daf}{side}"
+            if ref not in refs:
+                refs.append(ref)
     return refs
 
 
@@ -212,9 +250,17 @@ def detect_tractates(text: str) -> list[str]:
             # as a daf: "שבת קודש" parses as Shabbat + daf קודש (=410). The longest tractate is Bava
             # Batra at 176 dapim, so an implausible value means this was never a citation.
             daf = _daf_value(m.group("daf"))
-            if daf is None or not 2 <= daf <= 180:
+            if daf is None or not _DAF_MIN <= daf <= _DAF_MAX:
                 continue
         en = HE_TRACTATES.get(he or "")
+        if en and en not in out:
+            out.append(en)
+    # "דף עט בחולין" — the daf-first order. Worth catching here as well as in detect_hebrew_refs,
+    # because scoping the search to the right masechet is the floor: even when the daf number is
+    # implausible or the exact ref misses, an answer from somewhere in Chullin beats an answer from
+    # a Shulchan Arukh commentary on a different subject entirely, which is what this returned.
+    for m in _DAF_FIRST_RE.finditer(text):
+        en = HE_TRACTATES.get(m.group("tractate") or "")
         if en and en not in out:
             out.append(en)
     return out
