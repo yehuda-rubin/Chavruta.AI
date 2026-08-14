@@ -2130,3 +2130,16 @@ def test_a_message_saved_without_a_source_list_reads_back_empty(tmp_path, monkey
     db.save_message(sid, "assistant", "תשובה", intent="qa")
 
     assert db.get_messages(sid, "o-1")[-1]["source_note"] == ""
+
+
+def test_the_source_list_does_not_show_the_reader_raw_markers():
+    """Seen on the first live run: the model opens each line "[S1] נשמת חיים…". A marker means
+    nothing to a reader — that is why they are stripped from the answer — and the note is
+    reader-facing. Only the marker pass runs here; the foreign-language scrub must still never
+    touch this block, because a work's name is often the only Latin text in it."""
+    body, note = api._split_source_note(
+        'תשובה.\nHHH\n[S1] נשמת חיים — חיבור קבלי.\n[S8] Toldot_Yaakov_Yosef — ספר חסידי.')
+    assert body == "תשובה."
+    assert "[S1]" not in note and "[S8]" not in note
+    assert note.startswith("נשמת חיים")
+    assert "Toldot_Yaakov_Yosef" in note, "the scrub must not have run on the note"

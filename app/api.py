@@ -138,7 +138,13 @@ def _split_source_note(text: str) -> tuple[str, str]:
     m = _SOURCE_NOTE_RE.search(text)
     if not m:
         return text, ""
-    return text[:m.start()].rstrip(), text[m.end():].strip()
+    note = text[m.end():].strip()
+    # Markers come out of the note too — the model opens each line with "[S1] ", which means nothing
+    # to a reader and is the exact thing markers are stripped from the answer for. Seen on the first
+    # live run (2026-08-14). Only the marker pass: the foreign-language scrub must still never touch
+    # this block, because a work's name is often the only Latin in it.
+    note = _MARKER_RE.sub("", note)
+    return text[:m.start()].rstrip(), note.strip()
 
 
 def _strip_markers(text: str, he: bool = False) -> str:
