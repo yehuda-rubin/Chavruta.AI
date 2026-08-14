@@ -76,11 +76,6 @@ export function SourcesPanel({
     }
   }
 
-  // The most recent one only. Every answer in a long conversation carrying its own list would
-  // bury the sources under a stack of near-duplicates.
-  const latestNote = [...messages].reverse()
-    .find((m) => m.role === "assistant" && (m.source_note || "").trim())?.source_note?.trim() || "";
-
   const toggle = (ref: string) =>
     setToggled((prev) => {
       const next = new Set(prev);
@@ -102,22 +97,13 @@ export function SourcesPanel({
         <h3 className="font-serif text-xl font-bold text-tekhelet">{tr(lang, "relatedSources")}</h3>
       </div>
       <div className="flex-1 overflow-y-auto p-4 pt-0 flex flex-col gap-3">
-        {/* The model's own account of what it used, from the latest answer that carried one. It is
-            cut out of the answer server-side (app/api.py::_split_source_note) precisely so it can
-            live here instead — a reader asking "where is this from" is asking about the sources, so
-            the answer belongs beside them and not in the middle of the prose. Whitespace is
-            preserved because the model writes it as one line per work. */}
-        {latestNote && (
-          <div className="rounded-2xl bg-tekhelet/5 ring-1 ring-tekhelet/15 p-4">
-            <p className="text-[10px] font-black tracking-widest text-tekhelet/70 uppercase mb-2">
-              {tr(lang, "sourceNoteTitle")}
-            </p>
-            <p className="text-xs text-ink/75 leading-relaxed whitespace-pre-line break-words">
-              {latestNote}
-            </p>
-          </div>
-        )}
-        {order.length === 0 && !latestNote ? (
+        {/* The model's own source list used to render here and was removed on sight (2026-08-14):
+            it repeated, in English, the very sources listed underneath it. It existed to get a
+            work's NAME in front of a Hebrew reader — and the comma fix in
+            corpus/refs.py::hebrew_display_ref did that properly instead, taking the panel's own
+            Hebrew coverage from 66% to 98.5%. The server still carries `source_note` on the
+            message; nothing displays it, and the prompt that asks for it is gated off. */}
+        {order.length === 0 ? (
           <p className="text-ink/40 text-sm text-center mt-10">{tr(lang, "sourcesHint")}</p>
         ) : (
           // most-recent on top; ordinal 1 = first used
