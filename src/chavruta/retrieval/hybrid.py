@@ -13,6 +13,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import replace
 
+from chavruta.corpus.normalize import deuphemize_he
 from chavruta.corpus.refs import (
     commentary_refs,
     commentator_from_ref,
@@ -154,7 +155,12 @@ class HybridRetriever:
         t_all = time.monotonic()
         t: dict[str, float] = {}
         with _timed(t, "embed"):
-            emb = self.embedding.embed_query(query.search_text or query.text)
+            # The reverent spelling is rewritten for the SEARCH text only — the user's own words are
+            # never altered anywhere they are shown. Someone who writes "חלק אלוק ממעל" is quoting
+            # Iyov 31:2, and until this ran the pasuk did not appear in the top ten of its own
+            # quotation; with the one letter restored it comes back second. See
+            # corpus/normalize.py::deuphemize_he.
+            emb = self.embedding.embed_query(deuphemize_he(query.search_text or query.text))
         use_sparse = self.profile.hybrid and bool(emb.sparse)
         hquery = HybridQuery(dense=emb.dense, sparse=emb.sparse if use_sparse else None)
 

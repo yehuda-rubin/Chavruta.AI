@@ -277,3 +277,54 @@ def test_the_tractate_alone_is_scoped_even_in_the_daf_first_order():
 
     assert detect_tractates("אני באמצע ללמוד את דף עט בחולין") == ["Chullin"]
     assert detect_tractates("דף ב בבבא מציעא") == ["Bava Metzia"]
+
+
+# ── The reverent spelling (reported 2026-08-14) ──────────────────────────────
+# A user asked for the source of "הנשמה היא חלק אלוק ממעל" and was answered from works nobody has
+# heard of. The phrase is a verbatim quotation of Iyov 31:2, which sits in the corpus — but he wrote
+# the divine name the way observant Hebrew writes it outside prayer, with ק for ה, and the corpus
+# (being the texts themselves) spells it in full. Measured on the live collection: his spelling put
+# the pasuk nowhere in the top ten; the real spelling put it second.
+@pytest.mark.parametrize("written,sources_spell_it", [
+    ("חלק אלוק ממעל", "חלק אלוה ממעל"),
+    ("אלוקים", "אלוהים"),
+    ("אלקים", "אלהים"),
+    ("ואלוקי אבותינו", "ואלוהי אבותינו"),
+    ("באלקים", "באלהים"),
+    ("אלוקינו", "אלוהינו"),
+    ("מה המקור לכך שהנשמה היא חלק אלוק ממעל?", "מה המקור לכך שהנשמה היא חלק אלוה ממעל?"),
+])
+def test_the_reverent_spelling_is_restored_for_search(written, sources_spell_it):
+    from chavruta.corpus.normalize import deuphemize_he
+
+    assert deuphemize_he(written) == sources_spell_it
+
+
+@pytest.mark.parametrize("ordinary", [
+    "חלק", "צדק", "חוק", "רק", "שוק", "דק", "תיק", "פרק", "הצדק שלך", "חלק מהתשובה",
+    "אלוקיסט",          # a longer word that merely begins the same way
+])
+def test_ordinary_words_ending_in_kuf_are_left_alone(ordinary):
+    """A blanket ק→ה would wreck the language. The rewrite is anchored to the אל- stem with a word
+    boundary on both sides, so nothing but the divine name is touched."""
+    from chavruta.corpus.normalize import deuphemize_he
+
+    assert deuphemize_he(ordinary) == ordinary
+
+
+def test_the_rewrite_is_for_search_only_and_never_shown_to_the_reader():
+    """What a user chose to write is theirs. This exists so the query and the corpus can meet — the
+    retriever embeds the rewritten form, and nothing else in the request is altered."""
+    import importlib
+    import inspect
+
+    from chavruta.retrieval import hybrid
+
+    src = inspect.getsource(hybrid.HybridRetriever.retrieve)
+    assert "deuphemize_he(query.search_text or query.text)" in src, "not wired into embedding"
+    # The rewrite feeds the embedder and nothing else — the raw text must never be embedded
+    # alongside it, and no display path may call it.
+    assert "embed_query(query.search_text" not in src, "the un-rewritten text is still embedded"
+    for module in ("app.api", "chavruta.generation.grounded"):
+        mod = importlib.import_module(module)
+        assert "deuphemize" not in inspect.getsource(mod), f"{module} rewrites what the reader sees"
