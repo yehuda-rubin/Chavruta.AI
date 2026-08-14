@@ -165,7 +165,13 @@ granting the ₪2,799 tier, and a self-service quota reset — went out on 2026-
 
 ## G. The sources panel misses what the model used without marking it
 
-**Decided with the operator 2026-08-14. Specified, not built.**
+**Decided with the operator 2026-08-14. Built and deployed 2026-08-14** (`371cae0` —
+`_widen_citations_from_note` in `app/api.py`; `de28c1c` — the raw-ref chip fix in
+`web/lib/format.tsx`). `CHAVRUTA_SOURCE_NOTE_OWNERS` is live on the VM, gated in `_run_query` (the
+shared funnel every route goes through, not just `/query`), and the widening/logging path is verified
+against a real answer through `/sessions/{id}/query`. No `pipeline.ask` contract change was actually
+needed — `_fetch_refs()` already existed and does the validation. Below is the original spec, kept for
+the record.
 
 Measured on a real answer: the panel showed **16** sources, the model's own HHH list named **19**.
 The panel is built from `enforce_citations`, which maps `[S#]` markers back to chunks — so a source
@@ -203,3 +209,41 @@ specified rather than rushed at the end of a long session.
 route the app actually posts to — and confirm the panel count rises to meet the list. A check that
 calls `pipeline.ask` directly cannot see a route-shaped gap, which is exactly how the HHH block
 shipped gated on a route the app never calls.
+
+---
+
+## H. Tanakh and Mishnah are indexed WITH niqqud — this is likely the real cause of the base-pasuk recall gap
+
+**Found 2026-08-14, investigating why `Job.31.2` doesn't surface for "חלק אלוה/אלוק ממעל" even after
+the quotation floor (§ above, this session) and the de-euphemizer. Diagnosed only, not fixed — this
+is a re-embedding job, not a code patch.**
+
+The stored text for `Job.31.2` carries full niqqud + trop:
+`וּמֶ֤ה ׀ חֵ֣לֶק אֱל֣וֹהַּ מִמָּ֑עַל וְֽנַחֲלַ֥ת שַׁ֝דַּ֗י מִמְּרֹמִֽים׃`. Checked across work types:
+**Tanakh and Mishnah are stored vocalized; Halacha (`Shulchan_Arukh,_Orach_Chayim.1.1` sampled) is
+not.** This lines up exactly with the long-open, previously unexplained
+[[lesson-primary-source-recall-gap]] — base pasuk ~43% vs halacha ~100%.
+
+Two separate effects measured directly against production, both real:
+1. **Sparse/lexical**: a plain query token (`אלוה`) cannot match a niqqud-interleaved stored token —
+   different token entirely to a lexical index. Near-certain zero sparse contribution for vocalized
+   text.
+2. **Dense**: NOT solely a sparse problem. A pure dense-only search (sparse stripped out entirely),
+   scoped to foundational works with commentary refs filtered out, still does not surface `Job.31.2`
+   in the top 15 — its cosine (~0.62) sits inside a dense cluster of a few dozen Tehillim
+   verses/commentaries in the same 0.58–0.62 band. Niqqud makes it worse, but even a niqqud-stripped
+   re-embed of the verse only moved cosine from 0.6209 → 0.6492 against the query — real, but not by
+   itself enough to separate it from the pack.
+
+**Why this isn't tonight's fix**: closing it means re-embedding Tanakh + Mishnah (hundreds of
+thousands of points) and rebuilding the index for them — the same order of work as the original
+commercial-corpus build on the H100, not a `hybrid.py` patch. The quote-floor tweak discussed earlier
+in this session (deepen it, filter commentary refs like the base floor does) was proposed before this
+was known and **would not have fixed it** — verified by testing dense-only at depth 15, which still
+misses.
+
+**Before starting a re-embed**: decide whether niqqud is stripped only for the vectors (sparse +
+dense) while the stored/displayed payload text keeps it for citation display, or stripped from the
+payload text entirely with niqqud-bearing text reconstructed at render time. The former is safer and
+is almost certainly the right call — display fidelity has no bearing on retrievability and should not
+be touched to fix it.

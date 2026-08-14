@@ -457,6 +457,7 @@ class ChavrutaPipeline:
         answer = Answer(
             text=text, citations=citations, grounded=is_grounded,
             no_source=not is_grounded, intent=query.intent,
+            retrieved_refs=[h.ref for h in result.hits] + [s.ref for s in (fetched or [])],
         )
         if missing_note:
             answer.caveats.append(missing_note)
@@ -570,7 +571,8 @@ class ChavrutaPipeline:
         if plan.sections:
             plan = grounded.prune_lesson_to_cited(plan, citations)
         answer = Answer(text=text, citations=citations, grounded=is_grounded,
-                        no_source=not is_grounded, intent=query.intent)
+                        no_source=not is_grounded, intent=query.intent,
+                        retrieved_refs=[h.ref for h in result.hits] + [s.ref for s in (fetched or [])])
         answer.lesson_plan = plan
         return grounded.maybe_halacha_caveat(answer, query.lang)
 

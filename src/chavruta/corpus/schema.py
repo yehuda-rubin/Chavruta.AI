@@ -203,3 +203,7 @@ class Answer:
     caveats: list[str] = field(default_factory=list)
     intent: Intent = Intent.QA
     lesson_plan: LessonPlan | None = None
+    # Every ref the model was actually shown this turn (retrieved hits + agentically-fetched) — NOT
+    # just the ones it cited. Lets a caller tell "named a real work" apart from "named a work it was
+    # actually given"; see app/api.py::_widen_citations_from_note.
+    retrieved_refs: list[str] = field(default_factory=list)

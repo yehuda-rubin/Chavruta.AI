@@ -166,7 +166,8 @@ def _refs_in_source_note(note: str) -> list[str]:
     return out
 
 
-def _widen_citations_from_note(result, note: str, owner_id: str = "") -> None:
+def _widen_citations_from_note(result, note: str, owner_id: str = "",
+                               retrieved_refs=None) -> None:
     """Add sources the model USED but never marked, and log the ones it named out of thin air.
 
     The panel is built from `[S#]` markers, so a source the model leaned on without writing a marker
@@ -174,11 +175,21 @@ def _widen_citations_from_note(result, note: str, owner_id: str = "") -> None:
     the model's own list. This closes that gap — which is what the source list was asked for in the
     first place.
 
-    The list is an INDEX into real material, never a source of truth. A line only becomes a citation
-    if its ref resolves in the corpus, so a fabricated line cannot turn into one — and the first live
-    runs did fabricate, inventing an author for the Ben Ish Chai and a parasha called "איקה".
+    The list is an INDEX into real material, never a source of truth — a line only becomes a citation
+    if it names something the model actually had in front of it. That means TWO checks, not one:
 
-    A ref that resolves to nothing is the invention signal, and it is worth more as a measurement
+    1. The ref must resolve in the corpus at all (a fabricated ref, e.g. a parasha called "איקה",
+       fails here).
+    2. When `retrieved_refs` is given, the ref must be IN it — the set the model was actually shown
+       this turn (`result.hits` + any agentically-fetched sources). A ref that passes (1) but fails
+       (2) is a real work the model was never given for this question and is naming from its own
+       training data, not the retrieved context — invisible to (1) alone, and measured live on
+       2026-08-14: of 30 unique refs one real answer named, 20 were not in that turn's retrieved set
+       even though every one of the 30 resolved in the corpus, so (1) alone logged nothing.
+       `retrieved_refs` is optional (not every call site has it threaded through yet) — when absent
+       this falls back to corpus-only validation, same as before.
+
+    A ref that fails either check is the invention signal, and it is worth more as a measurement
     than the line was worth as a citation: recorded for the OPERATOR only (guard_findings), with no
     user-facing effect. Never raises — a diagnostic that can break an answer is worse than none.
     """
@@ -189,17 +200,24 @@ def _widen_citations_from_note(result, note: str, owner_id: str = "") -> None:
     wanted = [r for r in refs if r not in have]
     if not wanted:
         return
-    try:
-        hits = _fetch_refs(wanted)
-    except Exception:
-        _log.exception("could not resolve source-list refs")
-        return
+    retrieved_set = set(retrieved_refs) if retrieved_refs is not None else None
+    if retrieved_set is not None:
+        in_scope = [r for r in wanted if r in retrieved_set]
+        out_of_scope = [r for r in wanted if r not in retrieved_set]
+    else:
+        in_scope, out_of_scope = wanted, []
     found = {}
-    for h in hits:
-        payload = getattr(h, "payload", None) or {}
-        ref = payload.get("ref") or ""
-        if ref and ref not in found:
-            found[ref] = payload
+    if in_scope:
+        try:
+            hits = _fetch_refs(in_scope)
+        except Exception:
+            _log.exception("could not resolve source-list refs")
+            hits = []
+        for h in hits:
+            payload = getattr(h, "payload", None) or {}
+            ref = payload.get("ref") or ""
+            if ref and ref not in found:
+                found[ref] = payload
     he = True
     for ref, payload in found.items():
         result.citations.append(CitationOut(
@@ -213,11 +231,19 @@ def _widen_citations_from_note(result, note: str, owner_id: str = "") -> None:
             commentator=(payload.get("commentator_id") or commentator_from_ref(ref) or ""),
             deep_link=payload.get("deep_link") or "",
             license=payload.get("license") or "", version_title=payload.get("version_title") or ""))
-    if missing := [r for r in wanted if r not in found]:
-        # Named a work it was not given, or invented the ref outright.
+    if missing := [r for r in in_scope if r not in found]:
+        # Resolved to nothing in the corpus — named a work that does not exist, or invented the ref
+        # outright.
         db.record_guard_finding("source_note_unresolved", result.intent or "",
                                 {"refs": missing[:12], "named": len(refs),
                                  "resolved": len(found), "owner": owner_id[:12]})
+    if out_of_scope:
+        # Resolves in the corpus, but was never in this turn's retrieved set — the model named a
+        # real work it was not shown. Not added as a citation: real-but-ungrounded is still not
+        # grounded.
+        db.record_guard_finding("source_note_not_retrieved", result.intent or "",
+                                {"refs": out_of_scope[:12], "named": len(refs),
+                                 "owner": owner_id[:12]})
 
 
 def _strip_markers(text: str, he: bool = False) -> str:
@@ -1371,7 +1397,7 @@ def _generate_chavruta_turn(question: str, hits, lang: str, he: bool, history, w
     clean = _strip_markers(_fix_bleeding_sentences(raw, he, llm), he=he)
     out = QueryResponse(answer=clean, citations=used, grounded=bool(used),
                         intent="chavruta", files=[], source_note=note)
-    _widen_citations_from_note(out, note)
+    _widen_citations_from_note(out, note, retrieved_refs=[h.ref for h in hits])
     return out
 
 
@@ -1405,7 +1431,7 @@ def _generate_qa_turn_from_hits(question: str, hits, lang: str, he: bool, histor
         grounded=answer.grounded, intent="qa", caveats=list(answer.caveats), files=[],
         source_note=note,
     )
-    _widen_citations_from_note(out, note)
+    _widen_citations_from_note(out, note, retrieved_refs=[h.ref for h in hits])
     return out
 
 
@@ -1872,8 +1898,8 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
         source_note=source_note,
     )
     # Sources the model used without marking, plus a finding for anything it named that resolves to
-    # nothing — see _widen_citations_from_note.
-    _widen_citations_from_note(out, source_note)
+    # nothing OR was never actually retrieved this turn — see _widen_citations_from_note.
+    _widen_citations_from_note(out, source_note, retrieved_refs=answer.retrieved_refs)
     return out
 
 

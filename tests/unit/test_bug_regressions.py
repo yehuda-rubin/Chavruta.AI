@@ -2232,6 +2232,57 @@ def test_a_broken_lookup_never_costs_the_user_their_answer(monkeypatch):
     assert out.answer == "a"
 
 
+def test_a_real_ref_never_shown_this_turn_is_not_widened(monkeypatch):
+    """Passing (1) corpus-exists isn't enough — a real work the model was never given for THIS
+    question is not evidence it actually used it. Measured live 2026-08-14: of 30 unique refs one
+    real answer named, 20 resolved in the corpus but were never in that turn's retrieved set."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(api, "_fetch_refs", lambda refs: [
+        SimpleNamespace(payload={"ref": "Numbers.22.5.1", "text_he": "טקסט"})])
+    logged: list = []
+    monkeypatch.setattr(api.db, "record_guard_finding",
+                        lambda kind, intent, detail, **k: logged.append((kind, detail)))
+    out = api.QueryResponse(answer="a", citations=[], grounded=True, intent="qa")
+
+    api._widen_citations_from_note(out, "מדרש אגדה, Numbers.22.5.1",
+                                   retrieved_refs=["SomeOther.Ref.1"])
+
+    assert out.citations == [], "a real ref outside the retrieved set must not become a citation"
+    assert logged and logged[0][0] == "source_note_not_retrieved"
+    assert "Numbers.22.5.1" in logged[0][1]["refs"]
+
+
+def test_a_ref_actually_retrieved_this_turn_still_widens(monkeypatch):
+    """The common, correct case: the model named something it was genuinely shown."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(api, "_fetch_refs", lambda refs: [
+        SimpleNamespace(payload={"ref": "Numbers.22.5.1", "text_he": "טקסט"})])
+    monkeypatch.setattr(api.db, "record_guard_finding", lambda *a, **k: None)
+    out = api.QueryResponse(answer="a", citations=[], grounded=True, intent="qa")
+
+    api._widen_citations_from_note(out, "מדרש אגדה, Numbers.22.5.1",
+                                   retrieved_refs=["Numbers.22.5.1", "Other.Ref.2"])
+
+    assert [c.ref for c in out.citations] == ["Numbers.22.5.1"]
+
+
+def test_no_retrieved_refs_given_falls_back_to_corpus_only(monkeypatch):
+    """Call sites that have not threaded retrieved_refs through yet keep the old behaviour —
+    this is an additive check, not a breaking one."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(api, "_fetch_refs", lambda refs: [
+        SimpleNamespace(payload={"ref": "Numbers.22.5.1", "text_he": "טקסט"})])
+    monkeypatch.setattr(api.db, "record_guard_finding", lambda *a, **k: None)
+    out = api.QueryResponse(answer="a", citations=[], grounded=True, intent="qa")
+
+    api._widen_citations_from_note(out, "מדרש אגדה, Numbers.22.5.1")  # no retrieved_refs at all
+
+    assert [c.ref for c in out.citations] == ["Numbers.22.5.1"]
+
+
 def test_a_widened_citation_gets_its_commentator_derived_from_the_ref(monkeypatch):
     """`commentator_id` is EMPTY on all 2.4M points of the commercial corpus and is recovered at
     read time everywhere else (retrieval/hybrid.py::_to_hit). Reading the payload alone is why a
