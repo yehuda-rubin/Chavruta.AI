@@ -102,6 +102,20 @@ _FOUNDATIONAL_WORKS = ("tanakh", "mishnah", "gemara", "halacha", "midrash")
 # text is what makes the answer checkable, and one or two of them is enough for that.
 _BASE_SLOTS = 2
 
+# …and what it takes to actually KEEP one. This floor was the only one of the three that appended
+# its candidates and then gave them nothing, so they went back into the same score sort and lost:
+# a pasuk at 0.30 does not survive next to a commentary at 0.66, and "reserved slot" described an
+# intention the code never carried out. Reported from the other end on 2026-08-14 — a user asked for
+# the source of a well-known idea, got a stack of works nobody has heard of, and said so: "אולי כדאי
+# שיהיה לו סדר עדיפויות ושיביא קודם כל מהמקורות המוסמכים/קדומים/מוכרים יותר". His top-8 contained
+# not one base text.
+#
+# Sized level with the foundational floor rather than above it, and capped below the named-ref
+# anchor: a base text the user did not ask for by name must not outrank one they did. Like every
+# constant here it is a judgement, and like every constant here it is a KNOB in
+# scripts/tune_retrieval.py so the nightly run can replace the judgement with a measurement.
+_BASE_BOOST = 0.05
+
 # The foundational-works floor: how many candidates to pull, and how hard to lift them. The boost is
 # capped below the named-ref anchor sentinel so a floor hit can never masquerade as something the
 # user pointed at by name.
@@ -257,7 +271,9 @@ class HybridRetriever:
                     if is_commentary_ref(rh.ref):      # the point of this floor is the base text
                         continue
                     if not use_sparse or bmap.get(rh.chunk_id, 0.0) >= thr:
-                        rh.score = min(rh.score, 0.99)   # never masquerade as a named-ref anchor
+                        # Lift it, then cap below the named-ref anchor (0.99). Without the lift this
+                        # whole block only widened the candidate pool — see _BASE_BOOST.
+                        rh.score = min(rh.score + _BASE_BOOST, 0.98)
                         hits.append(rh)
                         kept += 1
             except Exception:

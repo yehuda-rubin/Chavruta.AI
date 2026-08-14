@@ -75,6 +75,11 @@ from chavruta.retrieval import hybrid  # noqa: E402
 # The knobs, and the values worth trying for each. Ordered so the ones with the most reason to
 # matter come first — coordinate descent keeps earlier winners, so ordering is not cosmetic.
 KNOBS: dict[str, list] = {
+    # First, because it is the newest and the least evidenced: added 2026-08-14 when the base-text
+    # floor turned out to append candidates and boost nothing, so its "reserved" slots lost the score
+    # sort every time. 0.0 is in the list on purpose — it reproduces the old behaviour, so the sweep
+    # can say the lift does not help rather than being unable to express that.
+    "_BASE_BOOST": [0.0, 0.02, 0.05, 0.10, 0.20],
     "_TRACTATE_BOOST": [0.0, 0.02, 0.05, 0.10, 0.20],
     "_TRACTATE_TOP_K": [3, 6, 10, 16],
     "_FOUNDATIONAL_BOOST": [0.0, 0.02, 0.05, 0.10, 0.20],

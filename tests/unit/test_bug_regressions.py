@@ -2053,3 +2053,80 @@ def test_the_instruction_is_off_unless_the_request_turns_it_on():
     finally:
         lb.reset_source_note(token)
     assert "HHH" not in lb.render_messages(prompt, "he")[-1]["content"]
+
+
+# ── The base-text floor reserved nothing (reported 2026-08-14) ────────────────
+# A user asked for the source of a well-known idea and got a stack of works nobody has heard of,
+# with not one base text in the top 8. The floor meant to prevent exactly that appended its
+# candidates and boosted none of them, so they went back into the same score sort and lost — a
+# pasuk at 0.30 does not survive next to a commentary at 0.66.
+def test_the_base_text_floor_actually_lifts_what_it_reserves():
+    from chavruta.retrieval import hybrid
+
+    assert hybrid._BASE_BOOST > 0, "the floor reserves a slot it cannot hold"
+    # Level with the other two floors: a base text is worth as much as a foundational-work hit.
+    assert hybrid._BASE_BOOST == hybrid._FOUNDATIONAL_BOOST
+
+
+def test_a_base_text_now_survives_next_to_a_commentary_that_scored_higher():
+    """The reported failure in miniature, at the scores the live corpus actually produced."""
+    from chavruta.retrieval import hybrid
+
+    commentary, base = 0.5625, 0.55           # observed on the real query, 2026-08-14
+    assert base < commentary                   # before: the pasuk loses and is cut
+    assert min(base + hybrid._BASE_BOOST, 0.98) > commentary
+
+
+def test_the_lifted_base_text_still_cannot_outrank_a_named_ref():
+    """A base text the user did not ask for by name must not masquerade as one they did — the
+    named-ref anchor sits at 0.99 and this is capped below it."""
+    from chavruta.retrieval import hybrid
+
+    assert min(0.99 + hybrid._BASE_BOOST, 0.98) < 0.99
+
+
+def test_the_base_boost_is_measurable_rather_than_permanent():
+    """Every constant in hybrid.py is a judgement; the ones that matter are knobs the nightly run
+    can overrule. 0.0 must be a candidate so the sweep can say the lift does not help."""
+    import importlib.util
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[2] / "scripts" / "tune_retrieval.py").read_text(
+        encoding="utf-8")
+    knobs = src[src.index("KNOBS: dict[str, list] = {"):src.index("HUMAN_SETS")]
+    assert "_BASE_BOOST" in knobs
+    spec = importlib.util.spec_from_loader("k", loader=None)
+    mod = importlib.util.module_from_spec(spec)
+    exec(compile(knobs, "k", "exec"), mod.__dict__)          # noqa: S102
+    assert 0.0 in mod.KNOBS["_BASE_BOOST"]
+
+
+# ── The source list had nowhere to live (same day) ───────────────────────────
+def test_the_source_list_survives_a_reload(tmp_path, monkeypatch):
+    """It was returned in the API response and stored nowhere, so it vanished the moment the
+    conversation was reopened — the feature would have read as broken rather than absent."""
+    import app.db as db
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "note.db")
+    monkeypatch.setattr(db, "_conn", None)
+    db.get_conn()
+    sid = db.create_session("שאלה", owner_id="o-1")
+    db.save_message(sid, "assistant", "תשובה", intent="qa",
+                    source_note="1. רש\"י על בראשית — צרפת, המאה ה-11.")
+
+    reloaded = db.get_messages(sid, "o-1")
+    assert reloaded[-1]["source_note"].startswith("1. רש")
+
+
+def test_a_message_saved_without_a_source_list_reads_back_empty(tmp_path, monkeypatch):
+    """Most messages have none — it must be an empty string, never NULL, so the API model and the
+    client can treat it as a plain string everywhere."""
+    import app.db as db
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "note2.db")
+    monkeypatch.setattr(db, "_conn", None)
+    db.get_conn()
+    sid = db.create_session("שאלה", owner_id="o-1")
+    db.save_message(sid, "assistant", "תשובה", intent="qa")
+
+    assert db.get_messages(sid, "o-1")[-1]["source_note"] == ""

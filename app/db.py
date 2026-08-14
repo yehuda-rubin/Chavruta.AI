@@ -81,6 +81,7 @@ def get_conn() -> sqlite3.Connection:
 # What was actually missing is below: WHAT each bump added. When a migration goes wrong the question
 # is never "was that major or minor", it is "what changed at 28". Reconstructed from git history.
 #
+#   31  messages.source_note                                      2026-08-14
 #   30  dev_helpers, helper_messages                              2026-08-13
 #   29  guard_findings                                            2026-08-13
 #   28  org_members.removed_at (a re-joinable block)              2026-08-13
@@ -96,7 +97,7 @@ def get_conn() -> sqlite3.Connection:
 #   18  billing_ledger                                            2026-07-26
 #   17  coupons                                                   2026-07-26
 #   ≤16 subscriptions, bans, deletion scheduling, per-owner scoping — see git log -G'^SCHEMA_VERSION'
-SCHEMA_VERSION = 30
+SCHEMA_VERSION = 31
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -141,6 +142,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
             caveats       TEXT,
             grounded      INTEGER,
             files         TEXT,
+            source_note   TEXT NOT NULL DEFAULT '',
             created_at    TEXT NOT NULL
         );
 
@@ -648,6 +650,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
         if "removed_at" not in mcols:
             conn.execute("ALTER TABLE org_members ADD COLUMN removed_at TEXT")
 
+    if version < 31:
+        # The model's own list of the works it used (the HHH block) was returned in the API response
+        # and stored nowhere, so it vanished the moment a conversation was reloaded — the feature
+        # would have looked broken rather than absent. Additive, like every column above it.
+        mcols = {r[1] for r in conn.execute("PRAGMA table_info(messages)")}
+        if "source_note" not in mcols:
+            conn.execute("ALTER TABLE messages ADD COLUMN source_note TEXT NOT NULL DEFAULT ''")
+
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
 
@@ -938,13 +948,15 @@ def save_message(
     caveats: list[str] | None = None,
     grounded: bool | None = None,
     files: list[dict] | None = None,
+    source_note: str = "",
 ) -> int:
     now = _now()
     with _tx(get_conn()) as conn:
         cur = conn.execute(
             """INSERT INTO messages
-               (session_id, role, text, intent, citations, caveats, grounded, files, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?)""",
+               (session_id, role, text, intent, citations, caveats, grounded, files,
+                source_note, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
             (
                 session_id,
                 role,
@@ -954,6 +966,7 @@ def save_message(
                 json.dumps(caveats, ensure_ascii=False) if caveats is not None else None,
                 int(grounded) if grounded is not None else None,
                 json.dumps(files, ensure_ascii=False) if files else None,
+                source_note or "",
                 now,
             ),
         )
@@ -1000,6 +1013,7 @@ def get_messages(session_id: str, owner_id: str = "local") -> list[dict[str, Any
         d["caveats"] = json.loads(d["caveats"]) if d["caveats"] else []
         d["grounded"] = bool(d["grounded"]) if d["grounded"] is not None else None
         d["files"] = json.loads(d["files"]) if d.get("files") else []
+        d["source_note"] = d.get("source_note") or ""
         out.append(d)
     return out
 

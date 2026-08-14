@@ -3152,6 +3152,7 @@ def _save_assistant(session_id: str, result: QueryResponse) -> None:
         caveats=result.caveats,
         grounded=result.grounded,
         files=[f.model_dump() for f in result.files],
+        source_note=result.source_note,
     )
     # Point the library entry at the turn that now holds the same documents, so deleting the lesson
     # can clear both copies. Best-effort: a lesson that stays unlinked still deletes from the
@@ -3340,6 +3341,9 @@ class MessageOut(BaseModel):
     caveats: list[str]
     grounded: bool | None
     files: list[dict] = []
+    # Carried on reload so the sources panel can render it again — it is cut out of `text`, so
+    # without its own column and its own field it existed only for the life of one response.
+    source_note: str = ""
     created_at: str
 
 
