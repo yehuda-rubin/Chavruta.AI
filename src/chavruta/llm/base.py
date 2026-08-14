@@ -157,12 +157,19 @@ def render_messages(prompt: GroundedPrompt, lang: str) -> list[dict]:
             # The model does not know these works' authorship; it knows the text it was handed. So
             # it is asked for the one thing it was handed: the name, copied. Anything richer needs a
             # curated table, not a language model.
+            # Positive and concrete. A first version asked for the author and a description, and the
+            # model invented both — the Ben Ish Chai's commentary attributed to a "רבי יעקב חיים
+            # זילברשטיין", parashat Eikev turned into a parasha called "איקה". A second version
+            # forbade all of that in a row of negatives, and the model responded by omitting the
+            # section altogether. So: say what to write, show the shape, and put the one prohibition
+            # last.
             user += (
-                "\n\nבסוף התשובה, אחרי שורה שבה כתוב HHH בלבד, כתוב רשימה של המקורות שהשתמשת בהם "
-                "בפועל — שורה לכל מקור, מהקדום לְמאוחר. העתק את שם החיבור בדיוק כפי שהוא מופיע "
-                "ברשימת המקורות שקיבלת, ואל תוסיף שם מחבר, תאריך, מקום או תיאור — גם אם נדמה לך "
-                "שאתה יודע אותם. אל תכתוב שם של חיבור שלא הופיע במקורות שקיבלת. "
-                "הרשימה הזו אינה חלק מן התשובה עצמה."
+                "\n\nחובה לסיים כך: שורה שבה כתוב HHH בלבד, ומתחתיה שורה לכל מקור שהשתמשת בו "
+                "בפועל, מהקדום למאוחר, ובה שם החיבור בלבד — מועתק מרשימת המקורות שלמעלה. לדוגמה:\n"
+                "HHH\n"
+                "בבא מציעא 2.\n"
+                "רש\"י על בראשית 1:1\n"
+                "אל תוסיף מחבר, תאריך או תיאור, וגם לא חיבור שלא הופיע ברשימה שקיבלת."
             )
     else:
         user = (
