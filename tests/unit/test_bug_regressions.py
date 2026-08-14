@@ -2230,3 +2230,21 @@ def test_a_broken_lookup_never_costs_the_user_their_answer(monkeypatch):
     out = api.QueryResponse(answer="a", citations=[], grounded=True, intent="qa")
     api._widen_citations_from_note(out, "מדרש אגדה, Numbers.22.5.1")   # must not raise
     assert out.answer == "a"
+
+
+def test_a_widened_citation_gets_its_commentator_derived_from_the_ref(monkeypatch):
+    """`commentator_id` is EMPTY on all 2.4M points of the commercial corpus and is recovered at
+    read time everywhere else (retrieval/hybrid.py::_to_hit). Reading the payload alone is why a
+    widened citation rendered as a bare "Chizkuni,_Deuteronomy.10.6.1" chip next to "rashbam"."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(api, "_fetch_refs", lambda refs: [
+        SimpleNamespace(payload={"ref": "Chizkuni,_Deuteronomy.10.6.1", "text_he": "טקסט"})])
+    monkeypatch.setattr(api.db, "record_guard_finding", lambda *a, **k: None)
+    out = api.QueryResponse(answer="a", citations=[], grounded=True, intent="qa")
+
+    api._widen_citations_from_note(out, "חזקוני, Chizkuni,_Deuteronomy.10.6.1")
+
+    # commentator_from_ref keys on "_on_", which the comma form does not have — so the chip has to
+    # fall back to the Hebrew display name, and that is what must be populated.
+    assert out.citations[0].ref_he.startswith("חזקוני")

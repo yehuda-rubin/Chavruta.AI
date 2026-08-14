@@ -206,7 +206,11 @@ def _widen_citations_from_note(result, note: str, owner_id: str = "") -> None:
             ref=ref, ref_he=(hebrew_display_ref(ref) or "") if he else "",
             text_he=payload.get("text_he") or payload.get("text") or "",
             text_en=payload.get("text_en") or "",
-            commentator=payload.get("commentator_id") or "",
+            # Derived from the ref, not read from the payload:  is EMPTY on all
+            # 2.4M points of the commercial corpus and is recovered at read time everywhere else
+            # (see retrieval/hybrid.py::_to_hit). Reading the payload alone is why a widened
+            # citation rendered as a bare "Chizkuni,_Deuteronomy.10.6.1" chip beside "rashbam".
+            commentator=(payload.get("commentator_id") or commentator_from_ref(ref) or ""),
             deep_link=payload.get("deep_link") or "",
             license=payload.get("license") or "", version_title=payload.get("version_title") or ""))
     if missing := [r for r in wanted if r not in found]:
@@ -374,6 +378,7 @@ from chavruta.corpus import rights
 from chavruta.corpus.refs import (
     COMMENTATOR_HE,
     commentary_refs,
+    commentator_from_ref,
     expand_range,
     hebrew_display_ref,
     with_ref_variants,
