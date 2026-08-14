@@ -117,3 +117,41 @@ def test_bavli_still_gets_its_daf_conversion():
     """The guard must stay in place for the corner it was built for."""
     assert hebrew_display_ref("Bava_Metzia.3.1") == "בבא מציעא 2."
     assert hebrew_display_ref("Rashi_on_Bava_Metzia.3.1.1") == 'רש"י על בבא מציעא 2.'
+
+
+# ── The comma (reported 2026-08-14) ──────────────────────────────────────────
+# 758 of 1336 citations in production reached a Hebrew reader as a raw English underscored ref.
+# The cause was not missing data: Sefaria keys a work by its own title and then names the book or
+# parasha after a comma IN THE REF, so looking the whole string up found nothing — while the title
+# sat in the map all along. None of the affected works are obscure; Chizkuni is printed in every
+# chumash.
+@pytest.mark.parametrize("ref,expected", [
+    ("Chizkuni,_Genesis.17.5.2", "חזקוני, בראשית 17:5:2"),
+    ("Siftei_Chakhamim,_Numbers.27.14.1", "שפתי חכמים, במדבר 27:14:1"),
+    ("Birkat_Asher_on_Torah,_Deuteronomy.18.11.2", "ברכת אשר על התורה, דברים 18:11:2"),
+])
+def test_a_work_named_before_a_comma_still_resolves(ref, expected):
+    assert hebrew_display_ref(ref) == expected
+
+
+@pytest.mark.parametrize("ref,starts", [
+    ("Yismach_Moshe,_Vaetchanan.2.3", "ישמח משה"),
+    ("Shem_MiShmuel,_Chukat.3.19", "שם משמואל"),
+    ("Nishmat_Chayyim,_Second_Treatise.9.2", "נשמת חיים"),
+])
+def test_a_segment_with_no_hebrew_keeps_its_english_rather_than_losing_the_whole_name(ref, starts):
+    """Parasha and structural segments ("Vaetchanan", "Part I") have no entry, book names do. A
+    partly-Hebrew label still names the work in the reader's own alphabet, which is the part they
+    recognise — refusing the whole thing served nobody."""
+    out = hebrew_display_ref(ref)
+    assert out and out.startswith(starts)
+
+
+@pytest.mark.parametrize("ref,expected", [
+    ("Malbim_on_I_Chronicles.1.27.1", 'מלבי"ם על דברי הימים א 1:27'),
+    ("Rashi_on_Genesis.1.1.1", 'רש"י על בראשית 1:1'),
+    ("Bava_Metzia.3.1", "בבא מציעא 2."),          # the amud-linear daf math must be untouched
+    ("Shulchan_Arukh,_Orach_Chayim.248.4", "שולחן ערוך, אורח חיים 248:4"),
+])
+def test_the_refs_that_already_worked_are_unchanged(ref, expected):
+    assert hebrew_display_ref(ref) == expected

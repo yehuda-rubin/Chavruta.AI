@@ -561,9 +561,31 @@ def hebrew_display_ref(ref: str | None) -> str | None:
     entry = None
     if m := _HEAD_RE.match(ref.replace("_", " ")):
         title, nums = m.group(1).strip(), m.group(2).strip()
-        entry = _load_hebrew_titles().get(title)
+        titles = _load_hebrew_titles()
+        entry = titles.get(title)
         if entry and entry.get("he") and not _is_bavli(entry):
             return f"{entry['he']} {':'.join(re.split(r'[ .]+', nums))}"
+
+        # A COMMA is why more than half of all citations reached a Hebrew reader with an English
+        # underscored ref (758 of 1336 measured in production, 2026-08-14). Sefaria keys a work by
+        # its own title — "Chizkuni", "Siftei Chakhamim", "Yismach Moshe" — and then names the book
+        # or parasha after a comma in the REF: `Chizkuni,_Genesis.17.5.2`. Looking the whole thing
+        # up finds nothing, so Chizkuni, Siftei Chakhamim, Shem MiShmuel and Birkat Asher — none of
+        # them obscure, one of them printed in every chumash — all rendered as raw English.
+        #
+        # Each comma segment is translated on its own and the ones that have no Hebrew keep their
+        # English: book names resolve (Genesis → בראשית) while parasha and structural segments
+        # ("Vaetchanan", "Part I") do not. A partly-Hebrew label still names the work in the reader's
+        # own alphabet, which is the part they recognise; refusing it wholesale served nobody.
+        if "," in title:
+            head, *rest = (p.strip() for p in title.split(","))
+            head_entry = titles.get(head)
+            if head_entry and head_entry.get("he") and not _is_bavli(head_entry):
+                parts = [head_entry["he"]]
+                for segment in rest:
+                    seg_entry = titles.get(segment)
+                    parts.append((seg_entry or {}).get("he") or segment)
+                return f"{', '.join(parts)} {':'.join(re.split(r'[ .]+', nums))}"
 
     # 3) A Bavli commentary whose commentator isn't in the curated table (e.g. Rashash on Gittin):
     #    the name comes from Sefaria, the daf conversion still from `_split_book`.
