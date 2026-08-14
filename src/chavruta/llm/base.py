@@ -86,10 +86,27 @@ def render_messages(prompt: GroundedPrompt, lang: str) -> list[dict]:
         return messages
 
     if prompt.sources:
+        # In Hebrew, lead each source with its HEBREW name. Without it there was no way for a source
+        # name to reach the reader at all, and a user said so on 2026-08-14: he asked where an
+        # answer's quotes came from and got a list of quotes attributed to nothing.
+        #
+        # The squeeze was structural, not a prompt-wording problem. The model was handed
+        # 'Birkat_Asher_on_Torah,_Deuteronomy.18.11.2' and told to answer in pure Hebrew — so naming
+        # the source made the sentence trip `_has_bleed`, and `_fix_bleeding_sentences` rewrote it to
+        # take the Latin out again. The only citation channel left was the [S#] marker, which is
+        # stripped before display by design. Every route to the reader was closed.
+        #
+        # The English ref stays on the line: it is what `enforce_citations` and the source sheet key
+        # on, and a model that wants to be precise can still copy it. The Hebrew name is what it can
+        # actually say out loud in a Hebrew answer.
+        from chavruta.corpus.refs import hebrew_display_ref   # local: keeps llm/ free of a corpus dep
+
         lines = []
         for s in prompt.sources:
             who = f" ({s.commentator_id})" if s.commentator_id else ""
-            lines.append(f"[{s.marker}] {s.ref}{who}:\n{s.text}")
+            name = (hebrew_display_ref(s.ref) or "") if lang == "he" else ""
+            label = f"{name} — {s.ref}" if name else s.ref
+            lines.append(f"[{s.marker}] {label}{who}:\n{s.text}")
         sources_block = "\n\n".join(lines)
     else:
         sources_block = "(no sources retrieved)"

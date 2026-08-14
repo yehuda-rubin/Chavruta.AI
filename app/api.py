@@ -43,7 +43,21 @@ _MARKER_RE = re.compile(rf"\s*{_MARKER_BODY}")
 #
 # The lookbehind is load-bearing too: without it, "הכתוב[S1]" would match its own final ב and
 # leave "הכתו". A one-letter prefix only counts when it is not the tail of a Hebrew word.
-_CARRIER_PREFIX = r"(?<![א-ת])(?:את\s+|[בכלמשוהד])"
+#
+# Two extensions, both from one live report (2026-08-14). A user asked where the quotes in an answer
+# came from and got a numbered list reading "– מופיע ב- וב-:" nineteen times over — a sources section
+# naming no sources, which is worse than none, because it looks like an answer to the question.
+#
+#   • A MAQAF/HYPHEN may sit between the prefix and the marker. "מופיע ב-[S1]" is the ordinary way to
+#     attach a Hebrew prefix to a bracketed token, and it is what a model writes most of the time;
+#     without this the marker went and the "ב-" stayed.
+#   • TWO prefix letters, for the very common vav+preposition ("וב-[S3]", "ול-[S2]"). One letter could
+#     never match those: the lookbehind correctly refuses to start at the ב of "וב", and starting at
+#     the ו left a ב with no marker after it.
+#
+# The lookbehind still guards the "הכתוב[S1]" case — inside a word every candidate letter is preceded
+# by another Hebrew letter, so nothing fires.
+_CARRIER_PREFIX = r"(?<![א-ת])(?:את\s+|[בכלמשוהד]{1,2}[-־]?)"
 _CARRIER_MARKER_RE = re.compile(rf"\s*{_CARRIER_PREFIX}{_MARKER_BODY}")
 
 # Caught live (2026-08-04): the model occasionally emits a literal backslash before a quote mark when

@@ -1965,3 +1965,39 @@ def test_a_new_chat_that_produces_a_lesson_charges_the_lesson_pool(monkeypatch, 
                  lambda: {"id": "s1", "first_q": "q", "created_at": "now",
                           "result": _lesson_answer()})()
     assert api.db.usage_this_week("teacher1", meter=api.db.LESSON) == 1
+
+
+# ── A sources section that named no sources (reported 2026-08-14) ────────────
+# A user asked where the quotes in an answer came from and got a numbered list whose every entry
+# read "– מופיע ב-  וב-:" — nineteen times. The model had written "מופיע ב-[S1] וב-[S3]:", and marker
+# stripping took the markers and left the prepositions.
+#
+# _CARRIER_MARKER_RE existed for exactly this and missed on two counts: it allowed no maqaf/hyphen
+# between the prefix and the marker ("ב-[S1]" is the ordinary way to attach a Hebrew prefix to a
+# bracketed token), and it allowed only ONE prefix letter, so the very common vav+preposition
+# ("וב-[S3]") could not match at all.
+@pytest.mark.parametrize("raw,expected", [
+    ("– מופיע ב-[S1] וב-[S3]:", "– מופיע:"),
+    ("מופיע ב-[S1]:", "מופיע:"),
+    ("נאמר ול-[S2] יש דעה אחרת", "נאמר יש דעה אחרת"),
+    ("כתוב ב[S2] שהוא", "כתוב שהוא"),          # the un-hyphenated form still works
+])
+def test_a_hebrew_prefix_does_not_survive_the_marker_it_was_attached_to(raw, expected):
+    assert api._strip_markers(raw, he=True) == expected
+
+
+@pytest.mark.parametrize("raw", [
+    "פרק ב. הסעיפים א, ב, ג",     # lone Hebrew letters here are NUMBERS, not prefixes
+    "ובסעיף ה נאמר",
+])
+def test_lone_hebrew_letters_that_are_not_carrying_a_marker_are_untouched(raw):
+    """The reason this repair is keyed on adjacency to a marker. In a Torah corpus a lone letter is
+    usually a chapter or section number, and a blind 'drop orphaned one-letter words' pass would
+    silently corrupt citations across the product."""
+    assert api._strip_markers(raw, he=True) == raw
+
+
+def test_a_marker_glued_to_a_word_does_not_eat_the_word():
+    """"הכתוב[S1]" must not lose its final ב — the lookbehind is what stops the word's own last
+    letter reading as a carrier prefix."""
+    assert api._strip_markers("הכתוב[S1] אומר", he=True) == "הכתוב אומר"
