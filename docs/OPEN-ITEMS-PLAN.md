@@ -160,3 +160,46 @@ Given the time available — yeshiva starts Sunday 2026-08-16 — the honest seq
 
 Nothing in this list is presently being exploited, and the two findings that were — a ₪49 charge
 granting the ₪2,799 tier, and a self-service quota reset — went out on 2026-08-14 and are closed.
+
+---
+
+## G. The sources panel misses what the model used without marking it
+
+**Decided with the operator 2026-08-14. Specified, not built.**
+
+Measured on a real answer: the panel showed **16** sources, the model's own HHH list named **19**.
+The panel is built from `enforce_citations`, which maps `[S#]` markers back to chunks — so a source
+the model leaned on without writing a marker never reaches the reader. `Shadal on Numbers.22.2.2`
+was one of the three missing from that answer.
+
+This was the operator's original request and it was misread on the way in. It asked for "a list of
+**all** the sources it used… and we put the sources on the side" — a question about WHICH sources
+appear. It was built as a naming feature instead, and then removed as redundant once
+`hebrew_display_ref`'s comma fix took the panel's Hebrew coverage to 98.5%. The naming problem was
+real and is now solved; the coverage gap it was actually asked to close is still open.
+
+**The design, which is not "display the list":**
+
+1. Keep the HHH block (`CHAVRUTA_SOURCE_NOTE_OWNERS`) — it is the INPUT, not the output.
+2. Match each of its lines back to a source that was actually RETRIEVED, on the ref. The model
+   copies from a sources block formatted `<hebrew name> — <ref>` and often takes only half, so
+   match on the ref substring and fall back to the Hebrew name.
+3. A line that matches a retrieved source not already in `citations` → add it. The panel then shows
+   everything the model used, and every entry is a real chunk: the list is an index into retrieved
+   material, never a source of truth. This is what keeps a fabricated line from becoming a citation.
+4. A line matching NOTHING retrieved → the model named a work it was not given. **Record it for the
+   operator only** (`guard_findings`, the existing table and admin section — no user-facing change).
+   That is the invention signal, and it is worth more as a measurement than the line is as a
+   citation. Note what the first live runs produced: an author invented for the Ben Ish Chai, and a
+   parasha called "איקה".
+5. Do NOT re-add the grey panel box. It duplicated, in English, the sources listed beneath it.
+
+**The one piece of plumbing this needs:** `enforce_citations`' `marker_map` holds every retrieved
+source, and only the cited subset leaves the pipeline. Matching needs the full set at the API layer,
+so `pipeline.ask` has to carry it out — that is a change to its contract and the reason this was
+specified rather than rushed at the end of a long session.
+
+**Verify with the model**, not around it: send the question through `/sessions/{id}/query` — the
+route the app actually posts to — and confirm the panel count rises to meet the list. A check that
+calls `pipeline.ask` directly cannot see a route-shaped gap, which is exactly how the HHH block
+shipped gated on a route the app never calls.
