@@ -147,6 +147,75 @@ def _split_source_note(text: str) -> tuple[str, str]:
     return text[:m.start()].rstrip(), note.strip()
 
 
+# A ref as it appears inside a source-list line. The model copies from a sources block formatted
+# "<hebrew name> — <ref>", and often takes only part of it, so the ref is picked out of the line
+# rather than the line being parsed as a whole.
+_NOTE_REF_RE = re.compile(r"[A-Z][A-Za-z'’א-ת_,\. ]*?[A-Za-z_]\.[0-9]+(?:[.:][0-9]+)*")
+
+
+def _refs_in_source_note(note: str) -> list[str]:
+    """Refs named in the model's source list, in order, deduped."""
+    out: list[str] = []
+    for line in (note or "").splitlines():
+        m = _NOTE_REF_RE.search(line)
+        if not m:
+            continue
+        ref = m.group(0).strip().replace(" ", "_").rstrip(".,")
+        if ref and ref not in out:
+            out.append(ref)
+    return out
+
+
+def _widen_citations_from_note(result, note: str, owner_id: str = "") -> None:
+    """Add sources the model USED but never marked, and log the ones it named out of thin air.
+
+    The panel is built from `[S#]` markers, so a source the model leaned on without writing a marker
+    never reaches the reader. Measured on a real answer 2026-08-14: 16 citations against 19 lines in
+    the model's own list. This closes that gap — which is what the source list was asked for in the
+    first place.
+
+    The list is an INDEX into real material, never a source of truth. A line only becomes a citation
+    if its ref resolves in the corpus, so a fabricated line cannot turn into one — and the first live
+    runs did fabricate, inventing an author for the Ben Ish Chai and a parasha called "איקה".
+
+    A ref that resolves to nothing is the invention signal, and it is worth more as a measurement
+    than the line was worth as a citation: recorded for the OPERATOR only (guard_findings), with no
+    user-facing effect. Never raises — a diagnostic that can break an answer is worse than none.
+    """
+    refs = _refs_in_source_note(note)
+    if not refs:
+        return
+    have = {c.ref for c in result.citations}
+    wanted = [r for r in refs if r not in have]
+    if not wanted:
+        return
+    try:
+        hits = _fetch_refs(wanted)
+    except Exception:
+        _log.exception("could not resolve source-list refs")
+        return
+    found = {}
+    for h in hits:
+        payload = getattr(h, "payload", None) or {}
+        ref = payload.get("ref") or ""
+        if ref and ref not in found:
+            found[ref] = payload
+    he = True
+    for ref, payload in found.items():
+        result.citations.append(CitationOut(
+            ref=ref, ref_he=(hebrew_display_ref(ref) or "") if he else "",
+            text_he=payload.get("text_he") or payload.get("text") or "",
+            text_en=payload.get("text_en") or "",
+            commentator=payload.get("commentator_id") or "",
+            deep_link=payload.get("deep_link") or "",
+            license=payload.get("license") or "", version_title=payload.get("version_title") or ""))
+    if missing := [r for r in wanted if r not in found]:
+        # Named a work it was not given, or invented the ref outright.
+        db.record_guard_finding("source_note_unresolved", result.intent or "",
+                                {"refs": missing[:12], "named": len(refs),
+                                 "resolved": len(found), "owner": owner_id[:12]})
+
+
 def _strip_markers(text: str, he: bool = False) -> str:
     # Load-bearing markers first ("ב[S2]" → nothing, not "ב"), then every remaining plain marker.
     t = _CARRIER_MARKER_RE.sub("", text or "")
@@ -1295,8 +1364,10 @@ def _generate_chavruta_turn(question: str, hits, lang: str, he: bool, history, w
     # foreign-language pass.
     raw, note = _split_source_note(raw)
     clean = _strip_markers(_fix_bleeding_sentences(raw, he, llm), he=he)
-    return QueryResponse(answer=clean, citations=used, grounded=bool(used),
-                         intent="chavruta", files=[], source_note=note)
+    out = QueryResponse(answer=clean, citations=used, grounded=bool(used),
+                        intent="chavruta", files=[], source_note=note)
+    _widen_citations_from_note(out, note)
+    return out
 
 
 def _generate_qa_turn_from_hits(question: str, hits, lang: str, he: bool, history, llm) -> QueryResponse:
@@ -1324,11 +1395,13 @@ def _generate_qa_turn_from_hits(question: str, hits, lang: str, he: bool, histor
     text = _strip_instruction_echo(answer.text, he)
     text, note = _split_source_note(text)
     clean = _strip_markers(_fix_bleeding_sentences(text, he, llm), he=he)
-    return QueryResponse(
+    out = QueryResponse(
         answer=clean, citations=[_cite(c) for c in answer.citations],
         grounded=answer.grounded, intent="qa", caveats=list(answer.caveats), files=[],
         source_note=note,
     )
+    _widen_citations_from_note(out, note)
+    return out
 
 
 _MAX_CARRIED_REFS = 12
@@ -1783,7 +1856,7 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
     text, source_note = _split_source_note(text)
     clean = _strip_markers(_fix_bleeding_sentences(text, he, resolved_llm), he=he)
 
-    return QueryResponse(
+    out = QueryResponse(
         answer=clean,
         citations=citations_out,
         grounded=answer.grounded,
@@ -1793,6 +1866,10 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
         files=[],
         source_note=source_note,
     )
+    # Sources the model used without marking, plus a finding for anything it named that resolves to
+    # nothing — see _widen_citations_from_note.
+    _widen_citations_from_note(out, source_note)
+    return out
 
 
 # ── Health ────────────────────────────────────────────────────────────────────

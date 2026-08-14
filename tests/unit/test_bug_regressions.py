@@ -2159,3 +2159,74 @@ def test_the_source_list_gate_covers_every_generation_route():
     assert "reset_source_note" in src, "the flag would leak into the next request on this worker"
     # …and no route sets it on its own any more, which would double-set and leave a stale token.
     assert inspect.getsource(api.query).count("set_source_note") == 0
+
+
+# ── Sources the model used without marking (the original 2026-08-14 request) ─
+# The panel is built from [S#] markers, so a source the model leaned on without writing a marker
+# never reaches the reader. Measured on a real answer: 16 citations against 19 lines in the model's
+# own list. Closing that gap is what the source list was asked for.
+def test_refs_are_picked_out_of_the_source_list_lines():
+    """The model copies from a block formatted "<hebrew name> — <ref>" and often takes half of it,
+    so the ref is found inside the line rather than the line parsed as a whole."""
+    refs = api._refs_in_source_note(
+        "מדרש אגדה, Numbers.22.5.1\nReggio on Torah, Numbers.22.9.1\nהדר זקנים, Exodus.1.10.2")
+    assert refs == ["Numbers.22.5.1", "Reggio_on_Torah,_Numbers.22.9.1", "Exodus.1.10.2"]
+
+
+def test_a_source_the_model_used_without_marking_reaches_the_panel(monkeypatch):
+    """The whole point: [S#] gives 16, the list names 19, and the reader should see all of them."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(api, "_fetch_refs", lambda refs: [
+        SimpleNamespace(payload={"ref": "Numbers.22.5.1", "text_he": "טקסט"})])
+    monkeypatch.setattr(api.db, "record_guard_finding", lambda *a, **k: None)
+    out = api.QueryResponse(answer="a", citations=[], grounded=True, intent="qa")
+
+    api._widen_citations_from_note(out, "מדרש אגדה, Numbers.22.5.1")
+
+    assert [c.ref for c in out.citations] == ["Numbers.22.5.1"]
+    assert out.citations[0].text_he == "טקסט"
+
+
+def test_a_line_that_resolves_to_nothing_never_becomes_a_citation(monkeypatch):
+    """The list is an INDEX into real material, never a source of truth — the first live runs
+    invented an author for the Ben Ish Chai and a parasha called "איקה". A fabricated line must not
+    be able to turn itself into a citation."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(api, "_fetch_refs", lambda refs: [
+        SimpleNamespace(payload={"ref": "Numbers.22.5.1", "text_he": "טקסט"})])
+    logged: list = []
+    monkeypatch.setattr(api.db, "record_guard_finding",
+                        lambda kind, intent, detail, **k: logged.append((kind, detail)))
+    out = api.QueryResponse(answer="a", citations=[], grounded=True, intent="qa")
+
+    api._widen_citations_from_note(out, "מדרש אגדה, Numbers.22.5.1\nבדוי, Invented.99.99.99")
+
+    assert [c.ref for c in out.citations] == ["Numbers.22.5.1"]
+    # …and the one that resolved to nothing is recorded FOR THE OPERATOR, with no user-facing effect.
+    assert logged and logged[0][0] == "source_note_unresolved"
+    assert "Invented.99.99.99" in logged[0][1]["refs"]
+
+
+def test_a_source_already_cited_is_not_added_twice(monkeypatch):
+    called: list = []
+    monkeypatch.setattr(api, "_fetch_refs", lambda refs: called.append(refs) or [])
+    out = api.QueryResponse(answer="a", grounded=True, intent="qa", citations=[
+        api.CitationOut(ref="Numbers.22.5.1")])
+
+    api._widen_citations_from_note(out, "מדרש אגדה, Numbers.22.5.1")
+
+    assert len(out.citations) == 1
+    assert called == [], "already-cited refs must not even be looked up"
+
+
+def test_a_broken_lookup_never_costs_the_user_their_answer(monkeypatch):
+    """This runs on the answer path. A diagnostic that can break an answer is worse than none."""
+    def boom(refs):
+        raise RuntimeError("qdrant down")
+
+    monkeypatch.setattr(api, "_fetch_refs", boom)
+    out = api.QueryResponse(answer="a", citations=[], grounded=True, intent="qa")
+    api._widen_citations_from_note(out, "מדרש אגדה, Numbers.22.5.1")   # must not raise
+    assert out.answer == "a"
