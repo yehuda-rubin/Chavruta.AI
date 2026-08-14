@@ -82,6 +82,14 @@ services:
       # the bge-m3 embedding step is the actual CPU-bound part of each request, so this should stay
       # comfortably under the host's vCPU count, not just "as high as possible".
       CHAVRUTA_MAX_CONCURRENT_GENERATIONS: ${CHAVRUTA_MAX_CONCURRENT_GENERATIONS:-2}
+
+      # What a million normalized tokens cost at the provider, so the admin panel can turn spend into
+      # money. Deliberately no default: unset means the panel shows nothing rather than a plausible
+      # invented figure (app/api.py::admin_usage_over_time). It has to be listed HERE and not only in
+      # .env — this service passes an explicit environment block, so .env only fills ${...} holes and
+      # a variable with no hole to fill never reaches the container at all. Setting it in .env alone
+      # looked done and left the panel reading zero.
+      CHAVRUTA_COST_PER_M_TOKENS: ${CHAVRUTA_COST_PER_M_TOKENS:-}
       CHAVRUTA_QUEUE_TIMEOUT_S: ${CHAVRUTA_QUEUE_TIMEOUT_S:-45}
 
       # Parshat HaShavua / Daf Yomi — beta, hand-picked owner_ids only (see app/api.py::
