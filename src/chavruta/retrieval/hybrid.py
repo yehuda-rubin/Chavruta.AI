@@ -13,7 +13,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import replace
 
-from chavruta.corpus.normalize import deuphemize_he
+from chavruta.corpus.normalize import deuphemize_he, quote_windows
 from chavruta.corpus.refs import (
     commentary_refs,
     commentator_from_ref,
@@ -128,6 +128,19 @@ _FOUNDATIONAL_BOOST = 0.05
 _TRACTATE_TOP_K = 6
 _TRACTATE_BOOST = 0.05
 
+# The quotation floor. A user who quotes a pasuk inside a sentence does not get the pasuk back: the
+# frame around it dominates the embedding, and the source is never even a candidate for re-ranking
+# to reach. Measured 2026-08-14 — "חלק אלוה ממעל" finds Iyov 31:2 at rank 2, the same three words
+# inside "מה המקור לכך שהנשמה היא חלק אלוה ממעל?" find it nowhere in the top ten, and adding one
+# word loses it again. So the phrase is searched on its own.
+#
+# `_QUOTE_WINDOWS` is a COST bound: each window is one search (cheap — measured at ~0ms against the
+# on-disk collection) but all of them share ONE embedding batch, because embedding is the part that
+# actually costs (~0.2s of a 0.5s retrieval). Four windows, one extra forward pass.
+_QUOTE_WINDOWS = 4
+_QUOTE_TOP_K = 3
+_QUOTE_BOOST = 0.05
+
 
 class HybridRetriever:
     def __init__(self, embedding, store, profile, *, reranker=None, link_expander=None):
@@ -160,7 +173,8 @@ class HybridRetriever:
             # Iyov 31:2, and until this ran the pasuk did not appear in the top ten of its own
             # quotation; with the one letter restored it comes back second. See
             # corpus/normalize.py::deuphemize_he.
-            emb = self.embedding.embed_query(deuphemize_he(query.search_text or query.text))
+            search_text = deuphemize_he(query.search_text or query.text)
+            emb = self.embedding.embed_query(search_text)
         use_sparse = self.profile.hybrid and bool(emb.sparse)
         hquery = HybridQuery(dense=emb.dense, sparse=emb.sparse if use_sparse else None)
 
@@ -322,6 +336,29 @@ class HybridRetriever:
                     hits.append(rh)
             except Exception as exc:
                 logger.warning("tractate-scoped search failed for %s (%s)", tractate, exc)
+
+        # Quotation floor — see _QUOTE_WINDOWS. Skipped when the question already names a ref, a work
+        # or a commentator: those are stronger statements of intent than a guessed phrase, and
+        # anchoring already serves them.
+        if not query.named_refs and not query.work_ids and not query.commentator_ids:
+            phrases = quote_windows(search_text, limit=_QUOTE_WINDOWS)
+            if phrases:
+                try:
+                    with _timed(t, "quotes"):
+                        embs = self.embedding.embed_batch(phrases)
+                        for pe in embs:
+                            pq = HybridQuery(dense=pe.dense,
+                                             sparse=pe.sparse if use_sparse else None)
+                            for h in self.store.search(self.profile.collection, pq,
+                                                       top_k=_QUOTE_TOP_K):
+                                rh = _to_hit(h)
+                                # Level with the tractate floor and capped below the named-ref
+                                # anchor: a phrase we GUESSED was a quotation is weaker evidence
+                                # than one the user spelled out.
+                                rh.score = min(rh.score + _QUOTE_BOOST, 0.98)
+                                hits.append(rh)
+                except Exception as exc:
+                    logger.warning("quotation floor failed (%s)", exc)
 
         # Optional reranking (heavy in cloud / optional local)
         if self.reranker is not None and self.profile.rerank and hits:

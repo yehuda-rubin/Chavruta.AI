@@ -80,6 +80,8 @@ KNOBS: dict[str, list] = {
     # sort every time. 0.0 is in the list on purpose — it reproduces the old behaviour, so the sweep
     # can say the lift does not help rather than being unable to express that.
     "_BASE_BOOST": [0.0, 0.02, 0.05, 0.10, 0.20],
+    "_QUOTE_BOOST": [0.0, 0.02, 0.05, 0.10, 0.20],
+    "_QUOTE_WINDOWS": [0, 2, 4, 6],
     "_TRACTATE_BOOST": [0.0, 0.02, 0.05, 0.10, 0.20],
     "_TRACTATE_TOP_K": [3, 6, 10, 16],
     "_FOUNDATIONAL_BOOST": [0.0, 0.02, 0.05, 0.10, 0.20],

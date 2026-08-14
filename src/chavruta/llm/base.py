@@ -148,11 +148,21 @@ def render_messages(prompt: GroundedPrompt, lang: str) -> list[dict]:
             # rule mid-sentence. Ordered oldest-first because that is what a learner asked for on
             # 2026-08-14 — "סדר בצורה כרונולוגית לפי המקור הקדום ביותר ותן קצת מידע על כל ספר" —
             # and the model can order what it was given even where retrieval ranking cannot yet.
+            # Names ONLY. The first version asked for the author and a sentence about each work, and
+            # the model invented all of it: on one live answer it gave the Ben Ish Chai's commentary
+            # to a "רבי יעקב חיים זילברשטיין", and turned parashat Eikev into a parasha called
+            # "איקה". Presented as a tidy metadata block, a reader takes that for fact — which is
+            # exactly the invention this product exists not to commit, dressed as a citation.
+            #
+            # The model does not know these works' authorship; it knows the text it was handed. So
+            # it is asked for the one thing it was handed: the name, copied. Anything richer needs a
+            # curated table, not a language model.
             user += (
                 "\n\nבסוף התשובה, אחרי שורה שבה כתוב HHH בלבד, כתוב רשימה של המקורות שהשתמשת בהם "
-                "בפועל — שורה לכל מקור, מהקדום לְמאוחר: שם החיבור בעברית, המחבר ותקופתו אם ידועים לך "
-                "מן המקור עצמו, ומשפט קצר על מה הוא. אל תכתוב שם של חיבור שלא הופיע במקורות שקיבלת, "
-                "ואל תשער תאריך שאינו ידוע לך — כתוב 'לא ידוע'. הרשימה הזו אינה חלק מן התשובה עצמה."
+                "בפועל — שורה לכל מקור, מהקדום לְמאוחר. העתק את שם החיבור בדיוק כפי שהוא מופיע "
+                "ברשימת המקורות שקיבלת, ואל תוסיף שם מחבר, תאריך, מקום או תיאור — גם אם נדמה לך "
+                "שאתה יודע אותם. אל תכתוב שם של חיבור שלא הופיע במקורות שקיבלת. "
+                "הרשימה הזו אינה חלק מן התשובה עצמה."
             )
     else:
         user = (

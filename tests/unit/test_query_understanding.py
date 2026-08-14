@@ -328,3 +328,52 @@ def test_the_rewrite_is_for_search_only_and_never_shown_to_the_reader():
     for module in ("app.api", "chavruta.generation.grounded"):
         mod = importlib.import_module(module)
         assert "deuphemize" not in inspect.getsource(mod), f"{module} rewrites what the reader sees"
+
+
+# ── The quotation floor (reported 2026-08-14) ────────────────────────────────
+# A quotation inside a question is drowned by the frame around it. Measured: "חלק אלוה ממעל" puts
+# Iyov 31:2 at rank 2; the same three words inside "מה המקור לכך שהנשמה היא חלק אלוה ממעל?" put it
+# nowhere in the top ten, and adding a single word loses it again. So the phrase is searched alone.
+def test_the_quoted_phrase_is_pulled_out_of_the_question_frame():
+    from chavruta.corpus.normalize import deuphemize_he, quote_windows
+
+    windows = quote_windows(deuphemize_he("מה המקור לכך שהנשמה היא חלק אלוק ממעל?"))
+    assert "חלק אלוה ממעל" in windows, "the phrase that actually finds the pasuk was not extracted"
+
+
+def test_a_question_that_is_only_scaffolding_yields_nothing_to_search():
+    """Every window costs a search. A question with no quotation in it must not buy any."""
+    from chavruta.corpus.normalize import quote_windows
+
+    for q in ("מה זה?", "למה", "אני רוצה לדעת", "מה המקור לכך?"):
+        assert quote_windows(q) == []
+
+
+def test_the_windows_are_bounded_because_each_one_costs_a_search():
+    from chavruta.corpus.normalize import quote_windows
+
+    long_q = "מה המקור לכך שהנשמה של האדם היא חלק אלוה ממעל וגם נחלת שדי ממרומים באמת"
+    assert len(quote_windows(long_q, limit=4)) <= 4
+
+
+def test_content_dense_windows_come_first():
+    """Ranked by how many words are not question scaffolding — that is what picks the quotation
+    out rather than the longest span, and the measurement says a tight phrase is what reaches the
+    source while a looser one does not."""
+    from chavruta.corpus.normalize import quote_windows
+
+    windows = quote_windows("איפה כתוב שניים אוחזין בטלית?")
+    assert windows[0] == "שניים אוחזין בטלית"
+
+
+def test_the_floor_is_skipped_when_the_question_already_named_something():
+    """A named ref, work or commentator is a stronger statement of intent than a guessed phrase,
+    and anchoring already serves it — so the extra searches are not bought."""
+    import inspect
+
+    from chavruta.retrieval import hybrid
+
+    src = inspect.getsource(hybrid.HybridRetriever.retrieve)
+    guard = "if not query.named_refs and not query.work_ids and not query.commentator_ids:"
+    assert guard in src
+    assert "embed_batch(phrases)" in src, "the windows must share one embedding pass"
