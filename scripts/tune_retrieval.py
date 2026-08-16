@@ -60,6 +60,7 @@ import json
 import statistics
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -224,6 +225,35 @@ def _save_state(path: Path, state: dict) -> None:
     path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+# Sits beside the pairs file, not the state file — a "too thin to tune" verdict is a property of
+# the POOL, not of one knob-sweep's progress, and the nightly wrapper needs to read it without
+# caring whether a --state sweep is even in progress.
+_THIN_SUFFIX = ".thin.json"
+
+
+def _mark_thin(pairs_path: Path, *, hits: int, sample: int) -> None:
+    """Record that THIS pool, as it stood on disk just now, did not have enough answered pairs to
+    tune on. `nightly_eval.py`'s harvest gate reads this so a pool that passes the count/age check
+    but fails the check that actually matters (how many pairs are answered) gets re-harvested next
+    time instead of sitting there being re-measured — and re-declared too thin — every single night
+    until the age gate finally expires. Tagged with size:mtime so a fresh harvest (which changes
+    both) invalidates the mark on its own; nothing has to remember to delete it.
+    """
+    marker = pairs_path.with_suffix(pairs_path.suffix + _THIN_SUFFIX)
+    try:
+        stat = pairs_path.stat()
+        pool = f"{stat.st_size}:{int(stat.st_mtime)}"
+    except OSError:
+        return
+    try:
+        marker.write_text(json.dumps(
+            {"pool": pool, "hits": hits, "sample": sample, "min_hits": MIN_HITS,
+             "checked_at": datetime.now().isoformat()}, ensure_ascii=False, indent=2),
+            encoding="utf-8")
+    except OSError:
+        pass
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -298,6 +328,7 @@ def main() -> int:
         print(f"NO SIGNAL: none of the {len(tune_set)} harvested pairs is answered at all, so every\n"
               f"candidate will score 0.000 and nothing can be compared. Raise --sample (harvested\n"
               f"hit rates run near 12%, so a few hundred pairs are needed before differences show).")
+        _mark_thin(ROOT / args.pairs, hits=0, sample=len(tune_set))
         return 1
 
     # An objective that is merely NEAR zero is barely better than one that is zero. At a ~10% hit
@@ -312,6 +343,7 @@ def main() -> int:
               f"{1.0 / max(1, hits):.3f}, which swamps every difference these knobs make — so a "
               f"'winner'\nhere is whichever candidate got lucky. Harvest more pairs "
               f"(at least {MIN_HITS} answered; scripts/harvest_pairs.py --target 5000) and re-run.")
+        _mark_thin(ROOT / args.pairs, hits=hits, sample=len(tune_set))
         return 1
 
     best = dict(state.get("best") or baseline)

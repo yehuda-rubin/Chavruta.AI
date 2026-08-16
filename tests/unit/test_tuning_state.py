@@ -130,3 +130,35 @@ def test_the_sweep_advances_one_knob_at_a_time_and_terminates(tmp_path, tune):
 
     assert seen == list(tune.KNOBS), "the sweep did not advance in order, or repeated a knob"
     assert tune._load_state(state_file, fp)["done"] == list(tune.KNOBS)
+
+
+# ── A pool that passes count+age but is still too thin to tune on (2026-08-16) ─────────────────
+# Measured live: a 3325-pair pool sat under the count and age gates for three days while every
+# single tick of a 16-hour Saturday window and a full nightly window re-derived and re-discarded
+# the same "TOO THIN" verdict, because the gate that decides whether to re-harvest never looked at
+# how much of the pool is actually answered — only its size and age. _mark_thin/_too_thin_reason
+# close that gap; these tests pin the marker's own shape, since nightly_eval.py reads it
+# independently (see test_bug_regressions.py for the reader side).
+def test_a_thin_verdict_is_marked_beside_the_pairs_file(tmp_path, tune):
+    pairs = _pairs(tmp_path)
+    tune._mark_thin(pairs, hits=21, sample=800)
+
+    marker = pairs.with_suffix(pairs.suffix + ".thin.json")
+    assert marker.exists()
+    info = json.loads(marker.read_text(encoding="utf-8"))
+    assert info["hits"] == 21 and info["sample"] == 800 and info["min_hits"] == tune.MIN_HITS
+
+
+def test_a_thin_mark_is_tagged_to_the_pool_that_earned_it(tmp_path, tune):
+    """A re-harvest changes the pairs file's size and mtime — the mark must not silently apply to
+    a pool it was never measured against."""
+    pairs = _pairs(tmp_path)
+    tune._mark_thin(pairs, hits=21, sample=800)
+    marker = pairs.with_suffix(pairs.suffix + ".thin.json")
+    before = json.loads(marker.read_text(encoding="utf-8"))["pool"]
+
+    pairs.write_text("a completely different, larger pool" * 50, encoding="utf-8")
+
+    stat = pairs.stat()
+    after = f"{stat.st_size}:{int(stat.st_mtime)}"
+    assert before != after, "the fixture pool must actually change size for this test to mean anything"

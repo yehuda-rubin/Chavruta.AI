@@ -124,6 +124,29 @@ def _pairs_count(path: Path) -> int:
         return 0
 
 
+def _too_thin_reason(pairs_path: Path) -> str:
+    """Whether the tuner already measured THIS pool and found too few of it actually answered to
+    tune on — see tune_retrieval.py::_mark_thin. Count and age are necessary but not sufficient: a
+    pool can be large and fresh and still be ~99% unanswered (measured live 2026-08-14 through
+    2026-08-16, size 3325/age <14d passing every tick of a 16-hour Saturday window and a full
+    nightly window — recall=0.026, ~21 pairs actually answered — while every single tick re-derived
+    and re-discarded the same verdict instead of re-harvesting). The marker is tagged with the pool's
+    own size:mtime, so a harvest that already happened (which changes both) silently invalidates a
+    stale mark — no separate cleanup needed.
+    """
+    marker = pairs_path.with_suffix(pairs_path.suffix + ".thin.json")
+    try:
+        info = json.loads(marker.read_text(encoding="utf-8"))
+        stat = pairs_path.stat()
+        pool = f"{stat.st_size}:{int(stat.st_mtime)}"
+    except (OSError, ValueError):
+        return ""
+    if info.get("pool") != pool:
+        return ""    # the pool moved since the tuner measured it — the mark no longer applies
+    return (f"the tuner already found only {info.get('hits', '?')} of "
+            f"{info.get('sample', '?')} pairs answered (needs {info.get('min_hits', '?')})")
+
+
 def _harvest_reason() -> str:
     """Why this run should re-harvest, or "" to skip. Size first: a pool too small to measure with
     is a worse reason to skip than a pool that is merely old."""
@@ -133,6 +156,8 @@ def _harvest_reason() -> str:
     have = _pairs_count(path)
     if have < PAIRS_MIN:
         return f"only {have} pairs, need at least {PAIRS_MIN} for the tuner to have any power"
+    if reason := _too_thin_reason(path):
+        return reason
     age = datetime.now().timestamp() - path.stat().st_mtime
     if age > PAIRS_MAX_AGE_DAYS * 86400:
         return f"pairs older than {PAIRS_MAX_AGE_DAYS}d"
