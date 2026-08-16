@@ -178,16 +178,28 @@ def main() -> int:
     #                                 ──
     #                                  8 scoring passes
     #
-    # At 800 pairs that is ~27 min each and ~216 min of the 298-minute window, leaving real margin —
-    # a run that overruns loses the whole night, so the margin is the point. 640 fits more easily but
-    # buys less evidence, and evidence is the thing in short supply: at a 5.3% harvested hit rate,
-    # 800 pairs are only ~42 actually answered.
+    # 800 was sized for a hit rate around 5%. Measured 2026-08-14 through 2026-08-16 on the actual
+    # pool it runs against: 2.6%-3.5%, not 5% — 800 pairs answers only ~21-28 of them, under
+    # tune_retrieval.MIN_HITS (30), so EVERY run of that entire window bailed out at "TOO THIN"
+    # before testing a single candidate. All of a 16-hour Saturday (32/32 ticks) and a full nightly
+    # window (8/8 ticks) did this — see docs/OPEN-ITEMS-PLAN.md and [[hhh-rollout-verification]]'s
+    # sibling finding for the numbers. Re-harvesting does not fix this on its own: harvest_pairs.py
+    # hits its own --target long before --scan-limit binds, from the same deterministic slice of the
+    # corpus, so the pool — and its hit rate — comes back identical. What actually clears the floor
+    # is more of the EXISTING pool per candidate: at a 50% holdout, 3325 pairs leave ~1662 available
+    # before this cuts to --sample, and 800 was leaving over half of that on the table. 1600 was
+    # measured live (same pool, same code) at recall=0.035 → ~56 answered, comfortably above 30.
     #
-    # Note what this does NOT fix. Noise falls with the square root, so 640 → 800 shrinks it by about
-    # a ninth, and the gains being chased are the same size as the noise either way. The thing that
-    # makes a result trustworthy here is the held-out confirmation at the end of every run, not the
-    # sample size — which is exactly the step that never once ran before this.
-    ap.add_argument("--sample", type=int, default=800)
+    # This roughly doubles the per-candidate cost the math above is built on — a full 8-pass
+    # evaluation of one knob may now outrun a single 298-minute weeknight window and carry into the
+    # next. That is not a new failure mode: it is exactly what the resumable state
+    # (tune_retrieval.py --state) exists for, and it is a real night of partial progress instead of a
+    # guaranteed zero. Saturday's 16-hour/6-core window absorbs the extra cost with room to spare.
+    #
+    # What this does NOT fix: noise falls with the square root, and the gains being chased are the
+    # same size as the noise either way. The thing that makes a result trustworthy is the held-out
+    # confirmation at the end of every run, not the sample size.
+    ap.add_argument("--sample", type=int, default=1600)
     ap.add_argument("--target", type=int, default=5000, help="pairs to harvest when refreshing")
     args = ap.parse_args()
 

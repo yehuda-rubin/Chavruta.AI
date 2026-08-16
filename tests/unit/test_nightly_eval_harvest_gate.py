@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -79,6 +80,19 @@ def test_a_missing_or_corrupt_marker_is_not_a_reason_to_re_harvest(tmp_path, nig
     marker = pairs.with_suffix(pairs.suffix + ".thin.json")
     marker.write_text("{not json", encoding="utf-8")
     assert nightly._too_thin_reason(pairs) == ""
+
+
+def test_the_nightly_sample_default_actually_clears_min_hits():
+    """800 was sized for a ~5% hit rate; the real pool measured 2.6%-3.5% (2026-08-14 through
+    2026-08-16), so every single tick of a 16-hour Saturday window (32/32) and a full nightly window
+    (8/8) bailed at TOO THIN without testing one candidate. 1600 was measured live against the same
+    pool (--sample 1600, recall=0.035 -> ~56 answered, comfortably above MIN_HITS=30). Pinned as a
+    floor rather than an exact value, so raising it further later does not fail this test — only
+    dropping it back toward 800 should."""
+    src = (ROOT / "scripts" / "nightly_eval.py").read_text(encoding="utf-8")
+    m = re.search(r'ap\.add_argument\("--sample", type=int, default=(\d+)\)', src)
+    assert m, "the --sample argument's shape changed — update this test's regex"
+    assert int(m.group(1)) >= 1600
 
 
 def test_the_full_harvest_gate_flags_a_big_fresh_but_thin_pool(tmp_path, nightly, monkeypatch):
