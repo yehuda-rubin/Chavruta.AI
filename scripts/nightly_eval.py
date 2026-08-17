@@ -2,8 +2,15 @@
 
 SCHEDULE (Israel local time, decided here rather than in cron)
 --------------------------------------------------------------
-    every night   00:00-05:00   on 2 CPUs
+    every night   23:00-07:00   on 2 CPUs   (wraps past midnight)
     Saturday      00:00-16:00   on 6 CPUs
+
+Widened from 00:00-05:00 on 2026-08-17: at --sample 1600 (see the --sample argument below) a
+candidate measured ~87 minutes live, not the ~54 estimated, so a 5-hour window fit only 2-3 of a
+knob's up to 5 candidates before rc=124 — and _save_state only writes once a whole knob is finished
+(see main(), "written only once the knob is finished AND checked"), so an interrupted knob restarts
+from its first candidate every single night rather than resuming mid-knob. 8 hours does not
+guarantee finishing a knob either, but it roughly doubles how far one night gets.
 
 The window is computed from Asia/Jerusalem, NOT from a fixed UTC offset, because the server runs on
 UTC and Israel moves between UTC+2 and UTC+3. A cron line with a hardcoded offset would silently
@@ -27,8 +34,8 @@ swept partway, and was killed at 05:00. Two consecutive nights ended `rc=124` ha
 value that was never confirmed and never recorded anywhere.
 
 It could not have finished, either. Once the pool grew to a size worth measuring on, a candidate
-went from ~130s to ~1310s, so a full five-knob descent needs 7-9 hours and the weeknight window is 5.
-No number of nights adds up when each one starts over.
+went from ~130s to ~1310s, so a full five-knob descent needs 7-9 hours and the weeknight window was
+5 (now 8 — see SCHEDULE above). No number of nights adds up when each one starts over.
 
 So the tuner now keeps state (`tune_retrieval.py --state`) and does ONE knob per night, ending each
 run with the held-out confirmation. A sweep takes about five nights instead of one, and every night
@@ -52,7 +59,7 @@ ISRAEL = ZoneInfo("Asia/Jerusalem")
 
 # (last hour exclusive, cpu budget). Saturday is checked first so it wins where the two overlap.
 SATURDAY_WINDOW = (0, 16, 6)     # 00:00-16:00 on six cores
-NIGHTLY_WINDOW = (0, 5, 2)       # 00:00-05:00 on two cores
+NIGHTLY_WINDOW = (23, 7, 2)      # 23:00-07:00 on two cores — WRAPS past midnight; see window_for
 
 # Where GENERATED artefacts go — harvested pairs and each night's log. Deliberately separable from
 # eval/, which holds the hand-written question sets: in the container those are mounted READ-ONLY
@@ -79,8 +86,23 @@ PAIRS_MIN = 2000
 
 
 def window_for(now: datetime) -> tuple[datetime, int] | None:
-    """(when this window ends, how many CPUs) — or None if `now` is outside every window."""
+    """(when this window ends, how many CPUs) — or None if `now` is outside every window.
+
+    NIGHTLY_WINDOW crosses midnight (23:00-07:00), which a plain `start <= hour < end` cannot
+    express — that comparison is false for every hour when start > end. Two cases instead: `now` at
+    23:30 is inside a window that started TODAY and ends TOMORROW; `now` at 03:00 is inside a window
+    that started YESTERDAY and ends TODAY. Saturday never wraps (0 < 16), so it falls through to the
+    plain range check unchanged.
+    """
     start_h, end_h, cpus = SATURDAY_WINDOW if now.weekday() == 5 else NIGHTLY_WINDOW
+    if start_h > end_h:
+        if now.hour >= start_h:
+            ends_at = (now + timedelta(days=1)).replace(hour=end_h, minute=0, second=0, microsecond=0)
+        elif now.hour < end_h:
+            ends_at = now.replace(hour=end_h, minute=0, second=0, microsecond=0)
+        else:
+            return None
+        return ends_at, cpus
     if not (start_h <= now.hour < end_h):
         return None
     return now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(hours=end_h), cpus

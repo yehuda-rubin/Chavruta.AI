@@ -227,10 +227,11 @@ def test_scoring_is_unaffected_for_items_with_no_source_chunk():
 
 
 # ── The nightly window ────────────────────────────────────────────────────────
-# Requested schedule (Israel local time): every night 00:00-05:00 on 2 CPUs, Saturday 00:00-16:00 on
-# 6 CPUs. The window is computed from Asia/Jerusalem rather than a UTC offset because the server runs
-# on UTC and Israel moves between UTC+2 and UTC+3 — a hardcoded offset would slide by an hour twice a
-# year and start a heavy batch job in the evening, while users are awake.
+# Requested schedule (Israel local time): every night 23:00-07:00 on 2 CPUs (crosses midnight —
+# widened 2026-08-17 from 00:00-05:00, see NIGHTLY_WINDOW), Saturday 00:00-16:00 on 6 CPUs. The
+# window is computed from Asia/Jerusalem rather than a UTC offset because the server runs on UTC and
+# Israel moves between UTC+2 and UTC+3 — a hardcoded offset would slide by an hour twice a year and
+# start a heavy batch job in the evening, while users are awake.
 from datetime import datetime  # noqa: E402
 from zoneinfo import ZoneInfo  # noqa: E402
 
@@ -243,16 +244,18 @@ def _at(y, m, d, hour):
     return window_for(datetime(y, m, d, hour, tzinfo=_IL))
 
 
-@pytest.mark.parametrize("hour,cpus", [(0, 2), (3, 2), (4, 2)])
+@pytest.mark.parametrize("hour,cpus", [(23, 2), (0, 2), (3, 2), (6, 2)])
 def test_weeknight_window_runs_on_two_cpus(hour, cpus):
+    """23 and 0-6 straddle midnight — both sides of the wrap must count as inside the window."""
     got = _at(2026, 8, 12, hour)          # a Wednesday
     assert got is not None and got[1] == cpus
 
 
-@pytest.mark.parametrize("hour", [5, 6, 12, 18, 23])
+@pytest.mark.parametrize("hour", [7, 8, 12, 18, 22])
 def test_outside_the_weeknight_window_nothing_runs(hour):
-    """05:00 is the END of the window and must already be outside it — a job admitted at 04:59 is
-    bounded by the deadline, but one admitted at 05:00 would run into the morning."""
+    """07:00 is the END of the window and must already be outside it — a job admitted at 06:59 is
+    bounded by the deadline, but one admitted at 07:00 would run into the morning. 22:00 is the hour
+    just before the window opens, on the other side of the wrap."""
     assert _at(2026, 8, 12, hour) is None
 
 
@@ -273,13 +276,24 @@ def test_saturday_stops_at_16_00(hour):
 
 
 def test_the_window_end_is_the_deadline_the_run_is_bounded_by():
+    """03:30 falls in the tail of a window that started the PREVIOUS day at 23:00 — the deadline is
+    07:00 the SAME day (12th), not the 13th."""
     from nightly_eval import window_for
 
     ends, _ = window_for(datetime(2026, 8, 12, 3, 30, tzinfo=_IL))
-    assert (ends.hour, ends.minute, ends.day) == (5, 0, 12)
+    assert (ends.hour, ends.minute, ends.day) == (7, 0, 12)
 
     ends_sat, _ = window_for(datetime(2026, 8, 15, 3, 30, tzinfo=_IL))
     assert (ends_sat.hour, ends_sat.day) == (16, 15)
+
+
+def test_the_window_end_after_the_wrap_lands_on_the_next_day():
+    """23:30 falls in the HEAD of a window that started that same day — the deadline is 07:00
+    TOMORROW, not the same calendar day (which would put it hours in the past)."""
+    from nightly_eval import window_for
+
+    ends, _ = window_for(datetime(2026, 8, 12, 23, 30, tzinfo=_IL))
+    assert (ends.hour, ends.minute, ends.day) == (7, 0, 13)
 
 
 def test_the_window_follows_israel_dst_not_a_fixed_utc_offset():
@@ -289,12 +303,12 @@ def test_the_window_follows_israel_dst_not_a_fixed_utc_offset():
 
     from nightly_eval import window_for
 
-    # 03:30 UTC → 06:30 IDT (summer, outside) but 05:30 IST (winter, also outside); the informative
-    # pair is 02:30 UTC → 05:30 IDT (outside) vs 04:30 IST (inside).
-    summer = datetime(2026, 8, 12, 2, 30, tzinfo=timezone.utc).astimezone(_IL)
-    winter = datetime(2026, 1, 14, 2, 30, tzinfo=timezone.utc).astimezone(_IL)
-    assert window_for(summer) is None          # 05:30 local — past the window
-    assert window_for(winter) is not None      # 04:30 local — still inside it
+    # 04:00 UTC → 07:00 IDT (summer, UTC+3 — exactly the exclusive end, so outside) but 06:00 IST
+    # (winter, UTC+2 — still inside, since 6 < 7 puts it in the wrapped tail of the window).
+    summer = datetime(2026, 8, 12, 4, 0, tzinfo=timezone.utc).astimezone(_IL)
+    winter = datetime(2026, 1, 14, 4, 0, tzinfo=timezone.utc).astimezone(_IL)
+    assert window_for(summer) is None          # 07:00 local — exactly past the window
+    assert window_for(winter) is not None      # 06:00 local — still inside it
 
 
 # ── An all-zero objective is not a result ─────────────────────────────────────
