@@ -177,7 +177,7 @@ def _apply(values: dict) -> None:
 
 
 # ── Cross-night state ─────────────────────────────────────────────────────────
-STATE_VERSION = 1
+STATE_VERSION = 2
 
 
 def _fingerprint(pairs_path: Path, baseline: dict) -> str:
@@ -202,7 +202,7 @@ def _fingerprint(pairs_path: Path, baseline: dict) -> str:
 def _load_state(path: Path, fingerprint: str) -> dict:
     """Stored progress, or a fresh sweep if there is none or it no longer applies."""
     fresh = {"version": STATE_VERSION, "fingerprint": fingerprint, "best": None, "done": [],
-             "history": []}
+             "history": [], "in_progress": None}
     if not path.exists():
         return fresh
     try:
@@ -377,40 +377,95 @@ def main() -> int:
     print(f"a candidate must gain more than {min_gain:.5f} mrr to be accepted "
           f"(one question of {len(tune_set)} is worth {one_item:.5f})\n")
 
+    # Checkpointing WITHIN a knob, not just once the whole knob (candidates + held-out confirmation)
+    # is done. Measured live 2026-08-17/18: the first night with the widened window scored all four
+    # _BASE_BOOST candidates and printed "→ keeping _BASE_BOOST = 0.2", then the window closed one
+    # step later, on the held-out confirmation — and because nothing was written until the very end,
+    # the next run started that whole knob over from its first candidate, at ~87 minutes each. A
+    # candidate (or a held-out half) already scored THIS sweep is reproducible — same model, same
+    # corpus, same pairs, no randomness in the retrieval path — so caching its result is exactly as
+    # trustworthy as the number that would come from re-running it, at zero cost instead of ~87
+    # minutes.
     for knob, candidates in knobs_this_run.items():
         print(f"── {knob} (currently {best[knob]})")
+        ip = state.get("in_progress") if state_path else None
+        resuming = bool(ip and ip.get("knob") == knob)
+        tried: dict = dict(ip["tried"]) if resuming else {}
+        best_k, score_k, human_k = (dict(ip["best"]), ip["best_score"], ip["best_human"]) \
+            if resuming else (dict(best), best_score, best_human)
+        if resuming and tried:
+            print(f"   resuming: {len(tried)} candidate(s) already scored this sweep")
+        elif state_path:
+            state["in_progress"] = {"knob": knob, "tried": {}, "best": dict(best_k),
+                                    "best_score": score_k, "best_human": human_k}
+            _save_state(state_path, state)
+
         for value in candidates:
-            if value == best[knob]:
+            if value == best_k[knob]:
                 continue
-            trial = dict(best, **{knob: value})
+            cached = tried.get(repr(value))
+            if cached is not None:
+                print(f"   {value!r:>6}  harvested mrr={cached['mrr']:.5f}  human mrr={cached['human']:.5f}"
+                      f"  (resumed) {'accepted' if cached['accepted'] else 'not accepted'}")
+                if cached["accepted"]:
+                    best_k = dict(best_k, **{knob: value})
+                    score_k, human_k = cached["mrr"], cached["human"]
+                continue
+            trial = dict(best_k, **{knob: value})
             _apply(trial)
             t0 = time.monotonic()
             s = score(retriever, tune_set, top_k=args.top_k)
             h = score(retriever, human, top_k=args.top_k)
             elapsed = time.monotonic() - t0
             # THE VETO: a gain on harvested pairs that costs anything on real questions is refused.
-            vetoed = h["mrr"] < best_human - 1e-9
+            vetoed = h["mrr"] < human_k - 1e-9
             # A bare `>` on floats calls a difference in the fourth decimal a win. That is how the
             # first live run "accepted" 0.02 (mrr 0.1013) over four candidates that all scored higher
             # on the human set (0.106) — the log printed three decimals and showed them all as ties,
             # so the decision was invisible to anyone reading it. A candidate now has to clear a real
             # margin, and the print carries enough precision to check the arithmetic by eye.
-            gain = s["mrr"] - best_score
+            gain = s["mrr"] - score_k
             wins = gain > min_gain
+            accepted = not vetoed and wins
             verdict = "VETOED (hurts real questions)" if vetoed else \
                       ("accepted" if wins else f"no gain (+{gain:.5f}, needs +{min_gain:.5f})")
             print(f"   {value!r:>6}  harvested mrr={s['mrr']:.5f}  human mrr={h['mrr']:.5f}"
                   f"  [{elapsed:.0f}s] {verdict}")
-            if not vetoed and wins:
-                best, best_score, best_human = trial, s["mrr"], h["mrr"]
+            tried[repr(value)] = {"mrr": s["mrr"], "human": h["mrr"], "accepted": accepted}
+            if accepted:
+                best_k, score_k, human_k = trial, s["mrr"], h["mrr"]
+            if state_path:
+                state["in_progress"] = {"knob": knob, "tried": tried, "best": best_k,
+                                        "best_score": score_k, "best_human": human_k}
+                _save_state(state_path, state)
+        best, best_score, best_human = best_k, score_k, human_k
         _apply(best)
         print(f"   → keeping {knob} = {best[knob]}\n")
 
     print("confirming the winner on the held-out half (a gain that does not survive this was noise)")
-    _apply(baseline)
-    hold_before = score(retriever, holdout, top_k=args.top_k)
-    _apply(best)
-    hold_after = score(retriever, holdout, top_k=args.top_k)
+    held = (state.get("in_progress") or {}).get("held_out") or {} if state_path else {}
+    if "before" in held:
+        hold_before = held["before"]
+        print("   (before) already scored this sweep — resumed")
+    else:
+        _apply(baseline)
+        hold_before = score(retriever, holdout, top_k=args.top_k)
+        if state_path:
+            ip = dict(state["in_progress"])
+            ip["held_out"] = {"before": hold_before}
+            state["in_progress"] = ip
+            _save_state(state_path, state)
+    if "after" in held:
+        hold_after = held["after"]
+        print("   (after) already scored this sweep — resumed")
+    else:
+        _apply(best)
+        hold_after = score(retriever, holdout, top_k=args.top_k)
+        if state_path:
+            ip = dict(state["in_progress"])
+            ip["held_out"] = dict(ip.get("held_out") or {}, after=hold_after)
+            state["in_progress"] = ip
+            _save_state(state_path, state)
 
     print(f"\nheld-out  before mrr={hold_before['mrr']:.3f} recall={hold_before['recall']:.3f}")
     print(f"held-out  after  mrr={hold_after['mrr']:.3f} recall={hold_after['recall']:.3f}")
@@ -427,11 +482,14 @@ def main() -> int:
               "reading the numbers first.")
 
     if state_path:
-        # Written only once the knob is finished AND checked, so a run killed mid-knob leaves the
-        # previous night's state untouched rather than a half-swept knob that reads as done.
+        # Moved from "done" only now that the knob is finished AND checked — a run killed mid-knob
+        # (see the in_progress checkpointing above) leaves `done` untouched, so a half-swept knob
+        # never reads as complete. `in_progress` itself is cleared here: the individual candidate
+        # and held-out scores it held are no longer needed once this knob's verdict is recorded.
         tuned_now = list(knobs_this_run)
         state["best"] = best
         state["done"] = list(state.get("done", [])) + tuned_now
+        state["in_progress"] = None
         state["history"] = list(state.get("history", []))[-40:] + [{
             "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "knobs": tuned_now,

@@ -132,6 +132,89 @@ def test_the_sweep_advances_one_knob_at_a_time_and_terminates(tmp_path, tune):
     assert tune._load_state(state_file, fp)["done"] == list(tune.KNOBS)
 
 
+# ── Mid-knob checkpointing (2026-08-18) ──────────────────────────────────────────────────────
+# A run that scored all four candidates of a knob, printed its winner, and was then killed on the
+# held-out confirmation (measured live: the first night of the widened window, on _BASE_BOOST) used
+# to lose ALL of it — `done`/`best` are written only once a knob is fully confirmed, so the next
+# run started that knob over from its first candidate at ~87 minutes each. `in_progress` is what
+# main() now writes after every scored candidate and after each held-out half, specifically so that
+# work survives a kill. These tests pin the shape main() writes and reads, not main() itself (which
+# needs the full retrieval stack — see the `tune` fixture's docstring); a real end-to-end resume is
+# what tonight's actual run verifies.
+def test_a_fresh_state_has_no_in_progress_knob(tmp_path, tune):
+    pairs, state_file = _pairs(tmp_path), tmp_path / "state.json"
+    state = tune._load_state(state_file, tune._fingerprint(pairs, BASE))
+    assert state["in_progress"] is None
+
+
+def test_a_candidate_scored_mid_knob_survives_a_reload(tmp_path, tune):
+    """The shape main() writes after each candidate: which knob, what has been tried, and the best
+    found so far — enough to skip straight past every already-scored candidate on resume."""
+    pairs, state_file = _pairs(tmp_path), tmp_path / "state.json"
+    fp = tune._fingerprint(pairs, BASE)
+    state = tune._load_state(state_file, fp)
+    state["in_progress"] = {
+        "knob": "_BASE_BOOST",
+        "tried": {"0.0": {"mrr": 0.017, "human": 0.074, "accepted": False},
+                  "0.02": {"mrr": 0.0168, "human": 0.077, "accepted": False}},
+        "best": dict(BASE), "best_score": 0.017, "best_human": 0.074,
+    }
+    tune._save_state(state_file, state)
+
+    reloaded = tune._load_state(state_file, fp)
+    assert reloaded["in_progress"]["knob"] == "_BASE_BOOST"
+    assert set(reloaded["in_progress"]["tried"]) == {"0.0", "0.02"}
+    assert reloaded["done"] == [], "candidates mid-sweep must not read as a finished knob"
+
+
+def test_a_held_out_half_scored_before_the_kill_survives_a_reload(tmp_path, tune):
+    """The specific case measured live: all candidates done, "keeping X = Y" already printed, killed
+    on held-out confirmation. The before-half must not have to be re-scored on resume."""
+    pairs, state_file = _pairs(tmp_path), tmp_path / "state.json"
+    fp = tune._fingerprint(pairs, BASE)
+    state = tune._load_state(state_file, fp)
+    state["in_progress"] = {
+        "knob": "_BASE_BOOST", "tried": {"0.2": {"mrr": 0.024, "human": 0.090, "accepted": True}},
+        "best": dict(BASE, _BASE_BOOST=0.2), "best_score": 0.024, "best_human": 0.090,
+        "held_out": {"before": {"mrr": 0.015, "recall": 0.03}},
+    }
+    tune._save_state(state_file, state)
+
+    reloaded = tune._load_state(state_file, fp)
+    assert "before" in reloaded["in_progress"]["held_out"]
+    assert "after" not in reloaded["in_progress"]["held_out"], \
+        "only the half that was actually scored before the kill should be present"
+
+
+def test_a_re_harvest_clears_in_progress_along_with_done_and_best(tmp_path, tune):
+    """A knob half-swept against pool A means nothing once the pool is pool B — every kind of
+    progress must be discarded together, not just `done`/`best`."""
+    pairs, state_file = _pairs(tmp_path), tmp_path / "state.json"
+    state = tune._load_state(state_file, tune._fingerprint(pairs, BASE))
+    state["in_progress"] = {"knob": "_BASE_BOOST", "tried": {"0.2": {"mrr": 0.02, "human": 0.09,
+                            "accepted": True}}, "best": BASE, "best_score": 0.02, "best_human": 0.09}
+    tune._save_state(state_file, state)
+
+    pairs.write_text("a freshly re-harvested, much larger pool" * 50, encoding="utf-8")
+    fresh = tune._load_state(state_file, tune._fingerprint(pairs, BASE))
+
+    assert fresh["in_progress"] is None
+
+
+def test_an_older_version_state_file_resets_in_progress_too(tmp_path, tune):
+    """STATE_VERSION was bumped for this fix (adding `in_progress` to the schema) — an old-format
+    file must not be read as though it safely has no in-progress work; it must reset like any other
+    version mismatch."""
+    pairs, state_file = _pairs(tmp_path), tmp_path / "state.json"
+    fp = tune._fingerprint(pairs, BASE)
+    state_file.write_text(json.dumps({"version": 1, "fingerprint": fp, "best": BASE, "done": [],
+                                      "history": []}), encoding="utf-8")
+
+    reloaded = tune._load_state(state_file, fp)
+    assert reloaded["in_progress"] is None
+    assert reloaded["done"] == [], "an old-version file must reset entirely, not merge partially"
+
+
 # ── A pool that passes count+age but is still too thin to tune on (2026-08-16) ─────────────────
 # Measured live: a 3325-pair pool sat under the count and age gates for three days while every
 # single tick of a 16-hour Saturday window and a full nightly window re-derived and re-discarded
