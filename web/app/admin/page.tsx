@@ -63,6 +63,7 @@ export default function AdminDashboard() {
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [byOwner, setByOwner] = useState<UsageByOwnerRow[] | null>(null);
   const [flagged, setFlagged] = useState<FlaggedMessage[] | null>(null);
+  const [expandedFlags, setExpandedFlags] = useState<Set<number>>(new Set());
   const [feedback, setFeedback] = useState<FeedbackItem[] | null>(null);
   const [guards, setGuards] = useState<GuardFindings | null>(null);
   const [guardKind, setGuardKind] = useState("");
@@ -117,6 +118,15 @@ export default function AdminDashboard() {
   async function reviewMessage(reportId: number) {
     await api.admin.reviewMessage(reportId);
     setFlagged((cur) => (cur ? cur.filter((f) => f.id !== reportId) : cur));
+  }
+
+  function toggleFlagExpanded(reportId: number) {
+    setExpandedFlags((cur) => {
+      const next = new Set(cur);
+      if (next.has(reportId)) next.delete(reportId);
+      else next.add(reportId);
+      return next;
+    });
   }
 
   async function reviewFeedback(feedbackId: number) {
@@ -466,7 +476,17 @@ export default function AdminDashboard() {
                           סומן כנבדק
                         </button>
                       </div>
-                      <p className="text-sm text-ink/80 line-clamp-3">{f.text}</p>
+                      <p
+                        className={`text-sm text-ink/80 whitespace-pre-wrap ${expandedFlags.has(f.id) ? "" : "line-clamp-3"}`}
+                      >
+                        {f.text}
+                      </p>
+                      <button
+                        onClick={() => toggleFlagExpanded(f.id)}
+                        className="self-start text-xs font-semibold text-tekhelet/70 hover:text-tekhelet"
+                      >
+                        {expandedFlags.has(f.id) ? "הצג פחות" : "הצג הכל"}
+                      </button>
                     </div>
                   ))}
                   {(flagged ?? []).length === 0 && (
