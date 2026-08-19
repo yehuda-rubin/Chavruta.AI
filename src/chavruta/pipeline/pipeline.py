@@ -217,7 +217,9 @@ class ChavrutaPipeline:
                     continue
                 try:
                     rq = self._resolve_query(Query(text=q, intent=Intent.QA))
-                    hits = self.retriever.retrieve(rq, top_k=8).hits
+                    # priority=True: this is an in-flight answer CONTINUING (the model already
+                    # spent a round and real tokens on it) — see hybrid.py::_PriorityGate.
+                    hits = self.retriever.retrieve(rq, top_k=8, priority=True).hits
                 except Exception:
                     continue
                 for h in hits:

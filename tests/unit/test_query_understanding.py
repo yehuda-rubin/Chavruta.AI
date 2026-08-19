@@ -320,7 +320,7 @@ def test_the_rewrite_is_for_search_only_and_never_shown_to_the_reader():
 
     from chavruta.retrieval import hybrid
 
-    src = inspect.getsource(hybrid.HybridRetriever.retrieve)
+    src = inspect.getsource(hybrid.HybridRetriever._retrieve_impl)
     assert "deuphemize_he(query.search_text or query.text)" in src, "not wired into embedding"
     # The rewrite feeds the embedder and nothing else — the raw text must never be embedded
     # alongside it, and no display path may call it.
@@ -373,7 +373,7 @@ def test_the_floor_is_skipped_when_the_question_already_named_something():
 
     from chavruta.retrieval import hybrid
 
-    src = inspect.getsource(hybrid.HybridRetriever.retrieve)
+    src = inspect.getsource(hybrid.HybridRetriever._retrieve_impl)
     guard = "if not query.named_refs and not query.work_ids and not query.commentator_ids:"
     assert guard in src
     assert "embed_batch(phrases)" in src, "the windows must share one embedding pass"

@@ -9,7 +9,10 @@ no-source signal that protects Principle I).
 from __future__ import annotations
 
 import logging
+import os
+import threading
 import time
+from collections import deque
 from contextlib import contextmanager
 from dataclasses import replace
 
@@ -141,6 +144,88 @@ _QUOTE_WINDOWS = 4
 _QUOTE_TOP_K = 3
 _QUOTE_BOOST = 0.05
 
+# `retrieve()` is the ONLY place in a request that touches the CPU-bound work — bge-m3 embedding
+# and the Qdrant round-trips (both floors and the quote windows). Measured live 2026-08-19: a call
+# takes 0.6-1.6s typically, up to ~8.7s under contention, against a total request time of 30-100s+
+# — the rest is waiting on the LLM API over the network, which holds no CPU at all. Before this,
+# app/api.py's one semaphore covered the WHOLE request (CPU work + that network wait) and gated
+# concurrency at 6, so five sixths of a "busy" system was actually idle CPU sitting behind requests
+# that were just waiting on Nebius.
+#
+# So the gate belongs HERE, scoped to only the part that is actually CPU-bound, not around the
+# whole request — that lets app/api.py raise its OWN semaphore (how many requests may be in flight
+# at once, mostly waiting on the network) much higher without raising how many are actually
+# computing on the box at once. Separate from app/api.py's `_generation_semaphore` on purpose: this
+# module has callers besides the API (scripts/, eval/), and none of them should be silently gated
+# by a limit that exists to protect a live server's shared cores.
+#
+# No thread-count cap is applied to torch/BLAS here (unlike scripts/nightly_eval.py, which pins its
+# own subprocess) — bge-m3 is free to use multiple cores per call, so this stays conservative
+# relative to the 8-core box it currently runs on rather than assuming each call is single-threaded.
+_MAX_CONCURRENT_RETRIEVALS = int(os.environ.get("CHAVRUTA_MAX_CONCURRENT_RETRIEVALS", "4"))
+
+
+class _PriorityGate:
+    """A capacity-N gate where a `priority=True` acquire jumps ahead of ordinary ones, and is
+    first-come-first-served against other priority acquires (never starves one against another).
+
+    Why: a request already mid-conversation — the model replied ===NEED_SOURCES=== and is waiting
+    on a follow-up retrieval to CONTINUE an answer it already spent real time and tokens producing
+    — must not queue behind a brand-new question's very first retrieval, which has no sunk cost at
+    all. By the operator's explicit decision (2026-08-19): finishing what is already in flight
+    outranks starting something new when both want the same scarce slot.
+
+    Plain `threading.Semaphore` cannot express this — waiters are released in an unspecified order.
+    An earlier version of this class used one `threading.Condition` with `notify_all()` and a
+    priority-vs-normal predicate; it correctly let priority jump ahead of normal, but a test
+    (test_retrieval_priority_gate.py) caught that ordering AMONG two priority waiters was not
+    actually FIFO — `notify_all()` wakes every waiter, and which one re-acquires the lock first is
+    an OS scheduling detail, not a guarantee. This version keeps an explicit FIFO queue per tier
+    instead and hands a released slot directly to the head of the priority queue (falling back to
+    the normal queue), so ordering among equals is an invariant of the data structure, not a hope
+    about wakeup order.
+    """
+
+    def __init__(self, capacity: int):
+        self._capacity = capacity
+        self._in_use = 0
+        self._lock = threading.Lock()
+        self._priority_queue: deque[threading.Event] = deque()
+        self._normal_queue: deque[threading.Event] = deque()
+
+    @contextmanager
+    def acquire(self, *, priority: bool = False):
+        my_turn = threading.Event()
+        with self._lock:
+            # Only take the fast path when NOTHING is queued — otherwise a slot that frees up would
+            # be grabbed by whichever new thread happens to reach this lock first, skipping over
+            # waiters who arrived earlier and were promised FIFO-among-equals.
+            if self._in_use < self._capacity and not self._priority_queue and not self._normal_queue:
+                self._in_use += 1
+                granted = True
+            else:
+                granted = False
+                (self._priority_queue if priority else self._normal_queue).append(my_turn)
+        if not granted:
+            my_turn.wait()
+        try:
+            yield
+        finally:
+            self._release()
+
+    def _release(self) -> None:
+        with self._lock:
+            self._in_use -= 1
+            queue = self._priority_queue or self._normal_queue
+            if queue:
+                # Hand the slot directly to the next waiter instead of just freeing capacity and
+                # letting everyone race for the lock — that race is exactly what broke FIFO before.
+                self._in_use += 1
+                queue.popleft().set()
+
+
+_retrieval_gate = _PriorityGate(_MAX_CONCURRENT_RETRIEVALS)
+
 
 class HybridRetriever:
     def __init__(self, embedding, store, profile, *, reranker=None, link_expander=None):
@@ -164,7 +249,18 @@ class HybridRetriever:
         still boosted above the rest; this also brings the pasuk in for context)."""
         return {"work_id": list(query.work_ids)} if query.work_ids else None
 
-    def retrieve(self, query: Query, *, top_k: int) -> RetrievalResult:
+    def retrieve(self, query: Query, *, top_k: int, priority: bool = False) -> RetrievalResult:
+        """Entry point. The CPU-bound work (embedding + Qdrant round-trips) is bounded by
+        `_retrieval_gate`, held only for this call — never for the LLM generation that follows it
+        in a real request. See `_MAX_CONCURRENT_RETRIEVALS` above for why.
+
+        `priority` is for a request already mid-conversation asking to CONTINUE (an agentic
+        ===NEED_SOURCES=== follow-up — see pipeline.py::_build_source_fetcher) — never for a fresh
+        turn's first retrieval, which has no completed work at stake yet."""
+        with _retrieval_gate.acquire(priority=priority):
+            return self._retrieve_impl(query, top_k=top_k)
+
+    def _retrieve_impl(self, query: Query, *, top_k: int) -> RetrievalResult:
         t_all = time.monotonic()
         t: dict[str, float] = {}
         with _timed(t, "embed"):

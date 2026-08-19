@@ -1698,12 +1698,26 @@ def _daf_yomi_context_note(tractate: str, daf: int, he: bool) -> str:
 
 # Global concurrency gate — every generation reaches the LLM/embedder/Qdrant through this one
 # function (sync routes call it inline; async routes call it from inside a job worker), so gating
-# HERE bounds total concurrent generations across BOTH paths combined, not per-path. Sized small on
-# purpose: on a 2-vCPU free-tier box (Oracle Always Free, an HF Spaces free CPU Space) letting more
-# than a couple of generations (embedding + LLM call) run at once buys nothing and risks the whole
-# process getting OOM-killed or grinding every in-flight request to a crawl. Excess requests QUEUE
-# (block on the semaphore) rather than run — that's cheap; running unboundedly is not — up to a
-# timeout, past which we degrade to an honest "busy" answer instead of piling up forever.
+# HERE bounds total concurrent generations across BOTH paths combined, not per-path.
+#
+# Measured live 2026-08-19 (300 real production requests): mean 45.8s, median 30.0s per request —
+# and of that, the CPU-bound part (embedding + Qdrant) is 0.6-8.7s. The rest is waiting on the LLM
+# API over the network, holding no CPU at all. Before 2026-08-19 this ONE gate covered both the
+# short CPU-bound burst and the long network wait, so it had to stay small to protect the box's
+# cores — capping how many requests could be in flight in total to roughly how many could be
+# COMPUTING at once, even though most of an in-flight request's time is spent doing nothing but
+# waiting.
+#
+# retrieval\hybrid.py::_retrieval_gate now protects the CPU-bound burst specifically
+# (CHAVRUTA_MAX_CONCURRENT_RETRIEVALS), so THIS gate's job is narrower: bound total requests in
+# flight (mostly idle, waiting on Nebius) against thread/memory growth, not against CPU contention
+# — it can be, and was raised, well past what the box's core count alone would justify. Default
+# stays conservative (2) for any deployment that has not measured its own real request durations;
+# CHAVRUTA_MAX_CONCURRENT_GENERATIONS=20 in production as of 2026-08-19, comfortably under
+# Starlette's default sync-route thread-pool ceiling (40) so this stays the binding limit rather
+# than queueing invisibly one layer up. Excess requests QUEUE (block on the semaphore) rather than
+# run — that's cheap; running unboundedly is not — up to a timeout, past which we degrade to an
+# honest "busy" answer instead of piling up forever.
 _MAX_CONCURRENT_GENERATIONS = int(os.environ.get("CHAVRUTA_MAX_CONCURRENT_GENERATIONS", "2"))
 _GENERATION_QUEUE_TIMEOUT_S = float(os.environ.get("CHAVRUTA_QUEUE_TIMEOUT_S", "45"))
 _generation_semaphore = threading.Semaphore(_MAX_CONCURRENT_GENERATIONS)

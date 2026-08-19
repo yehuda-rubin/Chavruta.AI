@@ -1802,7 +1802,7 @@ def test_base_source_floor_filters_commentary_by_ref_not_unit_type():
     import inspect
 
     from chavruta.retrieval import hybrid
-    src = inspect.getsource(hybrid.HybridRetriever.retrieve)
+    src = inspect.getsource(hybrid.HybridRetriever._retrieve_impl)
     assert 'unit_type": "source"' not in src, (
         "the base-source floor must not filter on unit_type — it is 'source' for every point"
     )
