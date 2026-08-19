@@ -341,6 +341,8 @@ export const api = {
       req<FlaggedMessage[]>(`/admin/flagged-messages?reviewed=${reviewed}`),
     reviewMessage: (reportId: number) =>
       req<{ ok: boolean }>(`/admin/flagged-messages/${reportId}/review`, { method: "POST" }),
+    sessionMessages: (sessionId: string) =>
+      req<Message[]>(`/admin/sessions/${sessionId}/messages`),
     feedback: (reviewed = false) =>
       req<FeedbackItem[]>(`/admin/feedback?reviewed=${reviewed}`),
     reviewFeedback: (feedbackId: number) =>

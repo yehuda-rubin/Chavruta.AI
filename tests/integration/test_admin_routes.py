@@ -37,6 +37,7 @@ def test_non_admin_gets_404_on_every_admin_route(client, monkeypatch):
     assert client.get("/admin/usage-by-week", headers=h).status_code == 404
     assert client.get("/admin/flagged-messages", headers=h).status_code == 404
     assert client.post("/admin/flagged-messages/1/review", headers=h).status_code == 404
+    assert client.get("/admin/sessions/some-session-id/messages", headers=h).status_code == 404
     assert client.get("/admin/feedback", headers=h).status_code == 404
     assert client.post("/admin/feedback/1/review", headers=h).status_code == 404
     assert client.get("/admin/coupons", headers=h).status_code == 404
@@ -92,6 +93,37 @@ def test_admin_can_review_a_flagged_message(client, monkeypatch):
     assert review.status_code == 200 and review.json()["ok"] is True
 
     assert client.get("/admin/flagged-messages?reviewed=false", headers=h).json() == []
+
+
+# ── Full-chat view for a flagged message (2026-08-19) ─────────────────────────
+# A report used to carry only the one flagged line — reading it in the admin panel meant reading a
+# claim with no idea what led up to it. This gives a reviewer the whole conversation.
+def test_admin_sees_the_full_chat_a_flagged_message_came_from(client, monkeypatch):
+    h, admin_owner = _as_admin(client, monkeypatch)
+
+    # The flagged chat belongs to a DIFFERENT, real end user — not the admin's own account. This is
+    # the behavior actually being tested: admin_get_session_messages is NOT owner-scoped, unlike
+    # the regular GET /sessions/{id}/messages a user hits on their own chats.
+    other_owner = "a-real-end-user"
+    sid = db.create_session("שרימפס זה כשר", owner_id=other_owner, mode="chavruta")
+    db.save_message(sid, "user", "שרימפס זה כשר")
+    reply_id = db.save_message(sid, "assistant", "הפסוק 'לא ימיש השרימפ מתוך חלבו' מופיע במשנה...")
+    db.report_message(reply_id, other_owner, "user thinks the model invented a source")
+
+    unreviewed = client.get("/admin/flagged-messages?reviewed=false", headers=h).json()
+    report = next(r for r in unreviewed if r["message_id"] == reply_id)
+
+    chat = client.get(f"/admin/sessions/{report['session_id']}/messages", headers=h)
+    assert chat.status_code == 200, chat.text
+    body = chat.json()
+    assert [m["role"] for m in body] == ["user", "assistant"]
+    assert body[1]["id"] == reply_id
+    assert "השרימפ" in body[1]["text"]
+
+
+def test_admin_full_chat_route_404s_on_an_unknown_session(client, monkeypatch):
+    h, _ = _as_admin(client, monkeypatch)
+    assert client.get("/admin/sessions/does-not-exist/messages", headers=h).status_code == 404
 
 
 def test_submit_and_review_feedback(client, monkeypatch):

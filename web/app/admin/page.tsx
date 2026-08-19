@@ -16,6 +16,7 @@ import {
   type UsageOverTime,
   type UsageByOwnerRow,
 } from "@/lib/api";
+import type { Message } from "@/lib/types";
 
 // No `metadata` export here — same reason as limits/page.tsx: this is a Client Component (needs
 // useState/useEffect for the data fetch + window toggle), and Next only resolves `metadata` on
@@ -64,6 +65,12 @@ export default function AdminDashboard() {
   const [byOwner, setByOwner] = useState<UsageByOwnerRow[] | null>(null);
   const [flagged, setFlagged] = useState<FlaggedMessage[] | null>(null);
   const [expandedFlags, setExpandedFlags] = useState<Set<number>>(new Set());
+  // Keyed by report id, not session_id — two reports can point at the same chat, and each row's
+  // open/loading state should be independent.
+  const [openChats, setOpenChats] = useState<Set<number>>(new Set());
+  const [chatCache, setChatCache] = useState<Record<number, Message[]>>({});
+  const [chatLoading, setChatLoading] = useState<Set<number>>(new Set());
+  const [chatError, setChatError] = useState<Set<number>>(new Set());
   const [feedback, setFeedback] = useState<FeedbackItem[] | null>(null);
   const [guards, setGuards] = useState<GuardFindings | null>(null);
   const [guardKind, setGuardKind] = useState("");
@@ -132,6 +139,34 @@ export default function AdminDashboard() {
   async function reviewFeedback(feedbackId: number) {
     await api.admin.reviewFeedback(feedbackId);
     setFeedback((cur) => (cur ? cur.filter((f) => f.id !== feedbackId) : cur));
+  }
+
+  async function toggleChat(reportId: number, sessionId: string) {
+    setOpenChats((cur) => {
+      const next = new Set(cur);
+      if (next.has(reportId)) next.delete(reportId);
+      else next.add(reportId);
+      return next;
+    });
+    if (chatCache[reportId] || chatLoading.has(reportId)) return;
+    setChatLoading((cur) => new Set(cur).add(reportId));
+    setChatError((cur) => {
+      const next = new Set(cur);
+      next.delete(reportId);
+      return next;
+    });
+    try {
+      const msgs = await api.admin.sessionMessages(sessionId);
+      setChatCache((cur) => ({ ...cur, [reportId]: msgs }));
+    } catch {
+      setChatError((cur) => new Set(cur).add(reportId));
+    } finally {
+      setChatLoading((cur) => {
+        const next = new Set(cur);
+        next.delete(reportId);
+        return next;
+      });
+    }
   }
 
   if (meLoading) {
@@ -481,12 +516,46 @@ export default function AdminDashboard() {
                       >
                         {f.text}
                       </p>
-                      <button
-                        onClick={() => toggleFlagExpanded(f.id)}
-                        className="self-start text-xs font-semibold text-tekhelet/70 hover:text-tekhelet"
-                      >
-                        {expandedFlags.has(f.id) ? "הצג פחות" : "הצג הכל"}
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => toggleFlagExpanded(f.id)}
+                          className="self-start text-xs font-semibold text-tekhelet/70 hover:text-tekhelet"
+                        >
+                          {expandedFlags.has(f.id) ? "הצג פחות" : "הצג הכל"}
+                        </button>
+                        <button
+                          onClick={() => toggleChat(f.id, f.session_id)}
+                          className="self-start text-xs font-semibold text-tekhelet/70 hover:text-tekhelet"
+                        >
+                          {openChats.has(f.id) ? "הסתר את הצ'אט" : "הצג את כל הצ'אט"}
+                        </button>
+                      </div>
+                      {openChats.has(f.id) && (
+                        <div className="mt-1 rounded-xl border border-ink/10 bg-white/40 p-3 flex flex-col gap-2 max-h-96 overflow-y-auto">
+                          {chatLoading.has(f.id) && (
+                            <p className="text-xs text-ink/40 text-center py-2">טוען צ'אט…</p>
+                          )}
+                          {chatError.has(f.id) && (
+                            <p className="text-xs text-red-500 text-center py-2">
+                              שגיאה בטעינת הצ'אט
+                            </p>
+                          )}
+                          {(chatCache[f.id] ?? []).map((m) => (
+                            <div
+                              key={m.id}
+                              className={`text-xs rounded-lg p-2 whitespace-pre-wrap ${
+                                m.role === "user" ? "bg-tekhelet/5" : "bg-gold/5"
+                              } ${m.id === f.message_id ? "ring-1 ring-gold" : ""}`}
+                            >
+                              <span className="block font-semibold text-ink/40 mb-0.5">
+                                {m.role === "user" ? "משתמש" : "מודל"}
+                                {m.id === f.message_id ? " · ההודעה המסומנת" : ""}
+                              </span>
+                              {m.text}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))}
                   {(flagged ?? []).length === 0 && (
