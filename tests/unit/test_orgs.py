@@ -237,11 +237,12 @@ def test_opening_the_panel_is_recorded(school):
     assert [tuple(r) for r in rows] == [("boss", "pupil", "view_panel")]
 
 
-# ── A member has no personal wallet ───────────────────────────────────────────
-# Everything below defends the same invariant from a different door: a school member spends the
-# org's pool and NOTHING else. app/api.py::_reserve_tokens branches on orgs.quota_context before it
-# ever reaches credits or a personal plan, so anything sold or granted to a member personally is
-# money (or operator goodwill) that buys literally nothing. Silence would look like success.
+# ── A member has no personal plan, but DOES have a personal wallet ────────────
+# A school member spends the org's pool for tokens and has no personal PLAN behind it —
+# app/api.py::_reserve_tokens branches on orgs.quota_context before it ever reaches one, so a
+# personal tier sold or granted to a member is money (or operator goodwill) that buys literally
+# nothing. Credits are the opposite (decided 2026-08-20): a member's own credits ARE a spendable
+# fallback once the pool refuses a turn, so they are never refused a credits purchase or grant.
 
 def test_a_member_cannot_check_out_a_personal_plan(school, monkeypatch):
     from app.billing import payplus, service as billing
@@ -272,17 +273,16 @@ def test_a_member_cannot_redeem_a_plan_coupon(school):
     assert exc.value.reason == "org_member"
 
 
-def test_a_member_cannot_be_granted_credits_either(school):
-    """Same door as /admin/grant, which mints a code and redeems it on the account's behalf — so the
-    refusal has to live in redeem() to cover the operator path too."""
+def test_a_member_can_be_granted_credits(school):
+    """A member's own credits ARE spendable (a fallback once the pool refuses — decided
+    2026-08-20), so unlike a plan coupon this one must go through, including via /admin/grant."""
     import app.coupons as coupons
 
     _join(school, "pupil")
     code = coupons.issue_credit_coupon(credits=100, max_redemptions=1)
-    with pytest.raises(coupons.RedeemError) as exc:
-        coupons.redeem("pupil", code, bypass_throttle=True)
-    assert exc.value.reason == "org_member"
-    assert db.get_credits("pupil") == 0
+    res = coupons.redeem("pupil", code, bypass_throttle=True)
+    assert res["kind"] == "credits"
+    assert db.get_credits("pupil") == 100
 
 
 def test_leaving_the_org_restores_the_ability_to_buy(school):
@@ -369,11 +369,12 @@ def test_the_operator_can_grant_a_school_its_plan(school):
     assert coupons.redeem("boss", code, bypass_throttle=True)["kind"] == "plan"
 
 
-def test_the_owner_cannot_be_granted_credits(school):
+def test_the_owner_can_be_granted_credits_too(school):
     import app.coupons as coupons
     code = coupons.issue_credit_coupon(credits=50, max_redemptions=1)
-    with pytest.raises(coupons.RedeemError):
-        coupons.redeem("boss", code, bypass_throttle=True)
+    res = coupons.redeem("boss", code, bypass_throttle=True)
+    assert res["kind"] == "credits"
+    assert db.get_credits("boss") == 50
 
 
 # ── Joining in the other order ────────────────────────────────────────────────
@@ -387,11 +388,12 @@ def test_a_checkout_in_flight_blocks_joining(school):
         _join(school, "shopper")
 
 
-def test_unspent_credits_block_joining(school):
-    """A member has no credit fallback, so joining with a balance strands something they paid for."""
+def test_unspent_credits_no_longer_block_joining(school):
+    """Reversed 2026-08-20: a member's credits are a spendable fallback now, so a balance carried
+    into a school is not stranded and must not block joining."""
     db.add_credits("saver", 40)
-    with pytest.raises(orgs.JoinRefused):
-        _join(school, "saver")
+    _join(school, "saver")
+    assert db.get_credits("saver") == 40
 
 
 # ── The member's counter is not their personal one ───────────────────────────

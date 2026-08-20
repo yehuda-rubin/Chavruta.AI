@@ -2458,8 +2458,17 @@ def _reserve_tokens(owner: str, lang: str, intent: str, user_key: str = "") -> R
             meter=db.TOKENS, day=day)
         if charge.allowed:
             return Reservation(estimate, False, ctx, day)
-        # Deliberately no credit or BYOK fallback for a member: both would let one person spend past
-        # the cap the school set for them, which is the single control an admin has over the pool.
+        # No BYOK fallback for a member — that needs a personal provider key, which is out of scope
+        # for a school seat. Credits ARE a fallback (decided 2026-08-20): a member may buy their own
+        # with their own card, so hitting the school's cap or the shared pool's limit stops the FREE
+        # ride, not the person — they can keep going on their own money. Mirrors the non-member path
+        # below exactly; nothing was reserved against the pool, so there is nothing to settle there.
+        cost = plans.credit_cost(intent)
+        spent, balance = db.spend_credits(owner, cost)
+        if spent:
+            _log.info("owner=%s hit org pool (%s); spent %d credit(s), %d left",
+                      owner, charge.refused, cost, balance)
+            return Reservation(0, day=day, credits_spent=cost)
         raise HTTPException(status_code=429, detail=_pool_quota_message(charge.refused, lang, ctx))
 
     plan = _plan_for(owner)

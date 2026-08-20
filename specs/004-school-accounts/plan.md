@@ -427,3 +427,39 @@ resolver in `app/orgs.py` (NOT in `plans.py`, which is pure and DB-free by desig
 `_reserve_tokens`, `_charge_lesson_unit`, `_record_event` and `/me`. Green `test_quota.py` and
 `test_byok_quota.py` is the definition of "existing single users unchanged". Then the gate and
 endpoints with the cross-org tests written alongside, then billing/coupon refusals, then UI.
+
+---
+
+# Decided 2026-08-20: the yeshiva shape of v1, and a reversal on credits
+
+Founder confirmed the three roles for the institutional version in yeshiva terms — matches what was
+already built, nothing to change: **student** = yeshiva students (18+, per the B1 blocker above),
+**teacher** = whoever the yeshiva designates, **admin** = the buying account. `org_invite`
+(app/api.py:4079) already mints a teacher's join code exactly like a student's, differing only in
+`role` — no work needed there.
+
+**Reversed: a member's own credits are now a spendable fallback, not refused.** Every member —
+student, teacher, or the admin themselves — may top up their own account with credits on their own
+card, to keep going once the school's pool or their own per-member cap stops them. The admin buys
+for the school in the admin panel (already worked, unchanged) or for themself in Settings like any
+other member (now works too). This is the OPPOSITE of what C1's review said only nine lines up
+("Deliberately no credit or BYOK fallback for a member") and it stands as an intentional revision,
+not an oversight — the cap the review protected is now a soft ceiling on the FREE ride, not a hard
+wall on what someone can spend of their own money. BYOK is unchanged: still refused for a member,
+since it needs a personal provider key, which is out of scope for a school seat.
+
+Implemented (2026-08-20, not yet wired to a real checkout — see below):
+- `orgs.refuse_personal_purchase(owner_id, plan, *, kind="plan")` — `kind="credits"` always returns
+  None (allowed); the `plan` branch (personal PLAN purchases) is unchanged and still refuses every
+  member, admin included, other than the org owner buying the school's own institutional tier.
+- `_reserve_tokens`'s org branch (app/api.py) — once `db.bump_pooled` refuses, falls through to
+  `db.spend_credits` exactly like the non-member path, before raising 429. No BYOK fallback added.
+- `accept_invite` (app/orgs.py) no longer refuses to admit someone who is carrying an unspent credit
+  balance — that precondition existed only because credits used to be dead money for a member.
+
+**Not done, on purpose**: there is still no real-money "buy credits" checkout at all, for a member or
+a non-member — `CheckoutRequest`/`billing.start_checkout` only ever sell a PLAN tier. This change
+makes credits spendable for a member the moment such a flow exists (or via an operator/coupon grant
+today); it does not build that flow. Matches the standing decision that the paid institutional
+checkout itself (`orgs.create_org` reachable from a real purchase) is still not wired — this is
+preparation for it, not the wiring.
