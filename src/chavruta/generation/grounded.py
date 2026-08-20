@@ -663,6 +663,60 @@ def mismatched_tanakh_citations(text: str, fetch_refs) -> list[MismatchedCitatio
     return out
 
 
+_TALMUD_SEGMENT_RE: re.Pattern | None = None
+
+
+def _talmud_segment_re() -> re.Pattern:
+    """Built lazily (needs HE_TRACTATES from hebrew_refs, a corpus/ -> intents/ dependency this
+    module otherwise avoids at import time) and cached — the alternation is the same on every call."""
+    global _TALMUD_SEGMENT_RE
+    if _TALMUD_SEGMENT_RE is None:
+        from chavruta.intents.hebrew_refs import HE_TRACTATES
+
+        names = "|".join(re.escape(n) for n in sorted(HE_TRACTATES, key=len, reverse=True))
+        _TALMUD_SEGMENT_RE = re.compile(
+            rf"(?P<prefix>[בלכמו]{{0,2}})(?P<tractate>{names})\s+(?P<n>\d+)[:.]\d+")
+    return _TALMUD_SEGMENT_RE
+
+
+# A real daf citation is always "<tractate> <daf-letters> ע\"<א|ב>" or "<tractate> <daf-letters>:" —
+# the amud is a LETTER, never a second integer. Two consecutive integers joined by ':' or '.' right
+# after a tractate name is therefore an unambiguous fingerprint of this specific leak, not something
+# that could also match a correctly-written citation.
+_MAX_SANE_DAF = 180   # Bava Batra, the longest tractate, tops out at 176 — 180 leaves margin
+
+
+def fix_raw_talmud_segment_refs(text: str) -> str:
+    """Replace a raw internal corpus segment number that leaked into prose (e.g. 'ביומא 148:10')
+    with the real daf:amud a reader recognizes ('ביומא עד ע"ב') — or, if the number does not decode
+    to a plausible daf, drop the confusing digits rather than guess.
+
+    Caught live 2026-08-20: a real QA answer wrote "הגמרא ביומא 148:10 קובעת" and "רש"י על ההמשך
+    (יומא 148:10) מבהיר" — 148 is the corpus's own flat amud-linear number for the source header the
+    model was shown ('יומא — Yoma.148.10'), and it copied that number straight into the answer
+    instead of converting it. The arithmetic checks out exactly: N=148 is even -> daf 74, amud b —
+    Yoma 74b, which is what the user's OWN question named. The model invented nothing; it just
+    exposed an internal identifier that was never meant to reach a reader. See
+    corpus/refs.py::corpus_n_to_daf_amud for the conversion (the inverse of the corpus's own
+    daf_amud_to_corpus_n) and the prompt-side fix in llm/base.py::render_messages /
+    app/api.py::_chavruta_job_md, which this backs up rather than replaces.
+    """
+    from chavruta.corpus.refs import corpus_n_to_daf_amud, hebrew_numeral
+
+    def _replace(m: re.Match) -> str:
+        n = int(m.group("n"))
+        try:
+            daf, amud = corpus_n_to_daf_amud(n)
+        except Exception:
+            return f"{m.group('prefix')}{m.group('tractate')}"
+        if not (2 <= daf <= _MAX_SANE_DAF):
+            return f"{m.group('prefix')}{m.group('tractate')}"      # not a plausible daf — drop it
+        amud_label = 'ע"א' if amud == "a" else 'ע"ב'
+        return f"{m.group('prefix')}{m.group('tractate')} {hebrew_numeral(daf)} {amud_label}"
+
+    return _talmud_segment_re().sub(_replace, text or "")
+
+
 def misattribution_note(lang: str, findings: list[Misattribution]) -> str:
     """Caveat text for a misattribution. Names BOTH sides on purpose: 'unverified quote' would be a
     lie here — the quote is in the corpus, it just isn't the commentator's the answer credits, and

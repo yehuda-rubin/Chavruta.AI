@@ -140,7 +140,11 @@ def render_messages(prompt: GroundedPrompt, lang: str) -> list[dict]:
             f"ענה בעברית בצורה ברורה, מלאה ומנומקת — הסבר את התשובה ופַתח אותה, אל תסתפק במשפט יבש אחד. "
             f"כתוב אך ורק בעברית תקנית, ללא מילים בשפה זרה. "
             f"צרף לכל טענה את סימון המקור, למשל [S1]. "
-            f"צטט את לשון המקור כשרלוונטי. אם אין תשובה במקורות — אמור זאת ואל תמציא."
+            f"צטט את לשון המקור כשרלוונטי. אם אין תשובה במקורות — אמור זאת ואל תמציא. "
+            f"המזהה שאחרי הקו בכותרת כל מקור (למשל 'Yoma.148.10') הוא זיהוי פנימי בלבד — לעולם אל "
+            f"תעתיק אותו כמו שהוא לתוך התשובה. אם ברצונך לציין דף גמרא בפרוזה, כתוב אותו בצורה אנושית "
+            f"(למשל 'יומא עד ע\"ב'), לא במספר הפנימי; ואם ברצונך לציין שם חיבור, השתמש בשם העברי "
+            f"שבתחילת הכותרת, לא בחלק האנגלי."
         )
         if _SOURCE_NOTE.get():
             # Asked for AFTER the answer, and cut back out before display. The reader gets it beside
@@ -178,7 +182,10 @@ def render_messages(prompt: GroundedPrompt, lang: str) -> list[dict]:
             f"Answer in English clearly and fully — explain and develop your answer, do not reply with a "
             f"single terse sentence. Write the explanation in English (you may quote the Hebrew source text), "
             f"but do NOT mix in stray words from other languages (no Chinese/Russian/etc.). Cite every claim by "
-            f"its source marker like [S1]. If the sources do not contain the answer, say so plainly and do not invent."
+            f"its source marker like [S1]. If the sources do not contain the answer, say so plainly and do not invent. "
+            f"The identifier after the dash in each source's header (e.g. 'Yoma.148.10') is an internal "
+            f"reference only — never copy it verbatim into your answer. If you want to name a Gemara daf "
+            f"in prose, use its human form (e.g. 'Yoma 74b'), not the internal number."
         )
     messages.append({"role": "user", "content": user})
     return messages

@@ -439,6 +439,61 @@ def test_fix_bleeding_sentences_fixes_a_single_stray_letter():
     assert len(llm.calls) == 1
 
 
+# ── Naming the specific offending word(s), not just "this sentence bleeds" (2026-08-20) ───────
+# Detection was never the gap — _has_bleed correctly flags real production answers every time it
+# was checked. The two-attempt REWRITE kept failing identically on a foreign term the model doesn't
+# recognize as a violation on its own: 'chez' survived two same-shape attempts (2026-08-14), and
+# 'qualify' plus a transliterated work title ('MASKIL LEDAVID') reached a real user unfixed
+# (2026-08-20) — even though the work's own Hebrew name was sitting right there in the sources
+# block. _rewrite_bleeding_sentence now tells the model exactly which word(s) are the problem.
+def test_bleed_words_extracts_a_single_english_word():
+    assert api._bleed_words("ולכן, רק אכילה ושתיה qualify, כי הן היחידים") == ["qualify"]
+
+
+def test_bleed_words_keeps_a_multi_word_transliteration_together():
+    """'MASKIL LEDAVID' must come back as ONE phrase — splitting it in two would produce a rewrite
+    instruction naming two meaningless fragments instead of the actual work title."""
+    assert api._bleed_words("הMASKIL LEDAVID מסביר את משמעות") == ["MASKIL LEDAVID"]
+
+
+def test_bleed_words_ignores_a_real_marker():
+    assert api._bleed_words("משפט נקי [S1] עם [S2, S3] בלבד") == []
+
+
+def test_bleed_words_is_empty_on_clean_hebrew():
+    assert api._bleed_words("זהו משפט עברי תקין לחלוטין.") == []
+
+
+class _SystemCapturingLLM:
+    """Like _FakeLLM, but also records the SYSTEM prompt each call was given — needed to check the
+    rewrite call actually names the offending word(s), not just to check its final answer."""
+
+    def __init__(self, reply: str):
+        self.reply = reply
+        self.systems: list[str] = []
+
+    def generate(self, prompt, *, lang, max_tokens, temperature):
+        self.systems.append(prompt.system)
+        return SimpleNamespace(text=self.reply)
+
+
+def test_the_rewrite_call_is_told_the_specific_offending_word():
+    llm = _SystemCapturingLLM(reply="רק אכילה ושתיה כשירות, כי הן היחידים")
+    api._rewrite_bleeding_sentence("רק אכילה ושתיה qualify, כי הן היחידים", llm)
+
+    assert llm.systems, "the rewrite call was never made"
+    assert "qualify" in llm.systems[0], (
+        "the offending word must be named explicitly in the system prompt, not left for the model "
+        "to notice on its own — that is exactly where the un-targeted version kept failing")
+
+
+def test_a_clean_rewrite_is_still_accepted_when_the_word_is_named():
+    llm = _SystemCapturingLLM(reply="הMASKIL LEDAVID הפך למשכיל לדוד")   # deliberately still bleeding
+    llm.reply = "משכיל לדוד מסביר את משמעות"                             # actually clean this time
+    out = api._rewrite_bleeding_sentence("המשכיל לדוד MASKIL LEDAVID מסביר את משמעות", llm)
+    assert out == "משכיל לדוד מסביר את משמעות"
+
+
 # Fix (caught live 2026-08-04): the model quoted a source containing a Hebrew abbreviation gershayim
 # (בר"ה) and emitted a literal backslash before it (בר\"ה) — as if escaping the quote the way a
 # JSON/code string would. A bare backslash has no legitimate use in this app's output.
@@ -2053,6 +2108,30 @@ def test_the_instruction_is_off_unless_the_request_turns_it_on():
     finally:
         lb.reset_source_note(token)
     assert "HHH" not in lb.render_messages(prompt, "he")[-1]["content"]
+
+
+def test_render_messages_now_forbids_copying_the_raw_ref_into_prose():
+    """Caught live 2026-08-20: a real answer wrote 'ביומא 148:10' — the corpus's own internal
+    segment number for the source header it was shown ('יומא — Yoma.148.10') — straight into the
+    prose instead of the human daf:amud form. Both language variants must carry the prohibition."""
+    import chavruta.llm.base as lb
+
+    prompt = lb.GroundedPrompt(system="s", question="q", sources=[
+        lb.SourceBlock(marker="S1", ref="Yoma.148.10", commentator_id=None, text="t")])
+
+    he_content = lb.render_messages(prompt, "he")[-1]["content"]
+    assert "זיהוי פנימי" in he_content or "מזהה פנימי" in he_content
+
+    en_content = lb.render_messages(prompt, "en")[-1]["content"]
+    assert "internal reference" in en_content
+
+
+def test_chavruta_job_prompt_also_forbids_copying_the_raw_ref():
+    """Chavruta mode builds its OWN source header (no Hebrew-name prefix at all — app/api.py's
+    _chavruta_job_md shows '### [S#] <ref>' directly), so it needs the same instruction, not just
+    render_messages (which chavruta mode does not go through)."""
+    job = api._chavruta_job_md("שאלה", [], "he", [])
+    assert "Yoma.148.10" in job or "internal identifier" in job.lower() or "פנימי" in job
 
 
 # ── The base-text floor reserved nothing (reported 2026-08-14) ────────────────

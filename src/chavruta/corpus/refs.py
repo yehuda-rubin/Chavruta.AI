@@ -49,6 +49,45 @@ def daf_amud_to_corpus_n(daf: int, amud: str) -> int:
     return 2 * int(daf) - (1 if amud == "a" else 0)
 
 
+def corpus_n_to_daf_amud(n: int) -> tuple[int, str]:
+    """Inverse of daf_amud_to_corpus_n: the corpus's flat amud-linear number back to (daf, amud).
+    N odd -> amud a, N even -> amud b (e.g. 148 -> (74, 'b') — Yoma 74b).
+
+    Exists for fix_raw_talmud_segment_refs (grounded.py): a model that was handed a source header
+    like 'יומא — Yoma.148.10' sometimes copies the raw internal number straight into its prose
+    ('ביומא 148:10') instead of naming the daf a reader would recognize — reproduced live 2026-08-20.
+    """
+    n = int(n)
+    return ((n + 1) // 2, "a") if n % 2 else (n // 2, "b")
+
+
+# Standard Hebrew numeral letters. 15/16 are the well-known exception (ט"ו / ט"ז, not יה / יו) —
+# spelling those two combinations is avoided because they resemble writing the Divine Name.
+_HEB_UNITS = ["", "א", "ב", "ג", "ד", "ה", "ו", "ז", "ח", "ט"]
+_HEB_TENS = ["", "י", "כ", "ל", "מ", "נ", "ס", "ע", "פ", "צ"]
+_HEB_HUNDREDS = ["", "ק", "ר", "ש", "ת"]
+
+
+def hebrew_numeral(n: int) -> str:
+    """A positive integer as a Hebrew-letter numeral with gershayim/geresh, e.g. 74 -> 'ע"ד', 176 ->
+    'קע"ו'. Bounded for daf numbers in practice (no tractate exceeds ~180); numbers at or past 500
+    are not expected here and fall back to a plain digit string rather than guessing at compound
+    hundreds forms nothing in this corpus actually needs.
+    """
+    if n == 15:
+        return 'ט"ו'
+    if n == 16:
+        return 'ט"ז'
+    hundreds, rem = divmod(n, 100)
+    tens, units = divmod(rem, 10)
+    if hundreds >= len(_HEB_HUNDREDS):
+        return str(n)
+    letters = _HEB_HUNDREDS[hundreds] + _HEB_TENS[tens] + _HEB_UNITS[units]
+    if len(letters) > 1:
+        return letters[:-1] + '"' + letters[-1]
+    return letters + "'" if letters else str(n)
+
+
 def _amud_to_corpus(ref: str) -> str | None:
     m = _AMUD_RE.match(ref or "")
     # Only a bare tractate name + daf + amud is Talmud ('Sanhedrin 23a'). A digit in the name means a

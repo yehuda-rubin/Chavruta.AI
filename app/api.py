@@ -300,6 +300,33 @@ _BLEED_FIX_SYSTEM = (
     "Reply with ONLY the rewritten sentence and nothing else — no preamble, no quotes around it."
 )
 
+# Maximal runs of "bleed characters" (same class _BLEED_CHAR_RE flags), joined across a single
+# space/hyphen/apostrophe so a multi-word transliteration ("MASKIL LEDAVID") comes back as ONE
+# phrase rather than two separate hits.
+_BLEED_RUN_RE = re.compile(
+    rf"(?:[A-Za-z]|[^\x00-\x7F֐-׿{_ALLOWED_EXTRA_PUNCT}])+"
+    rf"(?:[ '\-](?:[A-Za-z]|[^\x00-\x7F֐-׿{_ALLOWED_EXTRA_PUNCT}])+)*"
+)
+
+
+def _bleed_words(text: str) -> list[str]:
+    """The SPECIFIC word(s)/phrase(s) making `text` bleed — not just THAT it bleeds. Naming them in
+    the rewrite prompt is far more actionable than handing over the whole sentence and asking the
+    model to self-diagnose, which is exactly where the two-attempt rewrite kept failing IDENTICALLY
+    on a foreign term it doesn't recognize as a violation on its own: reproduced live twice —
+    'chez' survived two same-shape attempts (2026-08-14), and again with 'qualify' plus a
+    transliterated work title ('MASKIL LEDAVID', whose OWN Hebrew name was sitting right there in
+    the sources block) reaching a real user unfixed (2026-08-20)."""
+    masked = _MARKER_RE.sub("", text or "")
+    seen: set[str] = set()
+    out: list[str] = []
+    for m in _BLEED_RUN_RE.finditer(masked):
+        w = m.group(0)
+        if w not in seen:
+            seen.add(w)
+            out.append(w)
+    return out
+
 
 def _rewrite_bleeding_sentence(sentence: str, llm) -> str | None:
     """One sentence → its Hebrew-only rewrite, or None if no attempt produced a clean one.
@@ -312,12 +339,23 @@ def _rewrite_bleeding_sentence(sentence: str, llm) -> str | None:
     the Latin text — so a call that failed outright and a call that succeeded but produced an
     equally-bleeding rewrite were both dead ends after one try.
     """
+    words = _bleed_words(sentence)
+    system = _BLEED_FIX_SYSTEM
+    if words:
+        # Point the model at the SPECIFIC word(s) rather than leaving it to notice them unaided —
+        # see _bleed_words for why detection alone was not the gap.
+        named = "', '".join(words[:5])
+        system = system + (
+            f"\n\nThe following word(s)/phrase(s) in THIS sentence are NOT Hebrew and MUST be "
+            f"replaced with a natural Hebrew equivalent: '{named}'. Do not leave any of them as-is, "
+            f"and do not just delete them — replace with real Hebrew words."
+        )
     # A retry at the SAME low temperature on the SAME model tends to reproduce the SAME mistake
     # (caught live: "sugya"/"mixture" survived two identical-temperature attempts) — the second
     # try uses a higher temperature so it's a genuinely different roll, not a near-duplicate.
     for attempt, temperature in enumerate((0.2, 0.6)):
         try:
-            prompt = GroundedPrompt(system=_BLEED_FIX_SYSTEM, sources=[], question=sentence, bare=True)
+            prompt = GroundedPrompt(system=system, sources=[], question=sentence, bare=True)
             res = llm.generate(prompt, lang="he", max_tokens=200, temperature=temperature)
             candidate = (res.text or "").strip()
         except Exception:
@@ -338,8 +376,18 @@ def _fix_bleeding_sentences(text: str, he: bool, llm) -> str:
     sentence and nothing else, so they are genuinely independent — but only when the backend can
     take concurrent calls. The bridge answers in-session through a single job file, so overlapping
     calls there would interleave into each other; it opts out via `serial_only`.
+
+    Also fixes a raw internal Talmud segment number that leaked into prose (e.g. 'ביומא 148:10')
+    into its real daf:amud form — see grounded.fix_raw_talmud_segment_refs. Runs on every call
+    unconditionally (it needs no LLM and digits/colons never trip `_has_bleed`, so the bleed loop
+    below would never have caught it on its own), which also means every caller of this function
+    gets the fix for free rather than needing its own wiring — the exact gap that let chavruta mode
+    go without unverified_quotes for so long.
     """
-    if not he or not text or llm is None or not _has_bleed(text):
+    if not he or not text:
+        return text
+    text = grounded.fix_raw_talmud_segment_refs(text)
+    if llm is None or not _has_bleed(text):
         return text
     parts = _SENTENCE_SPLIT_RE.split(text)   # alternates: sentence, separator, sentence, separator, …
     # The cap is applied HERE, on the selection, so which sentences get fixed does not depend on how
@@ -1319,7 +1367,10 @@ def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bo
         "Keep it fairly short (a real chavruta exchange, not an essay). Write in the learner's language. **bold** key terms. "
         "LANGUAGE: write ONLY in the learner's language, with NO words from another language mixed in — in a "
         "Hebrew turn write 'בעל הבית', never 'employer' (and no stray Chinese/Russian either); in an English "
-        "turn keep it English.",
+        "turn keep it English. Each source above is headed '### [S#] <ref>' — that ref (e.g. 'Yoma.148.10') "
+        "is an internal identifier, never something to write out in your answer. To name a Gemara daf in "
+        "prose, use its human form (e.g. 'יומא עד ע\"ב' / 'Yoma 74b'), never the internal number; to name a "
+        "work, use its real Hebrew/English title, never the corpus ref string.",
     ]
     return "\n".join(lines)
 
