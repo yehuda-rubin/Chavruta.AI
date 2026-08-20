@@ -257,3 +257,28 @@ dense) while the stored/displayed payload text keeps it for citation display, or
 payload text entirely with niqqud-bearing text reconstructed at render time. The former is safer and
 is almost certainly the right call — display fidelity has no bearing on retrievability and should not
 be touched to fix it.
+
+---
+
+## I. Admin "show the full chat" was built, then reverted — needs a privacy policy update first
+
+**Built, then reverted same day (2026-08-20, commit `a9e73a2` → reverted `8498ca5`). Never deployed.**
+
+An admin reviewing a flagged/reported message could only see that ONE message — no context for what
+led up to it. Built a `GET /admin/sessions/{id}/messages` route (deliberately not owner-scoped, since
+a report can be about any account) plus a "הצג את כל הצ'אט" toggle in the admin panel.
+
+Reverted on re-reading `docs/legal/privacy-he.md` §1 ("סימון הודעות לבדיקה"), which explicitly
+promises: flagging "only transfers **the message** to our manual review, via a reference to its
+existing message ID — **not copying content to an additional location**." §11 purpose 6 (illegal/
+harmful/defamation-risk review) covers review of the flagged content; neither section describes
+extending that review to the rest of a user's conversation. Showing the whole chat is a real,
+meaningful expansion of what a user was told happens when a message of theirs gets flagged —
+including other, unrelated things they may have asked, on the reasonable assumption only the flagged
+exchange itself would ever be looked at.
+
+**To bring this back**: update the privacy policy FIRST (new/amended clause in §1 and/or §11,
+changelog entry, version bump — the same process every other policy change in this repo already
+follows), then re-apply the reverted commit (`git revert 8498ca5` undoes the revert cleanly, since
+nothing has touched those files since). Do not restore the feature without the policy update landing
+first — that was the whole point of reverting it before it ever reached production.
