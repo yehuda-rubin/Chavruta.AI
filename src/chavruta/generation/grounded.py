@@ -24,6 +24,22 @@ _SNUM_RE = re.compile(r"S(\d+)")              # an individual source marker insi
 _THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 
 
+def marker_numbers_in(text: str) -> list[int]:
+    """Every [S#] marker number in `text`, across every bracket shape the model actually uses —
+    "[S1]", "[S1, S2]", "[S1; S3]", and non-standard ones like "[source S1]" (the bracket content
+    only needs S# to appear SOMEWHERE inside it, not be the whole content).
+
+    Exists so a caller outside enforce_citations does not reinvent this extraction with a
+    narrower regex. app/api.py::_generate_chavruta_turn used to do exactly that (a bare
+    `\\[\\s*S(\\d+)\\s*\\]`), which missed "[source S1]" outright — found live 2026-08-19 in a real
+    answer (session 11190b1b) that credited a citation to a marker its own narrower regex never
+    even saw, silently dropping it from the citation list instead of resolving or rejecting it."""
+    nums: list[int] = []
+    for bm in _BRACKET_RE.finditer(text or ""):
+        nums.extend(int(n) for n in _SNUM_RE.findall(bm.group(1)))
+    return nums
+
+
 def source_body(text: str) -> str:
     """Drop the internal "[label] Ref daf:seg" header line a stored document carries, leaving
     the source's actual text. The header is prompt scaffolding (and may hold a pre-correction
@@ -534,6 +550,116 @@ def misattributed_quotes(text: str, sources, min_len: int = 24) -> list[Misattri
         if _names_in(normalized[end + 1:end + 1 + _ATTR_TRAIL].split("\n")[0]) & holders:
             continue
         out.append(Misattribution(raw.strip()[:60], claimed, tuple(sorted(str(c) for c in holders))))
+    return out
+
+
+class MismatchedCitation(NamedTuple):
+    """A quoted Hebrew phrase cited with two different Tanakh chapter:verse refs in the same
+    answer — one confirmed against the phrase by the corpus, the other contradicted by it."""
+
+    phrase: str
+    correct_ref: str
+    wrong_ref: str
+
+
+def mismatched_tanakh_citations(text: str, fetch_refs) -> list[MismatchedCitation]:
+    """Citation guard: a Hebrew phrase cited with a chapter:verse ref that contradicts what the
+    SAME phrase is cited as elsewhere in the same answer, where the corpus itself can say which one
+    is right.
+
+    Caught live 2026-08-20: one real QA answer quoted "והאבדתי את הנפש ההיא" correctly as
+    (ויקרא כג,ל) earlier in the response, then cited the identical phrase as (ויקרא יג,ל) — Leviticus
+    13, tzaraat, unrelated — a few lines later. `unverified_quotes` did not catch this: the quoted
+    words genuinely ARE in the retrieved Gemara, verbatim. What was wrong is the PARENTHETICAL
+    CROSS-REFERENCE back to the Torah pasuk itself, which is not an [S#]-marked citation at all and
+    is not what `unverified_quotes` checks.
+
+    Deliberately conservative: this fires ONLY when a citation's own ref shows almost NO n-gram
+    overlap with the text around it, while a DIFFERENT ref cited elsewhere in the same answer shows
+    clear overlap — i.e. only when the corpus itself can be fetched and shown to confirm one
+    candidate and contradict the other. A citation with no such internal contradiction is never
+    flagged — there is nothing here confident enough to call it wrong on its own, only "this answer
+    disagrees with itself, and the corpus can settle which side is right."
+
+    n-gram overlap, not an exact substring match: reproduced live, even the CORRECT citation in the
+    2026-08-20 case was not a verbatim quote of the pasuk (word order shifted, one word swapped for
+    a similar-sounding one) — an LLM paraphrasing/misremembering a Hebrew verse even while citing the
+    right chapter:verse is normal, not a separate error, and an exact-substring check flags both the
+    right and the wrong citation as unconfirmed, giving no way to tell them apart. Shared 6-character
+    substrings survive that kind of noise far better.
+
+    Same-chapter alternatives are excluded from "better ref" on purpose: a long multi-verse quotation
+    (e.g. citing Leviticus 23:27 through 23:33 as one continuous block) makes ADJACENT verses' content
+    bleed into each other's surrounding window — reproduced live, (ויקרא כג,לא) scored genuine but
+    unrelated overlap against verse 30's content purely from being quoted one line above it. That is
+    normal multi-verse citation, not an error, and without this exclusion it read identically to the
+    real cross-chapter mismatch (Leviticus 13 vs 23) this function exists to catch.
+
+    The surrounding window is taken from BOTH sides of the citation, not just before it: Gemara-style
+    phrasing sometimes puts the reference BEFORE its quote ("הרי הוא אומר (ref) quote…") and
+    sometimes after ("quote… (ref)") — a before-only window missed the live case, where the wrong
+    citation preceded its quote while the correct one, earlier in the same answer, followed it.
+
+    `fetch_refs` is a callable(refs: list[str]) -> list[hit-like] (payload or attribute access to
+    `ref`/`text`), same shape as app/api.py::_fetch_refs — kept as a parameter so this stays free of
+    any store import, like sugya.check.
+    """
+    from chavruta.intents.hebrew_refs import detect_parenthetical_tanakh_citations
+
+    spans = detect_parenthetical_tanakh_citations(text or "")
+    refs = sorted({ref for ref, _, _ in spans})
+    if len(refs) < 2:
+        return []
+    try:
+        hits = fetch_refs(refs)
+    except Exception:
+        return []
+    content: dict[str, str] = {}
+    for h in hits:
+        payload = getattr(h, "payload", None) or {}
+        r = getattr(h, "ref", None) or payload.get("ref")
+        body = getattr(h, "text", None) or payload.get("text") or ""
+        if r:
+            content[r] = _heb_skeleton(body)
+
+    _WIN, _NGRAM = 100, 6            # window radius; n-gram length for the overlap score
+    # Cited ref's own overlap must be near-zero (barely more than coincidence) before this even
+    # looks for an alternative; the alternative then needs a real, non-trivial score of its own —
+    # both calibrated against the live 2026-08-20 case (own=0.000, correct alt=0.072) with margin.
+    _OWN_MAX, _ALT_MIN = 0.03, 0.05
+
+    def _ngrams(s: str) -> set[str]:
+        return {s[i:i + _NGRAM] for i in range(len(s) - _NGRAM + 1)} if len(s) >= _NGRAM else set()
+
+    def _overlap(window_grams: set[str], ref: str) -> float:
+        skel_grams = _ngrams(content.get(ref, ""))
+        if not window_grams or not skel_grams:
+            return 0.0
+        return len(window_grams & skel_grams) / len(window_grams)
+
+    def _book_chapter(ref: str) -> str:
+        parts = ref.split(".")
+        return ".".join(parts[:2]) if len(parts) >= 2 else ref
+
+    out: list[MismatchedCitation] = []
+    seen_refs: set[str] = set()
+    for ref, start, end in spans:
+        if ref in seen_refs:
+            continue
+        window = _heb_skeleton(text[max(0, start - _WIN):min(len(text), end + _WIN)])
+        window_grams = _ngrams(window)
+        if not window_grams or _overlap(window_grams, ref) > _OWN_MAX:
+            continue                            # self-supported, or too little context to judge
+        best_ref, best_score = None, 0.0
+        for other in refs:
+            if other == ref or _book_chapter(other) == _book_chapter(ref):
+                continue                        # same chapter — normal multi-verse spillover, not an error
+            score = _overlap(window_grams, other)
+            if score > best_score:
+                best_ref, best_score = other, score
+        if best_ref and best_score >= _ALT_MIN:
+            out.append(MismatchedCitation(window[:_NGRAM * 3], best_ref, ref))
+            seen_refs.add(ref)                  # one finding per wrong ref is enough to act on
     return out
 
 

@@ -410,7 +410,7 @@ from chavruta.corpus.refs import (
     with_ref_variants,
 )
 from chavruta.corpus.schema import Intent, Query, Turn
-from chavruta.generation import computed, guards
+from chavruta.generation import computed, grounded, guards
 from chavruta import sugya as sugya_mod
 from chavruta.retrieval.base import RetrievalResult
 from chavruta.llm import metering
@@ -1305,8 +1305,18 @@ def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bo
         "if that STILL comes back with nothing relevant, ask the learner warmly for direction — "
         "'רגע — לא עלה לי המקור הנכון, תכוון אותי'. Do NOT ask the learner to name a daf when relevant "
         "sources are already present above.",
-        "Ground everything ONLY in the SOURCES; cite by [S#] (stripped from display). Keep it fairly short "
-        "(a real chavruta exchange, not an essay). Write in the learner's language. **bold** key terms. "
+        "Ground everything ONLY in the SOURCES; cite by [S#] (stripped from display). "
+        "MUST NOT invent sources, citations, or attributions that are not in the SOURCES above — this "
+        "applies EVEN WHEN the learner is the one who states a 'quote' or 'pasuk'. If they hand you a phrase "
+        "and it does not genuinely appear in the SOURCES, do not validate it, do not give it a citation, and "
+        "do not build an answer that treats it as real — say plainly that you don't have that source, even "
+        "mid-chavruta and even if the phrasing sounds playful or rhetorical. (Caught live 2026-08-13: a "
+        "learner invented a fake pasuk as a pun, and the reply said it 'appears in the Mishnah' with a made-up "
+        "citation before ever getting to the real halacha — that must not happen again.) When a claim is about "
+        "a real, identifiable person (historical figure, posek, a rabbi living or recently deceased) — "
+        "especially their conduct, intentions, or character — stay close to the SOURCE's own language rather "
+        "than your own paraphrase, and add no evaluation or judgment beyond what the source itself supports. "
+        "Keep it fairly short (a real chavruta exchange, not an essay). Write in the learner's language. **bold** key terms. "
         "LANGUAGE: write ONLY in the learner's language, with NO words from another language mixed in — in a "
         "Hebrew turn write 'בעל הבית', never 'employer' (and no stray Chinese/Russian either); in an English "
         "turn keep it English.",
@@ -1379,8 +1389,11 @@ def _generate_chavruta_turn(question: str, hits, lang: str, he: bool, history, w
     raw, fetched = llm.request(job, lang=lang,
                               token_budget=_max_tokens_for(Intent.EXPLAIN, _get_pipeline().profile))
     hits = hits + list(fetched or [])   # include agentically-fetched so their [S#] resolve
-    nums, used, seen = [int(n) for n in re.findall(r"\[\s*S(\d+)\s*\]", raw)], [], set()
-    for i in nums:
+    # marker_numbers_in (not a bespoke regex) so a non-standard bracket the model writes — e.g.
+    # "[source S1]" — resolves the same way enforce_citations would, instead of silently vanishing
+    # from the citation list (found live 2026-08-19, session 11190b1b).
+    used, seen = [], set()
+    for i in grounded.marker_numbers_in(raw):
         if 1 <= i <= len(hits) and i not in seen:
             seen.add(i)
             h = hits[i - 1]
@@ -1395,8 +1408,23 @@ def _generate_chavruta_turn(question: str, hits, lang: str, he: bool, history, w
     # foreign-language pass.
     raw, note = _split_source_note(raw)
     clean = _strip_markers(_fix_bleeding_sentences(raw, he, llm), he=he)
+    # Citation-faithfulness: chavruta never ran this check at all until now, unlike every other
+    # generation path (_qa_answer, lesson). The gap is exactly what let a learner's invented pasuk
+    # ("לא ימיש השרימפ מתוך חלבו", a pun) get validated as if it were real — the reply said it
+    # "appears in the Mishnah" with a made-up citation, and nothing caught it (2026-08-13, real
+    # production case). `hits` already includes agentically-fetched sources.
+    caveats: list[str] = []
+    try:
+        bad_q = grounded.unverified_quotes(clean, hits)
+    except Exception:                       # noqa: BLE001 — a watching check must never break a turn
+        _log.exception("chavruta unverified_quotes check failed")
+        bad_q = []
+    if bad_q:
+        caveats.append(("הערה: ציטוט/ים שלא נמצאו במקורות שנשלפו: «" + "», «".join(bad_q[:2]) + "» — יש לאמת.")
+                       if he else
+                       ("Note: quote(s) not found in the retrieved sources: «" + "», «".join(bad_q[:2]) + "» — verify."))
     out = QueryResponse(answer=clean, citations=used, grounded=bool(used),
-                        intent="chavruta", files=[], source_note=note)
+                        intent="chavruta", files=[], source_note=note, caveats=caveats)
     _widen_citations_from_note(out, note, retrieved_refs=[h.ref for h in hits])
     return out
 

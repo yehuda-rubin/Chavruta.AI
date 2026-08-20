@@ -188,6 +188,36 @@ def detect_tanakh_refs(text: str) -> list[str]:
     return refs
 
 
+# A citation the way a MODEL writes one in its own prose: "(<book> <chapter>, <verse>)" — e.g.
+# "(ויקרא כג, ל)". `_TANAKH_RE`/`_num` above require a geresh/gershayim mark on any multi-letter
+# numeral specifically to keep free-flowing USER prose from anchoring on an accidental letter
+# sequence — a real, deliberate guard for that context. A parenthetical citation is a different,
+# far more constrained context (always book + separator + chapter + separator + verse, inside
+# parens), where that ambiguity risk does not apply, so this accepts plain unmarked gematria there.
+# Built for grounded.py::mismatched_tanakh_citations — see that function's docstring for why it
+# needs each citation's character span, not just a deduped list of refs.
+_PAREN_CITATION_RE = re.compile(
+    rf"\((?P<book>{_book_alt(HE_BOOKS)})\s+(?P<ch>[{_HE_LETTERS}]+)\s*[,:]\s*(?P<vs>[{_HE_LETTERS}]+)\)"
+)
+
+
+def detect_parenthetical_tanakh_citations(text: str) -> list[tuple[str, int, int]]:
+    """Tanakh citations in the parenthetical shape a model actually writes — see `_PAREN_CITATION_RE`.
+    Returns (ref, start, end) so a caller can look at the text AROUND each citation, not just which
+    refs were named — the same quoted phrase cited under two different chapter:verse refs is only
+    detectable if both occurrences, and their positions, survive.
+    """
+    out: list[tuple[str, int, int]] = []
+    for m in _PAREN_CITATION_RE.finditer(text or ""):
+        ch = gematria(m.group("ch"))
+        vs = gematria(m.group("vs"))
+        if ch is None or vs is None:
+            continue
+        ref = f"{HE_BOOKS[m.group('book')]}.{ch}.{vs}"
+        out.append((ref, m.start(), m.end()))
+    return out
+
+
 def detect_talmud_refs(text: str) -> list[str]:
     """Hebrew Talmud refs → 'Tractate.<daf><a|b>' (amud aleph default).
 

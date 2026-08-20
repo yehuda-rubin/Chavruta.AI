@@ -528,6 +528,23 @@ class ChavrutaPipeline:
                               summary=f"{c.authority} {c.axis}/{c.attribution}")
         except Exception:                   # noqa: BLE001
             _guard_log.exception("deontic check failed")
+        try:
+            # A quoted pasuk cited under two different chapter:verse refs in the same answer, where
+            # the corpus can say which one is right. unverified_quotes does not catch this: the
+            # quoted WORDS are genuinely in the retrieved source — what is wrong is a parenthetical
+            # cross-reference back to the Torah verse itself, which carries no [S#] marker at all.
+            # Caught live 2026-08-20 (ויקרא כג,ל cited correctly, then ויקרא יג,ל for the identical
+            # phrase a few lines later — Leviticus 13 is tzaraat, unrelated).
+            def _fetch_tanakh_refs(refs: list[str]):
+                return self.store.fetch_by_refs(self.profile.collection, refs, limit=len(refs) * 2)
+
+            for c in grounded.mismatched_tanakh_citations(text, _fetch_tanakh_refs)[:2]:
+                guards.report("citation_mismatch", intent_name,
+                              {"phrase": c.phrase, "correct_ref": c.correct_ref,
+                               "wrong_ref": c.wrong_ref},
+                              summary=f"«{c.phrase}» cited as both {c.correct_ref} and {c.wrong_ref}")
+        except Exception:                   # noqa: BLE001
+            _guard_log.exception("citation-mismatch check failed")
         return grounded.maybe_halacha_caveat(answer, query.lang)
 
     def _lesson_answer(self, query, result, llm=None, *, history=None):

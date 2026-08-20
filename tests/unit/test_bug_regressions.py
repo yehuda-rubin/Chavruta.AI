@@ -2299,3 +2299,55 @@ def test_a_widened_citation_gets_its_commentator_derived_from_the_ref(monkeypatc
     # commentator_from_ref keys on "_on_", which the comma form does not have — so the chip has to
     # fall back to the Hebrew display name, and that is what must be populated.
     assert out.citations[0].ref_he.startswith("חזקוני")
+
+
+# ── chavruta mode had no citation-faithfulness guard at all (2026-08-19/20) ───────────────────
+# _qa_answer runs enforce_citations AND unverified_quotes; _generate_chavruta_turn ran neither — its
+# own bespoke [S#] regex only built the citation list, never checked a claim against what was
+# actually retrieved, and `caveats` stayed [] unconditionally. This is exactly the gap that let a
+# learner's invented pasuk ("לא ימיש השרימפ מתוך חלבו", a pun) get validated as real, with a made-up
+# Mishnah citation, in a real production chat (2026-08-13).
+class _FakeChavrutaLLM:
+    def __init__(self, raw: str):
+        self._raw = raw
+
+    def request(self, job, *, lang, token_budget):
+        return self._raw, []
+
+
+def test_chavruta_turn_flags_a_quote_not_in_the_retrieved_sources():
+    hits = [RankedHit(chunk_id="c1", ref="Test.1.1", text="טקסט מקור אמיתי שאינו קשור לציטוט",
+                      score=0.9)]
+    raw = ('שמעתי אותך. הפסוק "זהו ציטוט מומצא לחלוטין שאינו נמצא בשום מקור שסופק כאן" [S1] '
+           'מלמד יסוד חשוב — מה אתה חושב?')
+    out = api._generate_chavruta_turn("שאלה", hits, "he", True, [], False, _FakeChavrutaLLM(raw))
+
+    assert out.caveats, "an unverified quote in chavruta mode must produce a caveat, like QA mode does"
+
+
+def test_chavruta_turn_is_quiet_when_the_quote_is_real():
+    real = "טקסט מקור אמיתי שמצוטט נכונה כאן בתשובה"
+    hits = [RankedHit(chunk_id="c1", ref="Test.1.1", text=real, score=0.9)]
+    raw = f'שמעתי אותך. נאמר: "{real}" [S1] — מה אתה חושב?'
+    out = api._generate_chavruta_turn("שאלה", hits, "he", True, [], False, _FakeChavrutaLLM(raw))
+
+    assert out.caveats == []
+
+
+def test_chavruta_turn_resolves_a_nonstandard_marker_shape():
+    """Found live 2026-08-19 (session 11190b1b): the old bespoke regex `\\[\\s*S(\\d+)\\s*\\]`
+    missed "[source S1]" outright, silently dropping the citation instead of resolving it."""
+    hits = [RankedHit(chunk_id="c1", ref="Test.1.1", text="טקסט", score=0.9)]
+    raw = "תשובה קצרה [source S1] בלי הדלפה."
+    out = api._generate_chavruta_turn("שאלה", hits, "he", True, [], False, _FakeChavrutaLLM(raw))
+
+    assert [c.ref for c in out.citations] == ["Test.1.1"]
+
+
+def test_chavruta_job_prompt_now_prohibits_inventing_a_users_own_quote():
+    """Before this, the job only ever instructed the model to CITE sources — never told it not to
+    validate a fabricated one the LEARNER hands it, which is exactly the shrimp-pasuk failure mode
+    (2026-08-13). QA's system prompt already had this prohibition; chavruta's job did not."""
+    job = api._chavruta_job_md("שאלה", [], "he", [])
+    assert "MUST NOT invent" in job
+    assert "the learner is the one who states" in job
