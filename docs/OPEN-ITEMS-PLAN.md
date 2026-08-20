@@ -282,3 +282,28 @@ changelog entry, version bump — the same process every other policy change in 
 follows), then re-apply the reverted commit (`git revert 8498ca5` undoes the revert cleanly, since
 nothing has touched those files since). Do not restore the feature without the policy update landing
 first — that was the whole point of reverting it before it ever reached production.
+
+## J. Institution billing: the logic is ready, nothing is reachable yet — build the UI the moment checkout opens
+
+Decided and implemented 2026-08-20 (see `specs/004-school-accounts/plan.md`, "Decided 2026-08-20"):
+a school member's own credits (student, teacher, or the admin) are now a spendable fallback once the
+school's pool or their per-member cap refuses a turn — `orgs.refuse_personal_purchase`,
+`_reserve_tokens`'s org branch, and `accept_invite`'s join precondition were all updated and tested.
+
+**None of it is reachable by a real user right now, and this is the founder's explicit note to fix
+that the moment institution billing is opened for payment — build it immediately, not "at some
+point":**
+
+1. **There is no real-money "buy credits" checkout at all**, for anyone, member or not.
+   `CheckoutRequest`/`billing.start_checkout` only ever sell a PLAN tier. Today's fix only ensures
+   that whenever this gets built, an org member won't be wrongly blocked from it — it does not
+   build the flow itself.
+2. **The school admin panel (`web/app/school/page.tsx`) has no buy/upgrade button at all.** The
+   backend already lets the org owner check out or renew the school's own institutional plan
+   (`billing.start_checkout`, unrelated to today's change) — but there is no UI in the panel that
+   calls it, so the admin currently cannot click anything to buy or upgrade the institution's plan.
+3. Also still open from `004-school-accounts/plan.md`: `orgs.create_org` itself is never called from
+   a real checkout/webhook path — an institution purchase does not yet create an org for anyone.
+
+Order when this opens: (3) first — nothing else matters if a real purchase never creates the org —
+then (2) so the paying admin has something to click, then (1) so members can top up themselves.
