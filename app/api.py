@@ -246,6 +246,20 @@ def _widen_citations_from_note(result, note: str, owner_id: str = "",
                                  "owner": owner_id[:12]})
 
 
+# The interface renders plain text plus **bold** and newlines ONLY — no Markdown. SYSTEM_BASE_HE
+# already tells the model this explicitly ("לעולם אל תשתמש בכותרות Markdown... הם מוצגים כתווים
+# גולמיים ומכוערים" — never use Markdown headers, they show as raw ugly characters), but the
+# instruction is not always followed: caught live 2026-08-20, a real answer used five separate
+# "### heading" lines that reached the user as literal hash marks, since nothing renders them.
+# Converted to **bold** rather than just stripped — that IS the app's own stated substitute for a
+# heading (same instruction), so the model's structure is kept, not thrown away. Language-independent
+# (unlike _strip_foreign_parens above) because the interface is markdown-free in English too.
+_MD_HEADER_RE = re.compile(r"^[ \t]{0,3}#{1,6}(?:[ \t]+(.*?))?[ \t]*#*[ \t]*$", re.M)
+# A blockquote line ('> ...') — the same instruction asks for an inline quote in regular quote marks
+# instead. Only the leading marker is stripped; the quoted text itself is left as the model wrote it.
+_MD_BLOCKQUOTE_RE = re.compile(r"^[ \t]{0,3}>[ \t]?", re.M)
+
+
 def _strip_markers(text: str, he: bool = False) -> str:
     # Load-bearing markers first ("ב[S2]" → nothing, not "ב"), then every remaining plain marker.
     t = _CARRIER_MARKER_RE.sub("", text or "")
@@ -256,6 +270,14 @@ def _strip_markers(text: str, he: bool = False) -> str:
         t = _strip_foreign_parens(t)         # drop a stray English citation aside in a Hebrew answer
     t = re.sub(r"\*\*\s*\*\*", "", t)        # collapse empty **bold** left where a **[S#]** was stripped
     t = re.sub(r"(?<!\*)\*\s*\*(?!\*)", "", t)  # …and empty *italic*
+    # Markdown headers/blockquotes run AFTER the collapses above, not before: a freshly-made
+    # "**heading**" wrapper contains adjacent "**" pairs that the empty-marker collapses upstream
+    # would otherwise eat (they don't require emptiness between the two asterisks, only that the
+    # OUTER neighbours aren't also a star — which a real "**text**" wrapper satisfies too).
+    t = _MD_HEADER_RE.sub(
+        lambda m: (f"**{m.group(1).strip()}**" if (m.group(1) or "").strip() else ""), t
+    )
+    t = _MD_BLOCKQUOTE_RE.sub("", t)
     t = re.sub(r"[ \t]{2,}", " ", t)
     return t.strip()
 

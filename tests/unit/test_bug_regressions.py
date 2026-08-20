@@ -550,6 +550,46 @@ def test_strip_markers_leaves_the_existing_behaviour_intact(raw, expected):
     assert api._strip_markers(raw, he=True) == expected
 
 
+# ── Markdown headers/blockquotes reach the user as raw characters (2026-08-20) ─────────────────
+# The interface renders plain text + **bold** + newlines only — no Markdown. SYSTEM_BASE_HE already
+# tells the model this explicitly, and the model does not always follow it: a real answer used five
+# separate "### heading" lines that showed up as literal hash marks, since nothing renders them.
+def test_a_markdown_header_becomes_bold_not_raw_hashes():
+    raw = '### מהי משמעות "מאי ואם נפשך לומר"?\n\nתשובה כלשהי כאן.'
+    out = api._strip_markers(raw, he=True)
+    assert "#" not in out
+    assert out.startswith('**מהי משמעות "מאי ואם נפשך לומר"?**')
+
+
+@pytest.mark.parametrize("hashes", ["#", "##", "###", "####"])
+def test_headers_of_every_depth_are_converted(hashes):
+    out = api._strip_markers(f"{hashes} כותרת\nגוף התשובה", he=True)
+    assert out == "**כותרת**\nגוף התשובה"
+
+
+def test_a_blockquote_marker_is_stripped_but_the_quote_text_survives():
+    out = api._strip_markers("> וכי תימא בעריות קא מישתעי קרא", he=True)
+    assert out == "וכי תימא בעריות קא מישתעי קרא"
+
+
+def test_an_empty_header_produces_no_stray_bold_markers():
+    out = api._strip_markers("###\nגוף התשובה", he=True)
+    assert "#" not in out and "**" not in out
+
+
+def test_a_bare_hash_mid_sentence_is_not_mistaken_for_a_header():
+    """Only a '#' at the START of a line is a Markdown header — a hash appearing mid-sentence (e.g.
+    a hashtag-like reference) must survive untouched."""
+    raw = "המספר #1 ברשימה אינו כותרת."
+    assert api._strip_markers(raw, he=True) == raw
+
+
+def test_markdown_stripping_applies_to_english_answers_too():
+    """The interface is markdown-free regardless of language — this must not be gated behind `he`."""
+    out = api._strip_markers("### A Heading\nBody text", he=False)
+    assert out == "**A Heading**\nBody text"
+
+
 # ── Fix (2026-08-12): chavruta follow-up loses the tractate the conversation established.
 # Bug: only user_turns[0] (the FIRST question) was carried into the anchor, so a tractate named
 # in turn 2 was lost by turn 5. Now structural signals are harvested from the WHOLE conversation.
