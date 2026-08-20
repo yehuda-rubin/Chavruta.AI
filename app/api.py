@@ -3514,17 +3514,6 @@ def get_messages(session_id: str, owner: str = Depends(current_owner)):
     return msgs
 
 
-@app.get("/admin/sessions/{session_id}/messages", response_model=list[MessageOut])
-def admin_session_messages(session_id: str, owner: str = Depends(_require_admin)):
-    """The full chat a flagged/reported message came from — so a reviewer sees what led up to it,
-    not just the one line the report attached to. Not owner-scoped (see
-    db.admin_get_session_messages); reachable only behind _require_admin."""
-    msgs = db.admin_get_session_messages(session_id)
-    if not msgs:
-        raise HTTPException(status_code=404, detail="session not found")
-    return msgs
-
-
 @app.delete("/sessions/{session_id}", status_code=204)
 def delete_session(session_id: str, owner: str = Depends(current_owner)):
     if not db.delete_session(session_id, owner):

@@ -1037,31 +1037,6 @@ def report_message(message_id: int, owner_id: str, reason: str) -> None:
         )
 
 
-def admin_get_session_messages(session_id: str) -> list[dict[str, Any]]:
-    """The full conversation a flagged/reported message belongs to — for operator review only.
-
-    Deliberately NOT owner-scoped, unlike get_messages(): a report or guard finding can be about
-    any account's chat, and the whole point of showing it is to read the turns around the flagged
-    one for context (what led up to it, how it read to the user). The caller (app/api.py route) is
-    gated behind _require_admin — this function has no auth of its own, same as every other
-    admin_* aggregate in this file.
-    """
-    with _LOCK:
-        rows = get_conn().execute(
-            "SELECT * FROM messages WHERE session_id=? ORDER BY id", (session_id,)
-        ).fetchall()
-    out = []
-    for r in rows:
-        d = dict(r)
-        d["citations"] = json.loads(d["citations"]) if d["citations"] else []
-        d["caveats"] = json.loads(d["caveats"]) if d["caveats"] else []
-        d["grounded"] = bool(d["grounded"]) if d["grounded"] is not None else None
-        d["files"] = json.loads(d["files"]) if d.get("files") else []
-        d["source_note"] = d.get("source_note") or ""
-        out.append(d)
-    return out
-
-
 def list_flagged_messages(reviewed: bool = False, limit: int = 100) -> list[dict[str, Any]]:
     """Reports awaiting operator review by default (reviewed=False); pass True to see the ones
     already handled. Joins in the actual message text — unlike usage_events, a report exists
