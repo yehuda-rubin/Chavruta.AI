@@ -502,11 +502,14 @@ export interface OrgPanel {
 export interface Tier {
   id: string;
   name: string;
-  price_ils: number;              // per month
-  annual_price_ils: number;       // the year's total, for "₪1,990 a year"
-  annual_monthly_ils: number;     // what is actually charged each month (instalment)
+  // null for an institutional tier (seats > 1) — contact-us pricing, not a published number. See
+  // app/plans.py::public_catalogue.
+  price_ils: number | null;        // per month
+  annual_price_ils: number | null; // the year's total, for "₪1,990 a year"
+  annual_monthly_ils: number | null; // what is actually charged each month (instalment)
   annual_saving_pct: number;
   multiple: number;               // "3x the free tier" — no absolute allowance is published
+  seats: number;                  // > 1 marks an institutional tier — drives "contact us" in the UI
 }
 
 export interface Redeemed {

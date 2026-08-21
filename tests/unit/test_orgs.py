@@ -512,7 +512,7 @@ def test_the_billing_webhook_moves_the_school(school):
     from app.billing import service as billing
     db.upsert_subscription("boss", provider="payplus", status="pending", plan="institution_50",
                            updated_at=db._now())
-    billing.handle_event({"owner_id": "boss", "success": True, "amount": 1499.0})
+    billing.handle_event({"owner_id": "boss", "success": True, "amount": 2000.0})
     assert orgs.get_org(school)["plan"] == "institution_50"
 
 
