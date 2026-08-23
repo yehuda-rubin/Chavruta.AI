@@ -117,6 +117,31 @@ def build_manifest(tiers: list[str]) -> tuple[dict[str, tuple[str, str]], list[t
     return manifest, collisions
 
 
+def resolve_rights(title: str, manifest: dict[str, tuple[str, str]]) -> tuple[str, str] | None:
+    """Look up `title`, falling back to progressively shorter comma-prefixes.
+
+    Found live (2026-08-23) against the real merged manifest: a multi-volume/sectioned work's
+    licenses.json entry is inconsistently granular — some are recorded per volume already
+    ('Mishneh Torah, Positive Mitzvot'), but most are recorded only at the top work level
+    ('Arukh HaShulchan', 'Beit Yosef', 'Torah Temimah on Torah') while the LIVE collection's
+    per-chunk title correctly keeps Sefaria's own sub-index ('Arukh HaShulchan, Yoreh De'ah',
+    'Torah Temimah on Torah, Leviticus') — every volume of one physical sefer shares its parent's
+    licence and edition by construction, so this is not a guess: it is matching what the manifest
+    itself already asserts (one licence per base work, regardless of which volume recorded it) to
+    a chunk whose title happens to carry the fuller name. Strips ONE trailing ", segment" at a
+    time (not straight to the first comma) so an already volume-qualified manifest entry like
+    'Shem HaGedolim, Maarekhet Sefarim' still matches a chunk titled '..., Part 2' without losing
+    the qualifier it already has.
+    """
+    t = title
+    while True:
+        if t in manifest:
+            return manifest[t]
+        if "," not in t:
+            return None
+        t = t.rsplit(",", 1)[0].strip()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dry-run", action="store_true", help="measure and report; write nothing")
@@ -145,7 +170,7 @@ def main() -> int:
     unresolved_titles: list[str] = []
     t0 = time.time()
     for i, (title, n_chunks) in enumerate(ordered, 1):
-        rights = manifest.get(title)
+        rights = resolve_rights(title, manifest)
         if not rights:
             unresolved_chunks += n_chunks
             unresolved_titles.append(title)
