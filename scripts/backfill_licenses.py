@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import time
@@ -43,7 +44,12 @@ from chavruta.config import DEFAULT_COLLECTION  # noqa: E402
 from chavruta.corpus.rights import allows_commercial_use, is_unknown  # noqa: E402
 
 SEFARIA = "https://www.sefaria.org"
-QDRANT = "http://localhost:6333"
+# "localhost" only reaches Qdrant when this runs directly on the host, where docker-compose maps
+# the port out — from inside the api container (the normal way to run this: `docker compose exec
+# api python scripts/...`) the compose network's own hostname is "qdrant" (see docker-compose.yml's
+# CHAVRUTA_QDRANT_URL), and "localhost" there is the api container itself. Same env var the app
+# already reads, so this follows the container it happens to run in without extra plumbing.
+QDRANT = os.environ.get("CHAVRUTA_QDRANT_URL", "http://localhost:6333")
 COLLECTION = DEFAULT_COLLECTION
 STATE = ROOT / "data" / "license_backfill.json"     # {title: {"license_he":..., ...}} — the journal
 
