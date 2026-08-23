@@ -908,6 +908,36 @@ def _is_clarify_answer(text: str) -> bool:
     return len(t) < 2
 
 
+_LESSON_BUILD_RE = re.compile(
+    r"שיעור\s*(חדש|נוסף|אחר)"                                      # "lesson" + new/another/different
+    r"|(?:תבנה|תכין|תיצור|תרכיב|בנה|הכן|צור)\D{0,12}שיעור"          # build/prepare/create ... a lesson
+    r"|(?:תשנה|שנה|עדכן|תעדכן|הוסף|תוסיף|תקצר|תרחיב)\D{0,15}שיעור"  # change/update/add/shorten/expand ... the lesson
+    r"|\bnew\s+lesson\b|\b(?:build|prepare|create|make)\s+(?:a|another)\s+lesson\b"
+    r"|\b(?:change|update|edit|shorten|expand|redo)\D{0,20}\blesson\b",
+    re.I,
+)
+
+
+def _is_lesson_build_request(text: str) -> bool:
+    """Explicit signal that this turn wants a lesson BUILT or CHANGED — the one case, once a session
+    already has a finished lesson (`Turn.lesson`), that should still run `_run_lesson` rather than
+    continue as a chavruta-style discussion of the existing one (see `_run_query_impl`).
+
+    Deliberately narrow, matching this codebase's usual bar for a guard that changes routing: a
+    false NEGATIVE here (missing a genuine "build me a new lesson" phrasing) just means the model
+    discusses the topic instead of building — recoverable, the learner can ask again more plainly.
+    A false POSITIVE would silently rebuild and burn a real weekly lesson-pool charge, which is the
+    failure this whole check exists to avoid — so the pattern requires an explicit lesson-changing
+    verb next to the word "lesson" itself, not just any mention of it.
+
+    Known gap, not solved here: a "change X in the lesson" request that matches this still resolves
+    its TOPIC from the raw instruction text via `_resolve_topic` (unchanged) — it does not yet
+    recover the original lesson's topic the way a bare clarify-answer does. Rebuilding the SAME
+    lesson with a precise edit is a separate, deeper piece of work.
+    """
+    return bool(_LESSON_BUILD_RE.search(text or ""))
+
+
 def _resolve_topic(question: str, history) -> str:
     """The lesson topic for retrieval + the job. If the current turn is just a clarify answer
     ('ארוך', 'בית ספר כיתה ב'), recover the topic from the most recent substantive USER turn."""
@@ -1966,6 +1996,19 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
             raise HTTPException(status_code=422, detail=f"unknown intent: {intent_str!r}") from exc
 
     if intent == Intent.LESSON:            # lesson mode → Claude writes the 3 files, audience-adapted
+        # Mode is STICKY (see _prepare_continue) — every turn in a lesson-mode chat lands here,
+        # forever, regardless of what the client sends. Without this check, a plain follow-up
+        # question ("תסביר לי יותר על מה שרש\"י אמר") fell straight into _run_lesson, which has no
+        # notion of "this isn't a new topic" beyond the narrow audience/length clarify-echo
+        # (_is_clarify_answer) — it retrieved sources for the follow-up's OWN wording and silently
+        # built a second, unrelated lesson, spending a real weekly lesson-pool charge on garbage
+        # (caught live 2026-08-21, reading the code with the founder — never shipped a working
+        # follow-up path). Once a lesson has actually finished in this session, only an EXPLICIT
+        # request to build or change one runs _run_lesson again; anything else continues as a
+        # grounded chavruta turn instead — _prepare_continue already folded the lesson's own text
+        # into history (_lesson_turn_text), so the discussion is anchored on what was actually taught.
+        if any(h.role == "assistant" and h.lesson for h in history) and not _is_lesson_build_request(question):
+            return _run_chavruta(question, lang, history=history, llm=llm)
         return _run_lesson(question, lang, history=history, audience=audience,
                            grade_band=grade_band, length=length, owner_id=owner_id, llm=llm)
 
@@ -3424,6 +3467,27 @@ def _first_query_work(sid: str, req: QueryRequest, owner: str, llm=None) -> dict
     return {"id": sid, "first_q": row["first_q"], "created_at": row["created_at"], "result": result}
 
 
+_FULL_LESSON_FILE_NAMES = ("השיעור_המלא.doc", "full_lesson.doc")
+
+
+def _lesson_turn_text(m: dict) -> tuple[str, bool]:
+    """The text to carry into history for one saved turn, plus whether it was a completed LESSON.
+
+    `QueryResponse.answer` is deliberately empty for a finished lesson (see
+    `_generate_lesson_from_hits`) — its content lives only in `files`. Left as `m["text"]` as-is,
+    every consumer of `history` downstream (a chavruta follow-up, `_conversation_signals`, the raw
+    chat history hardened into the next LLM prompt via `render_messages`) would see an EMPTY
+    assistant turn sitting where the lesson was — as if nothing had been taught. Substituting the
+    full-lesson file's own text lets a follow-up turn actually discuss what was built.
+    """
+    text = m.get("text") or ""
+    files = m.get("files") or []
+    if text.strip() or not files:
+        return text, False
+    full = next((f for f in files if f.get("name") in _FULL_LESSON_FILE_NAMES), files[-1])
+    return full.get("content") or "", True
+
+
 def _prepare_continue(session_id: str, req: QueryRequest, owner: str) -> tuple[list[Turn], str]:
     """Shared setup for continuing a session: ownership gate (404 if not owned), build the trailing
     history, save the user turn, and resolve the sticky/locked intent. Returns (history, intent)."""
@@ -3434,10 +3498,14 @@ def _prepare_continue(session_id: str, req: QueryRequest, owner: str) -> tuple[l
         raise HTTPException(status_code=404, detail="session not found")
     # Carry each assistant turn's CITED refs, not just its prose. db.get_messages already decodes
     # them; dropping them here is what let a five-turn discussion of a sugya lose the sugya (see
-    # _conversation_signals).
-    history = [Turn(role=m["role"], text=m["text"],
-                    refs=[r for c in (m.get("citations") or []) if (r := (c or {}).get("ref"))])
-               for m in history_rows[-8:]]
+    # _conversation_signals). `lesson=` marks a turn that finished a lesson (see _lesson_turn_text) —
+    # _run_query_impl uses it to tell a follow-up question from a request for a genuinely new lesson.
+    history = []
+    for m in history_rows[-8:]:
+        text, is_lesson = _lesson_turn_text(m)
+        history.append(Turn(role=m["role"], text=text,
+                            refs=[r for c in (m.get("citations") or []) if (r := (c or {}).get("ref"))],
+                            lesson=is_lesson))
     db.save_message(session_id, "user", req.question)
     # Sticky mode: a chat stays in the mode chosen on its first turn — ignore any intent the client
     # sends on later turns. Legacy sessions (mode=NULL) fall back to the per-request intent.

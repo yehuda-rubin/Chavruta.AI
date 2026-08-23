@@ -154,6 +154,11 @@ class Turn:
     # follow-up like "האם הם חולקים?". Optional and empty by default: a caller that does not
     # track citations keeps the old two-field behaviour.
     refs: list[str] = field(default_factory=list)
+    # True for an assistant turn that completed a LESSON (files, not answer, hold its content — see
+    # app/api.py::_generate_lesson_from_hits). Lets a caller downstream of history reconstruction
+    # (app/api.py::_run_query_impl) tell "this session already has a finished lesson" from the turns
+    # alone, without a second DB round-trip. Optional and False by default, same reasoning as `refs`.
+    lesson: bool = False
 
 
 @dataclass
