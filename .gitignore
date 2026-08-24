@@ -151,9 +151,6 @@ sample_lessons/
 docs/DEV_MODELS.local.md
 *.local.md
 
-# ---- VM ops scripts tied to the production host (path/container specifics) — local only ----
-scripts/agentic_log_capture.sh
-
 # ---- Poster: brand-licensed Nebius assets/fonts + heavy PDF/PNG exports — keep the WHOLE folder out of git ----
 design/brand/
 design/poster/

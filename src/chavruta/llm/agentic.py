@@ -229,13 +229,9 @@ def agentic_request(llm, body_md: str, *, lang: str = "he",
     # back into cloud would be circular.
     from chavruta.llm.cloud import LLMConfigError, LLMEmptyAnswerError
 
-    state: dict = {"out_tokens": 0, "prompt_tokens": 0, "rounds": 0}
+    state: dict = {"out_tokens": 0, "prompt_tokens": 0}
 
     def _send(job_md: str) -> str | None:
-        # Every call is one round-trip to the model, however it turns out — this is the thing
-        # a retrieval improvement should shrink (e.g. from 3 rounds to 2), which fetched=N alone
-        # cannot show: it counts sources across all rounds, not how many rounds there were.
-        state["rounds"] += 1
         # Never let a round overshoot what's left of the whole-request budget.
         room = max_tokens
         if token_budget is not None:
@@ -272,9 +268,8 @@ def agentic_request(llm, body_md: str, *, lang: str = "he",
         return res.text or None
 
     answer, fetched = run_agentic_loop(_send, body_md, getattr(llm, "source_fetcher", None), lang)
-    _log.info("agentic request done: rounds=%d rounds_out_tokens=%d rounds_prompt_tokens=%d "
-              "budget=%s fetched=%d",
-              state["rounds"], state["out_tokens"], state["prompt_tokens"], token_budget, len(fetched))
+    _log.info("agentic request done: rounds_out_tokens=%d rounds_prompt_tokens=%d budget=%s fetched=%d",
+              state["out_tokens"], state["prompt_tokens"], token_budget, len(fetched))
     if state.get("config_error"):
         return _CONFIG_MSG.get(lang, _CONFIG_MSG["en"]), fetched
     # A budget stop mid-loop leaves no answer text; say so rather than returning the timeout lie.
