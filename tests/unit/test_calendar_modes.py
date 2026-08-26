@@ -11,6 +11,8 @@ from __future__ import annotations
 from datetime import date
 
 import app.api as api
+import app.db as db
+import app.devhelpers as devhelpers
 import chavruta.calendar.sefaria_calendar as cal
 import pytest
 from chavruta.retrieval.base import RankedHit
@@ -20,10 +22,33 @@ def _hit(cid, comm=None):
     return RankedHit(chunk_id=cid, ref=cid, text=f"text of {cid}", score=1.0, commentator_id=comm)
 
 
+@pytest.fixture
+def fresh_db(monkeypatch, tmp_path):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "calendar_helpers.db")
+    monkeypatch.setattr(db, "_conn", None)
+    db.get_conn()
+    return db
+
+
 def test_calendar_modes_disabled_by_default(monkeypatch):
     monkeypatch.delenv("CHAVRUTA_CALENDAR_BETA_OWNERS", raising=False)
     assert api._calendar_modes_enabled("anyone") is False
     assert api._calendar_modes_enabled("local") is False
+
+
+def test_calendar_modes_enabled_for_a_dev_helper_granted_the_feature(monkeypatch, fresh_db):
+    """The env var is the blunt, redeploy-to-edit allowlist; a dev helper granted the "calendar"
+    feature from the admin panel (app/devhelpers.py) must reach the same gate WITHOUT being on that
+    env var — this is the whole point of per-person grants (mirrors _sugya_enabled's fallback)."""
+    monkeypatch.delenv("CHAVRUTA_CALENDAR_BETA_OWNERS", raising=False)
+    devhelpers.invite("helper-cal", by="operator-1", features=["calendar"])
+    assert api._calendar_modes_enabled("helper-cal") is False   # not yet accepted — nothing applies
+    devhelpers.accept("helper-cal")
+    assert api._calendar_modes_enabled("helper-cal") is True
+    # A helper granted only the unrelated "sugya" feature must NOT get the calendar modes too.
+    devhelpers.invite("helper-other", by="operator-1", features=["sugya"])
+    devhelpers.accept("helper-other")
+    assert api._calendar_modes_enabled("helper-other") is False
 
 
 def test_calendar_modes_enabled_only_for_listed_owners(monkeypatch):

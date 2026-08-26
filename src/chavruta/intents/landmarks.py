@@ -91,6 +91,18 @@ ENGLISH_LANDMARKS: dict[str, str] = {
     "song of the sea": "Exodus.15", "priestly blessing": "Numbers.6.24",
     "garden of eden": "Genesis.2", "tower of babel": "Genesis.11",
     "the golden calf": "Exodus.32",
+    # Added per founder request (2026-08-25): an English-side concepts/topics map mirroring the
+    # Hebrew ABSOLUTE_LANDMARKS coverage — "the seven species" was the explicit example given.
+    "seven species": "Deuteronomy.8.8",
+    "ten plagues": "Exodus.7", "plagues of egypt": "Exodus.7",
+    "burning bush": "Exodus.3",
+    "splitting of the sea": "Exodus.14", "parting of the red sea": "Exodus.14",
+    "giving of the torah": "Exodus.19", "revelation at sinai": "Exodus.19",
+    "jacob's ladder": "Genesis.28",
+    "noah's ark": "Genesis.6",
+    "covenant between the pieces": "Genesis.15",
+    "twelve spies": "Numbers.13",
+    "red heifer": "Numbers.19",
 }
 _EN_LANDMARK_RE = {p: re.compile(rf"\b{re.escape(p)}\b") for p in ENGLISH_LANDMARKS}
 

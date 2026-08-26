@@ -206,6 +206,49 @@ def test_school_audience_detected(text):
     assert api._detect_school(text)
 
 
+# ── Bug (reported 2026-08-25): English lesson-building loop ──────────────────────
+# User builds a lesson in English, answers "who is it for" with a natural plural phrasing
+# ("grades 4-6", "6th graders") instead of the singular "5th grade" the old regex expected.
+# _detect_school used \bgrade\b (singular, exact word) so it silently failed to recognize these
+# real replies as school-audience text; _resolve_audience then returned aud=None again, and
+# _run_lesson re-asked the IDENTICAL "who is the lesson for" question — the loop the user
+# experienced as "it keeps asking me the same thing." Hebrew was unaffected: כית(?:ה|ת|ות) already
+# covers both singular and plural forms. Fixed by widening \bgrade\b to \bgrades?\b|\bgraders?\b.
+@pytest.mark.parametrize("text", [
+    "grades 4-6",
+    "for grades 7-9",
+    "6th graders",
+    "a class of 10th graders",
+])
+def test_school_audience_detected_for_plural_english_phrasing(text):
+    assert api._detect_school(text)
+
+
+def test_english_grade_loop_is_actually_fixed_not_just_reworded():
+    """End-to-end: a realistic English reply to the (rewritten) clarify question must resolve
+    BOTH audience and grade band in one turn, so _run_lesson does not ask again."""
+    aud, band = api._resolve_audience("grades 4-6", [], "", "")
+    assert (aud, band) == ("school", "d-f")
+
+    aud, band = api._resolve_audience("6th graders", [], "", "")
+    assert (aud, band) == ("school", "d-f")
+
+
+@pytest.mark.parametrize("text,expected_band", [
+    ("6th grade", "d-f"),               # matches the new question's own example
+    ("middle school", "g-i"),           # matches the new question's own example
+    ("grades 7-9", "g-i"),              # matches the new question's own example
+])
+def test_new_english_clarify_examples_resolve(text, expected_band):
+    """The rewritten English question (app/api.py ~1160-1172) suggests these exact example
+    replies — 'e.g. "6th grade," "middle school," or "grades 7-9"'. Each one must actually
+    resolve through _resolve_audience, or the reworded question would just move the loop
+    rather than fix it."""
+    aud, band = api._resolve_audience(text, [], "", "")
+    assert aud == "school"
+    assert band == expected_band
+
+
 # ── Fix (2026-07-13, generalized 2026-08-02): strip model multilingual bleed from output, keeping
 # Hebrew glued to a foreign char; legit Hebrew + English + common typography are untouched. Arabic
 # turned up live on 2026-08-02 — rather than adding it to an ever-growing enumerated list of scripts

@@ -22,7 +22,8 @@ export function Header({
   onToggleTheme: () => void;
   onOpenSessions?: () => void;  // mobile only — opens the sessions drawer
   onOpenSources?: () => void;   // mobile only — opens the sources drawer
-  onNewChat?: () => void;       // mobile only — starts a new chat directly, no drawer detour
+  onNewChat?: () => void;       // starts a new chat directly; also the brand mark's click on every
+                                 // viewport, not just mobile's dedicated + button
   isAdmin?: boolean;            // from me.is_admin (app/api.py::_is_admin) — hidden entirely, not
                                 // just disabled, for the near-everyone who isn't the admin account.
   orgRole?: string;             // from me.org_role. The school button shows for 'admin' and
@@ -56,10 +57,18 @@ export function Header({
         >
           <Icon name="add" />
         </button>
-        <div className="h-11 w-11 rounded-2xl grad grid place-items-center text-white font-serif text-xl font-black shadow-lg shadow-tekhelet/20">
-          ח
-        </div>
-        <h1 className="font-serif text-2xl font-bold text-tekhelet hidden sm:block">{tr(lang, "brand")}</h1>
+        {/* The brand mark doubles as "start a new chat" on every viewport, not just mobile's
+            dedicated + button — the same convention as clicking a logo to go home. */}
+        <button
+          onClick={onNewChat}
+          className="flex items-center gap-2 lg:gap-3 hover:opacity-80 transition"
+          title={tr(lang, "newChatShort")}
+        >
+          <div className="h-11 w-11 rounded-2xl grad grid place-items-center text-white font-serif text-xl font-black shadow-lg shadow-tekhelet/20">
+            ח
+          </div>
+          <h1 className="font-serif text-2xl font-bold text-tekhelet hidden sm:block">{tr(lang, "brand")}</h1>
+        </button>
       </div>
       <div className="flex items-center gap-2">
         {/* Usage-remaining is Settings-only now (see SettingsModal) — the header stayed crowded at

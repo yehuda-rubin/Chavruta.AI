@@ -490,6 +490,7 @@ export default function Home() {
           onSend={send}
           onPreviewFile={setPreviewFile}
           calendarModesEnabled={me?.calendar_modes_enabled}
+          userEmail={auth.user?.email}
         />
 
         <div className="hidden lg:contents">

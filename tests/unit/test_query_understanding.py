@@ -59,6 +59,26 @@ def test_landmarks(text, expected):
     assert expected in resolve_landmarks(text)
 
 
+# ── English concepts/topics coverage (founder request, 2026-08-25) ────────────────
+# "we need an English version of the Hebrew concepts-and-topics file too — e.g. for the seven
+# species" (מושגים וסוגיות). ABSOLUTE_LANDMARKS (Hebrew) already had ~24 entries; ENGLISH_LANDMARKS
+# had only ~13 and was missing well-known concepts the Hebrew side already covers (e.g. the ten
+# plagues) plus the founder's own explicit example (the seven species → Deuteronomy.8.8, the seven
+# species of Deuteronomy 8:8).
+@pytest.mark.parametrize("text,expected", [
+    ("what are the seven species of the land of Israel?", "Deuteronomy.8.8"),
+    ("tell me about the seven species", "Deuteronomy.8.8"),
+    ("explain the ten plagues", "Exodus.7"),
+    ("what happened at the burning bush", "Exodus.3"),
+    ("the splitting of the sea", "Exodus.14"),
+    ("what was the giving of the torah like", "Exodus.19"),
+    ("noah's ark and the flood", "Genesis.6"),
+    ("the story of the twelve spies", "Numbers.13"),
+])
+def test_english_landmarks(text, expected):
+    assert expected in resolve_landmarks(text)
+
+
 def test_router_resolves_indirect_comparison():
     """The original failing question must now anchor to Genesis.1.1 with both commentators."""
     q = Router().route(Query(text="מה המחלוקת בין רש\"י לרמב\"ן בפסוק הראשון בתורה?"))

@@ -826,9 +826,13 @@ def _user_blob(question: str, history) -> str:
 
 
 def _detect_school(text: str) -> bool:
+    # \bgrades?\b|\bgraders?\b (not the old singular-only \bgrade\b): a real English reply says
+    # "grades 4-6" or "6th graders", both plural forms the old pattern silently rejected — aud stayed
+    # None and _run_lesson re-asked the SAME "who is the lesson for" question forever (the reported
+    # loop). Hebrew's כית(?:ה|ת|ות) already covered its singular/plural forms; English didn't.
     return bool(re.search(
         r"בית.?ספר|תלמיד|כית(?:ה|ת|ות)|יסודי|חטיב|תיכון|ילדים|גן חובה|גן ילדים"
-        r"|\bschool\b|\bpupils?\b|\bgrade\b|elementary|kindergarten|\bkids\b|children"
+        r"|\bschool\b|\bpupils?\b|\bgrades?\b|\bgraders?\b|elementary|kindergarten|\bkids\b|children"
         r"|high[- ]?school|middle[- ]?school", text, re.I))
 
 
@@ -900,7 +904,7 @@ def _is_clarify_answer(text: str) -> bool:
     t = re.sub(
         r"בית.?ספר|בית.?מדרש|ישיב\w*|כית(?:ה|ת|ות)|תיכון|חטיב\w*|יסודי\w*|\bגן\b|בוגר|צעיר"
         r"|קצר\w*|בינונ\w*|ארוכ?\w*|תמציתי|מעמיק\w*|בהרחבה"
-        r"|\bshort\b|\bmedium\b|\blong\b|\bbrief\b|\bschools?\b|\byeshiva\w*|beit.?midrash|\bgrades?\b|elementary"
+        r"|\bshort\b|\bmedium\b|\blong\b|\bbrief\b|\bschools?\b|\byeshiva\w*|beit.?midrash|\bgrades?\b|\bgraders?\b|elementary"
         r"|\bhigh\b|\bmiddle\b|\b(?:1st|2nd|3rd|\d+th)\b",
         " ", t, flags=re.I)
     t = re.sub(r"(?<![א-ת])[א-טי](?![א-ת])", " ", t)                  # standalone grade letters (ב)
@@ -1154,11 +1158,18 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
     # unknown — the system asks for it before building (the user asked for this behaviour).
     ask = []
     if aud is None:
+        # Addressed to whoever is REQUESTING the lesson (usually a teacher building it for their
+        # class) — not phrased as if asking the reader about their own grade. Examples in plain
+        # English ("6th grade", "middle school") both read naturally AND are what _detect_school /
+        # _detect_band actually recognize, so a real reply resolves instead of re-triggering this
+        # same question (the reported loop).
         ask.append("למי השיעור מיועד — **בית מדרש / ישיבה** או **בית ספר** (ולאיזו שכבה: א–ג · ד–ו · ז–ט · י–יב)?"
-                   if he else "Who is the lesson for — **Beit Midrash / Yeshiva** or **School** (and which grade band: 1–3 · 4–6 · 7–9 · 10–12)?")
+                   if he else "Who is this lesson for — a **Beit Midrash / Yeshiva** setting, or a **school class**? "
+                              "If it's for a school class, what grade are the students in (for example \"6th grade,\" "
+                              "\"middle school,\" or \"grades 7–9\")?")
     elif aud == "school" and not band:
         ask.append("לאיזו שכבת גיל? **א–ג · ד–ו · ז–ט · י–יב** (או ציין/י את הכיתה)."
-                   if he else "Which grade band? **1–3 · 4–6 · 7–9 · 10–12** (or name the grade).")
+                   if he else "What grade are the students in? For example \"6th grade,\" \"middle school,\" or \"grades 7–9.\"")
     if length is None:
         ask.append("באיזה אורך? **קצר · בינוני · ארוך**" if he else "What length? **Short · Medium · Long**")
     if ask:
@@ -1909,12 +1920,18 @@ def _calendar_modes_enabled(owner_id: str) -> bool:
     frontend hides the options entirely; this is the real server-side enforcement, checked whether
     or not the request came through the UI). CHAVRUTA_CALENDAR_BETA_OWNERS is either a comma-
     separated allowlist of owner_ids, or "*" once the feature is out of beta for everyone; empty
-    (the default) means nobody yet."""
+    (the default) means nobody yet.
+
+    Same shape as `_sugya_enabled` below: the env var is the blunt instrument (a redeploy to change
+    who is in), and a dev helper granted the "calendar" feature from the admin panel is the one the
+    operator can flip per person, with the consent the env var cannot carry.
+    """
     raw = os.environ.get("CHAVRUTA_CALENDAR_BETA_OWNERS", "").strip()
     if raw == "*":
         return True
-    allowed = {o.strip() for o in raw.split(",") if o.strip()}
-    return owner_id in allowed
+    if owner_id in {o.strip() for o in raw.split(",") if o.strip()}:
+        return True
+    return devhelpers.has_feature(owner_id, "calendar")
 
 
 def _plan_for(owner_id: str) -> str:
