@@ -74,15 +74,21 @@ def hebrew_numeral(n: int) -> str:
     are not expected here and fall back to a plain digit string rather than guessing at compound
     hundreds forms nothing in this corpus actually needs.
     """
-    if n == 15:
-        return 'ט"ו'
-    if n == 16:
-        return 'ט"ז'
     hundreds, rem = divmod(n, 100)
-    tens, units = divmod(rem, 10)
     if hundreds >= len(_HEB_HUNDREDS):
         return str(n)
-    letters = _HEB_HUNDREDS[hundreds] + _HEB_TENS[tens] + _HEB_UNITS[units]
+    # The 15/16 exception applies to the LAST TWO DIGITS, not just to n itself — 115 and 116 hit it
+    # exactly as 15 and 16 do. Checking `n == 15` alone let 115 fall through to the ordinary
+    # tens+units letters (י + ה), spelling one of the two-letter forms of the Divine Name — the
+    # exact thing ט"ו/ט"ז exists to avoid, just one "hundreds" letter later.
+    if rem == 15:
+        tens_units = 'טו'
+    elif rem == 16:
+        tens_units = 'טז'
+    else:
+        tens, units = divmod(rem, 10)
+        tens_units = _HEB_TENS[tens] + _HEB_UNITS[units]
+    letters = _HEB_HUNDREDS[hundreds] + tens_units
     if len(letters) > 1:
         return letters[:-1] + '"' + letters[-1]
     return letters + "'" if letters else str(n)

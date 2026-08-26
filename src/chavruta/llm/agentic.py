@@ -148,6 +148,14 @@ def max_marker(job_md: str) -> int:
 def append_sources(job_md: str, sources: list[SourceBlock], start_n: int) -> str:
     lines = ["", "## ADDITIONAL SOURCES (retrieved at your request)"]
     for i, s in enumerate(sources, start_n + 1):
+        # Stamp the marker onto the SourceBlock itself, not just into the rendered text — the
+        # pipeline's citation map (marker_map) is built from THESE objects after the loop ends, and
+        # used to independently re-derive the same number by counting (see pipeline.py's two
+        # `marker_map.setdefault` call sites). Two separately-computed numberings for the same data
+        # can drift apart if max_marker's text scan ever over/undercounts (e.g. a retrieved source's
+        # own body coincidentally containing a `[S#]`-shaped line) — writing it here once, onto the
+        # object the caller already receives back, makes this the single source of truth instead.
+        s.marker = f"S{i}"
         who = f" ({s.commentator_id})" if getattr(s, "commentator_id", None) else ""
         lines += [f"### [S{i}] {s.ref}{who}", (s.text or "").strip(), ""]
     lines += [

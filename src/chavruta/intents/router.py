@@ -65,9 +65,19 @@ _BOOKS = (
 _REF_PAT = re.compile(rf"\b({_BOOKS})\s+(\d+)(?:[:.](\d+))?", re.IGNORECASE)
 _BOOK_CANON = {b.lower(): b for b in _BOOKS.split("|")}
 
+# Bare שיעור used to fire this on its own — but in halachic usage שיעור most often means a
+# MEASURE (שיעור כזית, שיעור רביעית), not "a lesson". That routed ordinary measure/shiur-of-X
+# questions into the 30k-token lesson builder instead of a direct answer, and — via
+# _LESSON_LEAD_HE — stripped the word "שיעור" itself out of the retrieval text, hurting recall on
+# top of the misroute. Require either an explicit creation verb, or שיעור immediately followed by a
+# topic preposition (mirrors what _LESSON_LEAD_HE strips), so "מה שיעור כזית" no longer matches.
 _LESSON_PAT = re.compile(
     r"\b(prepare|build|create|make)\b.*\b(lesson|shiur|class)\b"
-    r"|שיעור|הכן\s+שיעור|תכין\s+שיעור|בנה\s+שיעור", re.IGNORECASE)
+    r"|(?:הכן|תכין|תכנן|בנה|הכינו|תכינו)\s+(?:לי\s+)?שיעור"
+    # "של" deliberately excluded: "מה השיעור של X" is the ordinary measure-question idiom
+    # (what IS the measure of X), not a request for "a lesson of X" — including it here
+    # misrouted exactly that phrasing back into the lesson builder.
+    r"|\bשיעור\s+(?:על|בנושא|בסוגיית|בסוגיה)\b", re.IGNORECASE)
 _COMPARE_PAT = re.compile(
     r"\b(differ|difference|disagree|compare|versus|vs\.?)\b"
     r"|מחלוקת|הבדל|השווה|חולק|לעומת", re.IGNORECASE)

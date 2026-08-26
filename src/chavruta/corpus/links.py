@@ -97,7 +97,14 @@ class LinkStore:
     """
 
     def __init__(self, db_path: str | Path, *, max_reached: int = 200) -> None:
-        self._db = sqlite3.connect(f"file:{Path(db_path)}?mode=ro", uri=True, check_same_thread=False)
+        # Path.as_uri() (not an f-string) — a raw path pasted after `file:` happens to work for the
+        # common case (SQLite's URI parser tolerates bare Windows backslashes and spaces), but a path
+        # containing a URI-reserved character (#, ?, %) silently mis-parses: the `#` case measured
+        # here connects successfully to the WRONG (nonexistent) location instead of raising, so a
+        # link-graph path under a directory with such a character would silently serve empty results
+        # rather than fail loudly. as_uri() percent-encodes properly on every platform.
+        uri = Path(db_path).resolve().as_uri() + "?mode=ro"
+        self._db = sqlite3.connect(uri, uri=True, check_same_thread=False)
         self._max = max_reached
 
     def neighbours(self, ref: str, work_ids: list[str] | None = None) -> list[str]:

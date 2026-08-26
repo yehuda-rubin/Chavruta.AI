@@ -205,9 +205,32 @@ class _PriorityGate:
                 granted = True
             else:
                 granted = False
-                (self._priority_queue if priority else self._normal_queue).append(my_turn)
+                queue = self._priority_queue if priority else self._normal_queue
+                queue.append(my_turn)
         if not granted:
-            my_turn.wait()
+            try:
+                my_turn.wait()
+            except BaseException:
+                # Interrupted while still queued (never reached the try/finally below, so our own
+                # _release() will never run). If we leave `my_turn` sitting in the queue, a LATER
+                # holder's _release() still pops it and .set()s it — nobody is listening any more —
+                # and increments `_in_use` for a grant that is now permanently unmatched, quietly
+                # shrinking the gate's real capacity by one every time this happens. Remove ourselves
+                # instead; if we're no longer in either queue, a concurrent _release() already popped
+                # and granted us in the race between the exception and taking this lock — that grant
+                # is real capacity and must go through the normal release path (which may hand it
+                # straight to the next waiter), not be dropped silently.
+                already_granted = False
+                with self._lock:
+                    if my_turn in self._priority_queue:
+                        self._priority_queue.remove(my_turn)
+                    elif my_turn in self._normal_queue:
+                        self._normal_queue.remove(my_turn)
+                    else:
+                        already_granted = True
+                if already_granted:
+                    self._release()
+                raise
         try:
             yield
         finally:

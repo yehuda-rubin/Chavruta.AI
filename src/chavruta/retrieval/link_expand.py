@@ -8,9 +8,12 @@ vector hits by the retriever. Activates the full cross-corpus reach as corpora a
 
 from __future__ import annotations
 
-from chavruta.corpus.refs import canonical_ref, commentator_from_ref
+from dataclasses import replace
+
+from chavruta.corpus.refs import canonical_ref
 from chavruta.corpus.schema import Query
 from chavruta.retrieval.base import RankedHit
+from chavruta.retrieval.hybrid import _to_hit
 
 
 class LinkExpander:
@@ -45,18 +48,10 @@ class LinkExpander:
             return []
         filters = {"work_id": list(query.work_ids)} if query.work_ids else None
         raw = self.store.fetch_by_refs(self.profile.collection, reached, filters=filters)
-        hits: list[RankedHit] = []
-        for h in raw:
-            p = h.payload or {}
-            hits.append(RankedHit(
-                chunk_id=h.chunk_id,
-                ref=p.get("ref", ""),
-                text=p.get("text", ""),
-                score=self.link_score,
-                commentator_id=p.get("commentator_id") or commentator_from_ref(p.get("ref")),
-                deep_link=p.get("deep_link", ""),
-                work_id=p.get("work_id", ""),
-                anchor_ref=p.get("anchor_ref"),
-                period=p.get("period"),
-            ))
-        return hits
+        # Reuse hybrid.py's own payload->RankedHit mapping instead of a second, hand-rolled one here:
+        # a link-expanded hit is built from the exact same store payload shape as a direct vector hit,
+        # so a second copy of the field list only invites the two to drift — which they had (lang,
+        # text_he/text_en, license, version_title were missing here), silently blanking attribution
+        # and reader-facing text for every source that arrived via link expansion instead of a direct
+        # hit. Only the score differs (link-expanded hits rank below direct vector hits by design).
+        return [replace(_to_hit(h), score=self.link_score) for h in raw]

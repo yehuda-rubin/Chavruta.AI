@@ -162,6 +162,30 @@ def test_router_lesson_intent_with_landmark():
     assert q.expand_links is True
 
 
+@pytest.mark.parametrize("text", [
+    "מה שיעור כזית",
+    "מהו שיעור רביעית במקווה",
+    "מה שיעור חלה",
+    "מה השיעור של אכילת מצה",
+])
+def test_router_bare_measure_shiur_is_not_lesson_intent(text):
+    """Regression: 'שיעור' alone used to force Intent.LESSON on ANY question containing the word —
+    including its ordinary halachic sense (a measure/quantity, e.g. שיעור כזית), not just 'build me
+    a lesson'. That routed straightforward measure questions into the 30k-token lesson builder."""
+    q = Router().route(Query(text=text))
+    assert q.intent is not Intent.LESSON
+
+
+@pytest.mark.parametrize("text", [
+    "תכין לי שיעור על הלכות שבת",
+    "שיעור בנושא תשובה",
+    "בנה שיעור על מסכת ברכות",
+])
+def test_router_explicit_lesson_requests_still_detected(text):
+    q = Router().route(Query(text=text))
+    assert q.intent is Intent.LESSON
+
+
 def test_router_single_commentator_explain_with_verse():
     q = Router().route(Query(text="מה אומר אבן עזרא על שמות ג׳ י״ד?"))
     assert q.commentator_ids == ["ibn_ezra"]
