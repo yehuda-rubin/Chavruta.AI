@@ -144,6 +144,26 @@ _TALMUD_RE = re.compile(
     rf"(?P<daf>{_DAF})[{_MARK}]*\s*(?P<amud>{_AMUD})"
 )
 
+# The other word order: the DAF FIRST and the tractate after it — "דף עט בחולין", "בדף ב בבבא
+# מציעא". Every pattern above reads the tractate first, so this phrasing resolved to nothing at
+# all: not a ref, and not even a tractate to scope the search to.
+#
+# It is the sentence a learner actually types. A real report on 2026-08-13: someone opened chavruta
+# mode with "אני באמצע ללמוד את דף עט בחולין", got an answer about שיעור ארבע מילין out of a
+# Shulchan Arukh commentary, said "זאת לא הסוגיה", and got the same wrong source again. The daf was
+# in the corpus the whole time — once he described the topic in words, retrieval found Chullin.158.6,
+# which IS daf 79b. Nothing was missing except the parse.
+#
+# Safe without an amud marker because the literal word דף carries the disambiguation the amud
+# normally provides: "ברכות טובות" has no דף in it. The plausibility bound is kept all the same.
+_DAF_FIRST_RE = re.compile(
+    rf"ב?דף\s+(?P<daf>{_DAF})[{_MARK}]*\s*(?P<amud>{_AMUD})?\s*"
+    rf"(?:ב|ל|מ)?(?:מסכת\s+)?(?P<tractate>{_book_alt(HE_TRACTATES)})"
+)
+
+# The longest tractate is Bava Batra at 176 dapim, so anything outside this was never a citation.
+_DAF_MIN, _DAF_MAX = 2, 180
+
 
 def detect_tanakh_refs(text: str) -> list[str]:
     """Hebrew Tanakh refs → 'Book.ch' or 'Book.ch.verse'.
@@ -168,6 +188,36 @@ def detect_tanakh_refs(text: str) -> list[str]:
     return refs
 
 
+# A citation the way a MODEL writes one in its own prose: "(<book> <chapter>, <verse>)" — e.g.
+# "(ויקרא כג, ל)". `_TANAKH_RE`/`_num` above require a geresh/gershayim mark on any multi-letter
+# numeral specifically to keep free-flowing USER prose from anchoring on an accidental letter
+# sequence — a real, deliberate guard for that context. A parenthetical citation is a different,
+# far more constrained context (always book + separator + chapter + separator + verse, inside
+# parens), where that ambiguity risk does not apply, so this accepts plain unmarked gematria there.
+# Built for grounded.py::mismatched_tanakh_citations — see that function's docstring for why it
+# needs each citation's character span, not just a deduped list of refs.
+_PAREN_CITATION_RE = re.compile(
+    rf"\((?P<book>{_book_alt(HE_BOOKS)})\s+(?P<ch>[{_HE_LETTERS}]+)\s*[,:]\s*(?P<vs>[{_HE_LETTERS}]+)\)"
+)
+
+
+def detect_parenthetical_tanakh_citations(text: str) -> list[tuple[str, int, int]]:
+    """Tanakh citations in the parenthetical shape a model actually writes — see `_PAREN_CITATION_RE`.
+    Returns (ref, start, end) so a caller can look at the text AROUND each citation, not just which
+    refs were named — the same quoted phrase cited under two different chapter:verse refs is only
+    detectable if both occurrences, and their positions, survive.
+    """
+    out: list[tuple[str, int, int]] = []
+    for m in _PAREN_CITATION_RE.finditer(text or ""):
+        ch = gematria(m.group("ch"))
+        vs = gematria(m.group("vs"))
+        if ch is None or vs is None:
+            continue
+        ref = f"{HE_BOOKS[m.group('book')]}.{ch}.{vs}"
+        out.append((ref, m.start(), m.end()))
+    return out
+
+
 def detect_talmud_refs(text: str) -> list[str]:
     """Hebrew Talmud refs → 'Tractate.<daf><a|b>' (amud aleph default).
 
@@ -183,6 +233,24 @@ def detect_talmud_refs(text: str) -> list[str]:
         ref = f"{HE_TRACTATES[m.group('tractate')]}.{daf}{amud}"
         if ref not in refs:
             refs.append(ref)
+
+    for m in _DAF_FIRST_RE.finditer(text):
+        daf = _daf_value(m.group("daf"))
+        if daf is None or not _DAF_MIN <= daf <= _DAF_MAX:
+            continue
+        tractate = HE_TRACTATES[m.group("tractate")]
+        amud_tok = m.group("amud")
+        if amud_tok:
+            sides = ["b" if ("ב" in amud_tok or ":" in amud_tok) else "a"]
+        else:
+            # "daf 79" names the whole daf, and the sugya on it does not stop at the page turn —
+            # the answer this bug was about sat on 79b. Anchoring only to 79a would reproduce the
+            # miss in a quieter form, so both amudim go in.
+            sides = ["a", "b"]
+        for side in sides:
+            ref = f"{tractate}.{daf}{side}"
+            if ref not in refs:
+                refs.append(ref)
     return refs
 
 
@@ -212,9 +280,17 @@ def detect_tractates(text: str) -> list[str]:
             # as a daf: "שבת קודש" parses as Shabbat + daf קודש (=410). The longest tractate is Bava
             # Batra at 176 dapim, so an implausible value means this was never a citation.
             daf = _daf_value(m.group("daf"))
-            if daf is None or not 2 <= daf <= 180:
+            if daf is None or not _DAF_MIN <= daf <= _DAF_MAX:
                 continue
         en = HE_TRACTATES.get(he or "")
+        if en and en not in out:
+            out.append(en)
+    # "דף עט בחולין" — the daf-first order. Worth catching here as well as in detect_hebrew_refs,
+    # because scoping the search to the right masechet is the floor: even when the daf number is
+    # implausible or the exact ref misses, an answer from somewhere in Chullin beats an answer from
+    # a Shulchan Arukh commentary on a different subject entirely, which is what this returned.
+    for m in _DAF_FIRST_RE.finditer(text):
+        en = HE_TRACTATES.get(m.group("tractate") or "")
         if en and en not in out:
             out.append(en)
     return out

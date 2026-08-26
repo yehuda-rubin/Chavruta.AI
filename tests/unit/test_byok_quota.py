@@ -413,6 +413,22 @@ def test_a_member_over_their_own_cap_is_told_it_is_theirs(_school, api_backend):
     assert "מנהל המוסד" in detail and "מחר" in detail          # their own ceiling, renewed daily
 
 
+def test_a_member_over_their_cap_falls_back_to_their_own_credits(_school, api_backend):
+    """Decided 2026-08-20, reversing the earlier rule: a member's own credits are a spendable
+    fallback once the school's pool refuses a turn, so they are not simply stopped — same shape as
+    the non-member credit fallback, mirrored into the org branch of _reserve_tokens."""
+    import app.orgs as orgs
+    orgs.set_member_cap(_school, "pupil", 100)
+    ctx = orgs.quota_context("pupil")
+    db.bump_pooled(ctx["member_id"], ctx["pool_id"], member_cap=0, pool_daily=0, pool_weekly=0,
+                   units=100)
+    db.add_credits("pupil", 50)
+    res = api._reserve_tokens("pupil", "he", "qa")
+    assert res.paid_with_credits is True
+    assert res.ctx is None
+    assert db.get_credits("pupil") == 50 - plans.credit_cost("qa")
+
+
 def test_the_schools_exhausted_day_names_the_school(_school, api_backend, monkeypatch):
     import app.orgs as orgs
     monkeypatch.setenv("CHAVRUTA_TOKENS_DAY_INSTITUTION", "1000")

@@ -6,6 +6,9 @@ import { tr } from "@/lib/i18n";
 import type { Lang } from "@/lib/types";
 import { Modal } from "./Modal";
 
+// Same address used by SupportModal and Blocked — one contact channel, not a new one per feature.
+const CONTACT_EMAIL = "rubinyehuda8@gmail.com";
+
 /**
  * Plan picker. Shows both usage caps, not just the price — the daily one is what a user feels day
  * to day, and the weekly one is the number that actually decides whether a plan fits them, so
@@ -29,8 +32,12 @@ export function PlansModal({
   onChoose: (plan: string, cycle: "monthly" | "annual") => void;
 }) {
   const [cycle, setCycle] = useState<"monthly" | "annual">("monthly");
-  const paid = tiers.filter((t) => t.price_ils > 0);
-  const free = tiers.find((t) => t.price_ils === 0);
+  // Institutional tiers (seats > 1) carry price_ils === null — contact-us pricing, not a published
+  // number. See app/plans.py::public_catalogue. They never enter the priced grid or the saving-%
+  // calculation below.
+  const paid = tiers.filter((t) => t.seats === 1 && (t.price_ils ?? 0) > 0);
+  const institutional = tiers.filter((t) => t.seats > 1);
+  const free = tiers.find((t) => t.seats === 1 && t.price_ils === 0);
   const bestSaving = Math.max(0, ...paid.map((t) => t.annual_saving_pct));
 
   return (
@@ -65,8 +72,9 @@ export function PlansModal({
         <div className="grid gap-3 sm:grid-cols-3">
           {paid.map((t) => {
             const isCurrent = t.id === currentPlan;
-            const price = cycle === "annual" ? t.annual_monthly_ils : t.price_ils;
-            const annualTotal = t.annual_price_ils;
+            // Non-null: `paid` already filtered out institutional (contact-us / null-price) tiers.
+            const price = (cycle === "annual" ? t.annual_monthly_ils : t.price_ils) ?? 0;
+            const annualTotal = t.annual_price_ils ?? 0;
             return (
               <div
                 key={t.id}
@@ -108,6 +116,23 @@ export function PlansModal({
 
         {free && (
           <p className="text-xs text-ink/50 text-center">{tr(lang, "freeBaseline")}</p>
+        )}
+
+        {/* Institutional tiers never show a price — see app/plans.py::public_catalogue for why a
+            published number here would be a mistake, not just a design choice. */}
+        {institutional.length > 0 && (
+          <div className="flex flex-col gap-2 p-4 rounded-2xl glass ring-1 ring-transparent text-center">
+            <h3 className="font-semibold">{tr(lang, "institutionHeading")}</h3>
+            <p className="text-xs text-ink/70 leading-relaxed">{tr(lang, "institutionNote")}</p>
+            <a
+              href={`mailto:${CONTACT_EMAIL}`}
+              dir="ltr"
+              className="mt-2 self-center px-4 py-2 rounded-2xl grad text-white font-semibold text-sm
+                         hover:opacity-95 transition"
+            >
+              {tr(lang, "institutionCta")}
+            </a>
+          </div>
         )}
 
         <p className="text-xs text-ink/50 leading-relaxed">{tr(lang, "quotaExplainer")}</p>

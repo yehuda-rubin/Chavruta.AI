@@ -142,6 +142,10 @@ class Citation:
     deep_link: str
     quote: str = ""
     commentator_id: str | None = None
+    # Rights of the specific edition this text came from — see app/api.py::CitationOut for why an
+    # empty value means "unknown" (all-rights-reserved), never "no attribution owed".
+    license: str = ""
+    version_title: str = ""
 
 
 @dataclass
@@ -154,6 +158,11 @@ class Turn:
     # follow-up like "האם הם חולקים?". Optional and empty by default: a caller that does not
     # track citations keeps the old two-field behaviour.
     refs: list[str] = field(default_factory=list)
+    # True for an assistant turn that completed a LESSON (files, not answer, hold its content — see
+    # app/api.py::_generate_lesson_from_hits). Lets a caller downstream of history reconstruction
+    # (app/api.py::_run_query_impl) tell "this session already has a finished lesson" from the turns
+    # alone, without a second DB round-trip. Optional and False by default, same reasoning as `refs`.
+    lesson: bool = False
 
 
 @dataclass
@@ -203,3 +212,7 @@ class Answer:
     caveats: list[str] = field(default_factory=list)
     intent: Intent = Intent.QA
     lesson_plan: LessonPlan | None = None
+    # Every ref the model was actually shown this turn (retrieved hits + agentically-fetched) — NOT
+    # just the ones it cited. Lets a caller tell "named a real work" apart from "named a work it was
+    # actually given"; see app/api.py::_widen_citations_from_note.
+    retrieved_refs: list[str] = field(default_factory=list)

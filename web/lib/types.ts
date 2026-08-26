@@ -34,6 +34,9 @@ export interface Message {
   caveats: string[];
   grounded?: boolean;
   files?: FileOut[];
+  // The model's own list of the works it leaned on, cut out of `text` by the server and shown
+  // beside the sources rather than inside the answer. Present only for the rollout.
+  source_note?: string;
   created_at?: string;
 }
 
@@ -55,6 +58,7 @@ export interface QueryResponse {
   intent: Intent;
   caveats: string[];
   files?: FileOut[];
+  source_note?: string;
   session_id?: string;
 }
 

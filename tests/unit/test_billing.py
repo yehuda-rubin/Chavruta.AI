@@ -75,11 +75,12 @@ def test_handle_event_activates_paid(fresh_db, monkeypatch):
     monkeypatch.setattr(service.greeninvoice, "issue_receipt", lambda **k: None)   # no network
     service.handle_event({"owner_id": "u-1", "success": True, "recurring_uid": "rec_9",
                           "is_renewal": False, "amount": 49.9}, now=datetime(2026, 7, 19, tzinfo=UTC))
-    # No checkout row, so the tier defaults to the legacy 'pro' — but ₪49.90 is the pre-2026-08-12
-    # pro price and pro now costs ₪169, so the MONEY decides and it buys basic. This assertion used
-    # to read `== "pro"`, which was the old ladder frozen into a test; granting a tier the charge
-    # does not cover is the whole defect the resolver exists to stop.
-    assert fresh_db.get_plan("u-1") == "basic"
+    # No checkout row, so the tier defaults to the legacy 'pro' — but ₪49.90 is the pre-2026-08-12 pro
+    # price, and even basic (repriced 2026-08-21 to ₪75) now costs more than that stale charge, so the
+    # MONEY decides and it buys nothing but free. This assertion has already moved once (it used to
+    # read `== "pro"`, the old ladder frozen into a test, then `== "basic"` after the first reprice);
+    # granting a tier the charge does not cover is the whole defect the resolver exists to stop.
+    assert fresh_db.get_plan("u-1") == "free"
     sub = fresh_db.get_subscription("u-1")
     assert sub["status"] == "active" and sub["provider_ref"] == "rec_9"
     assert sub["current_period_end"] > "2026-08"     # ~30 days out

@@ -1,6 +1,6 @@
 # 🕍 Chavruta.AI — a trustworthy Torah study partner (RAG over the Jewish bookshelf)
 
-🔗 **Live product: [chavrutaai.org](https://chavrutaai.org)**
+🔗 **Live product: [chavrutaai.org](https://chavrutaai.org)** · Created by **Yehuda Rubin**
 
 **Chavruta.AI** answers questions on the Jewish bookshelf by **retrieving the actual sources** —
 the verse or passage, plus the classical commentators (Rashi, Ramban, Ibn Ezra, Tosafot, Rambam,
@@ -358,9 +358,16 @@ Hebrew/English UI. Halachic *rulings* remain advisory only, never a substitute f
 Texts from **[Sefaria](https://www.sefaria.org)** (open, free API). Embeddings: BAAI bge-m3.
 Inspired by Sefaria's [Virtual Havruta](https://github.com/Sefaria/AppliedAI).
 
+## Author
+
+**Chavruta.AI** was created and is maintained by **Yehuda Rubin**.
+Contact: [LinkedIn](https://www.linkedin.com/in/yehuda-rubin-a62108377/).
+
 ## Licence
 
-The **code** is MIT — see [LICENSE](LICENSE). The **texts are not**: each edition carries its own
-licence, and the shipped corpus is restricted to Public Domain / CC0 / CC-BY / CC-BY-SA with
-attribution and share-alike obligations that attach when a source is reproduced. Read
-[NOTICE.md](NOTICE.md) before redistributing anything the system retrieves.
+The **code** is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE) —
+**noncommercial use only**; commercial use requires a separate agreement with the author.
+The **texts are not** covered by this file at all: each edition carries its own licence, and the
+shipped corpus is restricted to Public Domain / CC0 / CC-BY / CC-BY-SA with attribution and
+share-alike obligations that attach when a source is reproduced. Read [NOTICE.md](NOTICE.md)
+before redistributing anything the system retrieves.

@@ -123,6 +123,11 @@ class Tier:
 #     pro           ₪48       10           ₪48      ₪96      ₪137           ₪169
 #     institution  ₪192       40          ₪192     ₪385      ₪549           ₪649
 #
+# The "gross" column above is the FLOOR at the ORIGINAL 2026-08-12 numbers, kept as-is because the
+# cost inputs (token price, weekly-lesson budget, PROFIT_TARGET) have not changed. It no longer equals
+# the sale price for any tier after the 2026-08-21 reprice below (₪75 / ₪200 / ₪1,000 / ₪2,000 /
+# ₪4,000) — every paid tier now sits deliberately above its floor rather than at it.
+#
 # Derived at $0.20 per million normalized tokens (= COMPLETION_WEIGHT matches the provider's own
 # input:output ratio, so a normalized token IS the cost unit), ~3.7 ILS/USD, 18% VAT, and a measured
 # 23,512 normalized tokens per turn / ~58,000 per lesson.
@@ -132,22 +137,47 @@ class Tier:
 # subscribers — the number to actually aim at.
 PROFIT_TARGET = 0.30
 
-# The rule above yields a FLOOR, not a price. Institution-20's floor is ~₪275; it is sold at ₪649
-# because ₪32 per member per month is still cheap for a school, and the margin over the floor is what
-# funds the ~₪740/month server and the work. Do not "correct" the paid tiers down to their floors —
-# the floor answers "would this lose money", not "what is this worth".
+# The rule above yields a FLOOR, not a price. Do not "correct" a paid tier down to its floor — the
+# floor answers "would this lose money", not "what is this worth".
 #
-# The three institution tiers share one per-member allowance and differ only in size: seats, pool and
-# lesson count all scale together (×1 / ×2.5 / ×5 from institution-20), so a bigger school gets more
-# capacity rather than a thinner slice of the same pool. Per-seat price drops gently with size —
-# ₪32.45 → ₪29.98 → ₪27.99 — a real volume discount that still clears the floor at every step.
+# INSTITUTIONAL PRICING IS NO LONGER A PUBLIC SELF-SERVICE LADDER (changed 2026-08-21). The three
+# figures below (₪1,000 / ₪2,000 / ₪4,000) are an INTERNAL negotiation anchor, not a published price:
+# public_catalogue() and the frontend (PlansModal.tsx) show "contact us" for any tier with seats > 1
+# instead of a number — see is_institutional(). Why: (1) a public institutional price invites a direct
+# comparison against Otzar HaHochma's real published rate (~₪561/month equivalent for 20 seats, see
+# docs/מחירון-מנויים-Chavruta-AI.pdf §9), and ₪1,000 for institution-20 would read as ~78% more
+# expensive with no room to explain the self-service admin panel (seats/invites/usage — orgs.py +
+# web/app/school) that a personal tier never gets and that is not priced into the cost model above at
+# all; (2) there is still no real institutional pricing signal (3 accounts, billing off) — a
+# conversation produces one, a published number does not; (3) it sidesteps needing to fix
+# create_org's broken self-service creation path for now — every institutional grant goes through the
+# ALREADY-WORKING coupon flow (coupons.issue_plan_coupon → redeem, see
+# test_a_coupon_granted_plan_reaches_the_school) after a manual, negotiated conversation, not through
+# checkout. IMPORTANT: because of this, a negotiated price below the anchor must be granted by coupon,
+# never inferred from the amount paid — a discounted invoice run through the ordinary PayPlus
+# amount-resolver (_tier_affordable_at) would silently resolve to a SMALLER tier than what was sold,
+# since that resolver only matches an amount against these list prices.
+#
+# At the ₪1,000 / ₪2,000 / ₪4,000 anchor, all three institution tiers clear PROFIT_TARGET even at full
+# utilisation (54.6% / 43.3% / 43.2% margin) — unlike the previous public ladder, where institution-50
+# and institution-100 sat below the 30% target at their own worst case. Per-seat price is ₪50.00 /
+# ₪40.00 / ₪40.00 — no further discount from 50 to 100 seats, which is fine for a negotiated anchor
+# (each conversation can move off it) but would look like a broken volume curve if ever published
+# as-is. See docs/מחירון-מנויים-Chavruta-AI.pdf §9 for the full worked analysis, including the basic/
+# pro reprice below.
+#
+# Repriced 2026-08-21 (basic/pro raised; institution/-50/-100 moved to the internal anchor above):
+# basic and pro were re-anchored well above their floor (54.6% / 43.3% margin at full utilisation)
+# rather than sitting a few agorot over it as before — that also fixes a real inversion where basic
+# was cheaper per normalized token than pro (backwards volume logic). Nothing is grandfathered: billing
+# is still off (no PAYPLUS_* keys), so none of this is charged to anyone yet.
 TIERS: tuple[Tier, ...] = (
-    Tier("free",             200_000,     525_000,   2,   1,    0.0,     0.0, "חינם",         "Free"),
-    Tier("basic",            600_000,   1_575_000,   6,   3,   49.0,   490.0, "בסיסי",        "Basic"),
-    Tier("pro",            2_000_000,   5_250_000,  20,  10,  169.0,  1690.0, "מלא",          "Pro"),
-    Tier("institution",    8_000_000,  21_000_000,  80,  40,  649.0,  6490.0, "מוסדי 20",     "Institution 20", 20),
-    Tier("institution_50", 20_000_000,  52_500_000, 200, 100, 1499.0, 14990.0, "מוסדי 50",    "Institution 50", 50),
-    Tier("institution_100", 40_000_000, 105_000_000, 400, 200, 2799.0, 27990.0, "מוסדי 100",  "Institution 100", 100),
+    Tier("free",             200_000,     525_000,   2,   1,    0.0,      0.0, "חינם",         "Free"),
+    Tier("basic",            600_000,   1_575_000,   6,   3,   75.0,    750.0, "בסיסי",        "Basic"),
+    Tier("pro",            2_000_000,   5_250_000,  20,  10,  200.0,   2000.0, "מלא",          "Pro"),
+    Tier("institution",    8_000_000,  21_000_000,  80,  40, 1000.0,  10000.0, "מוסדי 20",     "Institution 20", 20),
+    Tier("institution_50", 20_000_000,  52_500_000, 200, 100, 2000.0, 20000.0, "מוסדי 50",    "Institution 50", 50),
+    Tier("institution_100", 40_000_000, 105_000_000, 400, 200, 4000.0, 40000.0, "מוסדי 100",  "Institution 100", 100),
 )
 
 # Output costs several times input everywhere; 3x is the round figure that holds across the models
@@ -404,14 +434,16 @@ def refund_quote(amount: float, *, days_used: int = 0, cycle: str | None = MONTH
 # A credit is one generation, spent ONLY after a plan's cap is hit. Pricing it has almost nothing to
 # do with what it costs us and everything to do with not undercutting the subscriptions:
 #
-#     marginal cost of one turn          ₪0.017
-#     implied per-turn price, basic      ₪0.171
-#     implied per-turn price, pro        ₪0.177
-#     implied per-turn price, inst-100   ₪0.146   (the cheapest rate we sell at all)
+#     marginal cost of one turn                  ₪0.017
+#     implied per-turn price, basic / inst-20     ₪0.260
+#     implied per-turn price, pro / inst-50 / inst-100   ₪0.208   (the cheapest rate we sell at all)
 #
-# So a credit priced below ~₪0.15 is not an overflow valve, it is a cheaper subscription with extra
+# (Recomputed for the 2026-08-21 reprice — price ÷ (weekly_tokens x 4.3 / 23,512). Institution figures
+# use the internal negotiation anchor, not a published price; see the note above TIERS.)
+#
+# So a credit priced below ~₪0.20 is not an overflow valve, it is a cheaper subscription with extra
 # steps — anyone doing arithmetic buys credits instead of a plan, and the recurring revenue that
-# actually funds the server evaporates. ₪0.50 sits ~3x above the cheapest subscription rate and ~29x
+# actually funds the server evaporates. ₪0.50 sits ~2.4x above the cheapest subscription rate and ~29x
 # marginal cost, which is what makes it worth topping up in a pinch and never worth living on.
 #
 # Not yet sold: credits are granted by coupon today (db.add_credits), and a pack purchase would
@@ -445,24 +477,35 @@ def credit_cost(intent: str | None) -> int:
 def public_catalogue(lang: str = "he") -> list[dict]:
     """The tier list for the UI.
 
-    Prices are absolute — they have to be. Allowances are NOT: this returns the multiple of the free
-    tier and nothing else. A published token or lesson figure becomes a promise, so trimming a
-    budget or moving to a costlier model would be a downgrade to a paying customer; a ratio survives
-    both. It is also the only honest way to describe a token allowance, which means nothing to a
-    reader on its own.
+    Prices are absolute for PERSONAL tiers — they have to be. Allowances are NOT: this returns the
+    multiple of the free tier and nothing else. A published token or lesson figure becomes a promise,
+    so trimming a budget or moving to a costlier model would be a downgrade to a paying customer; a
+    ratio survives both. It is also the only honest way to describe a token allowance, which means
+    nothing to a reader on its own.
 
     The single `multiple` is truthful because every dimension scales together — see TIERS.
+
+    INSTITUTIONAL tiers (seats > 1) get price fields of None instead of a number, deliberately, as of
+    2026-08-21 — see the "INSTITUTIONAL PRICING IS NO LONGER A PUBLIC SELF-SERVICE LADDER" note above
+    TIERS. The number in TIERS for those rows is an internal negotiation anchor, not something this
+    endpoint should ever expose — a client inspecting the raw response must see the same "contact us"
+    signal the rendered UI shows, not a number the UI merely chooses not to print.
     """
     he = (lang or "he").startswith("he")
-    return [{
-        "id": t.id,
-        "name": t.name_he if he else t.name_en,
-        "price_ils": price_ils(t.id, MONTHLY),
-        "annual_price_ils": annual_total_ils(t.id),        # the year's total, for "₪1,990 a year"
-        "annual_monthly_ils": price_ils(t.id, ANNUAL),     # what is actually charged each month
-        "annual_saving_pct": annual_saving_pct(t.id),
-        "multiple": t.multiple,          # "3x the free tier" — the only allowance figure shown
-    } for t in TIERS]
+    out = []
+    for t in TIERS:
+        institutional = t.seats > 1
+        out.append({
+            "id": t.id,
+            "name": t.name_he if he else t.name_en,
+            "price_ils": None if institutional else price_ils(t.id, MONTHLY),
+            "annual_price_ils": None if institutional else annual_total_ils(t.id),
+            "annual_monthly_ils": None if institutional else price_ils(t.id, ANNUAL),
+            "annual_saving_pct": 0 if institutional else annual_saving_pct(t.id),
+            "multiple": t.multiple,          # "3x the free tier" — the only allowance figure shown
+            "seats": t.seats,                # > 1 is what the frontend uses to render "contact us"
+        })
+    return out
 
 
 def limits_catalogue(lang: str = "he") -> list[dict]:
@@ -480,15 +523,27 @@ def limits_catalogue(lang: str = "he") -> list[dict]:
 
     This function reads the current values through the accessor functions (daily_tokens, weekly_tokens,
     weekly_lessons, price_ils, annual_total_ils) so environment overrides are reflected.
+
+    INSTITUTIONAL tiers (seats > 1) get price fields of None here too, for the same reason as
+    public_catalogue (see the note above TIERS in this module): this is a public, UNAUTHENTICATED
+    endpoint, so if this function printed the real number a call to it directly would hand out the
+    ₪1,000/₪2,000/₪4,000 internal negotiation anchor even while the marketing UI shows "contact us" —
+    defeating the whole point of not publishing it. The absolute token/lesson figures are still real
+    and shown, since usage limits are not the competitive-sensitive part.
     """
     he = (lang or "he").startswith("he")
-    return [{
-        "id": t.id,
-        "name": t.name_he if he else t.name_en,
-        "price_ils": price_ils(t.id, MONTHLY),
-        "annual_price_ils": annual_total_ils(t.id),        # the year's total
-        "annual_monthly_ils": price_ils(t.id, ANNUAL),     # what is actually charged each month
-        "daily_tokens": daily_tokens(t.id),
-        "weekly_tokens": weekly_tokens(t.id),
-        "weekly_lessons": weekly_lessons(t.id),
-    } for t in TIERS]
+    out = []
+    for t in TIERS:
+        institutional = t.seats > 1
+        out.append({
+            "id": t.id,
+            "name": t.name_he if he else t.name_en,
+            "price_ils": None if institutional else price_ils(t.id, MONTHLY),
+            "annual_price_ils": None if institutional else annual_total_ils(t.id),
+            "annual_monthly_ils": None if institutional else price_ils(t.id, ANNUAL),
+            "daily_tokens": daily_tokens(t.id),
+            "weekly_tokens": weekly_tokens(t.id),
+            "weekly_lessons": weekly_lessons(t.id),
+            "seats": t.seats,
+        })
+    return out

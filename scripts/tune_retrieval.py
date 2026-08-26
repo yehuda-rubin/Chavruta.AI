@@ -32,6 +32,25 @@ RUNTIME is dominated by Qdrant, not by us: budget roughly (sample x seconds-per-
 value. Start with --sample 150 to get a result overnight, then re-run the winners at a larger sample
 to confirm they were not noise. Nothing here writes to the codebase: it prints the winning values
 for a human to apply.
+
+RESUMING ACROSS NIGHTS (--state)
+--------------------------------
+A full descent does not fit in one 5-hour window once the pool is big enough to mean anything, and
+for a week it did not fit and nobody noticed: each night restarted from the constants in hybrid.py,
+got partway through the sweep, was killed at 05:00, and threw the evening away. The log said
+"will resume next run", which was simply not true — there was nothing to resume from. Two nights ran
+to `rc=124` having accepted a value that was never confirmed and never written down.
+
+With `--state PATH` this tunes ONE knob per run and persists what it learned, so a sweep spans as
+many nights as it needs. Each run ends with the held-out check on everything accepted so far, which
+means every night produces an answer that is either applicable or explicitly rejected — rather than
+nothing at all until a sweep that never finishes finishes.
+
+The state is abandoned and started over when the ground moves under it: if the constants in
+hybrid.py no longer match the baseline the sweep began from (someone applied a value by hand), or if
+the pairs pool changed. Coordinate descent keeps earlier winners, so every later decision was made
+in the context of the earlier ones; carrying those forward onto a different baseline or different
+data would be quietly comparing things that were never comparable.
 """
 
 from __future__ import annotations
@@ -41,6 +60,7 @@ import json
 import statistics
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,6 +76,13 @@ from chavruta.retrieval import hybrid  # noqa: E402
 # The knobs, and the values worth trying for each. Ordered so the ones with the most reason to
 # matter come first — coordinate descent keeps earlier winners, so ordering is not cosmetic.
 KNOBS: dict[str, list] = {
+    # First, because it is the newest and the least evidenced: added 2026-08-14 when the base-text
+    # floor turned out to append candidates and boost nothing, so its "reserved" slots lost the score
+    # sort every time. 0.0 is in the list on purpose — it reproduces the old behaviour, so the sweep
+    # can say the lift does not help rather than being unable to express that.
+    "_BASE_BOOST": [0.0, 0.02, 0.05, 0.10, 0.20],
+    "_QUOTE_BOOST": [0.0, 0.02, 0.05, 0.10, 0.20],
+    "_QUOTE_WINDOWS": [0, 2, 4, 6],
     "_TRACTATE_BOOST": [0.0, 0.02, 0.05, 0.10, 0.20],
     "_TRACTATE_TOP_K": [3, 6, 10, 16],
     "_FOUNDATIONAL_BOOST": [0.0, 0.02, 0.05, 0.10, 0.20],
@@ -149,6 +176,84 @@ def _apply(values: dict) -> None:
         setattr(hybrid, name, value)
 
 
+# ── Cross-night state ─────────────────────────────────────────────────────────
+STATE_VERSION = 2
+
+
+def _fingerprint(pairs_path: Path, baseline: dict) -> str:
+    """What the stored progress is only valid FOR.
+
+    Two things invalidate a half-finished descent, and both have to be caught or the resumed sweep
+    silently compares values that were measured under different conditions:
+
+      * the constants in hybrid.py changed — someone applied a winner by hand, so the incumbent the
+        earlier knobs were measured against no longer exists;
+      * the pairs pool changed — a re-harvest replaces the questions, and an mrr on one set of
+        questions is not comparable to an mrr on another.
+    """
+    try:
+        stat = pairs_path.stat()
+        pool = f"{stat.st_size}:{int(stat.st_mtime)}"
+    except OSError:
+        pool = "missing"
+    return json.dumps({"baseline": baseline, "pool": pool}, sort_keys=True)
+
+
+def _load_state(path: Path, fingerprint: str) -> dict:
+    """Stored progress, or a fresh sweep if there is none or it no longer applies."""
+    fresh = {"version": STATE_VERSION, "fingerprint": fingerprint, "best": None, "done": [],
+             "history": [], "in_progress": None}
+    if not path.exists():
+        return fresh
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return fresh
+    if state.get("version") != STATE_VERSION:
+        print("state file is from an older version — starting the sweep over")
+        return fresh
+    if state.get("fingerprint") != fingerprint:
+        print("the constants or the pairs pool changed since this sweep began — starting over.\n"
+              "Coordinate descent keeps earlier winners, so those decisions were made against a\n"
+              "baseline that no longer exists and cannot be carried forward.")
+        return fresh
+    return state
+
+
+def _save_state(path: Path, state: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+# Sits beside the pairs file, not the state file — a "too thin to tune" verdict is a property of
+# the POOL, not of one knob-sweep's progress, and the nightly wrapper needs to read it without
+# caring whether a --state sweep is even in progress.
+_THIN_SUFFIX = ".thin.json"
+
+
+def _mark_thin(pairs_path: Path, *, hits: int, sample: int) -> None:
+    """Record that THIS pool, as it stood on disk just now, did not have enough answered pairs to
+    tune on. `nightly_eval.py`'s harvest gate reads this so a pool that passes the count/age check
+    but fails the check that actually matters (how many pairs are answered) gets re-harvested next
+    time instead of sitting there being re-measured — and re-declared too thin — every single night
+    until the age gate finally expires. Tagged with size:mtime so a fresh harvest (which changes
+    both) invalidates the mark on its own; nothing has to remember to delete it.
+    """
+    marker = pairs_path.with_suffix(pairs_path.suffix + _THIN_SUFFIX)
+    try:
+        stat = pairs_path.stat()
+        pool = f"{stat.st_size}:{int(stat.st_mtime)}"
+    except OSError:
+        return
+    try:
+        marker.write_text(json.dumps(
+            {"pool": pool, "hits": hits, "sample": sample, "min_hits": MIN_HITS,
+             "checked_at": datetime.now().isoformat()}, ensure_ascii=False, indent=2),
+            encoding="utf-8")
+    except OSError:
+        pass
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -162,6 +267,9 @@ def main() -> int:
     ap.add_argument("--top-k", type=int, default=8)
     ap.add_argument("--holdout", type=float, default=0.5,
                     help="fraction of the harvested pairs kept back to confirm the winner")
+    ap.add_argument("--state", default="",
+                    help="persist progress here and tune ONE knob per run, resuming across nights")
+    ap.add_argument("--reset", action="store_true", help="discard stored progress and start over")
     args = ap.parse_args()
 
     pairs = _load(ROOT / args.pairs)
@@ -184,8 +292,27 @@ def main() -> int:
     retriever = ChavrutaPipeline().retriever
 
     baseline = {k: getattr(hybrid, k) for k in KNOBS}
+
+    # Resume, if asked to. `best` carries forward what earlier nights accepted; `done` is which knobs
+    # no longer need looking at. Both are dropped if the fingerprint no longer matches.
+    state_path = Path(args.state) if args.state else None
+    state: dict = {}
+    if state_path:
+        fp = _fingerprint(ROOT / args.pairs, baseline)
+        if args.reset and state_path.exists():
+            state_path.unlink()
+            print("--reset: stored progress discarded")
+        state = _load_state(state_path, fp)
+        state["fingerprint"] = fp
+
     print(f"tuning on {len(tune_set)} harvested pairs | veto set: {len(human)} human questions")
-    print(f"baseline: {baseline}\n")
+    print(f"baseline: {baseline}")
+    if state:
+        carried = state.get("best") or baseline
+        print(f"resuming: {len(state['done'])}/{len(KNOBS)} knobs done{' — ' + ', '.join(state['done']) if state['done'] else ''}")
+        if carried != baseline:
+            print(f"carried  : {carried}")
+    print()
 
     base_tuned = score(retriever, tune_set, top_k=args.top_k)
     base_human = score(retriever, human, top_k=args.top_k)
@@ -201,6 +328,7 @@ def main() -> int:
         print(f"NO SIGNAL: none of the {len(tune_set)} harvested pairs is answered at all, so every\n"
               f"candidate will score 0.000 and nothing can be compared. Raise --sample (harvested\n"
               f"hit rates run near 12%, so a few hundred pairs are needed before differences show).")
+        _mark_thin(ROOT / args.pairs, hits=0, sample=len(tune_set))
         return 1
 
     # An objective that is merely NEAR zero is barely better than one that is zero. At a ~10% hit
@@ -215,56 +343,136 @@ def main() -> int:
               f"{1.0 / max(1, hits):.3f}, which swamps every difference these knobs make — so a "
               f"'winner'\nhere is whichever candidate got lucky. Harvest more pairs "
               f"(at least {MIN_HITS} answered; scripts/harvest_pairs.py --target 5000) and re-run.")
+        _mark_thin(ROOT / args.pairs, hits=hits, sample=len(tune_set))
         return 1
 
-    best = dict(baseline)
+    best = dict(state.get("best") or baseline)
     best_score, best_human = base_tuned["mrr"], base_human["mrr"]
+    # The incumbent is what earlier nights accepted, not the code's constants — so this night's
+    # candidates are compared against the same thing they will actually replace. Scoring it costs one
+    # candidate's worth of window and is not optional: comparing tonight's numbers against a baseline
+    # measured on a different night, with a different pool, is how a sweep accumulates drift.
+    if best != baseline:
+        _apply(best)
+        carried_t, carried_h = score(retriever, tune_set, top_k=args.top_k), \
+            score(retriever, human, top_k=args.top_k)
+        print(f"carried   harvested recall={carried_t['recall']:.3f} mrr={carried_t['mrr']:.3f}"
+              f" | human recall={carried_h['recall']:.3f} mrr={carried_h['mrr']:.3f}\n")
+        best_score, best_human = carried_t["mrr"], carried_h["mrr"]
+
+    # In state mode a run tunes ONE knob and stops. A full descent does not fit in a 5-hour window at
+    # a pool size worth measuring on, and a run that is killed partway through has, in practice,
+    # measured nothing it can keep.
+    todo = [k for k in KNOBS if k not in set(state.get("done", []))]
+    if state_path and not todo:
+        print(f"the sweep is complete — all {len(KNOBS)} knobs tuned.\n"
+              f"baseline : {baseline}\nwinner   : {best}\n"
+              f"Re-run with --reset to start a fresh sweep (worth doing after a re-harvest or a "
+              f"corpus reload).")
+        return 0
+    knobs_this_run = {todo[0]: KNOBS[todo[0]]} if state_path else KNOBS
     # One question flipping from missed to first place moves mrr by exactly this much.
     one_item = 1.0 / max(1, len(tune_set))
     min_gain = max(one_item, best_score * MIN_GAIN_REL)
     print(f"a candidate must gain more than {min_gain:.5f} mrr to be accepted "
           f"(one question of {len(tune_set)} is worth {one_item:.5f})\n")
 
-    for knob, candidates in KNOBS.items():
+    # Checkpointing WITHIN a knob, not just once the whole knob (candidates + held-out confirmation)
+    # is done. Measured live 2026-08-17/18: the first night with the widened window scored all four
+    # _BASE_BOOST candidates and printed "→ keeping _BASE_BOOST = 0.2", then the window closed one
+    # step later, on the held-out confirmation — and because nothing was written until the very end,
+    # the next run started that whole knob over from its first candidate, at ~87 minutes each. A
+    # candidate (or a held-out half) already scored THIS sweep is reproducible — same model, same
+    # corpus, same pairs, no randomness in the retrieval path — so caching its result is exactly as
+    # trustworthy as the number that would come from re-running it, at zero cost instead of ~87
+    # minutes.
+    for knob, candidates in knobs_this_run.items():
         print(f"── {knob} (currently {best[knob]})")
+        ip = state.get("in_progress") if state_path else None
+        resuming = bool(ip and ip.get("knob") == knob)
+        tried: dict = dict(ip["tried"]) if resuming else {}
+        best_k, score_k, human_k = (dict(ip["best"]), ip["best_score"], ip["best_human"]) \
+            if resuming else (dict(best), best_score, best_human)
+        if resuming and tried:
+            print(f"   resuming: {len(tried)} candidate(s) already scored this sweep")
+        elif state_path:
+            state["in_progress"] = {"knob": knob, "tried": {}, "best": dict(best_k),
+                                    "best_score": score_k, "best_human": human_k}
+            _save_state(state_path, state)
+
         for value in candidates:
-            if value == best[knob]:
+            if value == best_k[knob]:
                 continue
-            trial = dict(best, **{knob: value})
+            cached = tried.get(repr(value))
+            if cached is not None:
+                print(f"   {value!r:>6}  harvested mrr={cached['mrr']:.5f}  human mrr={cached['human']:.5f}"
+                      f"  (resumed) {'accepted' if cached['accepted'] else 'not accepted'}")
+                if cached["accepted"]:
+                    best_k = dict(best_k, **{knob: value})
+                    score_k, human_k = cached["mrr"], cached["human"]
+                continue
+            trial = dict(best_k, **{knob: value})
             _apply(trial)
             t0 = time.monotonic()
             s = score(retriever, tune_set, top_k=args.top_k)
             h = score(retriever, human, top_k=args.top_k)
             elapsed = time.monotonic() - t0
             # THE VETO: a gain on harvested pairs that costs anything on real questions is refused.
-            vetoed = h["mrr"] < best_human - 1e-9
+            vetoed = h["mrr"] < human_k - 1e-9
             # A bare `>` on floats calls a difference in the fourth decimal a win. That is how the
             # first live run "accepted" 0.02 (mrr 0.1013) over four candidates that all scored higher
             # on the human set (0.106) — the log printed three decimals and showed them all as ties,
             # so the decision was invisible to anyone reading it. A candidate now has to clear a real
             # margin, and the print carries enough precision to check the arithmetic by eye.
-            gain = s["mrr"] - best_score
+            gain = s["mrr"] - score_k
             wins = gain > min_gain
+            accepted = not vetoed and wins
             verdict = "VETOED (hurts real questions)" if vetoed else \
                       ("accepted" if wins else f"no gain (+{gain:.5f}, needs +{min_gain:.5f})")
             print(f"   {value!r:>6}  harvested mrr={s['mrr']:.5f}  human mrr={h['mrr']:.5f}"
                   f"  [{elapsed:.0f}s] {verdict}")
-            if not vetoed and wins:
-                best, best_score, best_human = trial, s["mrr"], h["mrr"]
+            tried[repr(value)] = {"mrr": s["mrr"], "human": h["mrr"], "accepted": accepted}
+            if accepted:
+                best_k, score_k, human_k = trial, s["mrr"], h["mrr"]
+            if state_path:
+                state["in_progress"] = {"knob": knob, "tried": tried, "best": best_k,
+                                        "best_score": score_k, "best_human": human_k}
+                _save_state(state_path, state)
+        best, best_score, best_human = best_k, score_k, human_k
         _apply(best)
         print(f"   → keeping {knob} = {best[knob]}\n")
 
     print("confirming the winner on the held-out half (a gain that does not survive this was noise)")
-    _apply(baseline)
-    hold_before = score(retriever, holdout, top_k=args.top_k)
-    _apply(best)
-    hold_after = score(retriever, holdout, top_k=args.top_k)
+    held = (state.get("in_progress") or {}).get("held_out") or {} if state_path else {}
+    if "before" in held:
+        hold_before = held["before"]
+        print("   (before) already scored this sweep — resumed")
+    else:
+        _apply(baseline)
+        hold_before = score(retriever, holdout, top_k=args.top_k)
+        if state_path:
+            ip = dict(state["in_progress"])
+            ip["held_out"] = {"before": hold_before}
+            state["in_progress"] = ip
+            _save_state(state_path, state)
+    if "after" in held:
+        hold_after = held["after"]
+        print("   (after) already scored this sweep — resumed")
+    else:
+        _apply(best)
+        hold_after = score(retriever, holdout, top_k=args.top_k)
+        if state_path:
+            ip = dict(state["in_progress"])
+            ip["held_out"] = dict(ip.get("held_out") or {}, after=hold_after)
+            state["in_progress"] = ip
+            _save_state(state_path, state)
 
     print(f"\nheld-out  before mrr={hold_before['mrr']:.3f} recall={hold_before['recall']:.3f}")
     print(f"held-out  after  mrr={hold_after['mrr']:.3f} recall={hold_after['recall']:.3f}")
     print(f"\nbaseline : {baseline}")
     print(f"winner   : {best}")
-    if hold_after["mrr"] <= hold_before["mrr"]:
+    survived = hold_after["mrr"] > hold_before["mrr"]
+    if not survived:
         print("\nThe gain did NOT survive the held-out half. Do not apply these values — this is "
               "what overfitting to a tuning split looks like, and it is the expected outcome when "
               "the constants were already near a local optimum.")
@@ -272,6 +480,30 @@ def main() -> int:
         print("\nApply by editing the constants in src/chavruta/retrieval/hybrid.py. Nothing is "
               "written automatically: these are load-bearing product values and deserve a human "
               "reading the numbers first.")
+
+    if state_path:
+        # Moved from "done" only now that the knob is finished AND checked — a run killed mid-knob
+        # (see the in_progress checkpointing above) leaves `done` untouched, so a half-swept knob
+        # never reads as complete. `in_progress` itself is cleared here: the individual candidate
+        # and held-out scores it held are no longer needed once this knob's verdict is recorded.
+        tuned_now = list(knobs_this_run)
+        state["best"] = best
+        state["done"] = list(state.get("done", [])) + tuned_now
+        state["in_progress"] = None
+        state["history"] = list(state.get("history", []))[-40:] + [{
+            "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "knobs": tuned_now,
+            "chose": {k: best[k] for k in tuned_now},
+            "held_out_before": round(hold_before["mrr"], 5),
+            "held_out_after": round(hold_after["mrr"], 5),
+            "survived": survived,
+            "sample": len(tune_set),
+        }]
+        _save_state(state_path, state)
+        left = [k for k in KNOBS if k not in set(state["done"])]
+        print(f"\nprogress saved → {state_path}")
+        print(f"{len(state['done'])}/{len(KNOBS)} knobs done"
+              + (f"; next up: {left[0]}" if left else "; sweep complete"))
     return 0
 
 

@@ -78,10 +78,21 @@ services:
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
 
       # Global concurrency cap on generations running at once (see .env.example for the full
-      # explanation). Default 2 assumes a 2-vCPU free-tier box; override in .env on a bigger machine —
-      # the bge-m3 embedding step is the actual CPU-bound part of each request, so this should stay
-      # comfortably under the host's vCPU count, not just "as high as possible".
+      # explanation). Default 2 assumes a 2-vCPU free-tier box.
+      #
+      # Until 2026-08-19 this was ALSO the CPU-protection knob, so it had to stay under the host's
+      # vCPU count. Measured live that day (300 real requests): the CPU-bound part of a request
+      # (embedding + Qdrant) is 0.6-8.7s against a 30-100s+ total — the rest is waiting on the LLM
+      # API, holding no CPU. CHAVRUTA_MAX_CONCURRENT_RETRIEVALS below now does the CPU protection
+      # specifically, so THIS one bounds thread/memory growth from requests mostly sitting idle —
+      # it can go well past the vCPU count. Stay under Starlette's default sync-route thread-pool
+      # ceiling (40), or requests queue invisibly one layer up instead of at this gate.
       CHAVRUTA_MAX_CONCURRENT_GENERATIONS: ${CHAVRUTA_MAX_CONCURRENT_GENERATIONS:-2}
+      # The CPU-bound gate itself (src/chavruta/retrieval/hybrid.py::_retrieval_gate) — see above.
+      # Default 4 is conservative for an 8-core box: bge-m3/BLAS get no explicit thread cap here
+      # (unlike scripts/nightly_eval.py's subprocess), so a single call may already use several
+      # cores on its own.
+      CHAVRUTA_MAX_CONCURRENT_RETRIEVALS: ${CHAVRUTA_MAX_CONCURRENT_RETRIEVALS:-4}
 
       # What a million normalized tokens cost at the provider, so the admin panel can turn spend into
       # money. Deliberately no default: unset means the panel shows nothing rather than a plausible
@@ -95,6 +106,11 @@ services:
       # Parshat HaShavua / Daf Yomi — beta, hand-picked owner_ids only (see app/api.py::
       # _calendar_modes_enabled). Empty = nobody sees the modes yet.
       CHAVRUTA_CALENDAR_BETA_OWNERS: ${CHAVRUTA_CALENDAR_BETA_OWNERS:-}
+      # The sugya study game (app/api.py::_sugya_enabled) and the model's trailing source list
+      # (::_source_note_enabled). Same allowlist shape, separate variables — being in one beta must
+      # not enrol you in another. Empty = nobody.
+      CHAVRUTA_SUGYA_BETA_OWNERS: ${CHAVRUTA_SUGYA_BETA_OWNERS:-}
+      CHAVRUTA_SOURCE_NOTE_OWNERS: ${CHAVRUTA_SOURCE_NOTE_OWNERS:-}
       # Small/fast model for the cheap _wants_full_lesson yes/no classification — deliberately NOT
       # the main generation model (see app/api.py::_classifier_llm).
       CHAVRUTA_CLASSIFIER_MODEL: ${CHAVRUTA_CLASSIFIER_MODEL:-}

@@ -9,10 +9,14 @@ no-source signal that protects Principle I).
 from __future__ import annotations
 
 import logging
+import os
+import threading
 import time
+from collections import deque
 from contextlib import contextmanager
 from dataclasses import replace
 
+from chavruta.corpus.normalize import deuphemize_he, quote_windows
 from chavruta.corpus.refs import (
     commentary_refs,
     commentator_from_ref,
@@ -102,6 +106,20 @@ _FOUNDATIONAL_WORKS = ("tanakh", "mishnah", "gemara", "halacha", "midrash")
 # text is what makes the answer checkable, and one or two of them is enough for that.
 _BASE_SLOTS = 2
 
+# …and what it takes to actually KEEP one. This floor was the only one of the three that appended
+# its candidates and then gave them nothing, so they went back into the same score sort and lost:
+# a pasuk at 0.30 does not survive next to a commentary at 0.66, and "reserved slot" described an
+# intention the code never carried out. Reported from the other end on 2026-08-14 — a user asked for
+# the source of a well-known idea, got a stack of works nobody has heard of, and said so: "אולי כדאי
+# שיהיה לו סדר עדיפויות ושיביא קודם כל מהמקורות המוסמכים/קדומים/מוכרים יותר". His top-8 contained
+# not one base text.
+#
+# Sized level with the foundational floor rather than above it, and capped below the named-ref
+# anchor: a base text the user did not ask for by name must not outrank one they did. Like every
+# constant here it is a judgement, and like every constant here it is a KNOB in
+# scripts/tune_retrieval.py so the nightly run can replace the judgement with a measurement.
+_BASE_BOOST = 0.05
+
 # The foundational-works floor: how many candidates to pull, and how hard to lift them. The boost is
 # capped below the named-ref anchor sentinel so a floor hit can never masquerade as something the
 # user pointed at by name.
@@ -112,6 +130,101 @@ _FOUNDATIONAL_BOOST = 0.05
 # than naming a ref, and the ranking must keep saying so.
 _TRACTATE_TOP_K = 6
 _TRACTATE_BOOST = 0.05
+
+# The quotation floor. A user who quotes a pasuk inside a sentence does not get the pasuk back: the
+# frame around it dominates the embedding, and the source is never even a candidate for re-ranking
+# to reach. Measured 2026-08-14 — "חלק אלוה ממעל" finds Iyov 31:2 at rank 2, the same three words
+# inside "מה המקור לכך שהנשמה היא חלק אלוה ממעל?" find it nowhere in the top ten, and adding one
+# word loses it again. So the phrase is searched on its own.
+#
+# `_QUOTE_WINDOWS` is a COST bound: each window is one search (cheap — measured at ~0ms against the
+# on-disk collection) but all of them share ONE embedding batch, because embedding is the part that
+# actually costs (~0.2s of a 0.5s retrieval). Four windows, one extra forward pass.
+_QUOTE_WINDOWS = 4
+_QUOTE_TOP_K = 3
+_QUOTE_BOOST = 0.05
+
+# `retrieve()` is the ONLY place in a request that touches the CPU-bound work — bge-m3 embedding
+# and the Qdrant round-trips (both floors and the quote windows). Measured live 2026-08-19: a call
+# takes 0.6-1.6s typically, up to ~8.7s under contention, against a total request time of 30-100s+
+# — the rest is waiting on the LLM API over the network, which holds no CPU at all. Before this,
+# app/api.py's one semaphore covered the WHOLE request (CPU work + that network wait) and gated
+# concurrency at 6, so five sixths of a "busy" system was actually idle CPU sitting behind requests
+# that were just waiting on Nebius.
+#
+# So the gate belongs HERE, scoped to only the part that is actually CPU-bound, not around the
+# whole request — that lets app/api.py raise its OWN semaphore (how many requests may be in flight
+# at once, mostly waiting on the network) much higher without raising how many are actually
+# computing on the box at once. Separate from app/api.py's `_generation_semaphore` on purpose: this
+# module has callers besides the API (scripts/, eval/), and none of them should be silently gated
+# by a limit that exists to protect a live server's shared cores.
+#
+# No thread-count cap is applied to torch/BLAS here (unlike scripts/nightly_eval.py, which pins its
+# own subprocess) — bge-m3 is free to use multiple cores per call, so this stays conservative
+# relative to the 8-core box it currently runs on rather than assuming each call is single-threaded.
+_MAX_CONCURRENT_RETRIEVALS = int(os.environ.get("CHAVRUTA_MAX_CONCURRENT_RETRIEVALS", "4"))
+
+
+class _PriorityGate:
+    """A capacity-N gate where a `priority=True` acquire jumps ahead of ordinary ones, and is
+    first-come-first-served against other priority acquires (never starves one against another).
+
+    Why: a request already mid-conversation — the model replied ===NEED_SOURCES=== and is waiting
+    on a follow-up retrieval to CONTINUE an answer it already spent real time and tokens producing
+    — must not queue behind a brand-new question's very first retrieval, which has no sunk cost at
+    all. By the operator's explicit decision (2026-08-19): finishing what is already in flight
+    outranks starting something new when both want the same scarce slot.
+
+    Plain `threading.Semaphore` cannot express this — waiters are released in an unspecified order.
+    An earlier version of this class used one `threading.Condition` with `notify_all()` and a
+    priority-vs-normal predicate; it correctly let priority jump ahead of normal, but a test
+    (test_retrieval_priority_gate.py) caught that ordering AMONG two priority waiters was not
+    actually FIFO — `notify_all()` wakes every waiter, and which one re-acquires the lock first is
+    an OS scheduling detail, not a guarantee. This version keeps an explicit FIFO queue per tier
+    instead and hands a released slot directly to the head of the priority queue (falling back to
+    the normal queue), so ordering among equals is an invariant of the data structure, not a hope
+    about wakeup order.
+    """
+
+    def __init__(self, capacity: int):
+        self._capacity = capacity
+        self._in_use = 0
+        self._lock = threading.Lock()
+        self._priority_queue: deque[threading.Event] = deque()
+        self._normal_queue: deque[threading.Event] = deque()
+
+    @contextmanager
+    def acquire(self, *, priority: bool = False):
+        my_turn = threading.Event()
+        with self._lock:
+            # Only take the fast path when NOTHING is queued — otherwise a slot that frees up would
+            # be grabbed by whichever new thread happens to reach this lock first, skipping over
+            # waiters who arrived earlier and were promised FIFO-among-equals.
+            if self._in_use < self._capacity and not self._priority_queue and not self._normal_queue:
+                self._in_use += 1
+                granted = True
+            else:
+                granted = False
+                (self._priority_queue if priority else self._normal_queue).append(my_turn)
+        if not granted:
+            my_turn.wait()
+        try:
+            yield
+        finally:
+            self._release()
+
+    def _release(self) -> None:
+        with self._lock:
+            self._in_use -= 1
+            queue = self._priority_queue or self._normal_queue
+            if queue:
+                # Hand the slot directly to the next waiter instead of just freeing capacity and
+                # letting everyone race for the lock — that race is exactly what broke FIFO before.
+                self._in_use += 1
+                queue.popleft().set()
+
+
+_retrieval_gate = _PriorityGate(_MAX_CONCURRENT_RETRIEVALS)
 
 
 class HybridRetriever:
@@ -136,11 +249,28 @@ class HybridRetriever:
         still boosted above the rest; this also brings the pasuk in for context)."""
         return {"work_id": list(query.work_ids)} if query.work_ids else None
 
-    def retrieve(self, query: Query, *, top_k: int) -> RetrievalResult:
+    def retrieve(self, query: Query, *, top_k: int, priority: bool = False) -> RetrievalResult:
+        """Entry point. The CPU-bound work (embedding + Qdrant round-trips) is bounded by
+        `_retrieval_gate`, held only for this call — never for the LLM generation that follows it
+        in a real request. See `_MAX_CONCURRENT_RETRIEVALS` above for why.
+
+        `priority` is for a request already mid-conversation asking to CONTINUE (an agentic
+        ===NEED_SOURCES=== follow-up — see pipeline.py::_build_source_fetcher) — never for a fresh
+        turn's first retrieval, which has no completed work at stake yet."""
+        with _retrieval_gate.acquire(priority=priority):
+            return self._retrieve_impl(query, top_k=top_k)
+
+    def _retrieve_impl(self, query: Query, *, top_k: int) -> RetrievalResult:
         t_all = time.monotonic()
         t: dict[str, float] = {}
         with _timed(t, "embed"):
-            emb = self.embedding.embed_query(query.search_text or query.text)
+            # The reverent spelling is rewritten for the SEARCH text only — the user's own words are
+            # never altered anywhere they are shown. Someone who writes "חלק אלוק ממעל" is quoting
+            # Iyov 31:2, and until this ran the pasuk did not appear in the top ten of its own
+            # quotation; with the one letter restored it comes back second. See
+            # corpus/normalize.py::deuphemize_he.
+            search_text = deuphemize_he(query.search_text or query.text)
+            emb = self.embedding.embed_query(search_text)
         use_sparse = self.profile.hybrid and bool(emb.sparse)
         hquery = HybridQuery(dense=emb.dense, sparse=emb.sparse if use_sparse else None)
 
@@ -257,7 +387,9 @@ class HybridRetriever:
                     if is_commentary_ref(rh.ref):      # the point of this floor is the base text
                         continue
                     if not use_sparse or bmap.get(rh.chunk_id, 0.0) >= thr:
-                        rh.score = min(rh.score, 0.99)   # never masquerade as a named-ref anchor
+                        # Lift it, then cap below the named-ref anchor (0.99). Without the lift this
+                        # whole block only widened the candidate pool — see _BASE_BOOST.
+                        rh.score = min(rh.score + _BASE_BOOST, 0.98)
                         hits.append(rh)
                         kept += 1
             except Exception:
@@ -300,6 +432,29 @@ class HybridRetriever:
                     hits.append(rh)
             except Exception as exc:
                 logger.warning("tractate-scoped search failed for %s (%s)", tractate, exc)
+
+        # Quotation floor — see _QUOTE_WINDOWS. Skipped when the question already names a ref, a work
+        # or a commentator: those are stronger statements of intent than a guessed phrase, and
+        # anchoring already serves them.
+        if not query.named_refs and not query.work_ids and not query.commentator_ids:
+            phrases = quote_windows(search_text, limit=_QUOTE_WINDOWS)
+            if phrases:
+                try:
+                    with _timed(t, "quotes"):
+                        embs = self.embedding.embed_batch(phrases)
+                        for pe in embs:
+                            pq = HybridQuery(dense=pe.dense,
+                                             sparse=pe.sparse if use_sparse else None)
+                            for h in self.store.search(self.profile.collection, pq,
+                                                       top_k=_QUOTE_TOP_K):
+                                rh = _to_hit(h)
+                                # Level with the tractate floor and capped below the named-ref
+                                # anchor: a phrase we GUESSED was a quotation is weaker evidence
+                                # than one the user spelled out.
+                                rh.score = min(rh.score + _QUOTE_BOOST, 0.98)
+                                hits.append(rh)
+                except Exception as exc:
+                    logger.warning("quotation floor failed (%s)", exc)
 
         # Optional reranking (heavy in cloud / optional local)
         if self.reranker is not None and self.profile.rerank and hits:

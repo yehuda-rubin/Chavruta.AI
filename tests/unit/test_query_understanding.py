@@ -59,6 +59,26 @@ def test_landmarks(text, expected):
     assert expected in resolve_landmarks(text)
 
 
+# ── English concepts/topics coverage (founder request, 2026-08-25) ────────────────
+# "we need an English version of the Hebrew concepts-and-topics file too — e.g. for the seven
+# species" (מושגים וסוגיות). ABSOLUTE_LANDMARKS (Hebrew) already had ~24 entries; ENGLISH_LANDMARKS
+# had only ~13 and was missing well-known concepts the Hebrew side already covers (e.g. the ten
+# plagues) plus the founder's own explicit example (the seven species → Deuteronomy.8.8, the seven
+# species of Deuteronomy 8:8).
+@pytest.mark.parametrize("text,expected", [
+    ("what are the seven species of the land of Israel?", "Deuteronomy.8.8"),
+    ("tell me about the seven species", "Deuteronomy.8.8"),
+    ("explain the ten plagues", "Exodus.7"),
+    ("what happened at the burning bush", "Exodus.3"),
+    ("the splitting of the sea", "Exodus.14"),
+    ("what was the giving of the torah like", "Exodus.19"),
+    ("noah's ark and the flood", "Genesis.6"),
+    ("the story of the twelve spies", "Numbers.13"),
+])
+def test_english_landmarks(text, expected):
+    assert expected in resolve_landmarks(text)
+
+
 def test_router_resolves_indirect_comparison():
     """The original failing question must now anchor to Genesis.1.1 with both commentators."""
     q = Router().route(Query(text="מה המחלוקת בין רש\"י לרמב\"ן בפסוק הראשון בתורה?"))
@@ -221,3 +241,159 @@ def test_router_planner_failure_is_swallowed():
             raise RuntimeError("LLM down")
     q = Router(planner=FailPlanner()).route(Query(text="a general question with no reference at all"))
     assert not q.named_refs   # None or [] — request still routed, no exception
+
+
+# ── The daf named BEFORE the tractate — reported live 2026-08-13 ─────────────
+# Someone opened chavruta mode with "אני באמצע ללמוד את דף עט בחולין", was answered about
+# שיעור ארבע מילין out of a Shulchan Arukh commentary, said "זאת לא הסוגיה", and got the same
+# wrong source a second time. Only when he described the sugya in his own words did retrieval
+# find Chullin.158.6 — which IS daf 79b. The daf was in the corpus the whole time.
+#
+# Every pattern read the tractate FIRST, so this phrasing produced neither a ref nor even a
+# tractate to scope the search to, and retrieval fell back to unscoped semantic search over a
+# sentence that carries almost no meaning on its own.
+@pytest.mark.parametrize("text,expected", [
+    ("אני באמצע ללמוד את דף עט בחולין", ["Chullin.79a", "Chullin.79b"]),
+    ("דף עט בחולין", ["Chullin.79a", "Chullin.79b"]),
+    ("בדף עט בחולין", ["Chullin.79a", "Chullin.79b"]),
+    ("דף עט במסכת חולין", ["Chullin.79a", "Chullin.79b"]),
+    ("אני באמצע ללמוד את דף ב בבבא מציעא", ["Bava Metzia.2a", "Bava Metzia.2b"]),
+    # An explicit amud still wins — it is more specific than "the daf", so don't widen it.
+    ("דף עט. בחולין", ["Chullin.79a"]),
+    ("דף עט: בחולין", ["Chullin.79b"]),
+])
+def test_a_daf_named_before_its_tractate_resolves(text, expected):
+    assert detect_hebrew_refs(text) == expected
+
+
+def test_a_bare_daf_covers_both_amudim():
+    """"דף עט" names the whole daf, and a sugya does not stop at the page turn. The answer this
+    bug was about sat on 79b; anchoring only to 79a would reproduce the miss more quietly."""
+    from chavruta.corpus.refs import with_ref_variants
+
+    refs = detect_hebrew_refs("אני לומד דף עט בחולין")
+    corpus = {v for r in refs for v in with_ref_variants([r])}
+    # Amud-linear: 79a → 157, 79b → 158 (N = 2·daf ∓ 1).
+    assert "Chullin.157.1" in corpus and "Chullin.158.1" in corpus
+
+
+@pytest.mark.parametrize("text", [
+    "ברכות טובות",          # ט = 9; a tractate followed by an innocent word
+    "שבת קודש",             # ק = 100 — the case the amud requirement exists for
+    "דף על השולחן",         # "דף" with no tractate anywhere
+    "אני קורא ספר טוב",
+])
+def test_prose_that_merely_contains_a_tractate_name_still_anchors_nothing(text):
+    """The amud marker was required precisely to stop these. Relaxing it for the daf-first form
+    must not reopen them — the literal word דף is what carries the disambiguation instead."""
+    assert detect_hebrew_refs(text) == []
+
+
+def test_the_tractate_alone_is_scoped_even_in_the_daf_first_order():
+    """The floor beneath the ref. Even when a daf number is implausible or the exact ref misses,
+    an answer from somewhere in Chullin beats one from a Shulchan Arukh commentary on a different
+    subject — which is what the live report got."""
+    from chavruta.intents.hebrew_refs import detect_tractates
+
+    assert detect_tractates("אני באמצע ללמוד את דף עט בחולין") == ["Chullin"]
+    assert detect_tractates("דף ב בבבא מציעא") == ["Bava Metzia"]
+
+
+# ── The reverent spelling (reported 2026-08-14) ──────────────────────────────
+# A user asked for the source of "הנשמה היא חלק אלוק ממעל" and was answered from works nobody has
+# heard of. The phrase is a verbatim quotation of Iyov 31:2, which sits in the corpus — but he wrote
+# the divine name the way observant Hebrew writes it outside prayer, with ק for ה, and the corpus
+# (being the texts themselves) spells it in full. Measured on the live collection: his spelling put
+# the pasuk nowhere in the top ten; the real spelling put it second.
+@pytest.mark.parametrize("written,sources_spell_it", [
+    ("חלק אלוק ממעל", "חלק אלוה ממעל"),
+    ("אלוקים", "אלוהים"),
+    ("אלקים", "אלהים"),
+    ("ואלוקי אבותינו", "ואלוהי אבותינו"),
+    ("באלקים", "באלהים"),
+    ("אלוקינו", "אלוהינו"),
+    ("מה המקור לכך שהנשמה היא חלק אלוק ממעל?", "מה המקור לכך שהנשמה היא חלק אלוה ממעל?"),
+])
+def test_the_reverent_spelling_is_restored_for_search(written, sources_spell_it):
+    from chavruta.corpus.normalize import deuphemize_he
+
+    assert deuphemize_he(written) == sources_spell_it
+
+
+@pytest.mark.parametrize("ordinary", [
+    "חלק", "צדק", "חוק", "רק", "שוק", "דק", "תיק", "פרק", "הצדק שלך", "חלק מהתשובה",
+    "אלוקיסט",          # a longer word that merely begins the same way
+])
+def test_ordinary_words_ending_in_kuf_are_left_alone(ordinary):
+    """A blanket ק→ה would wreck the language. The rewrite is anchored to the אל- stem with a word
+    boundary on both sides, so nothing but the divine name is touched."""
+    from chavruta.corpus.normalize import deuphemize_he
+
+    assert deuphemize_he(ordinary) == ordinary
+
+
+def test_the_rewrite_is_for_search_only_and_never_shown_to_the_reader():
+    """What a user chose to write is theirs. This exists so the query and the corpus can meet — the
+    retriever embeds the rewritten form, and nothing else in the request is altered."""
+    import importlib
+    import inspect
+
+    from chavruta.retrieval import hybrid
+
+    src = inspect.getsource(hybrid.HybridRetriever._retrieve_impl)
+    assert "deuphemize_he(query.search_text or query.text)" in src, "not wired into embedding"
+    # The rewrite feeds the embedder and nothing else — the raw text must never be embedded
+    # alongside it, and no display path may call it.
+    assert "embed_query(query.search_text" not in src, "the un-rewritten text is still embedded"
+    for module in ("app.api", "chavruta.generation.grounded"):
+        mod = importlib.import_module(module)
+        assert "deuphemize" not in inspect.getsource(mod), f"{module} rewrites what the reader sees"
+
+
+# ── The quotation floor (reported 2026-08-14) ────────────────────────────────
+# A quotation inside a question is drowned by the frame around it. Measured: "חלק אלוה ממעל" puts
+# Iyov 31:2 at rank 2; the same three words inside "מה המקור לכך שהנשמה היא חלק אלוה ממעל?" put it
+# nowhere in the top ten, and adding a single word loses it again. So the phrase is searched alone.
+def test_the_quoted_phrase_is_pulled_out_of_the_question_frame():
+    from chavruta.corpus.normalize import deuphemize_he, quote_windows
+
+    windows = quote_windows(deuphemize_he("מה המקור לכך שהנשמה היא חלק אלוק ממעל?"))
+    assert "חלק אלוה ממעל" in windows, "the phrase that actually finds the pasuk was not extracted"
+
+
+def test_a_question_that_is_only_scaffolding_yields_nothing_to_search():
+    """Every window costs a search. A question with no quotation in it must not buy any."""
+    from chavruta.corpus.normalize import quote_windows
+
+    for q in ("מה זה?", "למה", "אני רוצה לדעת", "מה המקור לכך?"):
+        assert quote_windows(q) == []
+
+
+def test_the_windows_are_bounded_because_each_one_costs_a_search():
+    from chavruta.corpus.normalize import quote_windows
+
+    long_q = "מה המקור לכך שהנשמה של האדם היא חלק אלוה ממעל וגם נחלת שדי ממרומים באמת"
+    assert len(quote_windows(long_q, limit=4)) <= 4
+
+
+def test_content_dense_windows_come_first():
+    """Ranked by how many words are not question scaffolding — that is what picks the quotation
+    out rather than the longest span, and the measurement says a tight phrase is what reaches the
+    source while a looser one does not."""
+    from chavruta.corpus.normalize import quote_windows
+
+    windows = quote_windows("איפה כתוב שניים אוחזין בטלית?")
+    assert windows[0] == "שניים אוחזין בטלית"
+
+
+def test_the_floor_is_skipped_when_the_question_already_named_something():
+    """A named ref, work or commentator is a stronger statement of intent than a guessed phrase,
+    and anchoring already serves it — so the extra searches are not bought."""
+    import inspect
+
+    from chavruta.retrieval import hybrid
+
+    src = inspect.getsource(hybrid.HybridRetriever._retrieve_impl)
+    guard = "if not query.named_refs and not query.work_ids and not query.commentator_ids:"
+    assert guard in src
+    assert "embed_batch(phrases)" in src, "the windows must share one embedding pass"

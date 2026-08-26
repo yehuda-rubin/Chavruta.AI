@@ -49,6 +49,45 @@ def daf_amud_to_corpus_n(daf: int, amud: str) -> int:
     return 2 * int(daf) - (1 if amud == "a" else 0)
 
 
+def corpus_n_to_daf_amud(n: int) -> tuple[int, str]:
+    """Inverse of daf_amud_to_corpus_n: the corpus's flat amud-linear number back to (daf, amud).
+    N odd -> amud a, N even -> amud b (e.g. 148 -> (74, 'b') — Yoma 74b).
+
+    Exists for fix_raw_talmud_segment_refs (grounded.py): a model that was handed a source header
+    like 'יומא — Yoma.148.10' sometimes copies the raw internal number straight into its prose
+    ('ביומא 148:10') instead of naming the daf a reader would recognize — reproduced live 2026-08-20.
+    """
+    n = int(n)
+    return ((n + 1) // 2, "a") if n % 2 else (n // 2, "b")
+
+
+# Standard Hebrew numeral letters. 15/16 are the well-known exception (ט"ו / ט"ז, not יה / יו) —
+# spelling those two combinations is avoided because they resemble writing the Divine Name.
+_HEB_UNITS = ["", "א", "ב", "ג", "ד", "ה", "ו", "ז", "ח", "ט"]
+_HEB_TENS = ["", "י", "כ", "ל", "מ", "נ", "ס", "ע", "פ", "צ"]
+_HEB_HUNDREDS = ["", "ק", "ר", "ש", "ת"]
+
+
+def hebrew_numeral(n: int) -> str:
+    """A positive integer as a Hebrew-letter numeral with gershayim/geresh, e.g. 74 -> 'ע"ד', 176 ->
+    'קע"ו'. Bounded for daf numbers in practice (no tractate exceeds ~180); numbers at or past 500
+    are not expected here and fall back to a plain digit string rather than guessing at compound
+    hundreds forms nothing in this corpus actually needs.
+    """
+    if n == 15:
+        return 'ט"ו'
+    if n == 16:
+        return 'ט"ז'
+    hundreds, rem = divmod(n, 100)
+    tens, units = divmod(rem, 10)
+    if hundreds >= len(_HEB_HUNDREDS):
+        return str(n)
+    letters = _HEB_HUNDREDS[hundreds] + _HEB_TENS[tens] + _HEB_UNITS[units]
+    if len(letters) > 1:
+        return letters[:-1] + '"' + letters[-1]
+    return letters + "'" if letters else str(n)
+
+
 def _amud_to_corpus(ref: str) -> str | None:
     m = _AMUD_RE.match(ref or "")
     # Only a bare tractate name + daf + amud is Talmud ('Sanhedrin 23a'). A digit in the name means a
@@ -561,9 +600,31 @@ def hebrew_display_ref(ref: str | None) -> str | None:
     entry = None
     if m := _HEAD_RE.match(ref.replace("_", " ")):
         title, nums = m.group(1).strip(), m.group(2).strip()
-        entry = _load_hebrew_titles().get(title)
+        titles = _load_hebrew_titles()
+        entry = titles.get(title)
         if entry and entry.get("he") and not _is_bavli(entry):
             return f"{entry['he']} {':'.join(re.split(r'[ .]+', nums))}"
+
+        # A COMMA is why more than half of all citations reached a Hebrew reader with an English
+        # underscored ref (758 of 1336 measured in production, 2026-08-14). Sefaria keys a work by
+        # its own title — "Chizkuni", "Siftei Chakhamim", "Yismach Moshe" — and then names the book
+        # or parasha after a comma in the REF: `Chizkuni,_Genesis.17.5.2`. Looking the whole thing
+        # up finds nothing, so Chizkuni, Siftei Chakhamim, Shem MiShmuel and Birkat Asher — none of
+        # them obscure, one of them printed in every chumash — all rendered as raw English.
+        #
+        # Each comma segment is translated on its own and the ones that have no Hebrew keep their
+        # English: book names resolve (Genesis → בראשית) while parasha and structural segments
+        # ("Vaetchanan", "Part I") do not. A partly-Hebrew label still names the work in the reader's
+        # own alphabet, which is the part they recognise; refusing it wholesale served nobody.
+        if "," in title:
+            head, *rest = (p.strip() for p in title.split(","))
+            head_entry = titles.get(head)
+            if head_entry and head_entry.get("he") and not _is_bavli(head_entry):
+                parts = [head_entry["he"]]
+                for segment in rest:
+                    seg_entry = titles.get(segment)
+                    parts.append((seg_entry or {}).get("he") or segment)
+                return f"{', '.join(parts)} {':'.join(re.split(r'[ .]+', nums))}"
 
     # 3) A Bavli commentary whose commentator isn't in the curated table (e.g. Rashash on Gittin):
     #    the name comes from Sefaria, the daf conversion still from `_split_book`.

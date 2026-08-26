@@ -183,18 +183,29 @@ def quota_context(owner_id: str) -> dict[str, Any] | None:
     }
 
 
-def refuse_personal_purchase(owner_id: str, plan: str | None) -> str | None:
+def refuse_personal_purchase(owner_id: str, plan: str | None, *, kind: str = "plan") -> str | None:
     """Why this account may not buy or be granted `plan` for itself — or None if it may.
 
-    The rule is "would this change what the account can spend", not "is this person in a school".
-    A member draws on the pool and nothing else (api.py::_reserve_tokens branches on quota_context
-    before it reaches a personal plan, credits or BYOK), so a personal tier buys them nothing.
+    The rule is "would this change what the account can spend", not "is this person in a school". A
+    member draws on the pool for their TOKENS (api.py::_reserve_tokens branches on quota_context
+    before it reaches a personal plan or BYOK), so a personal tier buys them nothing — that half of
+    the rule still refuses every member, admin included, unless `plan` is the school's own
+    institutional tier bought by the account that owns it (see below).
+
+    kind="credits" is a DIFFERENT question, decided 2026-08-20: every member — student, teacher or
+    admin — may top up their own account with credits bought on their own card, to keep going past
+    whatever the org pool or the admin's per-member cap gives them for free. That is spendable: once
+    the org pool refuses a turn, _reserve_tokens now falls through to the member's own credits before
+    it gives up, same as it always has for a non-member. So unlike a personal plan, credits are never
+    dead money for a member and there is nothing to refuse.
 
     But the ADMIN who pays for the school is a member of it too — the first cut of this guard tested
     membership alone and locked the paying customer out of buying, renewing or being granted the very
     subscription that funds the org. An institutional tier bought by the account that owns the org is
     the school's own subscription, and must go through.
     """
+    if kind == "credits":
+        return None
     m = membership(owner_id)
     if not m:
         return None
@@ -408,10 +419,10 @@ def accept_invite(code: str, owner_id: str) -> dict[str, Any]:
         if sub.get("status") == "pending" and _is_recent(sub.get("updated_at")):
             raise JoinRefused("a payment for this account is still in progress; finish or abandon "
                               "it, then try again in a day")
-        # Credits are unspendable for a member (no fallback behind the pool), so joining with a
-        # balance would quietly strand something they paid for.
-        if db.get_credits(owner_id) > 0:
-            raise JoinRefused("this account holds unused credits; spend them before joining")
+        # Credits are NOT refused here (decided 2026-08-20, reversing the earlier rule): a member's
+        # own credits are a spendable fallback once the org pool refuses a turn (see
+        # _reserve_tokens), so a balance carried into a school is not stranded — it still buys
+        # something.
         if conn.execute("SELECT 1 FROM orgs WHERE owner_id=?", (owner_id,)).fetchone():
             raise JoinRefused("this account owns an organisation")
         if conn.execute("SELECT 1 FROM org_members WHERE owner_id=? AND accepted_at IS NOT NULL",

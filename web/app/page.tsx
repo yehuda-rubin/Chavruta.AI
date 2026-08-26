@@ -343,8 +343,8 @@ export default function Home() {
       setMessages((prev) => [...prev, { role: "user", text, citations: [], caveats: [] }]);
       const appendIfCurrent = (msg: Message) =>
         setMessages((prev) => (activeIdRef.current === target ? [...prev, msg] : prev));
-      const push = (r: { answer: string; citations?: Message["citations"]; caveats?: string[]; grounded?: boolean; files?: Message["files"] }) =>
-        appendIfCurrent({ role: "assistant", text: r.answer, citations: r.citations || [], caveats: r.caveats || [], grounded: r.grounded, files: r.files });
+      const push = (r: { answer: string; citations?: Message["citations"]; caveats?: string[]; grounded?: boolean; files?: Message["files"]; source_note?: string }) =>
+        appendIfCurrent({ role: "assistant", text: r.answer, citations: r.citations || [], caveats: r.caveats || [], grounded: r.grounded, files: r.files, source_note: r.source_note });
       try {
         if (activeId) {
           push(await api.sessionQueryAsync(activeId, text, intent, lang, extras, att));
@@ -490,6 +490,7 @@ export default function Home() {
           onSend={send}
           onPreviewFile={setPreviewFile}
           calendarModesEnabled={me?.calendar_modes_enabled}
+          userEmail={auth.user?.email}
         />
 
         <div className="hidden lg:contents">

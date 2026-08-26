@@ -206,6 +206,49 @@ def test_school_audience_detected(text):
     assert api._detect_school(text)
 
 
+# ── Bug (reported 2026-08-25): English lesson-building loop ──────────────────────
+# User builds a lesson in English, answers "who is it for" with a natural plural phrasing
+# ("grades 4-6", "6th graders") instead of the singular "5th grade" the old regex expected.
+# _detect_school used \bgrade\b (singular, exact word) so it silently failed to recognize these
+# real replies as school-audience text; _resolve_audience then returned aud=None again, and
+# _run_lesson re-asked the IDENTICAL "who is the lesson for" question — the loop the user
+# experienced as "it keeps asking me the same thing." Hebrew was unaffected: כית(?:ה|ת|ות) already
+# covers both singular and plural forms. Fixed by widening \bgrade\b to \bgrades?\b|\bgraders?\b.
+@pytest.mark.parametrize("text", [
+    "grades 4-6",
+    "for grades 7-9",
+    "6th graders",
+    "a class of 10th graders",
+])
+def test_school_audience_detected_for_plural_english_phrasing(text):
+    assert api._detect_school(text)
+
+
+def test_english_grade_loop_is_actually_fixed_not_just_reworded():
+    """End-to-end: a realistic English reply to the (rewritten) clarify question must resolve
+    BOTH audience and grade band in one turn, so _run_lesson does not ask again."""
+    aud, band = api._resolve_audience("grades 4-6", [], "", "")
+    assert (aud, band) == ("school", "d-f")
+
+    aud, band = api._resolve_audience("6th graders", [], "", "")
+    assert (aud, band) == ("school", "d-f")
+
+
+@pytest.mark.parametrize("text,expected_band", [
+    ("6th grade", "d-f"),               # matches the new question's own example
+    ("middle school", "g-i"),           # matches the new question's own example
+    ("grades 7-9", "g-i"),              # matches the new question's own example
+])
+def test_new_english_clarify_examples_resolve(text, expected_band):
+    """The rewritten English question (app/api.py ~1160-1172) suggests these exact example
+    replies — 'e.g. "6th grade," "middle school," or "grades 7-9"'. Each one must actually
+    resolve through _resolve_audience, or the reworded question would just move the loop
+    rather than fix it."""
+    aud, band = api._resolve_audience(text, [], "", "")
+    assert aud == "school"
+    assert band == expected_band
+
+
 # ── Fix (2026-07-13, generalized 2026-08-02): strip model multilingual bleed from output, keeping
 # Hebrew glued to a foreign char; legit Hebrew + English + common typography are untouched. Arabic
 # turned up live on 2026-08-02 — rather than adding it to an ever-growing enumerated list of scripts
@@ -439,6 +482,61 @@ def test_fix_bleeding_sentences_fixes_a_single_stray_letter():
     assert len(llm.calls) == 1
 
 
+# ── Naming the specific offending word(s), not just "this sentence bleeds" (2026-08-20) ───────
+# Detection was never the gap — _has_bleed correctly flags real production answers every time it
+# was checked. The two-attempt REWRITE kept failing identically on a foreign term the model doesn't
+# recognize as a violation on its own: 'chez' survived two same-shape attempts (2026-08-14), and
+# 'qualify' plus a transliterated work title ('MASKIL LEDAVID') reached a real user unfixed
+# (2026-08-20) — even though the work's own Hebrew name was sitting right there in the sources
+# block. _rewrite_bleeding_sentence now tells the model exactly which word(s) are the problem.
+def test_bleed_words_extracts_a_single_english_word():
+    assert api._bleed_words("ולכן, רק אכילה ושתיה qualify, כי הן היחידים") == ["qualify"]
+
+
+def test_bleed_words_keeps_a_multi_word_transliteration_together():
+    """'MASKIL LEDAVID' must come back as ONE phrase — splitting it in two would produce a rewrite
+    instruction naming two meaningless fragments instead of the actual work title."""
+    assert api._bleed_words("הMASKIL LEDAVID מסביר את משמעות") == ["MASKIL LEDAVID"]
+
+
+def test_bleed_words_ignores_a_real_marker():
+    assert api._bleed_words("משפט נקי [S1] עם [S2, S3] בלבד") == []
+
+
+def test_bleed_words_is_empty_on_clean_hebrew():
+    assert api._bleed_words("זהו משפט עברי תקין לחלוטין.") == []
+
+
+class _SystemCapturingLLM:
+    """Like _FakeLLM, but also records the SYSTEM prompt each call was given — needed to check the
+    rewrite call actually names the offending word(s), not just to check its final answer."""
+
+    def __init__(self, reply: str):
+        self.reply = reply
+        self.systems: list[str] = []
+
+    def generate(self, prompt, *, lang, max_tokens, temperature):
+        self.systems.append(prompt.system)
+        return SimpleNamespace(text=self.reply)
+
+
+def test_the_rewrite_call_is_told_the_specific_offending_word():
+    llm = _SystemCapturingLLM(reply="רק אכילה ושתיה כשירות, כי הן היחידים")
+    api._rewrite_bleeding_sentence("רק אכילה ושתיה qualify, כי הן היחידים", llm)
+
+    assert llm.systems, "the rewrite call was never made"
+    assert "qualify" in llm.systems[0], (
+        "the offending word must be named explicitly in the system prompt, not left for the model "
+        "to notice on its own — that is exactly where the un-targeted version kept failing")
+
+
+def test_a_clean_rewrite_is_still_accepted_when_the_word_is_named():
+    llm = _SystemCapturingLLM(reply="הMASKIL LEDAVID הפך למשכיל לדוד")   # deliberately still bleeding
+    llm.reply = "משכיל לדוד מסביר את משמעות"                             # actually clean this time
+    out = api._rewrite_bleeding_sentence("המשכיל לדוד MASKIL LEDAVID מסביר את משמעות", llm)
+    assert out == "משכיל לדוד מסביר את משמעות"
+
+
 # Fix (caught live 2026-08-04): the model quoted a source containing a Hebrew abbreviation gershayim
 # (בר"ה) and emitted a literal backslash before it (בר\"ה) — as if escaping the quote the way a
 # JSON/code string would. A bare backslash has no legitimate use in this app's output.
@@ -493,6 +591,46 @@ def test_strip_markers_does_not_eat_the_last_letter_of_the_preceding_word():
 ])
 def test_strip_markers_leaves_the_existing_behaviour_intact(raw, expected):
     assert api._strip_markers(raw, he=True) == expected
+
+
+# ── Markdown headers/blockquotes reach the user as raw characters (2026-08-20) ─────────────────
+# The interface renders plain text + **bold** + newlines only — no Markdown. SYSTEM_BASE_HE already
+# tells the model this explicitly, and the model does not always follow it: a real answer used five
+# separate "### heading" lines that showed up as literal hash marks, since nothing renders them.
+def test_a_markdown_header_becomes_bold_not_raw_hashes():
+    raw = '### מהי משמעות "מאי ואם נפשך לומר"?\n\nתשובה כלשהי כאן.'
+    out = api._strip_markers(raw, he=True)
+    assert "#" not in out
+    assert out.startswith('**מהי משמעות "מאי ואם נפשך לומר"?**')
+
+
+@pytest.mark.parametrize("hashes", ["#", "##", "###", "####"])
+def test_headers_of_every_depth_are_converted(hashes):
+    out = api._strip_markers(f"{hashes} כותרת\nגוף התשובה", he=True)
+    assert out == "**כותרת**\nגוף התשובה"
+
+
+def test_a_blockquote_marker_is_stripped_but_the_quote_text_survives():
+    out = api._strip_markers("> וכי תימא בעריות קא מישתעי קרא", he=True)
+    assert out == "וכי תימא בעריות קא מישתעי קרא"
+
+
+def test_an_empty_header_produces_no_stray_bold_markers():
+    out = api._strip_markers("###\nגוף התשובה", he=True)
+    assert "#" not in out and "**" not in out
+
+
+def test_a_bare_hash_mid_sentence_is_not_mistaken_for_a_header():
+    """Only a '#' at the START of a line is a Markdown header — a hash appearing mid-sentence (e.g.
+    a hashtag-like reference) must survive untouched."""
+    raw = "המספר #1 ברשימה אינו כותרת."
+    assert api._strip_markers(raw, he=True) == raw
+
+
+def test_markdown_stripping_applies_to_english_answers_too():
+    """The interface is markdown-free regardless of language — this must not be gated behind `he`."""
+    out = api._strip_markers("### A Heading\nBody text", he=False)
+    assert out == "**A Heading**\nBody text"
 
 
 # ── Fix (2026-08-12): chavruta follow-up loses the tractate the conversation established.
@@ -1802,7 +1940,7 @@ def test_base_source_floor_filters_commentary_by_ref_not_unit_type():
     import inspect
 
     from chavruta.retrieval import hybrid
-    src = inspect.getsource(hybrid.HybridRetriever.retrieve)
+    src = inspect.getsource(hybrid.HybridRetriever._retrieve_impl)
     assert 'unit_type": "source"' not in src, (
         "the base-source floor must not filter on unit_type — it is 'source' for every point"
     )
@@ -1965,3 +2103,480 @@ def test_a_new_chat_that_produces_a_lesson_charges_the_lesson_pool(monkeypatch, 
                  lambda: {"id": "s1", "first_q": "q", "created_at": "now",
                           "result": _lesson_answer()})()
     assert api.db.usage_this_week("teacher1", meter=api.db.LESSON) == 1
+
+
+# ── A sources section that named no sources (reported 2026-08-14) ────────────
+# A user asked where the quotes in an answer came from and got a numbered list whose every entry
+# read "– מופיע ב-  וב-:" — nineteen times. The model had written "מופיע ב-[S1] וב-[S3]:", and marker
+# stripping took the markers and left the prepositions.
+#
+# _CARRIER_MARKER_RE existed for exactly this and missed on two counts: it allowed no maqaf/hyphen
+# between the prefix and the marker ("ב-[S1]" is the ordinary way to attach a Hebrew prefix to a
+# bracketed token), and it allowed only ONE prefix letter, so the very common vav+preposition
+# ("וב-[S3]") could not match at all.
+@pytest.mark.parametrize("raw,expected", [
+    ("– מופיע ב-[S1] וב-[S3]:", "– מופיע:"),
+    ("מופיע ב-[S1]:", "מופיע:"),
+    ("נאמר ול-[S2] יש דעה אחרת", "נאמר יש דעה אחרת"),
+    ("כתוב ב[S2] שהוא", "כתוב שהוא"),          # the un-hyphenated form still works
+])
+def test_a_hebrew_prefix_does_not_survive_the_marker_it_was_attached_to(raw, expected):
+    assert api._strip_markers(raw, he=True) == expected
+
+
+@pytest.mark.parametrize("raw", [
+    "פרק ב. הסעיפים א, ב, ג",     # lone Hebrew letters here are NUMBERS, not prefixes
+    "ובסעיף ה נאמר",
+])
+def test_lone_hebrew_letters_that_are_not_carrying_a_marker_are_untouched(raw):
+    """The reason this repair is keyed on adjacency to a marker. In a Torah corpus a lone letter is
+    usually a chapter or section number, and a blind 'drop orphaned one-letter words' pass would
+    silently corrupt citations across the product."""
+    assert api._strip_markers(raw, he=True) == raw
+
+
+def test_a_marker_glued_to_a_word_does_not_eat_the_word():
+    """"הכתוב[S1]" must not lose its final ב — the lookbehind is what stops the word's own last
+    letter reading as a carrier prefix."""
+    assert api._strip_markers("הכתוב[S1] אומר", he=True) == "הכתוב אומר"
+
+
+# ── The model's own source list, behind the HHH sentinel ─────────────────────
+# Added 2026-08-14 after a user asked where an answer's quotes came from and got nothing usable.
+# The block is cut out of the displayed answer and carried beside it, exactly as [S#] markers are.
+def test_the_source_list_is_cut_out_of_the_answer():
+    body, note = api._split_source_note(
+        'תשובה כאן.\n\nHHH\n1. רש"י על בראשית — צרפת, המאה ה-11.')
+    assert body == "תשובה כאן."
+    assert note.startswith("1. רש")
+
+
+@pytest.mark.parametrize("delim", ["HHH", "===HHH===", "  **HHH**  ", "‏HHH"])
+def test_the_sentinel_survives_the_decoration_a_model_adds_unprompted(delim):
+    """Bolded, indented, wrapped in equals signs, prefixed with an RTL mark — the same decorations
+    _LESSON_SPLIT_RE already tolerates, because the model applies them without being asked."""
+    body, note = api._split_source_note(f"תשובה.\n{delim}\nרשימה")
+    assert body == "תשובה." and note == "רשימה"
+
+
+def test_an_answer_without_the_sentinel_is_returned_untouched():
+    assert api._split_source_note("סתם תשובה בלי רשימה") == ("סתם תשובה בלי רשימה", "")
+    assert api._split_source_note("") == ("", "")
+
+
+def test_the_source_list_is_hidden_from_the_foreign_language_pass():
+    """The whole reason the split happens before cleaning. A work's name is often the only Latin
+    text in a Hebrew answer, so left in place the list trips _has_bleed and _fix_bleeding_sentences
+    spends a model call per line rewriting away the very names the list exists to carry."""
+    whole = 'תשובה נקייה לגמרי.\n\nHHH\nBirkat_Asher_on_Torah — לא ידוע.'
+    body, note = api._split_source_note(whole)
+    assert api._has_bleed(whole) is True      # would have been "fixed"
+    assert api._has_bleed(body) is False      # …but the answer itself is clean
+    assert "Birkat_Asher" in note             # and the name survives intact
+
+
+def test_the_instruction_is_off_unless_the_request_turns_it_on():
+    """It reshapes every Hebrew answer, so it ships to the operator alone first."""
+    import chavruta.llm.base as lb
+
+    prompt = lb.GroundedPrompt(system="s", question="q", sources=[
+        lb.SourceBlock(marker="S1", ref="Rashi_on_Genesis.1.1.1", commentator_id="rashi", text="t")])
+
+    assert "HHH" not in lb.render_messages(prompt, "he")[-1]["content"]
+    token = lb.set_source_note(True)
+    try:
+        assert "HHH" in lb.render_messages(prompt, "he")[-1]["content"]
+        # English answers are unchanged — the Latin-ref problem this solves is Hebrew-only.
+        assert "HHH" not in lb.render_messages(prompt, "en")[-1]["content"]
+    finally:
+        lb.reset_source_note(token)
+    assert "HHH" not in lb.render_messages(prompt, "he")[-1]["content"]
+
+
+def test_render_messages_now_forbids_copying_the_raw_ref_into_prose():
+    """Caught live 2026-08-20: a real answer wrote 'ביומא 148:10' — the corpus's own internal
+    segment number for the source header it was shown ('יומא — Yoma.148.10') — straight into the
+    prose instead of the human daf:amud form. Both language variants must carry the prohibition."""
+    import chavruta.llm.base as lb
+
+    prompt = lb.GroundedPrompt(system="s", question="q", sources=[
+        lb.SourceBlock(marker="S1", ref="Yoma.148.10", commentator_id=None, text="t")])
+
+    he_content = lb.render_messages(prompt, "he")[-1]["content"]
+    assert "זיהוי פנימי" in he_content or "מזהה פנימי" in he_content
+
+    en_content = lb.render_messages(prompt, "en")[-1]["content"]
+    assert "internal reference" in en_content
+
+
+def test_chavruta_job_prompt_also_forbids_copying_the_raw_ref():
+    """Chavruta mode builds its OWN source header (no Hebrew-name prefix at all — app/api.py's
+    _chavruta_job_md shows '### [S#] <ref>' directly), so it needs the same instruction, not just
+    render_messages (which chavruta mode does not go through)."""
+    job = api._chavruta_job_md("שאלה", [], "he", [])
+    assert "Yoma.148.10" in job or "internal identifier" in job.lower() or "פנימי" in job
+
+
+# ── The base-text floor reserved nothing (reported 2026-08-14) ────────────────
+# A user asked for the source of a well-known idea and got a stack of works nobody has heard of,
+# with not one base text in the top 8. The floor meant to prevent exactly that appended its
+# candidates and boosted none of them, so they went back into the same score sort and lost — a
+# pasuk at 0.30 does not survive next to a commentary at 0.66.
+def test_the_base_text_floor_actually_lifts_what_it_reserves():
+    from chavruta.retrieval import hybrid
+
+    assert hybrid._BASE_BOOST > 0, "the floor reserves a slot it cannot hold"
+    # Level with the other two floors: a base text is worth as much as a foundational-work hit.
+    assert hybrid._BASE_BOOST == hybrid._FOUNDATIONAL_BOOST
+
+
+def test_a_base_text_now_survives_next_to_a_commentary_that_scored_higher():
+    """The reported failure in miniature, at the scores the live corpus actually produced."""
+    from chavruta.retrieval import hybrid
+
+    commentary, base = 0.5625, 0.55           # observed on the real query, 2026-08-14
+    assert base < commentary                   # before: the pasuk loses and is cut
+    assert min(base + hybrid._BASE_BOOST, 0.98) > commentary
+
+
+def test_the_lifted_base_text_still_cannot_outrank_a_named_ref():
+    """A base text the user did not ask for by name must not masquerade as one they did — the
+    named-ref anchor sits at 0.99 and this is capped below it."""
+    from chavruta.retrieval import hybrid
+
+    assert min(0.99 + hybrid._BASE_BOOST, 0.98) < 0.99
+
+
+def test_the_base_boost_is_measurable_rather_than_permanent():
+    """Every constant in hybrid.py is a judgement; the ones that matter are knobs the nightly run
+    can overrule. 0.0 must be a candidate so the sweep can say the lift does not help."""
+    import importlib.util
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[2] / "scripts" / "tune_retrieval.py").read_text(
+        encoding="utf-8")
+    knobs = src[src.index("KNOBS: dict[str, list] = {"):src.index("HUMAN_SETS")]
+    assert "_BASE_BOOST" in knobs
+    spec = importlib.util.spec_from_loader("k", loader=None)
+    mod = importlib.util.module_from_spec(spec)
+    exec(compile(knobs, "k", "exec"), mod.__dict__)          # noqa: S102
+    assert 0.0 in mod.KNOBS["_BASE_BOOST"]
+
+
+# ── The source list had nowhere to live (same day) ───────────────────────────
+def test_the_source_list_survives_a_reload(tmp_path, monkeypatch):
+    """It was returned in the API response and stored nowhere, so it vanished the moment the
+    conversation was reopened — the feature would have read as broken rather than absent."""
+    import app.db as db
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "note.db")
+    monkeypatch.setattr(db, "_conn", None)
+    db.get_conn()
+    sid = db.create_session("שאלה", owner_id="o-1")
+    db.save_message(sid, "assistant", "תשובה", intent="qa",
+                    source_note="1. רש\"י על בראשית — צרפת, המאה ה-11.")
+
+    reloaded = db.get_messages(sid, "o-1")
+    assert reloaded[-1]["source_note"].startswith("1. רש")
+
+
+def test_a_message_saved_without_a_source_list_reads_back_empty(tmp_path, monkeypatch):
+    """Most messages have none — it must be an empty string, never NULL, so the API model and the
+    client can treat it as a plain string everywhere."""
+    import app.db as db
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "note2.db")
+    monkeypatch.setattr(db, "_conn", None)
+    db.get_conn()
+    sid = db.create_session("שאלה", owner_id="o-1")
+    db.save_message(sid, "assistant", "תשובה", intent="qa")
+
+    assert db.get_messages(sid, "o-1")[-1]["source_note"] == ""
+
+
+def test_the_source_list_does_not_show_the_reader_raw_markers():
+    """Seen on the first live run: the model opens each line "[S1] נשמת חיים…". A marker means
+    nothing to a reader — that is why they are stripped from the answer — and the note is
+    reader-facing. Only the marker pass runs here; the foreign-language scrub must still never
+    touch this block, because a work's name is often the only Latin text in it."""
+    body, note = api._split_source_note(
+        'תשובה.\nHHH\n[S1] נשמת חיים — חיבור קבלי.\n[S8] Toldot_Yaakov_Yosef — ספר חסידי.')
+    assert body == "תשובה."
+    assert "[S1]" not in note and "[S8]" not in note
+    assert note.startswith("נשמת חיים")
+    assert "Toldot_Yaakov_Yosef" in note, "the scrub must not have run on the note"
+
+
+def test_the_source_list_gate_covers_every_generation_route():
+    """It was set on /query alone, and the app posts to /sessions/{id}/query — so the trailing
+    source list worked in a direct call and never once through the UI. Six answers went out with an
+    empty note before anyone noticed, because the check that "verified" it bypassed the route.
+
+    _run_query is the one funnel every generation path goes through, so the gate belongs there.
+    """
+    import inspect
+
+    src = inspect.getsource(api._run_query)
+    assert "set_source_note(_source_note_enabled(owner_id))" in src
+    assert "reset_source_note" in src, "the flag would leak into the next request on this worker"
+    # …and no route sets it on its own any more, which would double-set and leave a stale token.
+    assert inspect.getsource(api.query).count("set_source_note") == 0
+
+
+# ── Sources the model used without marking (the original 2026-08-14 request) ─
+# The panel is built from [S#] markers, so a source the model leaned on without writing a marker
+# never reaches the reader. Measured on a real answer: 16 citations against 19 lines in the model's
+# own list. Closing that gap is what the source list was asked for.
+def test_refs_are_picked_out_of_the_source_list_lines():
+    """The model copies from a block formatted "<hebrew name> — <ref>" and often takes half of it,
+    so the ref is found inside the line rather than the line parsed as a whole."""
+    refs = api._refs_in_source_note(
+        "מדרש אגדה, Numbers.22.5.1\nReggio on Torah, Numbers.22.9.1\nהדר זקנים, Exodus.1.10.2")
+    assert refs == ["Numbers.22.5.1", "Reggio_on_Torah,_Numbers.22.9.1", "Exodus.1.10.2"]
+
+
+def test_a_source_the_model_used_without_marking_reaches_the_panel(monkeypatch):
+    """The whole point: [S#] gives 16, the list names 19, and the reader should see all of them."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(api, "_fetch_refs", lambda refs: [
+        SimpleNamespace(payload={"ref": "Numbers.22.5.1", "text_he": "טקסט"})])
+    monkeypatch.setattr(api.db, "record_guard_finding", lambda *a, **k: None)
+    out = api.QueryResponse(answer="a", citations=[], grounded=True, intent="qa")
+
+    api._widen_citations_from_note(out, "מדרש אגדה, Numbers.22.5.1")
+
+    assert [c.ref for c in out.citations] == ["Numbers.22.5.1"]
+    assert out.citations[0].text_he == "טקסט"
+
+
+def test_a_line_that_resolves_to_nothing_never_becomes_a_citation(monkeypatch):
+    """The list is an INDEX into real material, never a source of truth — the first live runs
+    invented an author for the Ben Ish Chai and a parasha called "איקה". A fabricated line must not
+    be able to turn itself into a citation."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(api, "_fetch_refs", lambda refs: [
+        SimpleNamespace(payload={"ref": "Numbers.22.5.1", "text_he": "טקסט"})])
+    logged: list = []
+    monkeypatch.setattr(api.db, "record_guard_finding",
+                        lambda kind, intent, detail, **k: logged.append((kind, detail)))
+    out = api.QueryResponse(answer="a", citations=[], grounded=True, intent="qa")
+
+    api._widen_citations_from_note(out, "מדרש אגדה, Numbers.22.5.1\nבדוי, Invented.99.99.99")
+
+    assert [c.ref for c in out.citations] == ["Numbers.22.5.1"]
+    # …and the one that resolved to nothing is recorded FOR THE OPERATOR, with no user-facing effect.
+    assert logged and logged[0][0] == "source_note_unresolved"
+    assert "Invented.99.99.99" in logged[0][1]["refs"]
+
+
+def test_a_source_already_cited_is_not_added_twice(monkeypatch):
+    called: list = []
+    monkeypatch.setattr(api, "_fetch_refs", lambda refs: called.append(refs) or [])
+    out = api.QueryResponse(answer="a", grounded=True, intent="qa", citations=[
+        api.CitationOut(ref="Numbers.22.5.1")])
+
+    api._widen_citations_from_note(out, "מדרש אגדה, Numbers.22.5.1")
+
+    assert len(out.citations) == 1
+    assert called == [], "already-cited refs must not even be looked up"
+
+
+def test_a_broken_lookup_never_costs_the_user_their_answer(monkeypatch):
+    """This runs on the answer path. A diagnostic that can break an answer is worse than none."""
+    def boom(refs):
+        raise RuntimeError("qdrant down")
+
+    monkeypatch.setattr(api, "_fetch_refs", boom)
+    out = api.QueryResponse(answer="a", citations=[], grounded=True, intent="qa")
+    api._widen_citations_from_note(out, "מדרש אגדה, Numbers.22.5.1")   # must not raise
+    assert out.answer == "a"
+
+
+def test_a_real_ref_never_shown_this_turn_is_not_widened(monkeypatch):
+    """Passing (1) corpus-exists isn't enough — a real work the model was never given for THIS
+    question is not evidence it actually used it. Measured live 2026-08-14: of 30 unique refs one
+    real answer named, 20 resolved in the corpus but were never in that turn's retrieved set."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(api, "_fetch_refs", lambda refs: [
+        SimpleNamespace(payload={"ref": "Numbers.22.5.1", "text_he": "טקסט"})])
+    logged: list = []
+    monkeypatch.setattr(api.db, "record_guard_finding",
+                        lambda kind, intent, detail, **k: logged.append((kind, detail)))
+    out = api.QueryResponse(answer="a", citations=[], grounded=True, intent="qa")
+
+    api._widen_citations_from_note(out, "מדרש אגדה, Numbers.22.5.1",
+                                   retrieved_refs=["SomeOther.Ref.1"])
+
+    assert out.citations == [], "a real ref outside the retrieved set must not become a citation"
+    assert logged and logged[0][0] == "source_note_not_retrieved"
+    assert "Numbers.22.5.1" in logged[0][1]["refs"]
+
+
+def test_a_ref_actually_retrieved_this_turn_still_widens(monkeypatch):
+    """The common, correct case: the model named something it was genuinely shown."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(api, "_fetch_refs", lambda refs: [
+        SimpleNamespace(payload={"ref": "Numbers.22.5.1", "text_he": "טקסט"})])
+    monkeypatch.setattr(api.db, "record_guard_finding", lambda *a, **k: None)
+    out = api.QueryResponse(answer="a", citations=[], grounded=True, intent="qa")
+
+    api._widen_citations_from_note(out, "מדרש אגדה, Numbers.22.5.1",
+                                   retrieved_refs=["Numbers.22.5.1", "Other.Ref.2"])
+
+    assert [c.ref for c in out.citations] == ["Numbers.22.5.1"]
+
+
+def test_no_retrieved_refs_given_falls_back_to_corpus_only(monkeypatch):
+    """Call sites that have not threaded retrieved_refs through yet keep the old behaviour —
+    this is an additive check, not a breaking one."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(api, "_fetch_refs", lambda refs: [
+        SimpleNamespace(payload={"ref": "Numbers.22.5.1", "text_he": "טקסט"})])
+    monkeypatch.setattr(api.db, "record_guard_finding", lambda *a, **k: None)
+    out = api.QueryResponse(answer="a", citations=[], grounded=True, intent="qa")
+
+    api._widen_citations_from_note(out, "מדרש אגדה, Numbers.22.5.1")  # no retrieved_refs at all
+
+    assert [c.ref for c in out.citations] == ["Numbers.22.5.1"]
+
+
+def test_a_widened_citation_gets_its_commentator_derived_from_the_ref(monkeypatch):
+    """`commentator_id` is EMPTY on all 2.4M points of the commercial corpus and is recovered at
+    read time everywhere else (retrieval/hybrid.py::_to_hit). Reading the payload alone is why a
+    widened citation rendered as a bare "Chizkuni,_Deuteronomy.10.6.1" chip next to "rashbam"."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(api, "_fetch_refs", lambda refs: [
+        SimpleNamespace(payload={"ref": "Chizkuni,_Deuteronomy.10.6.1", "text_he": "טקסט"})])
+    monkeypatch.setattr(api.db, "record_guard_finding", lambda *a, **k: None)
+    out = api.QueryResponse(answer="a", citations=[], grounded=True, intent="qa")
+
+    api._widen_citations_from_note(out, "חזקוני, Chizkuni,_Deuteronomy.10.6.1")
+
+    # commentator_from_ref keys on "_on_", which the comma form does not have — so the chip has to
+    # fall back to the Hebrew display name, and that is what must be populated.
+    assert out.citations[0].ref_he.startswith("חזקוני")
+
+
+# ── chavruta mode had no citation-faithfulness guard at all (2026-08-19/20) ───────────────────
+# _qa_answer runs enforce_citations AND unverified_quotes; _generate_chavruta_turn ran neither — its
+# own bespoke [S#] regex only built the citation list, never checked a claim against what was
+# actually retrieved, and `caveats` stayed [] unconditionally. This is exactly the gap that let a
+# learner's invented pasuk ("לא ימיש השרימפ מתוך חלבו", a pun) get validated as real, with a made-up
+# Mishnah citation, in a real production chat (2026-08-13).
+class _FakeChavrutaLLM:
+    def __init__(self, raw: str):
+        self._raw = raw
+
+    def request(self, job, *, lang, token_budget):
+        return self._raw, []
+
+
+def test_chavruta_turn_flags_a_quote_not_in_the_retrieved_sources():
+    hits = [RankedHit(chunk_id="c1", ref="Test.1.1", text="טקסט מקור אמיתי שאינו קשור לציטוט",
+                      score=0.9)]
+    raw = ('שמעתי אותך. הפסוק "זהו ציטוט מומצא לחלוטין שאינו נמצא בשום מקור שסופק כאן" [S1] '
+           'מלמד יסוד חשוב — מה אתה חושב?')
+    out = api._generate_chavruta_turn("שאלה", hits, "he", True, [], False, _FakeChavrutaLLM(raw))
+
+    assert out.caveats, "an unverified quote in chavruta mode must produce a caveat, like QA mode does"
+
+
+def test_chavruta_turn_is_quiet_when_the_quote_is_real():
+    real = "טקסט מקור אמיתי שמצוטט נכונה כאן בתשובה"
+    hits = [RankedHit(chunk_id="c1", ref="Test.1.1", text=real, score=0.9)]
+    raw = f'שמעתי אותך. נאמר: "{real}" [S1] — מה אתה חושב?'
+    out = api._generate_chavruta_turn("שאלה", hits, "he", True, [], False, _FakeChavrutaLLM(raw))
+
+    assert out.caveats == []
+
+
+def test_chavruta_turn_resolves_a_nonstandard_marker_shape():
+    """Found live 2026-08-19 (session 11190b1b): the old bespoke regex `\\[\\s*S(\\d+)\\s*\\]`
+    missed "[source S1]" outright, silently dropping the citation instead of resolving it."""
+    hits = [RankedHit(chunk_id="c1", ref="Test.1.1", text="טקסט", score=0.9)]
+    raw = "תשובה קצרה [source S1] בלי הדלפה."
+    out = api._generate_chavruta_turn("שאלה", hits, "he", True, [], False, _FakeChavrutaLLM(raw))
+
+    assert [c.ref for c in out.citations] == ["Test.1.1"]
+
+
+def test_chavruta_job_prompt_now_prohibits_inventing_a_users_own_quote():
+    """Before this, the job only ever instructed the model to CITE sources — never told it not to
+    validate a fabricated one the LEARNER hands it, which is exactly the shrimp-pasuk failure mode
+    (2026-08-13). QA's system prompt already had this prohibition; chavruta's job did not."""
+    job = api._chavruta_job_md("שאלה", [], "he", [])
+    assert "MUST NOT invent" in job
+    assert "the learner is the one who states" in job
+
+
+# ── license/version_title dropped on the standard QA citation path (found 2026-08-26) ──────────
+# Real production bug: a regular chat answer's SourcesPanel attribution (license + edition) showed
+# up on SOME source cards and not others, even though the commercial-rights backfill covers the
+# whole 2.4M-point collection. Root cause traced live: `Citation` (corpus/schema.py) — the dataclass
+# the STANDARD pipeline.ask() / enforce_citations() path uses — never had `license`/`version_title`
+# fields at all, so every citation built through it silently lost the data regardless of what the
+# underlying RankedHit carried. The lesson source-sheet and source-note-widening paths were fine
+# because they build CitationOut directly from RankedHit, bypassing Citation entirely — which is
+# exactly why the gap was invisible in the one spot already verified (a finished lesson) and only
+# showed up on ordinary qa/explain answers, the highest-traffic path in the app.
+from chavruta.generation.grounded import enforce_citations
+from chavruta.lessons.builder import _section
+from chavruta.lessons.templates import Stage
+from chavruta.retrieval.base import RankedHit as _RH
+
+
+def test_citation_dataclass_carries_license_and_version_title():
+    from chavruta.corpus.schema import Citation
+    c = Citation(chunk_id="c1", ref="Test.1.1", deep_link="https://x",
+                 license="CC-BY-SA", version_title="Wikisource")
+    assert c.license == "CC-BY-SA"
+    assert c.version_title == "Wikisource"
+
+
+def test_enforce_citations_carries_license_and_version_title_from_the_hit():
+    """The standard pipeline.ask() path (used by ordinary qa/explain answers, not lessons)."""
+    hit = _RH(chunk_id="c1", ref="Test.1.1", text="טקסט", score=0.9,
+              license="Public Domain", version_title="Vilna Edition")
+    text, citations, grounded = enforce_citations("תשובה [S1]", {"S1": hit})
+    assert grounded is True
+    assert citations[0].license == "Public Domain"
+    assert citations[0].version_title == "Vilna Edition"
+
+
+def test_lesson_builder_section_carries_license_and_version_title():
+    hit = _RH(chunk_id="c1", ref="Test.1.1", text="טקסט", score=0.9,
+              license="CC0", version_title="ויקיטקסט")
+    stage = Stage(key="opening", title_he="פתיחה")
+    section = _section(stage, [hit])
+    assert section.citations[0].license == "CC0"
+    assert section.citations[0].version_title == "ויקיטקסט"
+
+
+def test_generate_qa_turn_from_hits_passes_license_and_version_title_through(monkeypatch):
+    """_generate_qa_turn_from_hits (parsha's default, non-lesson turn) has its own local _cite()
+    closure, separate from enforce_citations — it silently dropped license/version_title even when
+    the Answer's Citation objects carried them. Exercises the real function end-to-end, not a
+    reimplementation of the fix."""
+    from chavruta.corpus.schema import Answer, Citation
+
+    hit = _RH(chunk_id="c1", ref="Test.1.1", text="טקסט", score=0.9)
+    real_citation = Citation(chunk_id="c1", ref="Test.1.1", deep_link="https://x",
+                             license="CC-BY-SA", version_title="Wikisource")
+    answer = Answer(text="תשובה [S1]", citations=[real_citation], grounded=True)
+
+    class _FakePipeline:
+        llm = "llm"
+
+        def _qa_answer(self, query, result, llm=None, *, history=None, missing_note=None):
+            return answer
+
+    monkeypatch.setattr(api, "_get_pipeline", lambda: _FakePipeline())
+    resp = api._generate_qa_turn_from_hits("שאלה", [hit], "he", True, [], None)
+    assert resp.citations[0].license == "CC-BY-SA"
+    assert resp.citations[0].version_title == "Wikisource"

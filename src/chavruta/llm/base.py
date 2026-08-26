@@ -8,8 +8,29 @@ in-session, no external API). Grounding is enforced by the pipeline, not trusted
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
+
+# Whether this request should ask the model to close with its own list of the works it used, behind
+# the HHH sentinel (app/api.py::_split_source_note cuts it back out). A ContextVar rather than a
+# parameter because `render_messages` is reached through build_prompt, the pipeline, the agentic
+# loop and both backends — threading a display flag through all of that would put a presentation
+# concern into five signatures that are otherwise about grounding.
+#
+# Set and reset per request in app/api.py. It is read on the request's own thread, before any
+# fan-out; see llm/metering.py for the one place where a ContextVar and a thread pool do meet, and
+# what that cost.
+_SOURCE_NOTE: ContextVar[bool] = ContextVar("chavruta_source_note", default=False)
+
+
+def set_source_note(on: bool):
+    """Enable/disable the trailing source list for this request. Returns a reset token."""
+    return _SOURCE_NOTE.set(bool(on))
+
+
+def reset_source_note(token) -> None:
+    _SOURCE_NOTE.reset(token)
 
 
 @dataclass
@@ -86,10 +107,28 @@ def render_messages(prompt: GroundedPrompt, lang: str) -> list[dict]:
         return messages
 
     if prompt.sources:
+        # In Hebrew, lead each source with its HEBREW name. Without it there was no way for a source
+        # name to reach the reader at all, and a user said so on 2026-08-14: he asked where an
+        # answer's quotes came from and got a list of quotes attributed to nothing.
+        #
+        # The squeeze was structural, not a prompt-wording problem. The model was handed
+        # 'Birkat_Asher_on_Torah,_Deuteronomy.18.11.2' and told to answer in pure Hebrew — so naming
+        # the source made the sentence trip `_has_bleed`, and `_fix_bleeding_sentences` rewrote it to
+        # take the Latin out again. The only citation channel left was the [S#] marker, which is
+        # stripped before display by design. Every route to the reader was closed.
+        #
+        # The English ref stays on the line: it is what `enforce_citations` and the source sheet key
+        # on, and a model that wants to be precise can still copy it. The Hebrew name is what it can
+        # actually say out loud in a Hebrew answer.
+        # Imported here, not at module scope, to keep llm/ free of a hard dependency on corpus/.
+        from chavruta.corpus.refs import hebrew_display_ref
+
         lines = []
         for s in prompt.sources:
             who = f" ({s.commentator_id})" if s.commentator_id else ""
-            lines.append(f"[{s.marker}] {s.ref}{who}:\n{s.text}")
+            name = (hebrew_display_ref(s.ref) or "") if lang == "he" else ""
+            label = f"{name} — {s.ref}" if name else s.ref
+            lines.append(f"[{s.marker}] {label}{who}:\n{s.text}")
         sources_block = "\n\n".join(lines)
     else:
         sources_block = "(no sources retrieved)"
@@ -101,8 +140,41 @@ def render_messages(prompt: GroundedPrompt, lang: str) -> list[dict]:
             f"ענה בעברית בצורה ברורה, מלאה ומנומקת — הסבר את התשובה ופַתח אותה, אל תסתפק במשפט יבש אחד. "
             f"כתוב אך ורק בעברית תקנית, ללא מילים בשפה זרה. "
             f"צרף לכל טענה את סימון המקור, למשל [S1]. "
-            f"צטט את לשון המקור כשרלוונטי. אם אין תשובה במקורות — אמור זאת ואל תמציא."
+            f"צטט את לשון המקור כשרלוונטי. אם אין תשובה במקורות — אמור זאת ואל תמציא. "
+            f"המזהה שאחרי הקו בכותרת כל מקור (למשל 'Yoma.148.10') הוא זיהוי פנימי בלבד — לעולם אל "
+            f"תעתיק אותו כמו שהוא לתוך התשובה. אם ברצונך לציין דף גמרא בפרוזה, כתוב אותו בצורה אנושית "
+            f"(למשל 'יומא עד ע\"ב'), לא במספר הפנימי; ואם ברצונך לציין שם חיבור, השתמש בשם העברי "
+            f"שבתחילת הכותרת, לא בחלק האנגלי."
         )
+        if _SOURCE_NOTE.get():
+            # Asked for AFTER the answer, and cut back out before display. The reader gets it beside
+            # the sources; the model gets somewhere to name works without breaking the Hebrew-only
+            # rule mid-sentence. Ordered oldest-first because that is what a learner asked for on
+            # 2026-08-14 — "סדר בצורה כרונולוגית לפי המקור הקדום ביותר ותן קצת מידע על כל ספר" —
+            # and the model can order what it was given even where retrieval ranking cannot yet.
+            # Names ONLY. The first version asked for the author and a sentence about each work, and
+            # the model invented all of it: on one live answer it gave the Ben Ish Chai's commentary
+            # to a "רבי יעקב חיים זילברשטיין", and turned parashat Eikev into a parasha called
+            # "איקה". Presented as a tidy metadata block, a reader takes that for fact — which is
+            # exactly the invention this product exists not to commit, dressed as a citation.
+            #
+            # The model does not know these works' authorship; it knows the text it was handed. So
+            # it is asked for the one thing it was handed: the name, copied. Anything richer needs a
+            # curated table, not a language model.
+            # Positive and concrete. A first version asked for the author and a description, and the
+            # model invented both — the Ben Ish Chai's commentary attributed to a "רבי יעקב חיים
+            # זילברשטיין", parashat Eikev turned into a parasha called "איקה". A second version
+            # forbade all of that in a row of negatives, and the model responded by omitting the
+            # section altogether. So: say what to write, show the shape, and put the one prohibition
+            # last.
+            user += (
+                "\n\nחובה לסיים כך: שורה שבה כתוב HHH בלבד, ומתחתיה שורה לכל מקור שהשתמשת בו "
+                "בפועל, מהקדום למאוחר, ובה שם החיבור בלבד — מועתק מרשימת המקורות שלמעלה. לדוגמה:\n"
+                "HHH\n"
+                "בבא מציעא 2.\n"
+                "רש\"י על בראשית 1:1\n"
+                "אל תוסיף מחבר, תאריך או תיאור, וגם לא חיבור שלא הופיע ברשימה שקיבלת."
+            )
     else:
         user = (
             f"SOURCES (the only knowledge you may use):\n{sources_block}\n\n"
@@ -110,7 +182,10 @@ def render_messages(prompt: GroundedPrompt, lang: str) -> list[dict]:
             f"Answer in English clearly and fully — explain and develop your answer, do not reply with a "
             f"single terse sentence. Write the explanation in English (you may quote the Hebrew source text), "
             f"but do NOT mix in stray words from other languages (no Chinese/Russian/etc.). Cite every claim by "
-            f"its source marker like [S1]. If the sources do not contain the answer, say so plainly and do not invent."
+            f"its source marker like [S1]. If the sources do not contain the answer, say so plainly and do not invent. "
+            f"The identifier after the dash in each source's header (e.g. 'Yoma.148.10') is an internal "
+            f"reference only — never copy it verbatim into your answer. If you want to name a Gemara daf "
+            f"in prose, use its human form (e.g. 'Yoma 74b'), not the internal number."
         )
     messages.append({"role": "user", "content": user})
     return messages

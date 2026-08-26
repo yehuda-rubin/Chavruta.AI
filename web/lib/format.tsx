@@ -11,7 +11,11 @@ export function isHe(text: string): boolean {
 }
 
 export function commentatorTag(c: Citation): string {
-  return (c.commentator || c.ref || "").trim();
+  // ref_he before ref. `commentator_id` is empty on every point of the commercial corpus and is
+  // derived from the ref at read time — but that derivation keys on "_on_", which the comma form
+  // (Chizkuni,_Deuteronomy.10.6.1) does not have. Falling straight to `ref` is why a Hebrew answer
+  // showed a chip reading "Chizkuni,_Deuteronomy.10.6.1" beside one reading "rashbam".
+  return (c.commentator || c.ref_he || c.ref || "").trim();
 }
 
 // Minimal, safe **bold** + newline renderer — no dangerouslySetInnerHTML. Returns React nodes so

@@ -6,8 +6,25 @@ import { commentatorTag, isHe } from "@/lib/format";
 import { fileKind } from "@/lib/files";
 import { Icon } from "./Icon";
 
-// Attribution — the edition + licence a source's text came from. CC-BY / CC-BY-SA require it.
-// Renders nothing until the fields are populated (they arrive with the licence backfill).
+// Human-readable label for a raw licence string — mirrors app/api.py's _LICENSE_HE (that copy
+// serves the lesson source sheet; this one serves the sources panel). Everything not in the map
+// falls back to the licence's own identifier (CC-BY-SA, CC0…), which is what people search for.
+const LICENSE_LABEL: Record<Lang, Record<string, string>> = {
+  he: { "public domain": "נחלת הכלל", "public domain mark": "נחלת הכלל", cc0: "CC0 (ויתור על זכויות)" },
+  en: { "public domain": "Public Domain", "public domain mark": "Public Domain", cc0: "CC0 (public domain dedication)" },
+};
+function licenseLabel(lic: string, lang: Lang): string {
+  return LICENSE_LABEL[lang]?.[lic.trim().toLowerCase()] ?? lic;
+}
+
+// Attribution — the edition + licence a source's text came from. CC-BY / CC-BY-SA require it;
+// every source shows it regardless, so a reader always knows what they may do with the text, not
+// only the sources where a licence legally demands it (same reasoning as _license_table in
+// app/api.py for lesson sheets — see rights.py::document_license_notice).
+// Still renders nothing when NONE of edition/licence/link are populated (a source with no
+// attribution data at all, e.g. before the licence backfill reaches it) — an "unknown licence"
+// placeholder on every card before that data lands would read as a wall of warnings, not
+// information; the underlying gap is tracked in docs/CORPUS_SOURCES_CANDIDATES.md §9.
 function Attribution({ c, lang }: { c: Citation; lang: Lang }) {
   const lic = (c.license || "").trim();
   const ver = (c.version_title || "").trim();
@@ -22,7 +39,7 @@ function Attribution({ c, lang }: { c: Citation; lang: Lang }) {
       )}
       {lic && (
         <span>
-          {tr(lang, "srcLicense")}: {lic}
+          {tr(lang, "srcLicense")}: {licenseLabel(lic, lang)}
         </span>
       )}
       {link && (
@@ -97,6 +114,12 @@ export function SourcesPanel({
         <h3 className="font-serif text-xl font-bold text-tekhelet">{tr(lang, "relatedSources")}</h3>
       </div>
       <div className="flex-1 overflow-y-auto p-4 pt-0 flex flex-col gap-3">
+        {/* The model's own source list used to render here and was removed on sight (2026-08-14):
+            it repeated, in English, the very sources listed underneath it. It existed to get a
+            work's NAME in front of a Hebrew reader — and the comma fix in
+            corpus/refs.py::hebrew_display_ref did that properly instead, taking the panel's own
+            Hebrew coverage from 66% to 98.5%. The server still carries `source_note` on the
+            message; nothing displays it, and the prompt that asks for it is gated off. */}
         {order.length === 0 ? (
           <p className="text-ink/40 text-sm text-center mt-10">{tr(lang, "sourcesHint")}</p>
         ) : (

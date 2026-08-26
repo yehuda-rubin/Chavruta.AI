@@ -39,7 +39,7 @@ _sink: Callable[[str, str, dict[str, Any]], None] | None = None
 
 # What a caller may report. A typo in a kind would produce a category the panel silently never shows,
 # so it is checked rather than trusted.
-KINDS = ("misattribution", "deontic", "calendar")
+KINDS = ("misattribution", "deontic", "calendar", "citation_mismatch")
 
 
 def set_sink(fn: Callable[[str, str, dict[str, Any]], None] | None) -> None:

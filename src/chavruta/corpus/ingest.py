@@ -103,12 +103,27 @@ def payload_from_legacy_meta(meta: dict, work_id: str = "tanakh") -> dict:
         text=document,
         text_he=md.get("text_he", "") or document,
         text_en=md.get("text_en", ""),
-        deep_link=f"https://www.sefaria.org/{verse_id}" if verse_id else "",
+        # An explicit deep_link (e.g. a real he.wikisource.org page URL) wins over the derived
+        # Sefaria one — the derivation assumes verse_id IS a Sefaria ref, which is false for any
+        # non-Sefaria source (a Wikisource ref like "Wikisource_wikisource_kook:..." produced
+        # "https://www.sefaria.org/Wikisource_wikisource_kook:..." — a dead link to a page that
+        # doesn't exist). Existing tiers never carry this key, so they fall through unchanged.
+        deep_link=md.get("deep_link") or (f"https://www.sefaria.org/{verse_id}" if verse_id else ""),
         period=md.get("period", ""),   # responsa carry their halachic era (geonim/rishonim/…)
         position=position,
-        anchor_ref=verse_id if is_commentary else None,
-        anchor_kind=AnchorKind.SOURCE if is_commentary else None,
+        # An explicit anchor_ref in the metadata (e.g. a Wikisource commentary anchored to the
+        # Sefaria-sourced base text it comments on) wins; only derive the old self-referential
+        # anchor when the fetch stage didn't already compute a real one. Existing tiers never
+        # carry this key, so they fall through to the unchanged legacy behaviour.
+        anchor_ref=md.get("anchor_ref") or (verse_id if is_commentary else None),
+        anchor_kind=AnchorKind.SOURCE if (md.get("anchor_ref") or is_commentary) else None,
         commentator_id=commentator,
+        # license_he/version_he: populated by every fetch notebook (Sefaria and Wikisource
+        # alike) and silently dropped here until now — Chunk defaulted to "", so Attribution
+        # in SourcesPanel.tsx never had anything to render and rights.requires_attribution("")
+        # wrongly read as "no attribution owed". Falls back to "" exactly as before when absent.
+        license=md.get("license_he", "") or md.get("license_en", ""),
+        version_title=md.get("version_he", "") or md.get("version_en", ""),
     )
     return chunk.to_payload()
 

@@ -43,7 +43,21 @@ _MARKER_RE = re.compile(rf"\s*{_MARKER_BODY}")
 #
 # The lookbehind is load-bearing too: without it, "הכתוב[S1]" would match its own final ב and
 # leave "הכתו". A one-letter prefix only counts when it is not the tail of a Hebrew word.
-_CARRIER_PREFIX = r"(?<![א-ת])(?:את\s+|[בכלמשוהד])"
+#
+# Two extensions, both from one live report (2026-08-14). A user asked where the quotes in an answer
+# came from and got a numbered list reading "– מופיע ב- וב-:" nineteen times over — a sources section
+# naming no sources, which is worse than none, because it looks like an answer to the question.
+#
+#   • A MAQAF/HYPHEN may sit between the prefix and the marker. "מופיע ב-[S1]" is the ordinary way to
+#     attach a Hebrew prefix to a bracketed token, and it is what a model writes most of the time;
+#     without this the marker went and the "ב-" stayed.
+#   • TWO prefix letters, for the very common vav+preposition ("וב-[S3]", "ול-[S2]"). One letter could
+#     never match those: the lookbehind correctly refuses to start at the ב of "וב", and starting at
+#     the ו left a ב with no marker after it.
+#
+# The lookbehind still guards the "הכתוב[S1]" case — inside a word every candidate letter is preceded
+# by another Hebrew letter, so nothing fires.
+_CARRIER_PREFIX = r"(?<![א-ת])(?:את\s+|[בכלמשוהד]{1,2}[-־]?)"
 _CARRIER_MARKER_RE = re.compile(rf"\s*{_CARRIER_PREFIX}{_MARKER_BODY}")
 
 # Caught live (2026-08-04): the model occasionally emits a literal backslash before a quote mark when
@@ -96,6 +110,156 @@ def _strip_foreign_parens(text: str) -> str:
     return _PAREN_RE.sub(repl, text)
 
 
+# The model's own list of what it leaned on, emitted after the answer behind this sentinel and cut
+# out of the displayed text — the same treatment [S#] markers get, for the same reason: it is
+# addressed to the app, not to the reader. The reader sees it rendered beside the answer instead.
+#
+# Why the model is asked to write it at all, when the citations are already derived from the markers:
+# a marker says WHICH chunk, and nothing a person can read. The names never reached the reader (see
+# `render_messages` — a Latin ref in a Hebrew answer is scrubbed as foreign bleed), so a user asked
+# where the quotes came from and got "מופיע ב-  וב-:" nineteen times. This is the channel where the
+# model can say, in Hebrew, which work each quote is from and what that work is.
+#
+# HHH rather than a word: it must survive a model that likes to translate its own delimiters, and it
+# must never occur in Torah prose. Tolerant of the same decorations _LESSON_SPLIT_RE tolerates —
+# bolding, indentation, RTL marks — because the model applies them unprompted.
+_SOURCE_NOTE_RE = re.compile(r"^[ \t>*‏‎]*={0,3}\s*HHH\s*={0,3}[ \t*]*$", re.M)
+
+
+def _split_source_note(text: str) -> tuple[str, str]:
+    """(answer, the model's source list) — ('…', '') when it did not emit one.
+
+    Split BEFORE any cleaning runs. The note names works, and a work's name is often the only Latin
+    text in a Hebrew answer; left in place it trips `_has_bleed`, and `_fix_bleeding_sentences` would
+    spend a model call per line rewriting the very names this exists to preserve.
+    """
+    if not text:
+        return "", ""
+    m = _SOURCE_NOTE_RE.search(text)
+    if not m:
+        return text, ""
+    note = text[m.end():].strip()
+    # Markers come out of the note too — the model opens each line with "[S1] ", which means nothing
+    # to a reader and is the exact thing markers are stripped from the answer for. Seen on the first
+    # live run (2026-08-14). Only the marker pass: the foreign-language scrub must still never touch
+    # this block, because a work's name is often the only Latin in it.
+    note = _MARKER_RE.sub("", note)
+    return text[:m.start()].rstrip(), note.strip()
+
+
+# A ref as it appears inside a source-list line. The model copies from a sources block formatted
+# "<hebrew name> — <ref>", and often takes only part of it, so the ref is picked out of the line
+# rather than the line being parsed as a whole.
+_NOTE_REF_RE = re.compile(r"[A-Z][A-Za-z'’א-ת_,\. ]*?[A-Za-z_]\.[0-9]+(?:[.:][0-9]+)*")
+
+
+def _refs_in_source_note(note: str) -> list[str]:
+    """Refs named in the model's source list, in order, deduped."""
+    out: list[str] = []
+    for line in (note or "").splitlines():
+        m = _NOTE_REF_RE.search(line)
+        if not m:
+            continue
+        ref = m.group(0).strip().replace(" ", "_").rstrip(".,")
+        if ref and ref not in out:
+            out.append(ref)
+    return out
+
+
+def _widen_citations_from_note(result, note: str, owner_id: str = "",
+                               retrieved_refs=None) -> None:
+    """Add sources the model USED but never marked, and log the ones it named out of thin air.
+
+    The panel is built from `[S#]` markers, so a source the model leaned on without writing a marker
+    never reaches the reader. Measured on a real answer 2026-08-14: 16 citations against 19 lines in
+    the model's own list. This closes that gap — which is what the source list was asked for in the
+    first place.
+
+    The list is an INDEX into real material, never a source of truth — a line only becomes a citation
+    if it names something the model actually had in front of it. That means TWO checks, not one:
+
+    1. The ref must resolve in the corpus at all (a fabricated ref, e.g. a parasha called "איקה",
+       fails here).
+    2. When `retrieved_refs` is given, the ref must be IN it — the set the model was actually shown
+       this turn (`result.hits` + any agentically-fetched sources). A ref that passes (1) but fails
+       (2) is a real work the model was never given for this question and is naming from its own
+       training data, not the retrieved context — invisible to (1) alone, and measured live on
+       2026-08-14: of 30 unique refs one real answer named, 20 were not in that turn's retrieved set
+       even though every one of the 30 resolved in the corpus, so (1) alone logged nothing.
+       `retrieved_refs` is optional (not every call site has it threaded through yet) — when absent
+       this falls back to corpus-only validation, same as before.
+
+    A ref that fails either check is the invention signal, and it is worth more as a measurement
+    than the line was worth as a citation: recorded for the OPERATOR only (guard_findings), with no
+    user-facing effect. Never raises — a diagnostic that can break an answer is worse than none.
+    """
+    refs = _refs_in_source_note(note)
+    if not refs:
+        return
+    have = {c.ref for c in result.citations}
+    wanted = [r for r in refs if r not in have]
+    if not wanted:
+        return
+    retrieved_set = set(retrieved_refs) if retrieved_refs is not None else None
+    if retrieved_set is not None:
+        in_scope = [r for r in wanted if r in retrieved_set]
+        out_of_scope = [r for r in wanted if r not in retrieved_set]
+    else:
+        in_scope, out_of_scope = wanted, []
+    found = {}
+    if in_scope:
+        try:
+            hits = _fetch_refs(in_scope)
+        except Exception:
+            _log.exception("could not resolve source-list refs")
+            hits = []
+        for h in hits:
+            payload = getattr(h, "payload", None) or {}
+            ref = payload.get("ref") or ""
+            if ref and ref not in found:
+                found[ref] = payload
+    he = True
+    for ref, payload in found.items():
+        result.citations.append(CitationOut(
+            ref=ref, ref_he=(hebrew_display_ref(ref) or "") if he else "",
+            text_he=payload.get("text_he") or payload.get("text") or "",
+            text_en=payload.get("text_en") or "",
+            # Derived from the ref, not read from the payload:  is EMPTY on all
+            # 2.4M points of the commercial corpus and is recovered at read time everywhere else
+            # (see retrieval/hybrid.py::_to_hit). Reading the payload alone is why a widened
+            # citation rendered as a bare "Chizkuni,_Deuteronomy.10.6.1" chip beside "rashbam".
+            commentator=(payload.get("commentator_id") or commentator_from_ref(ref) or ""),
+            deep_link=payload.get("deep_link") or "",
+            license=payload.get("license") or "", version_title=payload.get("version_title") or ""))
+    if missing := [r for r in in_scope if r not in found]:
+        # Resolved to nothing in the corpus — named a work that does not exist, or invented the ref
+        # outright.
+        db.record_guard_finding("source_note_unresolved", result.intent or "",
+                                {"refs": missing[:12], "named": len(refs),
+                                 "resolved": len(found), "owner": owner_id[:12]})
+    if out_of_scope:
+        # Resolves in the corpus, but was never in this turn's retrieved set — the model named a
+        # real work it was not shown. Not added as a citation: real-but-ungrounded is still not
+        # grounded.
+        db.record_guard_finding("source_note_not_retrieved", result.intent or "",
+                                {"refs": out_of_scope[:12], "named": len(refs),
+                                 "owner": owner_id[:12]})
+
+
+# The interface renders plain text plus **bold** and newlines ONLY — no Markdown. SYSTEM_BASE_HE
+# already tells the model this explicitly ("לעולם אל תשתמש בכותרות Markdown... הם מוצגים כתווים
+# גולמיים ומכוערים" — never use Markdown headers, they show as raw ugly characters), but the
+# instruction is not always followed: caught live 2026-08-20, a real answer used five separate
+# "### heading" lines that reached the user as literal hash marks, since nothing renders them.
+# Converted to **bold** rather than just stripped — that IS the app's own stated substitute for a
+# heading (same instruction), so the model's structure is kept, not thrown away. Language-independent
+# (unlike _strip_foreign_parens above) because the interface is markdown-free in English too.
+_MD_HEADER_RE = re.compile(r"^[ \t]{0,3}#{1,6}(?:[ \t]+(.*?))?[ \t]*#*[ \t]*$", re.M)
+# A blockquote line ('> ...') — the same instruction asks for an inline quote in regular quote marks
+# instead. Only the leading marker is stripped; the quoted text itself is left as the model wrote it.
+_MD_BLOCKQUOTE_RE = re.compile(r"^[ \t]{0,3}>[ \t]?", re.M)
+
+
 def _strip_markers(text: str, he: bool = False) -> str:
     # Load-bearing markers first ("ב[S2]" → nothing, not "ב"), then every remaining plain marker.
     t = _CARRIER_MARKER_RE.sub("", text or "")
@@ -106,6 +270,14 @@ def _strip_markers(text: str, he: bool = False) -> str:
         t = _strip_foreign_parens(t)         # drop a stray English citation aside in a Hebrew answer
     t = re.sub(r"\*\*\s*\*\*", "", t)        # collapse empty **bold** left where a **[S#]** was stripped
     t = re.sub(r"(?<!\*)\*\s*\*(?!\*)", "", t)  # …and empty *italic*
+    # Markdown headers/blockquotes run AFTER the collapses above, not before: a freshly-made
+    # "**heading**" wrapper contains adjacent "**" pairs that the empty-marker collapses upstream
+    # would otherwise eat (they don't require emptiness between the two asterisks, only that the
+    # OUTER neighbours aren't also a star — which a real "**text**" wrapper satisfies too).
+    t = _MD_HEADER_RE.sub(
+        lambda m: (f"**{m.group(1).strip()}**" if (m.group(1) or "").strip() else ""), t
+    )
+    t = _MD_BLOCKQUOTE_RE.sub("", t)
     t = re.sub(r"[ \t]{2,}", " ", t)
     return t.strip()
 
@@ -150,6 +322,33 @@ _BLEED_FIX_SYSTEM = (
     "Reply with ONLY the rewritten sentence and nothing else — no preamble, no quotes around it."
 )
 
+# Maximal runs of "bleed characters" (same class _BLEED_CHAR_RE flags), joined across a single
+# space/hyphen/apostrophe so a multi-word transliteration ("MASKIL LEDAVID") comes back as ONE
+# phrase rather than two separate hits.
+_BLEED_RUN_RE = re.compile(
+    rf"(?:[A-Za-z]|[^\x00-\x7F֐-׿{_ALLOWED_EXTRA_PUNCT}])+"
+    rf"(?:[ '\-](?:[A-Za-z]|[^\x00-\x7F֐-׿{_ALLOWED_EXTRA_PUNCT}])+)*"
+)
+
+
+def _bleed_words(text: str) -> list[str]:
+    """The SPECIFIC word(s)/phrase(s) making `text` bleed — not just THAT it bleeds. Naming them in
+    the rewrite prompt is far more actionable than handing over the whole sentence and asking the
+    model to self-diagnose, which is exactly where the two-attempt rewrite kept failing IDENTICALLY
+    on a foreign term it doesn't recognize as a violation on its own: reproduced live twice —
+    'chez' survived two same-shape attempts (2026-08-14), and again with 'qualify' plus a
+    transliterated work title ('MASKIL LEDAVID', whose OWN Hebrew name was sitting right there in
+    the sources block) reaching a real user unfixed (2026-08-20)."""
+    masked = _MARKER_RE.sub("", text or "")
+    seen: set[str] = set()
+    out: list[str] = []
+    for m in _BLEED_RUN_RE.finditer(masked):
+        w = m.group(0)
+        if w not in seen:
+            seen.add(w)
+            out.append(w)
+    return out
+
 
 def _rewrite_bleeding_sentence(sentence: str, llm) -> str | None:
     """One sentence → its Hebrew-only rewrite, or None if no attempt produced a clean one.
@@ -162,12 +361,23 @@ def _rewrite_bleeding_sentence(sentence: str, llm) -> str | None:
     the Latin text — so a call that failed outright and a call that succeeded but produced an
     equally-bleeding rewrite were both dead ends after one try.
     """
+    words = _bleed_words(sentence)
+    system = _BLEED_FIX_SYSTEM
+    if words:
+        # Point the model at the SPECIFIC word(s) rather than leaving it to notice them unaided —
+        # see _bleed_words for why detection alone was not the gap.
+        named = "', '".join(words[:5])
+        system = system + (
+            f"\n\nThe following word(s)/phrase(s) in THIS sentence are NOT Hebrew and MUST be "
+            f"replaced with a natural Hebrew equivalent: '{named}'. Do not leave any of them as-is, "
+            f"and do not just delete them — replace with real Hebrew words."
+        )
     # A retry at the SAME low temperature on the SAME model tends to reproduce the SAME mistake
     # (caught live: "sugya"/"mixture" survived two identical-temperature attempts) — the second
     # try uses a higher temperature so it's a genuinely different roll, not a near-duplicate.
     for attempt, temperature in enumerate((0.2, 0.6)):
         try:
-            prompt = GroundedPrompt(system=_BLEED_FIX_SYSTEM, sources=[], question=sentence, bare=True)
+            prompt = GroundedPrompt(system=system, sources=[], question=sentence, bare=True)
             res = llm.generate(prompt, lang="he", max_tokens=200, temperature=temperature)
             candidate = (res.text or "").strip()
         except Exception:
@@ -188,8 +398,18 @@ def _fix_bleeding_sentences(text: str, he: bool, llm) -> str:
     sentence and nothing else, so they are genuinely independent — but only when the backend can
     take concurrent calls. The bridge answers in-session through a single job file, so overlapping
     calls there would interleave into each other; it opts out via `serial_only`.
+
+    Also fixes a raw internal Talmud segment number that leaked into prose (e.g. 'ביומא 148:10')
+    into its real daf:amud form — see grounded.fix_raw_talmud_segment_refs. Runs on every call
+    unconditionally (it needs no LLM and digits/colons never trip `_has_bleed`, so the bleed loop
+    below would never have caught it on its own), which also means every caller of this function
+    gets the fix for free rather than needing its own wiring — the exact gap that let chavruta mode
+    go without unverified_quotes for so long.
     """
-    if not he or not text or llm is None or not _has_bleed(text):
+    if not he or not text:
+        return text
+    text = grounded.fix_raw_talmud_segment_refs(text)
+    if llm is None or not _has_bleed(text):
         return text
     parts = _SENTENCE_SPLIT_RE.split(text)   # alternates: sentence, separator, sentence, separator, …
     # The cap is applied HERE, on the selection, so which sentences get fixed does not depend on how
@@ -254,16 +474,18 @@ from chavruta.corpus import rights
 from chavruta.corpus.refs import (
     COMMENTATOR_HE,
     commentary_refs,
+    commentator_from_ref,
     expand_range,
     hebrew_display_ref,
     with_ref_variants,
 )
 from chavruta.corpus.schema import Intent, Query, Turn
-from chavruta.generation import computed, guards
+from chavruta.generation import computed, grounded, guards
 from chavruta import sugya as sugya_mod
 from chavruta.retrieval.base import RetrievalResult
 from chavruta.llm import metering
 from chavruta.llm.agentic import is_degrade_message
+from chavruta.llm import base as llm_base
 from chavruta.llm.base import GroundedPrompt
 from chavruta.pipeline.pipeline import _max_tokens_for
 from chavruta.intents.hebrew_refs import detect_tractates, detect_hebrew_refs
@@ -481,6 +703,10 @@ class QueryResponse(BaseModel):
     # message can link the two — the documents live in both places, and deleting the library entry
     # has to be able to find the chat copy.
     lesson_id: str = ""
+    # The model's own account of the works it used, in Hebrew — cut out of `answer` and carried
+    # separately so the client can render it beside the sources rather than inside the prose.
+    # Empty for everyone outside the rollout, and empty whenever the model did not emit one.
+    source_note: str = ""
 
 
 # ── Lesson audience / grade / length ─────────────────────────────────────────
@@ -600,9 +826,13 @@ def _user_blob(question: str, history) -> str:
 
 
 def _detect_school(text: str) -> bool:
+    # \bgrades?\b|\bgraders?\b (not the old singular-only \bgrade\b): a real English reply says
+    # "grades 4-6" or "6th graders", both plural forms the old pattern silently rejected — aud stayed
+    # None and _run_lesson re-asked the SAME "who is the lesson for" question forever (the reported
+    # loop). Hebrew's כית(?:ה|ת|ות) already covered its singular/plural forms; English didn't.
     return bool(re.search(
         r"בית.?ספר|תלמיד|כית(?:ה|ת|ות)|יסודי|חטיב|תיכון|ילדים|גן חובה|גן ילדים"
-        r"|\bschool\b|\bpupils?\b|\bgrade\b|elementary|kindergarten|\bkids\b|children"
+        r"|\bschool\b|\bpupils?\b|\bgrades?\b|\bgraders?\b|elementary|kindergarten|\bkids\b|children"
         r"|high[- ]?school|middle[- ]?school", text, re.I))
 
 
@@ -674,12 +904,42 @@ def _is_clarify_answer(text: str) -> bool:
     t = re.sub(
         r"בית.?ספר|בית.?מדרש|ישיב\w*|כית(?:ה|ת|ות)|תיכון|חטיב\w*|יסודי\w*|\bגן\b|בוגר|צעיר"
         r"|קצר\w*|בינונ\w*|ארוכ?\w*|תמציתי|מעמיק\w*|בהרחבה"
-        r"|\bshort\b|\bmedium\b|\blong\b|\bbrief\b|\bschools?\b|\byeshiva\w*|beit.?midrash|\bgrades?\b|elementary"
+        r"|\bshort\b|\bmedium\b|\blong\b|\bbrief\b|\bschools?\b|\byeshiva\w*|beit.?midrash|\bgrades?\b|\bgraders?\b|elementary"
         r"|\bhigh\b|\bmiddle\b|\b(?:1st|2nd|3rd|\d+th)\b",
         " ", t, flags=re.I)
     t = re.sub(r"(?<![א-ת])[א-טי](?![א-ת])", " ", t)                  # standalone grade letters (ב)
     t = re.sub(r"[\d.,·•\-–\s\"'()־׳״]", "", t)
     return len(t) < 2
+
+
+_LESSON_BUILD_RE = re.compile(
+    r"שיעור\s*(חדש|נוסף|אחר)"                                      # "lesson" + new/another/different
+    r"|(?:תבנה|תכין|תיצור|תרכיב|בנה|הכן|צור)\D{0,12}שיעור"          # build/prepare/create ... a lesson
+    r"|(?:תשנה|שנה|עדכן|תעדכן|הוסף|תוסיף|תקצר|תרחיב)\D{0,15}שיעור"  # change/update/add/shorten/expand ... the lesson
+    r"|\bnew\s+lesson\b|\b(?:build|prepare|create|make)\s+(?:a|another)\s+lesson\b"
+    r"|\b(?:change|update|edit|shorten|expand|redo)\D{0,20}\blesson\b",
+    re.I,
+)
+
+
+def _is_lesson_build_request(text: str) -> bool:
+    """Explicit signal that this turn wants a lesson BUILT or CHANGED — the one case, once a session
+    already has a finished lesson (`Turn.lesson`), that should still run `_run_lesson` rather than
+    continue as a chavruta-style discussion of the existing one (see `_run_query_impl`).
+
+    Deliberately narrow, matching this codebase's usual bar for a guard that changes routing: a
+    false NEGATIVE here (missing a genuine "build me a new lesson" phrasing) just means the model
+    discusses the topic instead of building — recoverable, the learner can ask again more plainly.
+    A false POSITIVE would silently rebuild and burn a real weekly lesson-pool charge, which is the
+    failure this whole check exists to avoid — so the pattern requires an explicit lesson-changing
+    verb next to the word "lesson" itself, not just any mention of it.
+
+    Known gap, not solved here: a "change X in the lesson" request that matches this still resolves
+    its TOPIC from the raw instruction text via `_resolve_topic` (unchanged) — it does not yet
+    recover the original lesson's topic the way a bare clarify-answer does. Rebuilding the SAME
+    lesson with a precise edit is a separate, deeper piece of work.
+    """
+    return bool(_LESSON_BUILD_RE.search(text or ""))
 
 
 def _resolve_topic(question: str, history) -> str:
@@ -898,11 +1158,18 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
     # unknown — the system asks for it before building (the user asked for this behaviour).
     ask = []
     if aud is None:
+        # Addressed to whoever is REQUESTING the lesson (usually a teacher building it for their
+        # class) — not phrased as if asking the reader about their own grade. Examples in plain
+        # English ("6th grade", "middle school") both read naturally AND are what _detect_school /
+        # _detect_band actually recognize, so a real reply resolves instead of re-triggering this
+        # same question (the reported loop).
         ask.append("למי השיעור מיועד — **בית מדרש / ישיבה** או **בית ספר** (ולאיזו שכבה: א–ג · ד–ו · ז–ט · י–יב)?"
-                   if he else "Who is the lesson for — **Beit Midrash / Yeshiva** or **School** (and which grade band: 1–3 · 4–6 · 7–9 · 10–12)?")
+                   if he else "Who is this lesson for — a **Beit Midrash / Yeshiva** setting, or a **school class**? "
+                              "If it's for a school class, what grade are the students in (for example \"6th grade,\" "
+                              "\"middle school,\" or \"grades 7–9\")?")
     elif aud == "school" and not band:
         ask.append("לאיזו שכבת גיל? **א–ג · ד–ו · ז–ט · י–יב** (או ציין/י את הכיתה)."
-                   if he else "Which grade band? **1–3 · 4–6 · 7–9 · 10–12** (or name the grade).")
+                   if he else "What grade are the students in? For example \"6th grade,\" \"middle school,\" or \"grades 7–9.\"")
     if length is None:
         ask.append("באיזה אורך? **קצר · בינוני · ארוך**" if he else "What length? **Short · Medium · Long**")
     if ask:
@@ -1149,11 +1416,24 @@ def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bo
         "if that STILL comes back with nothing relevant, ask the learner warmly for direction — "
         "'רגע — לא עלה לי המקור הנכון, תכוון אותי'. Do NOT ask the learner to name a daf when relevant "
         "sources are already present above.",
-        "Ground everything ONLY in the SOURCES; cite by [S#] (stripped from display). Keep it fairly short "
-        "(a real chavruta exchange, not an essay). Write in the learner's language. **bold** key terms. "
+        "Ground everything ONLY in the SOURCES; cite by [S#] (stripped from display). "
+        "MUST NOT invent sources, citations, or attributions that are not in the SOURCES above — this "
+        "applies EVEN WHEN the learner is the one who states a 'quote' or 'pasuk'. If they hand you a phrase "
+        "and it does not genuinely appear in the SOURCES, do not validate it, do not give it a citation, and "
+        "do not build an answer that treats it as real — say plainly that you don't have that source, even "
+        "mid-chavruta and even if the phrasing sounds playful or rhetorical. (Caught live 2026-08-13: a "
+        "learner invented a fake pasuk as a pun, and the reply said it 'appears in the Mishnah' with a made-up "
+        "citation before ever getting to the real halacha — that must not happen again.) When a claim is about "
+        "a real, identifiable person (historical figure, posek, a rabbi living or recently deceased) — "
+        "especially their conduct, intentions, or character — stay close to the SOURCE's own language rather "
+        "than your own paraphrase, and add no evaluation or judgment beyond what the source itself supports. "
+        "Keep it fairly short (a real chavruta exchange, not an essay). Write in the learner's language. **bold** key terms. "
         "LANGUAGE: write ONLY in the learner's language, with NO words from another language mixed in — in a "
         "Hebrew turn write 'בעל הבית', never 'employer' (and no stray Chinese/Russian either); in an English "
-        "turn keep it English.",
+        "turn keep it English. Each source above is headed '### [S#] <ref>' — that ref (e.g. 'Yoma.148.10') "
+        "is an internal identifier, never something to write out in your answer. To name a Gemara daf in "
+        "prose, use its human form (e.g. 'יומא עד ע\"ב' / 'Yoma 74b'), never the internal number; to name a "
+        "work, use its real Hebrew/English title, never the corpus ref string.",
     ]
     return "\n".join(lines)
 
@@ -1223,8 +1503,11 @@ def _generate_chavruta_turn(question: str, hits, lang: str, he: bool, history, w
     raw, fetched = llm.request(job, lang=lang,
                               token_budget=_max_tokens_for(Intent.EXPLAIN, _get_pipeline().profile))
     hits = hits + list(fetched or [])   # include agentically-fetched so their [S#] resolve
-    nums, used, seen = [int(n) for n in re.findall(r"\[\s*S(\d+)\s*\]", raw)], [], set()
-    for i in nums:
+    # marker_numbers_in (not a bespoke regex) so a non-standard bracket the model writes — e.g.
+    # "[source S1]" — resolves the same way enforce_citations would, instead of silently vanishing
+    # from the citation list (found live 2026-08-19, session 11190b1b).
+    used, seen = [], set()
+    for i in grounded.marker_numbers_in(raw):
         if 1 <= i <= len(hits) and i not in seen:
             seen.add(i)
             h = hits[i - 1]
@@ -1235,9 +1518,29 @@ def _generate_chavruta_turn(question: str, hits, lang: str, he: bool, history, w
                                     license=(getattr(h, "license", "") or ""),
                                     version_title=(getattr(h, "version_title", "") or "")))
     raw = _strip_instruction_echo(raw, he)
+    # Split the model's source list off FIRST — see _split_source_note for why it must not reach the
+    # foreign-language pass.
+    raw, note = _split_source_note(raw)
     clean = _strip_markers(_fix_bleeding_sentences(raw, he, llm), he=he)
-    return QueryResponse(answer=clean, citations=used, grounded=bool(used),
-                         intent="chavruta", files=[])
+    # Citation-faithfulness: chavruta never ran this check at all until now, unlike every other
+    # generation path (_qa_answer, lesson). The gap is exactly what let a learner's invented pasuk
+    # ("לא ימיש השרימפ מתוך חלבו", a pun) get validated as if it were real — the reply said it
+    # "appears in the Mishnah" with a made-up citation, and nothing caught it (2026-08-13, real
+    # production case). `hits` already includes agentically-fetched sources.
+    caveats: list[str] = []
+    try:
+        bad_q = grounded.unverified_quotes(clean, hits)
+    except Exception:                       # noqa: BLE001 — a watching check must never break a turn
+        _log.exception("chavruta unverified_quotes check failed")
+        bad_q = []
+    if bad_q:
+        caveats.append(("הערה: ציטוט/ים שלא נמצאו במקורות שנשלפו: «" + "», «".join(bad_q[:2]) + "» — יש לאמת.")
+                       if he else
+                       ("Note: quote(s) not found in the retrieved sources: «" + "», «".join(bad_q[:2]) + "» — verify."))
+    out = QueryResponse(answer=clean, citations=used, grounded=bool(used),
+                        intent="chavruta", files=[], source_note=note, caveats=caveats)
+    _widen_citations_from_note(out, note, retrieved_refs=[h.ref for h in hits])
+    return out
 
 
 def _generate_qa_turn_from_hits(question: str, hits, lang: str, he: bool, history, llm) -> QueryResponse:
@@ -1260,14 +1563,20 @@ def _generate_qa_turn_from_hits(question: str, hits, lang: str, he: bool, histor
             text_en=getattr(c, "text_en", ""),
             commentator=getattr(c, "commentator_id", "") or "",
             deep_link=getattr(c, "deep_link", "") or "",
+            license=getattr(c, "license", "") or "",
+            version_title=getattr(c, "version_title", "") or "",
         )
 
     text = _strip_instruction_echo(answer.text, he)
+    text, note = _split_source_note(text)
     clean = _strip_markers(_fix_bleeding_sentences(text, he, llm), he=he)
-    return QueryResponse(
+    out = QueryResponse(
         answer=clean, citations=[_cite(c) for c in answer.citations],
         grounded=answer.grounded, intent="qa", caveats=list(answer.caveats), files=[],
+        source_note=note,
     )
+    _widen_citations_from_note(out, note, retrieved_refs=[h.ref for h in hits])
+    return out
 
 
 _MAX_CARRIED_REFS = 12
@@ -1533,12 +1842,26 @@ def _daf_yomi_context_note(tractate: str, daf: int, he: bool) -> str:
 
 # Global concurrency gate — every generation reaches the LLM/embedder/Qdrant through this one
 # function (sync routes call it inline; async routes call it from inside a job worker), so gating
-# HERE bounds total concurrent generations across BOTH paths combined, not per-path. Sized small on
-# purpose: on a 2-vCPU free-tier box (Oracle Always Free, an HF Spaces free CPU Space) letting more
-# than a couple of generations (embedding + LLM call) run at once buys nothing and risks the whole
-# process getting OOM-killed or grinding every in-flight request to a crawl. Excess requests QUEUE
-# (block on the semaphore) rather than run — that's cheap; running unboundedly is not — up to a
-# timeout, past which we degrade to an honest "busy" answer instead of piling up forever.
+# HERE bounds total concurrent generations across BOTH paths combined, not per-path.
+#
+# Measured live 2026-08-19 (300 real production requests): mean 45.8s, median 30.0s per request —
+# and of that, the CPU-bound part (embedding + Qdrant) is 0.6-8.7s. The rest is waiting on the LLM
+# API over the network, holding no CPU at all. Before 2026-08-19 this ONE gate covered both the
+# short CPU-bound burst and the long network wait, so it had to stay small to protect the box's
+# cores — capping how many requests could be in flight in total to roughly how many could be
+# COMPUTING at once, even though most of an in-flight request's time is spent doing nothing but
+# waiting.
+#
+# retrieval\hybrid.py::_retrieval_gate now protects the CPU-bound burst specifically
+# (CHAVRUTA_MAX_CONCURRENT_RETRIEVALS), so THIS gate's job is narrower: bound total requests in
+# flight (mostly idle, waiting on Nebius) against thread/memory growth, not against CPU contention
+# — it can be, and was raised, well past what the box's core count alone would justify. Default
+# stays conservative (2) for any deployment that has not measured its own real request durations;
+# CHAVRUTA_MAX_CONCURRENT_GENERATIONS=20 in production as of 2026-08-19, comfortably under
+# Starlette's default sync-route thread-pool ceiling (40) so this stays the binding limit rather
+# than queueing invisibly one layer up. Excess requests QUEUE (block on the semaphore) rather than
+# run — that's cheap; running unboundedly is not — up to a timeout, past which we degrade to an
+# honest "busy" answer instead of piling up forever.
 _MAX_CONCURRENT_GENERATIONS = int(os.environ.get("CHAVRUTA_MAX_CONCURRENT_GENERATIONS", "2"))
 _GENERATION_QUEUE_TIMEOUT_S = float(os.environ.get("CHAVRUTA_QUEUE_TIMEOUT_S", "45"))
 _generation_semaphore = threading.Semaphore(_MAX_CONCURRENT_GENERATIONS)
@@ -1559,7 +1882,14 @@ def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
     of a 500 for the whole request (real HTTPExceptions — e.g. 422 bad intent — still propagate).
     `llm` defaults to the pipeline's own shared backend; a caller may override it (BYOK)."""
     he = (lang or "") != "en"
+    # Every route reaches generation through here — /query, /sessions/{id}/query, its async twin and
+    # the calendar paths. Setting the flag on ONE of them is what made the trailing source list work
+    # in a direct call and never once through the UI: /sessions/{id}/query is what the app actually
+    # posts to, and it went through a different door. Reset in the `finally` below, so a worker
+    # thread cannot carry it into the next request it serves.
+    _note_token = llm_base.set_source_note(_source_note_enabled(owner_id))
     if not _generation_semaphore.acquire(timeout=_GENERATION_QUEUE_TIMEOUT_S):
+        llm_base.reset_source_note(_note_token)
         _log.warning("generation queue timeout — system at capacity (intent=%r)", intent_str)
         return QueryResponse(
             answer=("המערכת עמוסה כרגע — נסו שוב בעוד רגע." if he
@@ -1584,6 +1914,7 @@ def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
         with _in_flight_lock:
             _in_flight_count -= 1
         _generation_semaphore.release()
+        llm_base.reset_source_note(_note_token)
 
 
 def _calendar_modes_enabled(owner_id: str) -> bool:
@@ -1591,12 +1922,18 @@ def _calendar_modes_enabled(owner_id: str) -> bool:
     frontend hides the options entirely; this is the real server-side enforcement, checked whether
     or not the request came through the UI). CHAVRUTA_CALENDAR_BETA_OWNERS is either a comma-
     separated allowlist of owner_ids, or "*" once the feature is out of beta for everyone; empty
-    (the default) means nobody yet."""
+    (the default) means nobody yet.
+
+    Same shape as `_sugya_enabled` below: the env var is the blunt instrument (a redeploy to change
+    who is in), and a dev helper granted the "calendar" feature from the admin panel is the one the
+    operator can flip per person, with the consent the env var cannot carry.
+    """
     raw = os.environ.get("CHAVRUTA_CALENDAR_BETA_OWNERS", "").strip()
     if raw == "*":
         return True
-    allowed = {o.strip() for o in raw.split(",") if o.strip()}
-    return owner_id in allowed
+    if owner_id in {o.strip() for o in raw.split(",") if o.strip()}:
+        return True
+    return devhelpers.has_feature(owner_id, "calendar")
 
 
 def _plan_for(owner_id: str) -> str:
@@ -1609,6 +1946,23 @@ def _plan_for(owner_id: str) -> str:
     both are floors over what the account itself holds, never overrides.
     """
     return plans.canonical(orgs.effective_plan(owner_id))
+
+
+def _source_note_enabled(owner_id: str) -> bool:
+    """Whether to ask the model for its own source list (the HHH block).
+
+    Rolled out to the operator alone first, deliberately: it changes the shape of every Hebrew
+    answer, and a prompt change is the kind that looks fine on three examples and drifts on the
+    hundredth. `CHAVRUTA_SOURCE_NOTE_OWNERS` is the same allowlist shape as the other two gates —
+    comma-separated ids, `*` for everyone, empty for nobody — and dev helpers can be given it
+    individually through the `source_note` capability once it has been lived with.
+    """
+    raw = os.environ.get("CHAVRUTA_SOURCE_NOTE_OWNERS", "").strip()
+    if raw == "*":
+        return True
+    if owner_id and owner_id in {o.strip() for o in raw.split(",") if o.strip()}:
+        return True
+    return bool(owner_id) and devhelpers.has_feature(owner_id, "source_note")
 
 
 def _sugya_enabled(owner_id: str) -> bool:
@@ -1661,6 +2015,19 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
             raise HTTPException(status_code=422, detail=f"unknown intent: {intent_str!r}") from exc
 
     if intent == Intent.LESSON:            # lesson mode → Claude writes the 3 files, audience-adapted
+        # Mode is STICKY (see _prepare_continue) — every turn in a lesson-mode chat lands here,
+        # forever, regardless of what the client sends. Without this check, a plain follow-up
+        # question ("תסביר לי יותר על מה שרש\"י אמר") fell straight into _run_lesson, which has no
+        # notion of "this isn't a new topic" beyond the narrow audience/length clarify-echo
+        # (_is_clarify_answer) — it retrieved sources for the follow-up's OWN wording and silently
+        # built a second, unrelated lesson, spending a real weekly lesson-pool charge on garbage
+        # (caught live 2026-08-21, reading the code with the founder — never shipped a working
+        # follow-up path). Once a lesson has actually finished in this session, only an EXPLICIT
+        # request to build or change one runs _run_lesson again; anything else continues as a
+        # grounded chavruta turn instead — _prepare_continue already folded the lesson's own text
+        # into history (_lesson_turn_text), so the discussion is anchored on what was actually taught.
+        if any(h.role == "assistant" and h.lesson for h in history) and not _is_lesson_build_request(question):
+            return _run_chavruta(question, lang, history=history, llm=llm)
         return _run_lesson(question, lang, history=history, audience=audience,
                            grade_band=grade_band, length=length, owner_id=owner_id, llm=llm)
 
@@ -1675,6 +2042,8 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
             text_en=getattr(c, "text_en", ""),
             commentator=getattr(c, "commentator_id", "") or "",
             deep_link=getattr(c, "deep_link", "") or "",
+            license=getattr(c, "license", "") or "",
+            version_title=getattr(c, "version_title", "") or "",
         )
 
     lesson_plan = None
@@ -1694,9 +2063,10 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
     citations_out = [_cite(c) for c in answer.citations]
     resolved_llm = llm or _get_pipeline().llm
     text = _strip_instruction_echo(answer.text, he)
+    text, source_note = _split_source_note(text)
     clean = _strip_markers(_fix_bleeding_sentences(text, he, resolved_llm), he=he)
 
-    return QueryResponse(
+    out = QueryResponse(
         answer=clean,
         citations=citations_out,
         grounded=answer.grounded,
@@ -1704,7 +2074,12 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
         caveats=list(answer.caveats),
         lesson_plan=lesson_plan,
         files=[],
+        source_note=source_note,
     )
+    # Sources the model used without marking, plus a finding for anything it named that resolves to
+    # nothing OR was never actually retrieved this turn — see _widen_citations_from_note.
+    _widen_citations_from_note(out, source_note, retrieved_refs=answer.retrieved_refs)
+    return out
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
@@ -2147,8 +2522,17 @@ def _reserve_tokens(owner: str, lang: str, intent: str, user_key: str = "") -> R
             meter=db.TOKENS, day=day)
         if charge.allowed:
             return Reservation(estimate, False, ctx, day)
-        # Deliberately no credit or BYOK fallback for a member: both would let one person spend past
-        # the cap the school set for them, which is the single control an admin has over the pool.
+        # No BYOK fallback for a member — that needs a personal provider key, which is out of scope
+        # for a school seat. Credits ARE a fallback (decided 2026-08-20): a member may buy their own
+        # with their own card, so hitting the school's cap or the shared pool's limit stops the FREE
+        # ride, not the person — they can keep going on their own money. Mirrors the non-member path
+        # below exactly; nothing was reserved against the pool, so there is nothing to settle there.
+        cost = plans.credit_cost(intent)
+        spent, balance = db.spend_credits(owner, cost)
+        if spent:
+            _log.info("owner=%s hit org pool (%s); spent %d credit(s), %d left",
+                      owner, charge.refused, cost, balance)
+            return Reservation(0, day=day, credits_spent=cost)
         raise HTTPException(status_code=429, detail=_pool_quota_message(charge.refused, lang, ctx))
 
     plan = _plan_for(owner)
@@ -2449,10 +2833,11 @@ def query(req: QueryRequest, owner: str = Depends(current_owner),
         raise HTTPException(status_code=422, detail="question must not be empty")
     reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key,
                                                     x_user_llm_base_url, x_user_llm_model)
+    # The gate lives in _run_query, which every generation path goes through — see there.
     return _metered(owner, reserved, req.intent, lambda: _run_query(
         _augment_question(req.question, req.attachments), req.lang, req.intent, [],
-        audience=req.audience, grade_band=req.grade_band, length=req.length, owner_id=owner, llm=llm),
-        req, meter=meter)()
+        audience=req.audience, grade_band=req.grade_band, length=req.length,
+        owner_id=owner, llm=llm), req, meter=meter)()
 
 
 class MeOut(BaseModel):
@@ -3072,6 +3457,7 @@ def _save_assistant(session_id: str, result: QueryResponse) -> None:
         caveats=result.caveats,
         grounded=result.grounded,
         files=[f.model_dump() for f in result.files],
+        source_note=result.source_note,
     )
     # Point the library entry at the turn that now holds the same documents, so deleting the lesson
     # can clear both copies. Best-effort: a lesson that stays unlinked still deletes from the
@@ -3102,6 +3488,27 @@ def _first_query_work(sid: str, req: QueryRequest, owner: str, llm=None) -> dict
     return {"id": sid, "first_q": row["first_q"], "created_at": row["created_at"], "result": result}
 
 
+_FULL_LESSON_FILE_NAMES = ("השיעור_המלא.doc", "full_lesson.doc")
+
+
+def _lesson_turn_text(m: dict) -> tuple[str, bool]:
+    """The text to carry into history for one saved turn, plus whether it was a completed LESSON.
+
+    `QueryResponse.answer` is deliberately empty for a finished lesson (see
+    `_generate_lesson_from_hits`) — its content lives only in `files`. Left as `m["text"]` as-is,
+    every consumer of `history` downstream (a chavruta follow-up, `_conversation_signals`, the raw
+    chat history hardened into the next LLM prompt via `render_messages`) would see an EMPTY
+    assistant turn sitting where the lesson was — as if nothing had been taught. Substituting the
+    full-lesson file's own text lets a follow-up turn actually discuss what was built.
+    """
+    text = m.get("text") or ""
+    files = m.get("files") or []
+    if text.strip() or not files:
+        return text, False
+    full = next((f for f in files if f.get("name") in _FULL_LESSON_FILE_NAMES), files[-1])
+    return full.get("content") or "", True
+
+
 def _prepare_continue(session_id: str, req: QueryRequest, owner: str) -> tuple[list[Turn], str]:
     """Shared setup for continuing a session: ownership gate (404 if not owned), build the trailing
     history, save the user turn, and resolve the sticky/locked intent. Returns (history, intent)."""
@@ -3112,10 +3519,14 @@ def _prepare_continue(session_id: str, req: QueryRequest, owner: str) -> tuple[l
         raise HTTPException(status_code=404, detail="session not found")
     # Carry each assistant turn's CITED refs, not just its prose. db.get_messages already decodes
     # them; dropping them here is what let a five-turn discussion of a sugya lose the sugya (see
-    # _conversation_signals).
-    history = [Turn(role=m["role"], text=m["text"],
-                    refs=[r for c in (m.get("citations") or []) if (r := (c or {}).get("ref"))])
-               for m in history_rows[-8:]]
+    # _conversation_signals). `lesson=` marks a turn that finished a lesson (see _lesson_turn_text) —
+    # _run_query_impl uses it to tell a follow-up question from a request for a genuinely new lesson.
+    history = []
+    for m in history_rows[-8:]:
+        text, is_lesson = _lesson_turn_text(m)
+        history.append(Turn(role=m["role"], text=text,
+                            refs=[r for c in (m.get("citations") or []) if (r := (c or {}).get("ref"))],
+                            lesson=is_lesson))
     db.save_message(session_id, "user", req.question)
     # Sticky mode: a chat stays in the mode chosen on its first turn — ignore any intent the client
     # sends on later turns. Legacy sessions (mode=NULL) fall back to the per-request intent.
@@ -3260,6 +3671,9 @@ class MessageOut(BaseModel):
     caveats: list[str]
     grounded: bool | None
     files: list[dict] = []
+    # Carried on reload so the sources panel can render it again — it is cut out of `text`, so
+    # without its own column and its own field it existed only for the life of one response.
+    source_note: str = ""
     created_at: str
 
 

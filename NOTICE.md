@@ -1,6 +1,7 @@
 # Third-party content — the texts are not covered by the code licence
 
-Chavruta.AI is MIT-licensed **software** (see [LICENSE](LICENSE)). It is not a licence to the
+Chavruta.AI's **software** is licensed under the PolyForm Noncommercial License 1.0.0 (see
+[LICENSE](LICENSE)) — noncommercial use only. It is not a licence to the
 Jewish texts it retrieves. Those come from [Sefaria](https://www.sefaria.org) and each one carries
 the licence of its own **edition** — Sefaria grants rights per `(title, language, versionTitle)`,
 not per work and not per author. Two Hebrew editions of the same tractate can differ.

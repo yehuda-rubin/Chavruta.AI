@@ -115,17 +115,30 @@ function LessonFiles({ lang, files, onPreview }: { lang: Lang; files: FileOut[];
   );
 }
 
-function Bubble({ lang, m, onPreview }: { lang: Lang; m: Message; onPreview: (f: FileOut) => void }) {
+function Bubble({ lang, m, onPreview, userInitial }: { lang: Lang; m: Message; onPreview: (f: FileOut) => void; userInitial: string }) {
   const dir = isHe(m.text) ? "he" : "en";
   const [copied, setCopied] = useState(false);
   if (m.role === "user") {
     return (
       <div className="flex gap-3.5 flex-row-reverse">
-        <div className="h-9 w-9 rounded-2xl grad grid place-items-center text-white font-bold shrink-0">א</div>
+        <div className="h-9 w-9 rounded-2xl grad grid place-items-center text-white font-bold shrink-0">{userInitial}</div>
         <div className="grad text-white rounded-3xl rounded-tl-md p-5 shadow-lg shadow-tekhelet/20 max-w-[80%]">
           <p className={`font-serif text-[17px] leading-loose ${dir}`} style={{ whiteSpace: "pre-wrap" }}>
             {m.text}
           </p>
+          <button
+            onClick={() => {
+              navigator.clipboard?.writeText(m.text).then(() => {
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              }).catch(() => {});
+            }}
+            aria-label={tr(lang, "copy")}
+            className="mt-3 text-xs text-white/70 hover:text-white inline-flex items-center gap-1 transition"
+          >
+            <Icon name={copied ? "check" : "content_copy"} className="text-[15px]" />
+            {tr(lang, copied ? "copied" : "copy")}
+          </button>
         </div>
       </div>
     );
@@ -190,6 +203,7 @@ export function ChatPane({
   onSend,
   onPreviewFile,
   calendarModesEnabled,
+  userEmail,
 }: {
   lang: Lang;
   messages: Message[];
@@ -207,7 +221,12 @@ export function ChatPane({
   onSend: (text: string) => void;
   onPreviewFile: (f: FileOut) => void;
   calendarModesEnabled?: boolean;
+  // The signed-in user's email, when known — used only to derive the avatar initial. In local/dev
+  // mode (no Supabase configured) there's no signed-in user at all, so this stays undefined and the
+  // avatar falls back to the generic aleph glyph rather than rendering empty.
+  userEmail?: string | null;
 }) {
+  const userInitial = userEmail ? userEmail[0].toUpperCase() : "א";
   const [input, setInput] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -282,7 +301,7 @@ export function ChatPane({
             </div>
           </div>
         ) : (
-          messages.map((m, i) => <Bubble key={m.id ?? i} lang={lang} m={m} onPreview={onPreviewFile} />)
+          messages.map((m, i) => <Bubble key={m.id ?? i} lang={lang} m={m} onPreview={onPreviewFile} userInitial={userInitial} />)
         )}
         {thinkingHere && (
           <div className="flex gap-3.5">
