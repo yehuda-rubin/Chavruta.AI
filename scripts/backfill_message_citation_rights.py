@@ -72,9 +72,13 @@ def _resolve_refs(client: QdrantClient, refs: list[str]) -> dict[str, tuple[str,
 
 
 def _rows(table: str) -> list:
+    # Both tables have their own literal `id` primary key column (messages.id is an autoincrement
+    # int, saved_lessons.id is text) — using that directly instead of the sqlite `rowid` alias,
+    # since a table with an explicit INTEGER PRIMARY KEY reports that column's own name back in
+    # cursor.description rather than "rowid", and saved_lessons' key isn't an int at all.
     conn = db.get_conn()
     return conn.execute(
-        f"SELECT rowid, citations FROM {table} "  # noqa: S608 — table name is one of two literals below
+        f"SELECT id, citations FROM {table} "  # noqa: S608 — table name is one of two literals below
         "WHERE citations IS NOT NULL AND citations != '' AND citations != '[]'"
     ).fetchall()
 
@@ -94,7 +98,7 @@ def main() -> int:
             needs = [c for c in cits if not (c.get("license") or "").strip()
                      and not (c.get("version_title") or "").strip()]
             if needs:
-                targets.append((table, row["rowid"], cits))
+                targets.append((table, row["id"], cits))
                 missing_refs.update(c["ref"] for c in needs if c.get("ref"))
 
     print(f"① {len(targets)} rows across messages/saved_lessons have citations missing rights "
@@ -106,7 +110,7 @@ def main() -> int:
     updated_rows = 0
     updated_citations = 0
     still_missing: set[str] = set()
-    for table, rowid, cits in targets:
+    for table, row_id, cits in targets:
         changed = False
         for c in cits:
             if (c.get("license") or "").strip() or (c.get("version_title") or "").strip():
@@ -123,8 +127,8 @@ def main() -> int:
             updated_rows += 1
             if not args.dry_run:
                 with db._tx(db.get_conn()) as conn:
-                    conn.execute(f"UPDATE {table} SET citations=? WHERE rowid=?",  # noqa: S608
-                                (json.dumps(cits, ensure_ascii=False), rowid))
+                    conn.execute(f"UPDATE {table} SET citations=? WHERE id=?",  # noqa: S608
+                                (json.dumps(cits, ensure_ascii=False), row_id))
 
     print(f"\n{'[DRY RUN] would update' if args.dry_run else 'updated'} {updated_rows} row(s), "
           f"{updated_citations} citation(s).")
