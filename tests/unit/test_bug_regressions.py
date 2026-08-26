@@ -2513,3 +2513,70 @@ def test_chavruta_job_prompt_now_prohibits_inventing_a_users_own_quote():
     job = api._chavruta_job_md("שאלה", [], "he", [])
     assert "MUST NOT invent" in job
     assert "the learner is the one who states" in job
+
+
+# ── license/version_title dropped on the standard QA citation path (found 2026-08-26) ──────────
+# Real production bug: a regular chat answer's SourcesPanel attribution (license + edition) showed
+# up on SOME source cards and not others, even though the commercial-rights backfill covers the
+# whole 2.4M-point collection. Root cause traced live: `Citation` (corpus/schema.py) — the dataclass
+# the STANDARD pipeline.ask() / enforce_citations() path uses — never had `license`/`version_title`
+# fields at all, so every citation built through it silently lost the data regardless of what the
+# underlying RankedHit carried. The lesson source-sheet and source-note-widening paths were fine
+# because they build CitationOut directly from RankedHit, bypassing Citation entirely — which is
+# exactly why the gap was invisible in the one spot already verified (a finished lesson) and only
+# showed up on ordinary qa/explain answers, the highest-traffic path in the app.
+from chavruta.generation.grounded import enforce_citations
+from chavruta.lessons.builder import _section
+from chavruta.lessons.templates import Stage
+from chavruta.retrieval.base import RankedHit as _RH
+
+
+def test_citation_dataclass_carries_license_and_version_title():
+    from chavruta.corpus.schema import Citation
+    c = Citation(chunk_id="c1", ref="Test.1.1", deep_link="https://x",
+                 license="CC-BY-SA", version_title="Wikisource")
+    assert c.license == "CC-BY-SA"
+    assert c.version_title == "Wikisource"
+
+
+def test_enforce_citations_carries_license_and_version_title_from_the_hit():
+    """The standard pipeline.ask() path (used by ordinary qa/explain answers, not lessons)."""
+    hit = _RH(chunk_id="c1", ref="Test.1.1", text="טקסט", score=0.9,
+              license="Public Domain", version_title="Vilna Edition")
+    text, citations, grounded = enforce_citations("תשובה [S1]", {"S1": hit})
+    assert grounded is True
+    assert citations[0].license == "Public Domain"
+    assert citations[0].version_title == "Vilna Edition"
+
+
+def test_lesson_builder_section_carries_license_and_version_title():
+    hit = _RH(chunk_id="c1", ref="Test.1.1", text="טקסט", score=0.9,
+              license="CC0", version_title="ויקיטקסט")
+    stage = Stage(key="opening", title_he="פתיחה")
+    section = _section(stage, [hit])
+    assert section.citations[0].license == "CC0"
+    assert section.citations[0].version_title == "ויקיטקסט"
+
+
+def test_generate_qa_turn_from_hits_passes_license_and_version_title_through(monkeypatch):
+    """_generate_qa_turn_from_hits (parsha's default, non-lesson turn) has its own local _cite()
+    closure, separate from enforce_citations — it silently dropped license/version_title even when
+    the Answer's Citation objects carried them. Exercises the real function end-to-end, not a
+    reimplementation of the fix."""
+    from chavruta.corpus.schema import Answer, Citation
+
+    hit = _RH(chunk_id="c1", ref="Test.1.1", text="טקסט", score=0.9)
+    real_citation = Citation(chunk_id="c1", ref="Test.1.1", deep_link="https://x",
+                             license="CC-BY-SA", version_title="Wikisource")
+    answer = Answer(text="תשובה [S1]", citations=[real_citation], grounded=True)
+
+    class _FakePipeline:
+        llm = "llm"
+
+        def _qa_answer(self, query, result, llm=None, *, history=None, missing_note=None):
+            return answer
+
+    monkeypatch.setattr(api, "_get_pipeline", lambda: _FakePipeline())
+    resp = api._generate_qa_turn_from_hits("שאלה", [hit], "he", True, [], None)
+    assert resp.citations[0].license == "CC-BY-SA"
+    assert resp.citations[0].version_title == "Wikisource"

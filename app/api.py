@@ -1563,6 +1563,8 @@ def _generate_qa_turn_from_hits(question: str, hits, lang: str, he: bool, histor
             text_en=getattr(c, "text_en", ""),
             commentator=getattr(c, "commentator_id", "") or "",
             deep_link=getattr(c, "deep_link", "") or "",
+            license=getattr(c, "license", "") or "",
+            version_title=getattr(c, "version_title", "") or "",
         )
 
     text = _strip_instruction_echo(answer.text, he)
@@ -2040,6 +2042,8 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
             text_en=getattr(c, "text_en", ""),
             commentator=getattr(c, "commentator_id", "") or "",
             deep_link=getattr(c, "deep_link", "") or "",
+            license=getattr(c, "license", "") or "",
+            version_title=getattr(c, "version_title", "") or "",
         )
 
     lesson_plan = None

@@ -285,6 +285,8 @@ def enforce_citations(
             # Full source text (no truncation) — the UI shows the complete quote on expand.
             quote=source_body(getattr(h, "text", None) or getattr(h, "quote", "") or ""),
             commentator_id=getattr(h, "commentator_id", None),
+            license=getattr(h, "license", "") or "",
+            version_title=getattr(h, "version_title", "") or "",
         )
         for h in used.values()
     ]

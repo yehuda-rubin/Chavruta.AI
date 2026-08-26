@@ -66,7 +66,9 @@ def _section(stage: Stage, hits: list[RankedHit]) -> LessonSection:
         source_refs=[h.ref for h in hits],
         citations=[
             Citation(chunk_id=h.chunk_id, ref=h.ref, deep_link=h.deep_link,
-                     quote=source_body(h.text)[:280], commentator_id=h.commentator_id)
+                     quote=source_body(h.text)[:280], commentator_id=h.commentator_id,
+                     license=getattr(h, "license", "") or "",
+                     version_title=getattr(h, "version_title", "") or "")
             for h in hits
         ],
     )

@@ -142,6 +142,10 @@ class Citation:
     deep_link: str
     quote: str = ""
     commentator_id: str | None = None
+    # Rights of the specific edition this text came from — see app/api.py::CitationOut for why an
+    # empty value means "unknown" (all-rights-reserved), never "no attribution owed".
+    license: str = ""
+    version_title: str = ""
 
 
 @dataclass
