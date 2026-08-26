@@ -28,7 +28,10 @@ function licenseLabel(lic: string, lang: Lang): string {
 function Attribution({ c, lang }: { c: Citation; lang: Lang }) {
   const lic = (c.license || "").trim();
   const ver = (c.version_title || "").trim();
-  const link = (c.deep_link || "").trim();
+  // Only ever render http(s) links — deep_link is server data, but a malformed/hostile value
+  // (e.g. "javascript:...") must not become a clickable anchor.
+  const rawLink = (c.deep_link || "").trim();
+  const link = /^https?:\/\//i.test(rawLink) ? rawLink : "";
   if (!lic && !ver && !link) return null;
   return (
     <div className="mt-2 pt-2 border-t border-line/40 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink/45">

@@ -59,10 +59,15 @@ export function setUserLLMModel(model: string | null) {
   _lsSet(_BYOK_MODEL_KEY, _userLLMModel);
 }
 
+// Only the routes that actually generate (or test) with the user's own key need to carry it —
+// attaching it to every call (billing, feedback, admin, …) leaked it into proxy/access logs for
+// requests that never touch an LLM at all.
+const _BYOK_PATH_RE = /^\/(sessions|byok)(\/|$|\?)/;
+
 async function req<T>(path: string, opts?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (_authToken) headers.Authorization = `Bearer ${_authToken}`;
-  if (_userLLMKey) {
+  if (_userLLMKey && _BYOK_PATH_RE.test(path)) {
     headers["X-User-LLM-Key"] = _userLLMKey;
     if (_userLLMBaseUrl) headers["X-User-LLM-Base-URL"] = _userLLMBaseUrl;
     if (_userLLMModel) headers["X-User-LLM-Model"] = _userLLMModel;
@@ -95,6 +100,8 @@ async function req<T>(path: string, opts?: RequestInit): Promise<T> {
   if (looksLikeHtml(body)) {
     throw new Error(`הבקשה לא הגיעה לשרת (${path}) — התקבל HTML במקום JSON`);
   }
+  // 204 No Content (delete endpoints) — and any other empty-body success — has nothing to parse.
+  if (res.status === 204 || body === "") return undefined as T;
   return JSON.parse(body) as T;
 }
 
