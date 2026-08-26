@@ -24,13 +24,24 @@ RUN npm ci
 COPY web/ ./
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# NEXT_PUBLIC_* vars are inlined into the client bundle by `next build` — setting them only as
-# container `environment:` (docker-compose.yml) has no effect, since that's runtime and this bundle
-# is already frozen by then. They have to arrive as build ARGs into THIS stage instead.
+# NEXT_PUBLIC_* vars are inlined into the client bundle by `next build` — container `environment:`
+# (docker-compose.yml) is runtime, too late for an already-frozen bundle, so a value has to reach
+# THIS stage as a build ARG instead.
+#
+# Written to .env.production.local, and ONLY when actually provided — never as a plain `ENV`. An
+# unconditional `ENV NEXT_PUBLIC_SUPABASE_URL=$ARG` (even when $ARG is empty) puts an EMPTY string
+# into process.env, and Next.js's env precedence puts process.env above every `.env*` file — so it
+# would SHADOW a real value this repo already keeps in `web/.env.production` (present on the deploy
+# host, git-ignored, loaded natively by `next build`; root .env / docker-compose `environment:` was
+# never the mechanism actually in use here). Caught live 2026-08-26: exactly that shadowing blanked
+# a working Supabase config and took auth down site-wide for one deploy, immediately rolled back.
+# Writing to the file conditionally means an empty ARG (this deployment) leaves the real file alone,
+# while a deployment that DOES configure via docker-compose build.args still gets it baked in.
 ARG NEXT_PUBLIC_SUPABASE_URL
 ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
-ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL \
-    NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
+RUN { [ -n "$NEXT_PUBLIC_SUPABASE_URL" ] && echo "NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL"; \
+      [ -n "$NEXT_PUBLIC_SUPABASE_ANON_KEY" ] && echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY"; \
+      true; } >> .env.production.local
 
 RUN npm run build
 
