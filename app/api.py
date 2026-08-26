@@ -3484,7 +3484,12 @@ def _first_query_work(sid: str, req: QueryRequest, owner: str, llm=None) -> dict
         db.delete_session(sid, owner)   # don't leave a half-created, answer-less session behind
         raise
     _save_assistant(sid, result)
-    row = next(s for s in db.list_sessions(owner) if s["id"] == sid)
+    row = next((s for s in db.list_sessions(owner) if s["id"] == sid), None)
+    if row is None:
+        # Session vanished between being created and read back — a concurrent delete from the same
+        # caller, or the account sweeper's retention pass. An unhandled StopIteration here would
+        # otherwise surface as a bare 500 instead of the 404 this actually is.
+        raise HTTPException(status_code=404, detail="session not found")
     return {"id": sid, "first_q": row["first_q"], "created_at": row["created_at"], "result": result}
 
 
