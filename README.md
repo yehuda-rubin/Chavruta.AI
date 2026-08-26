@@ -361,7 +361,7 @@ Inspired by Sefaria's [Virtual Havruta](https://github.com/Sefaria/AppliedAI).
 ## Author
 
 **Chavruta.AI** was created and is maintained by **Yehuda Rubin**.
-Contact: 052-920-9287.
+Contact: [LinkedIn](https://www.linkedin.com/in/yehuda-rubin-a62108377/).
 
 ## Licence
 
