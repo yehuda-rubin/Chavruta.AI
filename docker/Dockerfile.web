@@ -23,6 +23,15 @@ RUN npm ci
 
 COPY web/ ./
 ENV NEXT_TELEMETRY_DISABLED=1
+
+# NEXT_PUBLIC_* vars are inlined into the client bundle by `next build` — setting them only as
+# container `environment:` (docker-compose.yml) has no effect, since that's runtime and this bundle
+# is already frozen by then. They have to arrive as build ARGs into THIS stage instead.
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
+ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
+
 RUN npm run build
 
 # ── Stage 2: run ─────────────────────────────────────────────────────────────

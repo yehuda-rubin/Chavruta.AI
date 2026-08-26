@@ -170,6 +170,12 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.web
+      # NEXT_PUBLIC_* vars are inlined at `next build` time, not read at container start — the
+      # `environment:` block below runs too late to reach the client bundle. These args are what
+      # actually gets them into the compiled JS; without them Supabase auth silently no-ops.
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
     container_name: chavruta-ui
     restart: unless-stopped
     environment:
