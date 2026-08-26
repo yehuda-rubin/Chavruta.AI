@@ -209,13 +209,15 @@ def handle_event(normalized: dict, *, now: datetime | None = None) -> None:
         _log.exception("could not write the charge to the ledger (amount=%s)", amount)
 
     try:
-        _apply_coupon_discount(owner, amount, normalized.get("transaction_uid"), tier, cycle, now)
+        _apply_coupon_discount(owner, amount, normalized.get("transaction_uid"), tier, cycle, now,
+                               email=normalized.get("email", "") or "",
+                               name=normalized.get("name", "") or "")
     except Exception:               # noqa: BLE001 — a failed rebate must not fail the whole webhook
         _log.exception("coupon discount rebate failed for %s", owner)
 
 
 def _apply_coupon_discount(owner: str, amount: float, txn_uid: str | None, tier: str, cycle: str,
-                           now: datetime) -> None:
+                           now: datetime, *, email: str = "", name: str = "") -> None:
     """Rebate a coupon-granted ILS discount off a real charge that just succeeded, via a partial
     refund — PayPlus has no API to change an already-running recurring amount, so the charge goes
     through in full and the discount comes back as money returned, same mechanism scripts/refund.py
@@ -228,13 +230,23 @@ def _apply_coupon_discount(owner: str, amount: float, txn_uid: str | None, tier:
     rebate = round(min(balance, amount), 2)
     if rebate <= 0:
         return
-    payplus.refund(txn_uid, rebate, description="קופון — הנחה על החיוב")   # raises ⇒ nothing below runs
+    description = "קופון — הנחה על החיוב"
+    payplus.refund(txn_uid, rebate, description=description)   # raises ⇒ nothing below runs
     try:
         db.record_charge(charged_at=now.isoformat(), amount=-rebate, plan=tier, cycle=cycle,
                          provider="payplus", provider_ref=txn_uid,
                          note="coupon discount rebate", txn_uid=txn_uid)
     except Exception:               # noqa: BLE001 — the money already moved; never lose that fact
         _log.exception("REBATE OF ₪%.2f ON %s IS NOT IN THE LEDGER — record it by hand", rebate, txn_uid)
+    # Same reasoning as the operator-initiated refund path (refund() above, step 4): the money moved
+    # back, and the original tax invoice still stands for the full amount unless a credit note
+    # reverses the rebated part. Best-effort — the rebate itself already happened and must stand
+    # either way; issue_credit_note() never raises, this is belt and braces on top of that.
+    try:
+        greeninvoice.issue_credit_note(email=email, name=name, amount=rebate,
+                                       description=description, now=now.timestamp())
+    except Exception:               # noqa: BLE001 — issue_credit_note already swallows; belt and braces
+        _log.exception("credit note failed for coupon rebate of ₪%.2f on %s", rebate, txn_uid)
     db.set_coupon_discount(owner, round(balance - rebate, 2))
     _log.info("coupon discount rebate for %s: ₪%.2f (balance now ₪%.2f)",
               owner, rebate, round(balance - rebate, 2))

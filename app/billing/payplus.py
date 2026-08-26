@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
 import logging
 import os
 
@@ -183,8 +184,28 @@ def verify_webhook(raw_body: bytes, user_agent: str | None, hash_header: str | N
     return hmac.compare_digest(expected, hash_header)
 
 
+def _customer_info(txn: dict) -> tuple[str, str]:
+    """(email, name) for the receipt, from the webhook's own `transaction.data.hash_data` — despite
+    the name, that field is base64-encoded JSON PayPlus round-trips containing what the hosted
+    payment page collected (email, name, vat_number, phone; verified against
+    docs.payplus.co.il's transaction-callback reference 2026-08-26). There is no plain
+    `customer_email`/`customer_name` field on this callback shape — those exist only on the
+    DIFFERENT `refURL_success` redirect response, which this webhook is not.
+    Never raises: a malformed or absent hash_data means an empty receipt name field, not a 500 on
+    a payment that already succeeded."""
+    raw = ((txn.get("data") or {}).get("hash_data") or "").strip()
+    if not raw:
+        return "", ""
+    try:
+        info = json.loads(base64.b64decode(raw).decode("utf-8"))
+    except Exception:
+        return "", ""
+    return str(info.get("email") or "").strip(), str(info.get("name") or "").strip()
+
+
 def parse_event(payload: dict) -> dict:
-    """Normalise a callback into {owner_id, success, transaction_uid, recurring_uid, is_renewal, amount}.
+    """Normalise a callback into {owner_id, success, transaction_uid, recurring_uid, is_renewal,
+    amount, email, name}.
 
     `transaction_uid` identifies THIS charge, where `recurring_uid` identifies the subscription that
     produced it. Refunds are issued against the former, so it has to be captured here and stored —
@@ -193,6 +214,7 @@ def parse_event(payload: dict) -> dict:
     """
     txn = payload.get("transaction") or {}
     rec = txn.get("recurring_charge_information") or {}
+    email, name = _customer_info(txn)
     return {
         "owner_id": txn.get("more_info") or payload.get("more_info"),
         "success": str(txn.get("status_code")) == "000",
@@ -200,4 +222,6 @@ def parse_event(payload: dict) -> dict:
         "recurring_uid": rec.get("recurring_uid"),
         "is_renewal": bool(rec),                 # renewal callbacks carry recurring_charge_information
         "amount": txn.get("amount"),
+        "email": email,
+        "name": name,
     }
