@@ -443,16 +443,27 @@ class HybridRetriever:
         # in Sukkah" from Sukkah and answering it from wherever the embedding happened to land.
         for tractate in (query.tractates or [])[:2]:
             try:
+                # `ref` only carries a KEYWORD payload index (exact-match, for fetch_by_refs), not a
+                # TEXT one — a MatchText filter against it is rejected by Qdrant with a 400 and used
+                # to be swallowed here silently, so this floor never actually scoped anything. Over-
+                # fetch unfiltered and filter for the tractate name in Python instead; refs are the
+                # dotted form ("Sukkah.41a.1", "Rashi_on_Sukkah.41a.1.2") so substring containment is
+                # equivalent to the word-level match this was meant to do.
                 with _timed(t, "tractate"):
                     scoped = self.store.search(self.profile.collection, hquery,
-                                               top_k=_TRACTATE_TOP_K,
-                                               filters={"ref": {"$text": tractate}})
+                                               top_k=_TRACTATE_TOP_K * 8)
+                kept = 0
                 for h in scoped:
+                    if kept >= _TRACTATE_TOP_K:
+                        break
                     rh = _to_hit(h)
+                    if tractate not in rh.ref:
+                        continue
                     # Below the named-ref anchor sentinel: the question named a tractate, not a ref,
                     # so this must not masquerade as something the user pointed at exactly.
                     rh.score = min(rh.score + _TRACTATE_BOOST, 0.98)
                     hits.append(rh)
+                    kept += 1
             except Exception as exc:
                 logger.warning("tractate-scoped search failed for %s (%s)", tractate, exc)
 

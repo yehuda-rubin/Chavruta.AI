@@ -40,7 +40,7 @@ export function HelperPrompt({ lang }: { lang: Lang }) {
   const dismiss = async (id: number) => {
     // Optimistic: the notice disappears now and the read receipt catches up. A failed write means
     // it reappears on the next load, which is the right way round for something already read.
-    setSt({ ...st, unread: st.unread.filter((m) => m.id !== id) });
+    setSt({ ...st, unread: (st.unread || []).filter((m) => m.id !== id) });
     try {
       await api.helper.markRead(id);
     } catch {
@@ -141,7 +141,7 @@ export function HelperPrompt({ lang }: { lang: Lang }) {
         </div>
       )}
 
-      {st.unread.map((m) => (
+      {(st.unread || []).map((m) => (
         <div
           key={m.id}
           role="status"

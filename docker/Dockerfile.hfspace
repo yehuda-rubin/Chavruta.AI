@@ -21,7 +21,25 @@ COPY web/package.json web/package-lock.json* ./
 RUN npm ci
 COPY web/ ./
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN npm run build
+
+# NEXT_PUBLIC_* vars are inlined into the client bundle by `next build`, so they must reach THIS
+# build stage — mirrors docker/Dockerfile.web's ARG handling (see its comment for the two live
+# traps this avoids: an unconditional ENV shadows web/.env.production with an empty string even
+# when the ARG isn't passed, and BuildKit injects an explicitly-passed-but-empty ARG into the RUN
+# environment regardless, so the unset has to happen in the SAME RUN as the build).
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
+RUN if [ -n "$NEXT_PUBLIC_SUPABASE_URL" ]; then \
+      echo "NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL" >> .env.production.local; \
+    else \
+      unset NEXT_PUBLIC_SUPABASE_URL; \
+    fi; \
+    if [ -n "$NEXT_PUBLIC_SUPABASE_ANON_KEY" ]; then \
+      echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY" >> .env.production.local; \
+    else \
+      unset NEXT_PUBLIC_SUPABASE_ANON_KEY; \
+    fi; \
+    npm run build
 
 # ── Stage 2: the runtime image ────────────────────────────────────────────────────────────────
 FROM python:3.11-slim

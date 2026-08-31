@@ -210,7 +210,10 @@ def _chapter_lengths_for(book: str) -> list[int] | None:
     return lengths
 
 
-_RANGE_RE = re.compile(r"^(?P<book>.+?)\s+(?P<c1>\d+):(?P<v1>\d+)-(?P<c2>\d+):(?P<v2>\d+)$")
+# The second chapter is optional — a same-chapter range ('Isaiah 54:1-10', 'Genesis 1:1-5') is
+# common (e.g. a Haftarah that doesn't cross a chapter boundary) and was previously unparseable:
+# the chapter-less form simply didn't match, so expand_range silently returned [].
+_RANGE_RE = re.compile(r"^(?P<book>.+?)\s+(?P<c1>\d+):(?P<v1>\d+)-(?:(?P<c2>\d+):)?(?P<v2>\d+)$")
 
 
 def expand_range(ref_range: str) -> list[str]:
@@ -227,7 +230,8 @@ def expand_range(ref_range: str) -> list[str]:
     lengths = _chapter_lengths_for(book)
     if not lengths:
         return []
-    c1, v1, c2, v2 = int(m.group("c1")), int(m.group("v1")), int(m.group("c2")), int(m.group("v2"))
+    c1, v1, v2 = int(m.group("c1")), int(m.group("v1")), int(m.group("v2"))
+    c2 = int(m.group("c2")) if m.group("c2") else c1
     if c1 < 1 or c2 > len(lengths) or c1 > c2:
         return []
     out: list[str] = []

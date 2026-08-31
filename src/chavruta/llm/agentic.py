@@ -249,7 +249,11 @@ def agentic_request(llm, body_md: str, *, lang: str = "he",
                              token_budget, state["out_tokens"])
                 state["budget_exhausted"] = True
                 return None
-        prompt = GroundedPrompt(system=_REQUEST_SYSTEM, sources=[], question=job_md)
+        # bare=True: job_md already carries the real sources inline as plain instruction text: with
+        # bare=False, render_messages ALSO wraps it in the standard QA template (whose sources=[]
+        # branch adds "(no sources retrieved)"), so the model got that contradicting the sources it
+        # could plainly see in job_md right below it.
+        prompt = GroundedPrompt(system=_REQUEST_SYSTEM, sources=[], question=job_md, bare=True)
         try:
             # Unlike the bridge's file-poll transport (which returns None on timeout and never
             # raises), a real completion backend raises on any API error / timeout / rate-limit.

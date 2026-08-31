@@ -35,7 +35,16 @@ class Reranker:
         model = self._ensure()
         raw = model.predict([(query, h.text) for h in hits])
         for h, s in zip(hits, raw):
-            # sigmoid → 0..1 (matches the previous normalize=True relevance semantics)
-            h.score = 1.0 / (1.0 + math.exp(-float(s)))
+            # sigmoid → 0..1 (matches the previous normalize=True relevance semantics). The model
+            # returns unnormalized logits, and on a clearly-irrelevant pair the magnitude can exceed
+            # math.exp's ~709 range and raise OverflowError, taking down the whole retrieval request —
+            # clamp first since exp saturates to 0/1 well before that point anyway.
+            neg_s = -float(s)
+            if neg_s > 700:
+                h.score = 0.0
+            elif neg_s < -700:
+                h.score = 1.0
+            else:
+                h.score = 1.0 / (1.0 + math.exp(neg_s))
         hits.sort(key=lambda h: h.score, reverse=True)
         return hits

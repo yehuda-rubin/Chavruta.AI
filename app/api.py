@@ -3484,7 +3484,7 @@ def _first_query_work(sid: str, req: QueryRequest, owner: str, llm=None) -> dict
         db.delete_session(sid, owner)   # don't leave a half-created, answer-less session behind
         raise
     _save_assistant(sid, result)
-    row = next((s for s in db.list_sessions(owner) if s["id"] == sid), None)
+    row = db.get_session(sid, owner)
     if row is None:
         # Session vanished between being created and read back — a concurrent delete from the same
         # caller, or the account sweeper's retention pass. An unhandled StopIteration here would
@@ -3732,7 +3732,7 @@ def update_session(session_id: str, req: SessionUpdateIn, lang: str = "he",
     if req.excluded is not None:
         if not db.set_session_excluded(session_id, owner, req.excluded):
             raise HTTPException(status_code=404, detail="session not found")
-    row = next((s for s in db.list_sessions(owner) if s["id"] == session_id), None)
+    row = db.get_session(session_id, owner)
     if row is None:
         raise HTTPException(status_code=404, detail="session not found")
     return row

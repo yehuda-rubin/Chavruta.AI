@@ -123,7 +123,16 @@ def _has_tech_term(text: str) -> bool:
 # Lesson/prepare lead-ins to strip from the RETRIEVAL text (they pollute the embedding;
 # the intent is already known). The related-material breadth itself is desirable — this
 # only sharpens the central match so the sugya's core source surfaces for the opening.
-_LESSON_LEAD_HE = re.compile(r"^\s*(?:הכן|תכין|תכנן|בנה|הכנת|הכינו|תכינו)?\s*שיעור\s*(?:על|בנושא|של|ב)?\s*")
+#
+# Both the verb and the preposition after "שיעור" used to be optional, so a bare "שיעור <word>"
+# always got stripped — including halachic terms of measure like "שיעור כזית" or "שיעור פאה", where
+# "שיעור" is the actual topic, not a lesson-prep instruction. Require a prepare-verb before it OR a
+# preposition after it (real "prepare a lesson on X" phrasing has one or the other); with neither,
+# leave "שיעור" in the search text.
+_LESSON_LEAD_HE = re.compile(
+    r"^\s*(?:(?:הכן|תכין|תכנן|בנה|הכנת|הכינו|תכינו)\s*שיעור\s*(?:על|בנושא|של|ב)?\s*"
+    r"|שיעור\s*(?:על|בנושא|של|ב)\s*)"
+)
 _LESSON_LEAD_EN = re.compile(
     r"^\s*(?:please\s+)?(?:prepare|build|make|create|give\s+me)?\s*(?:an?\s+)?"
     r"(?:lesson|shiur|class|source\s*sheet)\s+(?:on|about|for)?\s*", re.IGNORECASE)
