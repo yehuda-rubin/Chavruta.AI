@@ -162,3 +162,9 @@ design/poster/
 # from scratch, describing the RETRIEVAL PATTERN that failed — never a user's sentence.
 harvested_failures*.jsonl
 eval/harvested*.jsonl
+
+# ---- Faith variants / independent forks (planning & code) ----
+variants/
+temp_*/
+temp_corpora_staging/
+

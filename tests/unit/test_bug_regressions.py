@@ -2586,3 +2586,71 @@ def test_generate_qa_turn_from_hits_passes_license_and_version_title_through(mon
     resp = api._generate_qa_turn_from_hits("שאלה", [hit], "he", True, [], None)
     assert resp.citations[0].license == "CC-BY-SA"
     assert resp.citations[0].version_title == "Wikisource"
+
+
+def test_build_lesson_plan_propagates_license_and_version_title():
+    from chavruta.generation.grounded import build_lesson_plan
+    hit = _RH(chunk_id="c1", ref="Rashi_on_Berakhot.118.17.1", text="טקסט", score=0.9,
+              license="Public Domain", version_title="Vilna Edition")
+    plan = build_lesson_plan("ברכות", [hit])
+    assert plan.sections[0].citations[0].license == "Public Domain"
+    assert plan.sections[0].citations[0].version_title == "Vilna Edition"
+
+
+def test_build_lesson_walkthrough_prompt_propagates_metadata_to_source_blocks():
+    from chavruta.corpus.schema import Citation
+    from chavruta.generation.grounded import LessonPlan, LessonSection, build_lesson_walkthrough_prompt
+    cit = Citation(chunk_id="c1", ref="Rashi_on_Berakhot.118.17.1", quote="טקסט רש\"י",
+                   license="Public Domain", version_title="Vilna Edition", deep_link="https://sefaria.org/x")
+    plan = LessonPlan(topic="ברכות", sections=[LessonSection(heading="ברכות נט", source_refs=[cit.ref], citations=[cit])])
+    prompt, marker_map = build_lesson_walkthrough_prompt(plan, "ברכות", lang="he")
+    assert prompt.sources[0].license == "Public Domain"
+    assert prompt.sources[0].version_title == "Vilna Edition"
+    assert prompt.sources[0].deep_link == "https://sefaria.org/x"
+
+
+def test_generate_lesson_from_hits_resolves_fallback_license_for_commentator(monkeypatch):
+    from types import SimpleNamespace
+    from app.api import _generate_lesson_from_hits
+
+    class _FakeLLM:
+        def request(self, job, **kw):
+            return "=== FULL_LESSON ===\nשיעור [S1]\n=== ORDER ===\nS1", []
+
+    class _FakeProfile:
+        collection = "corpus"
+        llm_max_tokens = 4096
+
+    class _FakePipeline:
+        profile = _FakeProfile()
+        llm = _FakeLLM()
+
+    monkeypatch.setattr(api, "_get_pipeline", lambda: _FakePipeline())
+    hit = _RH(chunk_id="c1", ref="Rashi_on_Berakhot.118.17.1", text="טקסט", score=0.9,
+              license="", version_title="")
+    resp = _generate_lesson_from_hits("נושא", [hit], "he", True, audience="general", grade_band="high_school",
+                                      length="medium", tpl=None, history=[], owner_id="test", llm=_FakeLLM())
+    assert len(resp.citations) == 1
+    assert resp.citations[0].license == "Public Domain"
+    assert resp.citations[0].version_title == "Vilna Edition"
+
+
+def test_widen_citations_from_note_resolves_fallback_license(monkeypatch):
+    from types import SimpleNamespace
+    from app.api import QueryResponse, _widen_citations_from_note
+
+    class _FakeStore:
+        def fetch_by_refs(self, coll, refs, **kw):
+            return [SimpleNamespace(payload={"ref": "Rashi_on_Berakhot.118.17.1", "text_he": "טקסט"})]
+
+    class _FakePipeline:
+        store = _FakeStore()
+        profile = SimpleNamespace(collection="corpus")
+
+    monkeypatch.setattr(api, "_get_pipeline", lambda: _FakePipeline())
+    resp = QueryResponse(answer="תשובה", citations=[], intent="qa", grounded=True)
+    _widen_citations_from_note(resp, "רש\"י — Rashi_on_Berakhot.118.17.1", retrieved_refs=["Rashi_on_Berakhot.118.17.1"])
+    assert len(resp.citations) == 1
+    assert resp.citations[0].license == "Public Domain"
+    assert resp.citations[0].version_title == "Vilna Edition"
+

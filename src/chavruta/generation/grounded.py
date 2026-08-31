@@ -817,8 +817,14 @@ def build_lesson_walkthrough_prompt(plan: LessonPlan, question: str, lang: str =
                 text = cit.quote or ""
                 if len(text) > MAX_SOURCE_CHARS:
                     text = text[:MAX_SOURCE_CHARS] + "…"
-                sources.append(SourceBlock(marker=m, ref=cit.ref,
-                                           commentator_id=cit.commentator_id, text=text))
+                sources.append(SourceBlock(
+                    marker=m, ref=cit.ref, commentator_id=cit.commentator_id, text=text,
+                    text_he=getattr(cit, "text_he", "") or getattr(cit, "quote", ""),
+                    text_en=getattr(cit, "text_en", ""),
+                    deep_link=getattr(cit, "deep_link", "") or "",
+                    license=getattr(cit, "license", "") or "",
+                    version_title=getattr(cit, "version_title", "") or "",
+                ))
             markers.append(m)
         stages.append((sec.heading, markers))
 
@@ -884,7 +890,9 @@ def build_lesson_plan(topic: str, hits: list[RankedHit]) -> LessonPlan:
             source_refs=[h.ref for h in group_sorted],
             citations=[
                 Citation(chunk_id=h.chunk_id, ref=h.ref, deep_link=h.deep_link,
-                         quote=h.text[:280], commentator_id=h.commentator_id)
+                         quote=h.text[:280], commentator_id=h.commentator_id,
+                         license=getattr(h, "license", "") or "",
+                         version_title=getattr(h, "version_title", "") or "")
                 for h in group_sorted
             ],
         ))

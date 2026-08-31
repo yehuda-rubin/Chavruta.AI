@@ -376,11 +376,26 @@ def work_title_for_ref(ref: str | None) -> str | None:
     if not ref:
         return None
     _load_licenses()
-    flat = ref.replace("_", " ")
+    s = ref.strip()
+    # Commentary chunks in the corpus store 'רש"י on Rashi on Chullin 11.3.1' — drop the Hebrew
+    # display label prefix so the clean English work title can match.
+    if _HEB.search(s):
+        i = s.find(" on ")
+        if i != -1:
+            s = s[i + 4:]
+    flat = s.replace("_", " ")
     for title in _titles_by_len:
         if flat == title or flat.startswith(title + ".") or flat.startswith(title + ",") \
                 or flat.startswith(title + " "):
             return title
+    # Normalize common transliteration drifts (Shitah/Shittah -> Shita, Chiddushei -> Chidushei)
+    norm = re.sub(r"\bShitt?ah\b", "Shita", flat, flags=re.I)
+    norm = re.sub(r"\bChiddushei\b", "Chidushei", norm, flags=re.I)
+    if norm != flat:
+        for title in _titles_by_len:
+            if norm == title or norm.startswith(title + ".") or norm.startswith(title + ",") \
+                    or norm.startswith(title + " "):
+                return title
     return None
 
 

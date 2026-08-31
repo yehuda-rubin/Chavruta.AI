@@ -29,6 +29,13 @@ from chavruta.corpus.refs import license_for_ref, work_title_for_ref
     ("Chafetz_Chaim_on_Sifra,_Behar,_Section_2.2.8", "Chafetz Chaim on Sifra"),
     ("Shoel_uMeshiv_Mahadura_I.3.215.5", "Shoel uMeshiv Mahadura I"),      # name ends in a numeral
     ("Sha'ar_HaPesukim,_Parashat_Bereshit.71", "Sha'ar HaPesukim"),        # apostrophe
+    # Hebrew display label prefixes as stored in legacy Qdrant chunks
+    ('רש"י on Rashi on Berakhot 118.17.1', "Rashi on Berakhot"),
+    ("תוספות on Tosafot on Berakhot 68.30.1", "Tosafot on Berakhot"),
+    ('שיטה מקובצת on Shita Mekubetzet on Berakhot 118.17.1', "Shita Mekubetzet on Berakhot"),
+    # Transliteration variants for commentators
+    ("Shitah_Mekubetzet_on_Berakhot.118.17.1", "Shita Mekubetzet on Berakhot"),
+    ("Shittah_Mekubetzet_on_Berakhot.118.17.1", "Shita Mekubetzet on Berakhot"),
 ])
 def test_work_title_is_matched_not_parsed(ref, title):
     assert work_title_for_ref(ref) == title
@@ -38,6 +45,14 @@ def test_a_longer_title_wins_over_a_shorter_one_that_prefixes_it():
     """Matching must be longest-first and land on a segment boundary, or 'Genesis' swallows
     'Genesis Rabbah' and every midrash gets attributed to the Chumash."""
     assert work_title_for_ref("Bereshit_Rabbah.1.1") != "Genesis"
+
+
+def test_commentary_with_hebrew_prefix_resolves_license():
+    lic, ver = license_for_ref('רש"י on Rashi on Berakhot 118.17.1', "he")
+    assert lic == "Public Domain" and ver == "Vilna Edition"
+
+    lic_shita, ver_shita = license_for_ref('Shitah_Mekubetzet_on_Berakhot.118.17.1', "he")
+    assert lic_shita == "Public Domain" and ver_shita == "Shita Mekubetzet"
 
 
 # ── The licence itself ────────────────────────────────────────────────────────

@@ -24,6 +24,11 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+try:
+    import torch  # noqa: F401,E402 — MUST precede qdrant_client import (Windows pyarrow DLL order)
+except Exception:  # noqa: BLE001
+    pass
+
 # Source markers ([S1], [S1, S5], (S1), 【S1】, …) are the grounding mechanism — the pipeline maps them
 # to citations, then we strip them from the DISPLAYED text so the answer reads cleanly.
 _MARKER_BODY = r"[\[(（【]\s*S\d+(?:\s*,\s*S\d+)*\s*[\])）】]"
@@ -220,6 +225,10 @@ def _widen_citations_from_note(result, note: str, owner_id: str = "",
                 found[ref] = payload
     he = True
     for ref, payload in found.items():
+        from chavruta.corpus.refs import license_for_ref
+
+        lic = payload.get("license") or payload.get("license_he") or license_for_ref(ref, "he")[0]
+        ver = payload.get("version_title") or payload.get("version_he") or license_for_ref(ref, "he")[1]
         result.citations.append(CitationOut(
             ref=ref, ref_he=(hebrew_display_ref(ref) or "") if he else "",
             text_he=payload.get("text_he") or payload.get("text") or "",
@@ -230,7 +239,7 @@ def _widen_citations_from_note(result, note: str, owner_id: str = "",
             # citation rendered as a bare "Chizkuni,_Deuteronomy.10.6.1" chip beside "rashbam".
             commentator=(payload.get("commentator_id") or commentator_from_ref(ref) or ""),
             deep_link=payload.get("deep_link") or "",
-            license=payload.get("license") or "", version_title=payload.get("version_title") or ""))
+            license=lic or "", version_title=ver or ""))
     if missing := [r for r in in_scope if r not in found]:
         # Resolved to nothing in the corpus — named a work that does not exist, or invented the ref
         # outright.
@@ -458,8 +467,6 @@ def _strip_instruction_echo(text: str, he: bool) -> str:
             if i + 1 < len(parts):           # drop the sentence's OWN trailing separator too, so the
                 parts[i + 1] = ""            # sentence before it joins directly onto the one after
     return re.sub(r"[ \t]{2,}", " ", "".join(parts)).strip()
-
-import torch  # noqa: F401,E402 — MUST precede qdrant_client import (Windows pyarrow DLL order)
 
 from contextlib import asynccontextmanager, contextmanager
 
@@ -1258,12 +1265,16 @@ def _generate_lesson_from_hits(topic: str, hits, lang: str, he: bool, *, audienc
             en_text = (getattr(h, "text_en", "") or "").strip()
             if not he_text and not en_text:
                 he_text = getattr(h, "text", "") or ""
+            from chavruta.corpus.refs import license_for_ref
+
+            lic = getattr(h, "license", "") or license_for_ref(h.ref, "he" if he else "en")[0]
+            ver = getattr(h, "version_title", "") or license_for_ref(h.ref, "he" if he else "en")[1]
             used.append(CitationOut(ref=h.ref, ref_he=(hebrew_display_ref(h.ref) or "") if he else "",
                                     text_he=he_text, text_en=en_text,
                                     commentator=(getattr(h, "commentator_id", "") or ""),
                                     deep_link=(getattr(h, "deep_link", "") or ""),
-                                    license=(getattr(h, "license", "") or ""),
-                                    version_title=(getattr(h, "version_title", "") or "")))
+                                    license=lic or "",
+                                    version_title=ver or ""))
     # ss isn't bleed-fixed here: it's about to be replaced by the mechanically-assembled sheet below
     # whenever `used` is non-empty (the common case) — fixing bleed in text that's discarded a few
     # lines later would just spend real LLM calls for nothing.
@@ -1441,7 +1452,7 @@ def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bo
 # A small/fast model dedicated to trivial yes/no classification (_wants_full_lesson) — same
 # provider/key as the main pipeline LLM, but NOT the main model_id. Verify this id is still live on
 # the configured provider's catalog before relying on it; CHAVRUTA_CLASSIFIER_MODEL overrides it.
-_CLASSIFIER_MODEL_DEFAULT = "Qwen/Qwen2.5-7B-Instruct"
+_CLASSIFIER_MODEL_DEFAULT = "Qwen/Qwen3-30B-A3B-Instruct-2507"
 _classifier_llm_cache = None
 
 
@@ -1511,12 +1522,16 @@ def _generate_chavruta_turn(question: str, hits, lang: str, he: bool, history, w
         if 1 <= i <= len(hits) and i not in seen:
             seen.add(i)
             h = hits[i - 1]
+            from chavruta.corpus.refs import license_for_ref
+
+            lic = getattr(h, "license", "") or license_for_ref(h.ref, "he" if he else "en")[0]
+            ver = getattr(h, "version_title", "") or license_for_ref(h.ref, "he" if he else "en")[1]
             used.append(CitationOut(ref=h.ref, ref_he=(hebrew_display_ref(h.ref) or "") if he else "",
                                     text_he=(getattr(h, "text", "") or ""), text_en="",
                                     commentator=(getattr(h, "commentator_id", "") or ""),
                                     deep_link=(getattr(h, "deep_link", "") or ""),
-                                    license=(getattr(h, "license", "") or ""),
-                                    version_title=(getattr(h, "version_title", "") or "")))
+                                    license=lic or "",
+                                    version_title=ver or ""))
     raw = _strip_instruction_echo(raw, he)
     # Split the model's source list off FIRST — see _split_source_note for why it must not reach the
     # foreign-language pass.
@@ -1556,6 +1571,10 @@ def _generate_qa_turn_from_hits(question: str, hits, lang: str, he: bool, histor
     answer = pipeline._qa_answer(query, result, llm, history=history)
 
     def _cite(c) -> CitationOut:
+        from chavruta.corpus.refs import license_for_ref
+
+        lic = getattr(c, "license", "") or license_for_ref(c.ref, "he" if he else "en")[0]
+        ver = getattr(c, "version_title", "") or license_for_ref(c.ref, "he" if he else "en")[1]
         return CitationOut(
             ref=c.ref,
             ref_he=(hebrew_display_ref(c.ref) or "") if he else "",
@@ -1563,8 +1582,8 @@ def _generate_qa_turn_from_hits(question: str, hits, lang: str, he: bool, histor
             text_en=getattr(c, "text_en", ""),
             commentator=getattr(c, "commentator_id", "") or "",
             deep_link=getattr(c, "deep_link", "") or "",
-            license=getattr(c, "license", "") or "",
-            version_title=getattr(c, "version_title", "") or "",
+            license=lic or "",
+            version_title=ver or "",
         )
 
     text = _strip_instruction_echo(answer.text, he)
@@ -1692,7 +1711,7 @@ _CHAVRUTA_HIT_CAP = 25
 _LESSON_HIT_CAP = 40
 
 
-def _cap_hits(hits: list, max_total: int) -> list:
+def _cap_hits(hits: list, max_total: int, min_commentaries: int = 0) -> list:
     """Caught live (2026-08-05): parsha/daf-yomi's fetch (a whole parsha's verses, or a whole daf,
     times every commentator in COMMENTATOR_HE) can pull in hundreds of hits — far more than any
     other job template in this app is written for. Fed unbounded into a job prompt, this produced a
@@ -1701,15 +1720,20 @@ def _cap_hits(hits: list, max_total: int) -> list:
     echoed fragments of its own instructions and left unbalanced ** markers (breaking bold
     rendering for the rest of the message too).
 
-    Keeps EVERY base-text hit (there are never many — one daf's 2 amudim, or one parsha's verses —
+    Keeps EVERY base-text hit (there are never many — one daf's amudim, or one parsha's verses —
     and they're what the question is actually about) and fills the rest of the budget with
     commentary, preserving whatever order it already arrives in (for daf yomi, that's
-    daf_yomi_sort_key's Gemara/Rashi-first ordering)."""
+    daf_yomi_sort_key's Gemara/Rashi-first ordering). When base text alone meets or exceeds max_total
+    (e.g. a long parsha of 70+ verses), up to min_commentaries of top commentary hits are retained
+    so the prompt is never commentary-starved."""
     if len(hits) <= max_total:
         return hits
     base = [h for h in hits if not getattr(h, "commentator_id", None)]
     commentary = [h for h in hits if getattr(h, "commentator_id", None)]
-    return base + commentary[:max(0, max_total - len(base))]
+    avail_comm = max_total - len(base)
+    if avail_comm > 0:
+        return base + commentary[:avail_comm]
+    return base + commentary[:min_commentaries]
 
 
 def _fetch_ranked_hits(targets: list[str], *, filters=None, limit: int | None = None):
@@ -1762,10 +1786,10 @@ def _run_parsha(question: str, lang: str, history=None, owner_id: str = "local",
     question = f"{_parsha_context_note(info, he)}\n{question}"
     if _wants_full_lesson(question):
         tpl = _select_template(topic, "yeshiva", "")
-        return _generate_lesson_from_hits(topic, _cap_hits(hits, _LESSON_HIT_CAP) + haftarah_hits,
+        return _generate_lesson_from_hits(topic, _cap_hits(hits, _LESSON_HIT_CAP, min_commentaries=15) + haftarah_hits,
                                           lang, he, audience="yeshiva", grade_band="", length="medium",
                                           tpl=tpl, history=history, owner_id=owner_id, llm=llm)
-    hits = _cap_hits(hits, _CHAVRUTA_HIT_CAP) + haftarah_hits
+    hits = _cap_hits(hits, _CHAVRUTA_HIT_CAP, min_commentaries=15) + haftarah_hits
     return _generate_qa_turn_from_hits(question, hits, lang, he, history, llm=llm)
 
 
@@ -1794,9 +1818,10 @@ def _parsha_context_note(info, he: bool) -> str:
 def _run_daf_yomi(question: str, lang: str, history=None, owner_id: str = "local",
                   llm=None) -> QueryResponse:
     """Daf Yomi: resolve today's daf from Sefaria's calendar (cached), fetch BOTH amudim (Daf Yomi
-    covers a whole daf per day) plus their commentaries, sort so Gemara/Rashi lead and Tosafot
+    covers a whole daf per day) across all segments plus their commentaries, sort so Gemara/Rashi lead and Tosafot
     follows (daf_yomi_sort_key), then default to a chavruta-style turn — or a full lesson if the
     model judges the user actually asked for one."""
+    from chavruta.corpus.refs import daf_amud_to_corpus_n
     from chavruta.lessons.builder import daf_yomi_sort_key
 
     pipeline = _get_pipeline()
@@ -1808,18 +1833,25 @@ def _run_daf_yomi(question: str, lang: str, history=None, owner_id: str = "local
         msg = ("לא הצלחנו לזהות את הדף היומי כרגע — נסו שוב בעוד רגע." if he
                else "Couldn't resolve today's daf yomi right now — please try again shortly.")
         return QueryResponse(answer=msg, citations=[], grounded=False, intent="dafyomi", files=[])
-    daf_refs = [f"{info.tractate} {info.daf}a", f"{info.tractate} {info.daf}b"]
+    n_a = daf_amud_to_corpus_n(info.daf, "a")
+    n_b = daf_amud_to_corpus_n(info.daf, "b")
+    t_clean = info.tractate.replace(" ", "_")
+    # Enumerate all segments for both amudim (amud a and amud b) plus legacy/high-level variants
+    daf_refs = [f"{t_clean}.{n_a}.{i}" for i in range(1, 36)] + [f"{t_clean}.{n_b}.{i}" for i in range(1, 36)]
+    daf_refs.extend([f"{info.tractate} {info.daf}a", f"{info.tractate} {info.daf}b"])
     ref_variants = with_ref_variants(daf_refs)
-    targets = ref_variants + commentary_refs(ref_variants, list(COMMENTATOR_HE))
+    # Preload only Gemara base segments + Rashi up front; secondary commentaries (Tosafot, etc.)
+    # can be requested on-demand via ===NEED_SOURCES===
+    targets = ref_variants + commentary_refs(ref_variants, ["rashi"])
     hits = _fetch_ranked_hits(targets, limit=max(len(targets) * 4, 400))
     hits.sort(key=daf_yomi_sort_key)
     topic = f"{info.tractate} {info.daf}"
     if _wants_full_lesson(question):
         tpl = _select_template(topic, "yeshiva", "")
-        return _generate_lesson_from_hits(topic, _cap_hits(hits, _LESSON_HIT_CAP), lang, he,
+        return _generate_lesson_from_hits(topic, _cap_hits(hits, _LESSON_HIT_CAP, min_commentaries=15), lang, he,
                                           audience="yeshiva", grade_band="", length="medium",
                                           tpl=tpl, history=history, owner_id=owner_id, llm=llm)
-    hits = _cap_hits(hits, _CHAVRUTA_HIT_CAP)
+    hits = _cap_hits(hits, _CHAVRUTA_HIT_CAP, min_commentaries=15)
     question = f"{_daf_yomi_context_note(info.tractate, info.daf, he)}\n{question}"
     return _generate_chavruta_turn(question, hits, lang, he, history, weak=(not hits), llm=llm)
 
@@ -1832,12 +1864,14 @@ def _daf_yomi_context_note(tractate: str, daf: int, he: bool) -> str:
     We already know the real daf from Sefaria, so just tell the model directly rather than making
     it infer a fact it structurally cannot get right from what it's shown."""
     if he:
-        return (f"(לעיונך: הדף האמיתי של היום הוא {tractate} דף {daf}. אם המשתמש שואל על מספר הדף, "
-               f"ענה {daf} ולא מספר אחר — המספרים שמופיעים ברפרנסים של המקורות למטה הם מספור פנימי "
-               f"של מסד הנתונים, לא מספר הדף האמיתי.)")
-    return (f"(For reference: today's real daf is {tractate} {daf}. If asked which daf this is, "
-           f"answer {daf} — the numbers in the source refs below are the database's internal "
-           f"numbering, not the real daf number.)")
+        return (f"(לעיונך: הדף האמיתי של היום הוא {tractate} דף {daf}. קיבלת את גוף הגמרא ופירוש רש\"י בלבד — "
+               f"אם את/ה צריך/ה פירוש תוספות או מפרשים נוספים, בקש/י אותם דרך ===NEED_SOURCES===. "
+               f"אם המשתמש שואל על מספר הדף, ענה {daf} ולא מספר אחר — המספרים שמופיעים ברפרנסים של "
+               f"המקורות למטה הם מספור פנימי של מסד הנתונים, לא מספר הדף האמיתי.)")
+    return (f"(For reference: today's real daf is {tractate} {daf}. You were given the Gemara text and Rashi only — "
+           f"if you need Tosafot or other commentaries, request them via ===NEED_SOURCES===. "
+           f"If asked which daf this is, answer {daf} — the numbers in the source refs below are the "
+           f"database's internal numbering, not the real daf number.)")
 
 
 # Global concurrency gate — every generation reaches the LLM/embedder/Qdrant through this one
@@ -2035,6 +2069,10 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
     answer = _get_pipeline().ask(q, history=history, llm=llm)
 
     def _cite(c) -> CitationOut:
+        from chavruta.corpus.refs import license_for_ref
+
+        lic = getattr(c, "license", "") or license_for_ref(c.ref, "he" if he else "en")[0]
+        ver = getattr(c, "version_title", "") or license_for_ref(c.ref, "he" if he else "en")[1]
         return CitationOut(
             ref=c.ref,
             ref_he=(hebrew_display_ref(c.ref) or "") if he else "",
@@ -2042,8 +2080,8 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
             text_en=getattr(c, "text_en", ""),
             commentator=getattr(c, "commentator_id", "") or "",
             deep_link=getattr(c, "deep_link", "") or "",
-            license=getattr(c, "license", "") or "",
-            version_title=getattr(c, "version_title", "") or "",
+            license=lic or "",
+            version_title=ver or "",
         )
 
     lesson_plan = None
