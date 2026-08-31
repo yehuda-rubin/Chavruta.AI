@@ -421,3 +421,21 @@ def test_the_floor_is_skipped_when_the_question_already_named_something():
     guard = "if not query.named_refs and not query.work_ids and not query.commentator_ids:"
     assert guard in src
     assert "embed_batch(phrases)" in src, "the windows must share one embedding pass"
+
+
+# ── Concept Bridges & Landmark Expansions ───────────────────────────────────
+
+@pytest.mark.parametrize("text,expected_ref,expected_keyword", [
+    ("מה המקור בתורה לאיסור לשון הרע?", "Leviticus.19.16", "רכיל"),
+    ("איסור לשון הרע", "Leviticus.19.16", "רכיל"),
+    ("איפה כתוב על השבת אבידה", "Deuteronomy.22.1", "השב תשיבם"),
+    ("מצוות שילוח הקן", "Deuteronomy.22.6", "שלח תשלח"),
+    ("האם מותר לקחת ריבית?", "Leviticus.25.36", "נשך"),
+    ("איסור לפני עיוור לא תיתן מכשול", "Leviticus.19.14", "מכשל"),
+    ("What is the source for lashon hara in the Torah?", "Leviticus.19.16", "רכיל"),
+])
+def test_concept_bridges_and_landmarks_resolution(text, expected_ref, expected_keyword):
+    q = Router().route(Query(text=text))
+    assert expected_ref in (q.named_refs or []), f"Expected ref {expected_ref} not found for '{text}'"
+    assert expected_keyword in q.search_text, f"Expected keyword '{expected_keyword}' not in search_text '{q.search_text}'"
+

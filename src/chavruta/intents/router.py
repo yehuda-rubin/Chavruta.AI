@@ -114,6 +114,63 @@ _TECH_CONCEPT_EXPANSION = (
     "electricity electrical device muktzeh"
 )
 
+# Concept bridges: modern/colloquial topics whose foundational Torah/halachic terms
+# use different vocabulary. Appended ONLY to query.search_text (the dense/sparse embedding
+# input). query.text (what the LLM receives) is ALWAYS kept untouched.
+_CONCEPT_BRIDGES: tuple[tuple[tuple[str, ...], str], ...] = (
+    # Technology / Electricity (preserves _TECH_TERMS)
+    (_TECH_TERMS, _TECH_CONCEPT_EXPANSION),
+
+    # Lashon Hara / Rechilut -> Torah terminology (Leviticus 19:16, Shemot 23:1, Chafetz Chaim)
+    (
+        ("לשון הרע", "איסור לשון הרע", "רכילות", "איסור רכילות", "מוציא שם רע",
+         "הוצאת שם רע", "בעל לשון הרע", "הלכות לשון הרע", "lashon hara", "evil speech", "slander", "gossip", "talebearer"),
+        "רכיל לא תלך רכיל בעמיך לא תשא שמע שוא חפץ חיים דעות ז ויקרא יט טז"
+    ),
+
+    # Hashavat Aveida / Lost Property
+    (
+        ("השבת אבידה", "השבת אבדה", "מצוות השבת אבידה", "אבידה ומציאה", "lost property", "returning lost property"),
+        "השב תשיבם לא תוכל להתעלם חמור אחיך שור אחיך דברים כב"
+    ),
+
+    # Shiluach HaKen
+    (
+        ("שילוח הקן", "שלוח הקן", "מצוות שילוח הקן", "mother bird", "shiluach haken"),
+        "שלח תשלח את האם ואת הבנים תקח לך למען ייטב לך דברים כב"
+    ),
+
+    # Ribbit / Interest
+    (
+        ("ריבית", "איסור ריבית", "הלוואה בריבית", "היתר עיסקה", "היתר עסקה", "usury", "interest loan"),
+        "נשך ותרבית לא תשיך לאחיך אל תקח מאתו נשך ויקרא כה דברים כג"
+    ),
+
+    # Lifnei Iver / Stumbling Block
+    (
+        ("לפני עיוור", "לפני עיוור לא תיתן מכשול", "לפני עור", "מכשול", "stumbling block"),
+        "לפני עור לא תתן מכשל ויראת מאלקיך ויקרא יט יד"
+    ),
+
+    # Ona'at Devarim / Verbal Hurt
+    (
+        ("אונאת דברים", "הונאת דברים", "פגיעה מילולית", "לצער בדיבור"),
+        "לא תונו איש את עמיתו ויראת מאלקיך בבא מציעא נח"
+    ),
+
+    # Bal Tashchit / Wastefulness
+    (
+        ("בל תשחית", "השחתה", "השחתת רכוש", "השחתת עצים", "wastefulness"),
+        "לא תשחית את עצה לנדח עליו גרזן דברים כ"
+    ),
+
+    # Tza'ar Ba'alei Chayim / Animal Cruelty
+    (
+        ("צער בעלי חיים", "התאכזרות לבעלי חיים", "cruelty to animals", "animal welfare"),
+        "עזוב תעזוב עמו פריקה וטעינה חסימה שור בדישו שבת קכח"
+    ),
+)
+
 
 def _has_tech_term(text: str) -> bool:
     low = text.lower()
@@ -235,8 +292,11 @@ class Router:
         if not query.search_text:
             query.search_text = retrieval_text(query.text)
 
-        if _has_tech_term(query.text) and _TECH_CONCEPT_EXPANSION not in query.search_text:
-            query.search_text = f"{query.search_text} {_TECH_CONCEPT_EXPANSION}"
+        low = query.text.lower()
+        for terms, expansion in _CONCEPT_BRIDGES:
+            if any(_alias_hit(t, query.text, low) for t in terms):
+                if expansion not in query.search_text:
+                    query.search_text = f"{query.search_text} {expansion}"
 
         commentators = detect_commentators(query.text)
         if commentators and not query.commentator_ids:
