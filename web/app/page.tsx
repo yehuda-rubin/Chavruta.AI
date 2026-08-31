@@ -142,10 +142,14 @@ export default function Home() {
     setActiveId(s.id);
     setSubtitle(s.title || s.first_q || "");
     if (s.mode) setIntent(s.mode as IntentId);
+    // A fast click on session A then B can have A's fetch resolve after B's — activeIdRef is the
+    // always-current id (see its declaration above), so a stale response is dropped instead of
+    // overwriting the session the user actually has open now.
     try {
-      setMessages(await api.sessionMessages(s.id));
+      const msgs = await api.sessionMessages(s.id);
+      if (activeIdRef.current === s.id) setMessages(msgs);
     } catch {
-      setMessages([]);
+      if (activeIdRef.current === s.id) setMessages([]);
     }
   }, []);
 
@@ -267,8 +271,8 @@ export default function Home() {
   const joinOrg = useCallback(async (code: string) => {
     const joined = await api.orgs.join(code);
     refreshMe();
-    return `הצטרפת ל${joined.name}`;
-  }, [refreshMe]);
+    return lang === "he" ? `הצטרפת ל${joined.name}` : `Joined ${joined.name}`;
+  }, [refreshMe, lang]);
 
   // Resolves with an error message to show, or null on success. Deletion is the one place a silent
   // failure is unacceptable: the server refuses when it cannot stop a recurring charge, and that
@@ -308,8 +312,12 @@ export default function Home() {
     // would bloat the list. So the row we were handed has neither, and reading them off it showed a
     // lesson with no downloads at all. Fetch the full record; the list stays light.
     setMessages([{ role: "assistant", text: "📚 " + l.topic, files: [], citations: [], caveats: [] }]);
+    // openLesson clears activeId to null above. If the user navigates to an actual session while
+    // this fetch is in flight, activeIdRef.current is no longer null by the time it resolves — skip
+    // the update rather than clobbering that session's messages with this lesson's.
     try {
       const full = await api.getLesson(l.id);
+      if (activeIdRef.current !== null) return;
       setMessages([{
         role: "assistant",
         text: "📚 " + full.topic,
@@ -318,6 +326,7 @@ export default function Home() {
         caveats: [],
       }]);
     } catch {
+      if (activeIdRef.current !== null) return;
       // Keep the header we already showed rather than blanking the screen; the lesson is still in
       // My Shiurim and re-opening retries.
       setMessages([{
@@ -579,6 +588,8 @@ export default function Home() {
         onCancelSubscription={cancelSubscription}
         onRedeemCoupon={me?.authenticated ? redeemCoupon : undefined}
         byokSupported={me?.byok_supported}
+        onJoinOrg={me?.authenticated ? joinOrg : undefined}
+        orgName={me?.org_name}
       />
       <SupportModal open={showSupport} lang={lang} onClose={() => setShowSupport(false)} />
       <FilePreviewModal file={previewFile} lang={lang} onClose={() => setPreviewFile(null)} />

@@ -145,9 +145,16 @@ def list_models(base_url: str, api_key: str, *, timeout_s: float = 15.0) -> list
     is deliberately NOT attempted here: the OpenAI `models.list()` shape carries no cost field, and
     providers differ too much for a generic guess to be honest — the caller states that plainly
     rather than inventing a number."""
+    import httpx
     from openai import OpenAI  # lazy — see CloudLLM._client_
 
-    client = OpenAI(base_url=base_url, api_key=api_key, timeout=timeout_s, max_retries=0)
+    # follow_redirects=False: base_url here can be a BYOK caller's own value (app/api.py::byok_check),
+    # already checked by app/security.py::validate_provider_base_url against resolving to a private
+    # address — but that check only sees the FIRST hop. The SDK's default httpx client follows
+    # redirects, so a host that answers 200 at request time and 302-to-127.0.0.1/metadata-IP at
+    # connect time would defeat the check entirely. No legitimate provider needs a redirect here.
+    client = OpenAI(base_url=base_url, api_key=api_key, timeout=timeout_s, max_retries=0,
+                     http_client=httpx.Client(follow_redirects=False))
     return sorted(m.id for m in client.models.list().data)
 
 
@@ -206,13 +213,17 @@ class CloudLLM:
 
     def _client_(self):
         if self._client is None:
+            import httpx
             from openai import OpenAI  # lazy
 
+            # follow_redirects=False — see the same note in list_models(); base_url may be a BYOK
+            # caller's own value, already checked once but only against its first-hop address.
             self._client = OpenAI(
                 base_url=self.base_url,
                 api_key=self.api_key,
                 timeout=self.timeout_s,
                 max_retries=self.max_retries,
+                http_client=httpx.Client(follow_redirects=False),
             )
         return self._client
 
@@ -294,6 +305,10 @@ class CloudLLM:
             stream=True,
         )
         for chunk in stream:
+            # A `stream_options={"include_usage": True}` usage chunk (see the note above, for whoever
+            # adds that) arrives with an EMPTY choices list — chunk.choices[0] would raise IndexError.
+            if not chunk.choices:
+                continue
             piece = chunk.choices[0].delta.content
             if piece:
                 yield piece

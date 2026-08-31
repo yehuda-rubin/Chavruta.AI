@@ -317,7 +317,14 @@ _QUOTE_RE = re.compile(r'["“„״]([^"“”״\n]{12,})["”״]')  # gershayim
 # What separates the two is what FOLLOWS the mark: an abbreviation ends almost immediately (רש"י,
 # רמב"ם, שו"ע, ב"ק — one letter, occasionally two), while a quotation runs on into a word. So the
 # mask applies only when at most two Hebrew letters remain before the next boundary.
-_ABBREV_MARK_RE = re.compile(r'(?<=[א-ת])["״](?=[א-ת]{1,2}(?![א-ת]))')
+#
+# That lookahead boundary must also exclude an actual quote mark — a one-letter prefix opening a
+# QUOTE, like ש"לא..." or ו"אם...", also has 1-2 Hebrew letters before the *closing* quote mark
+# sitting right after them, so the old `(?![א-ת])` boundary (letters only) treated the closing mark
+# as "not a letter" and masked the opening mark as if it were an abbreviation. That drops one mark
+# of the pair, leaves an odd count, and throws off every quote pairing after it in the answer. The
+# boundary must stop at another quote mark too, not just at more Hebrew letters.
+_ABBREV_MARK_RE = re.compile(r'(?<=[א-ת])["״](?=[א-ת]{1,2}(?!["״א-ת]))')
 
 
 def _protect_abbreviations(s: str) -> str:

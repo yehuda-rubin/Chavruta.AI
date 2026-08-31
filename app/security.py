@@ -227,6 +227,10 @@ class _SlidingWindow:
         self._lock = threading.Lock()
 
     def allow(self, key: str, now: float) -> bool:
+        if self.max <= 0:
+            # `CHAVRUTA_RATE_PER_MIN=0` (or _HOUR) is meant as "unlimited", the common convention for
+            # a limit env var — not "block every request", which is what `len(hits) >= 0` always is.
+            return True
         with self._lock:
             cutoff = now - self.window
             hits = [t for t in self._hits.get(key, ()) if t > cutoff]
@@ -347,8 +351,23 @@ async def body_size_middleware(request: Request, call_next):
     """Reject oversized bodies before they're read into memory. nginx also caps this, but a
     directly-exposed instance (or a missing nginx limit) needs its own guard."""
     cl = request.headers.get("content-length")
-    if cl and cl.isdigit() and int(cl) > _MAX_BODY:
-        return JSONResponse(status_code=413, content={"detail": "request body too large"})
+    if cl and cl.isdigit():
+        if int(cl) > _MAX_BODY:
+            return JSONResponse(status_code=413, content={"detail": "request body too large"})
+    else:
+        # No usable Content-Length — e.g. `Transfer-Encoding: chunked`, which carries none — so the
+        # check above never runs and an oversized body would otherwise sail through uncounted.
+        # Stream it ourselves with a running cap; Starlette caches whatever we assign to `_body`, so
+        # the route below reads this same buffer via request.body()/.json() instead of re-consuming
+        # the (already exhausted) connection.
+        total = 0
+        chunks: list[bytes] = []
+        async for chunk in request.stream():
+            total += len(chunk)
+            if total > _MAX_BODY:
+                return JSONResponse(status_code=413, content={"detail": "request body too large"})
+            chunks.append(chunk)
+        request._body = b"".join(chunks)
     return await call_next(request)
 
 

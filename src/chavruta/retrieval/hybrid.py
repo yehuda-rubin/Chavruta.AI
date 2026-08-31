@@ -205,9 +205,32 @@ class _PriorityGate:
                 granted = True
             else:
                 granted = False
-                (self._priority_queue if priority else self._normal_queue).append(my_turn)
+                queue = self._priority_queue if priority else self._normal_queue
+                queue.append(my_turn)
         if not granted:
-            my_turn.wait()
+            try:
+                my_turn.wait()
+            except BaseException:
+                # Interrupted while still queued (never reached the try/finally below, so our own
+                # _release() will never run). If we leave `my_turn` sitting in the queue, a LATER
+                # holder's _release() still pops it and .set()s it — nobody is listening any more —
+                # and increments `_in_use` for a grant that is now permanently unmatched, quietly
+                # shrinking the gate's real capacity by one every time this happens. Remove ourselves
+                # instead; if we're no longer in either queue, a concurrent _release() already popped
+                # and granted us in the race between the exception and taking this lock — that grant
+                # is real capacity and must go through the normal release path (which may hand it
+                # straight to the next waiter), not be dropped silently.
+                already_granted = False
+                with self._lock:
+                    if my_turn in self._priority_queue:
+                        self._priority_queue.remove(my_turn)
+                    elif my_turn in self._normal_queue:
+                        self._normal_queue.remove(my_turn)
+                    else:
+                        already_granted = True
+                if already_granted:
+                    self._release()
+                raise
         try:
             yield
         finally:
@@ -420,16 +443,27 @@ class HybridRetriever:
         # in Sukkah" from Sukkah and answering it from wherever the embedding happened to land.
         for tractate in (query.tractates or [])[:2]:
             try:
+                # `ref` only carries a KEYWORD payload index (exact-match, for fetch_by_refs), not a
+                # TEXT one — a MatchText filter against it is rejected by Qdrant with a 400 and used
+                # to be swallowed here silently, so this floor never actually scoped anything. Over-
+                # fetch unfiltered and filter for the tractate name in Python instead; refs are the
+                # dotted form ("Sukkah.41a.1", "Rashi_on_Sukkah.41a.1.2") so substring containment is
+                # equivalent to the word-level match this was meant to do.
                 with _timed(t, "tractate"):
                     scoped = self.store.search(self.profile.collection, hquery,
-                                               top_k=_TRACTATE_TOP_K,
-                                               filters={"ref": {"$text": tractate}})
+                                               top_k=_TRACTATE_TOP_K * 8)
+                kept = 0
                 for h in scoped:
+                    if kept >= _TRACTATE_TOP_K:
+                        break
                     rh = _to_hit(h)
+                    if tractate not in rh.ref:
+                        continue
                     # Below the named-ref anchor sentinel: the question named a tractate, not a ref,
                     # so this must not masquerade as something the user pointed at exactly.
                     rh.score = min(rh.score + _TRACTATE_BOOST, 0.98)
                     hits.append(rh)
+                    kept += 1
             except Exception as exc:
                 logger.warning("tractate-scoped search failed for %s (%s)", tractate, exc)
 

@@ -1,5 +1,15 @@
 # Deploying Chavruta.AI on Oracle Cloud (Always Free)
 
+> ⚠️ **STALE as of 2026-08-26 — production is NOT on Oracle.** `docs/HANDOFF.md` §1 shows
+> `chavrutaai.org` live on a **Nebius Cloud VM** (`chavruta@89.169.99.221`). This doc's specifics
+> (Oracle console steps, DuckDNS domain, Gemini as the generation backend, billing left off) no
+> longer match reality — generation is back to Nebius `Qwen/Qwen3-235B-A22B-Instruct-2507`, the real
+> domain is `chavrutaai.org`, and `app/billing/` has live PayPlus/GreenInvoice code. Treat the
+> **general shape** (Docker Compose, `restore_commercial_snapshot.py`, boot volume size, firewall
+> needing two layers) as still useful, but verify every provider-specific detail against
+> `docs/HANDOFF.md` and the actual VM before following it step by step. No Nebius-specific rewrite
+> of this doc exists yet.
+
 **Written 2026-07-29, before an Oracle account existed.** Decided over GCP Always Free (1GB/month
 egress — too thin for live traffic), Qdrant Cloud free tier (1GB RAM/4GB disk — smaller than the
 collection), HF Spaces (ephemeral disk — the index gets wiped on every restart), and Render/

@@ -825,6 +825,21 @@ def list_sessions(owner_id: str = "local") -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+def get_session(sid: str, owner_id: str = "local") -> dict[str, Any] | None:
+    """Single session by id, independent of `list_sessions`'s 100-row cap — callers that already
+    have the id (e.g. reading back a session they just touched) must not 404 just because the
+    owner has more than 100 sessions and this one fell off the recency-ordered page."""
+    with _LOCK:
+        row = get_conn().execute(
+            """SELECT id, first_q, created_at, updated_at, mode, title, pinned_at,
+                      excluded_from_review
+               FROM sessions
+               WHERE id=? AND owner_id=?""",
+            (sid, owner_id),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def delete_session(sid: str, owner_id: str = "local") -> bool:
     with _tx(get_conn()) as conn:
         cur = conn.execute("DELETE FROM sessions WHERE id=? AND owner_id=?", (sid, owner_id))

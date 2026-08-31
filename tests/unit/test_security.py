@@ -8,6 +8,9 @@ from __future__ import annotations
 import types
 
 import pytest
+from fastapi import FastAPI, Request
+from fastapi.testclient import TestClient
+
 from app.security import _SlidingWindow, require_api_key
 
 
@@ -68,6 +71,14 @@ def test_rate_limit_window_slides():
     assert w.allow("a", 0.0) is True
     assert w.allow("a", 5.0) is False   # within window
     assert w.allow("a", 11.0) is True   # old hit expired
+
+
+def test_rate_limit_zero_means_unlimited_not_blocked():
+    # CHAVRUTA_RATE_PER_MIN=0 is meant as "disable this limit" (the common convention for a limit
+    # env var), not "every request is already over the limit" — `len(hits) >= 0` is always true, so
+    # without the explicit guard this configuration blocked 100% of traffic instead of 0%.
+    w = _SlidingWindow(0, 60.0)
+    assert all(w.allow("a", i * 0.1) for i in range(10))
 
 
 # ── Spoof-proof client IP for the rate-limit key (adversarial review P1) ──
@@ -213,3 +224,49 @@ def test_the_limiter_still_limits_through_the_middleware(monkeypatch, tmp_path):
         codes = [c.post("/query/async", json={"question": "x"}).status_code for _ in range(5)]
     assert 429 in codes, "the middleware must actually reach the window"
     assert codes.count(202) == 3
+
+
+# ── Body cap must also catch bodies with no Content-Length (chunked transfer) ─────────────────
+def test_body_size_middleware_allows_small_chunked_body(monkeypatch):
+    from app import security
+
+    monkeypatch.setattr(security, "_MAX_BODY", 10)
+
+    app = FastAPI()
+    app.middleware("http")(security.body_size_middleware)
+
+    @app.post("/echo")
+    async def echo(request: Request):
+        return {"len": len(await request.body())}
+
+    def chunks(data: bytes):
+        for i in range(0, len(data), 3):
+            yield data[i:i + 3]
+
+    with TestClient(app) as c:
+        r = c.post("/echo", content=chunks(b"hello"))   # 5 bytes, under the 10-byte cap
+    assert r.status_code == 200
+    assert r.json()["len"] == 5
+
+
+def test_body_size_middleware_rejects_oversized_chunked_body(monkeypatch):
+    """Content-Length is absent for `Transfer-Encoding: chunked` — the header check alone can't see
+    an oversized body sent this way, so it used to sail straight through uncounted."""
+    from app import security
+
+    monkeypatch.setattr(security, "_MAX_BODY", 10)
+
+    app = FastAPI()
+    app.middleware("http")(security.body_size_middleware)
+
+    @app.post("/echo")
+    async def echo(request: Request):
+        return {"len": len(await request.body())}   # must never run for the oversized request
+
+    def chunks(data: bytes):
+        for i in range(0, len(data), 3):
+            yield data[i:i + 3]
+
+    with TestClient(app) as c:
+        r = c.post("/echo", content=chunks(b"x" * 50))   # 50 bytes, over the 10-byte cap
+    assert r.status_code == 413

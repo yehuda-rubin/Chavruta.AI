@@ -144,6 +144,70 @@ def test_a_slot_is_released_even_when_the_held_work_raises():
     assert acquired == [True], "the gate stayed full after an exception inside it"
 
 
+def test_a_waiter_interrupted_while_queued_does_not_leak_capacity(monkeypatch):
+    """If my_turn.wait() itself is interrupted while a waiter is still queued (never granted), the
+    Event must come out of the queue. Otherwise a LATER holder's _release() still pops it and
+    .set()s it — nobody is listening any more — and increments `_in_use` for a grant that will
+    never be matched by this waiter's own `finally: self._release()` (that code never runs), quietly
+    stealing one unit of the gate's capacity forever."""
+    gate = _PriorityGate(capacity=1)
+    holder_ready = threading.Event()
+    release_holder = threading.Event()
+
+    def holder():
+        with gate.acquire():
+            holder_ready.set()
+            release_holder.wait(timeout=5)
+
+    t_holder = threading.Thread(target=holder)
+    t_holder.start()
+    holder_ready.wait(timeout=5)
+
+    # Make the queued waiter's my_turn.wait() raise. threading.Thread.start() itself blocks the
+    # CALLING thread on an internal Event.wait() until the new thread has actually started — that is
+    # deterministically the FIRST Event.wait() call in this window, before the new thread ever
+    # reaches gate.acquire(); my_turn.wait() is the second. (The holder's own release_holder.wait()
+    # is already an in-progress call from earlier and is unaffected by re-patching the class now.)
+    orig_wait = threading.Event.wait
+    calls = {"n": 0}
+
+    def flaky_wait(self, timeout=None):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            monkeypatch.setattr(threading.Event, "wait", orig_wait)   # one-shot
+            raise RuntimeError("simulated interruption")
+        return orig_wait(self, timeout)
+
+    monkeypatch.setattr(threading.Event, "wait", flaky_wait)
+
+    interrupted = []
+
+    def waiter():
+        try:
+            with gate.acquire():
+                pass  # pragma: no cover — must never be reached
+        except RuntimeError:
+            interrupted.append(True)
+
+    t_waiter = threading.Thread(target=waiter)
+    t_waiter.start()
+    t_waiter.join(timeout=5)
+    assert interrupted == [True], "the simulated interruption must propagate out of acquire()"
+    assert not gate._priority_queue and not gate._normal_queue, (
+        "the interrupted waiter's Event must not be left sitting in the queue")
+
+    release_holder.set()
+    t_holder.join(timeout=5)
+
+    # The gate must still be at full, correct capacity afterward — no phantom grant leaked.
+    assert gate._in_use == 0
+    acquired = []
+    with gate.acquire():
+        acquired.append(True)
+        assert gate._in_use == 1
+    assert acquired == [True]
+
+
 def test_two_priority_waiters_do_not_starve_each_other():
     """Priority beats normal, but priority-vs-priority is still first-come-first-served — nothing
     here should let one priority waiter block another indefinitely."""

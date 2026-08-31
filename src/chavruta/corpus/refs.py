@@ -74,15 +74,21 @@ def hebrew_numeral(n: int) -> str:
     are not expected here and fall back to a plain digit string rather than guessing at compound
     hundreds forms nothing in this corpus actually needs.
     """
-    if n == 15:
-        return 'ט"ו'
-    if n == 16:
-        return 'ט"ז'
     hundreds, rem = divmod(n, 100)
-    tens, units = divmod(rem, 10)
     if hundreds >= len(_HEB_HUNDREDS):
         return str(n)
-    letters = _HEB_HUNDREDS[hundreds] + _HEB_TENS[tens] + _HEB_UNITS[units]
+    # The 15/16 exception applies to the LAST TWO DIGITS, not just to n itself — 115 and 116 hit it
+    # exactly as 15 and 16 do. Checking `n == 15` alone let 115 fall through to the ordinary
+    # tens+units letters (י + ה), spelling one of the two-letter forms of the Divine Name — the
+    # exact thing ט"ו/ט"ז exists to avoid, just one "hundreds" letter later.
+    if rem == 15:
+        tens_units = 'טו'
+    elif rem == 16:
+        tens_units = 'טז'
+    else:
+        tens, units = divmod(rem, 10)
+        tens_units = _HEB_TENS[tens] + _HEB_UNITS[units]
+    letters = _HEB_HUNDREDS[hundreds] + tens_units
     if len(letters) > 1:
         return letters[:-1] + '"' + letters[-1]
     return letters + "'" if letters else str(n)
@@ -204,7 +210,10 @@ def _chapter_lengths_for(book: str) -> list[int] | None:
     return lengths
 
 
-_RANGE_RE = re.compile(r"^(?P<book>.+?)\s+(?P<c1>\d+):(?P<v1>\d+)-(?P<c2>\d+):(?P<v2>\d+)$")
+# The second chapter is optional — a same-chapter range ('Isaiah 54:1-10', 'Genesis 1:1-5') is
+# common (e.g. a Haftarah that doesn't cross a chapter boundary) and was previously unparseable:
+# the chapter-less form simply didn't match, so expand_range silently returned [].
+_RANGE_RE = re.compile(r"^(?P<book>.+?)\s+(?P<c1>\d+):(?P<v1>\d+)-(?:(?P<c2>\d+):)?(?P<v2>\d+)$")
 
 
 def expand_range(ref_range: str) -> list[str]:
@@ -221,7 +230,8 @@ def expand_range(ref_range: str) -> list[str]:
     lengths = _chapter_lengths_for(book)
     if not lengths:
         return []
-    c1, v1, c2, v2 = int(m.group("c1")), int(m.group("v1")), int(m.group("c2")), int(m.group("v2"))
+    c1, v1, v2 = int(m.group("c1")), int(m.group("v1")), int(m.group("v2"))
+    c2 = int(m.group("c2")) if m.group("c2") else c1
     if c1 < 1 or c2 > len(lengths) or c1 > c2:
         return []
     out: list[str] = []

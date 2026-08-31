@@ -1710,6 +1710,9 @@ def test_create_session_async_runs_in_background(monkeypatch):
     monkeypatch.setattr(api.db, "save_message", lambda *a, **k: 1)
     monkeypatch.setattr(api.db, "list_sessions",
                         lambda owner="local": [{"id": "sid-async", "first_q": "q", "created_at": "t"}])
+    monkeypatch.setattr(api.db, "get_session",
+                        lambda sid, owner="local": {"id": "sid-async", "first_q": "q", "created_at": "t"}
+                        if sid == "sid-async" else None)
     monkeypatch.setattr(api, "_run_query",
                         lambda *a, **k: api.QueryResponse(answer="lesson body", citations=[],
                                                           grounded=True, intent="lesson", files=[]))
@@ -1743,6 +1746,9 @@ def test_get_job_is_owner_scoped(monkeypatch):
     monkeypatch.setattr(api.db, "save_message", lambda *a, **k: 1)
     monkeypatch.setattr(api.db, "list_sessions",
                         lambda owner="local": [{"id": "sid-o", "first_q": "q", "created_at": "t"}])
+    monkeypatch.setattr(api.db, "get_session",
+                        lambda sid, owner="local": {"id": "sid-o", "first_q": "q", "created_at": "t"}
+                        if sid == "sid-o" else None)
     monkeypatch.setattr(api, "_run_query",
                         lambda *a, **k: api.QueryResponse(answer="a", citations=[], grounded=True,
                                                           intent="qa", files=[]))

@@ -454,7 +454,12 @@ class ChavrutaPipeline:
         # Agentically-fetched sources continue the S# numbering — extend the marker map so their [S#]
         # citations resolve instead of being dropped as fabricated.
         for i, s in enumerate(fetched or [], len(marker_map) + 1):
-            marker_map.setdefault(f"S{i}", s)
+            # Use the marker the agentic loop actually embedded into the prompt text (set on the
+            # object itself by append_sources) rather than re-deriving one by counting — two
+            # independently-computed numberings for the same sources can drift apart if the loop's
+            # own text scan ever over/undercounts (see agentic.py::append_sources). Falls back to
+            # the old count-based guess only for a source that never went through that loop.
+            marker_map.setdefault(s.marker or f"S{i}", s)
         text, citations, is_grounded = grounded.enforce_citations(raw, marker_map)
         answer = Answer(
             text=text, citations=citations, grounded=is_grounded,
@@ -585,7 +590,12 @@ class ChavrutaPipeline:
         # responsa/lesson that fetched its own sources keeps those [S#] citations (and
         # prune_lesson_to_cited doesn't then delete the sections citing them).
         for i, s in enumerate(fetched or [], len(marker_map) + 1):
-            marker_map.setdefault(f"S{i}", s)
+            # Use the marker the agentic loop actually embedded into the prompt text (set on the
+            # object itself by append_sources) rather than re-deriving one by counting — two
+            # independently-computed numberings for the same sources can drift apart if the loop's
+            # own text scan ever over/undercounts (see agentic.py::append_sources). Falls back to
+            # the old count-based guess only for a source that never went through that loop.
+            marker_map.setdefault(s.marker or f"S{i}", s)
         text, citations, is_grounded = grounded.enforce_citations(raw, marker_map)
         if plan.sections:
             plan = grounded.prune_lesson_to_cited(plan, citations)

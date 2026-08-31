@@ -236,7 +236,7 @@ def test_send_email_all_blank_recipients_returns_false(monkeypatch):
 
 
 def test_send_email_non_200_status_returns_false(monkeypatch):
-    """Resend API returning non-200 status returns False."""
+    """Resend API returning a real error status (5xx) returns False."""
     monkeypatch.setenv("RESEND_API_KEY", "test-key")
     monkeypatch.setenv("RESEND_FROM", "sender@example.com")
 
@@ -246,6 +246,22 @@ def test_send_email_non_200_status_returns_false(monkeypatch):
 
     result = email.send_email("test@example.com", "Test", "<p>Test</p>")
     assert result is False
+
+
+def test_send_email_201_created_returns_true(monkeypatch):
+    """Regression: Resend's documented success response is any 2xx (its own SDKs check for an
+    `error` field, not a specific status code) — a strict `!= 200` check treated a legitimate 201
+    Created as a failure, so every real send was logged as an error despite the email having gone
+    out, and BYOK/account-deletion callers that gate on the return value degraded needlessly."""
+    monkeypatch.setenv("RESEND_API_KEY", "test-key")
+    monkeypatch.setenv("RESEND_FROM", "sender@example.com")
+
+    def fake_urlopen(req, timeout=10):
+        return _FakeResponse(status=201)
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    result = email.send_email("test@example.com", "Test", "<p>Test</p>")
+    assert result is True
 
 
 if __name__ == "__main__":

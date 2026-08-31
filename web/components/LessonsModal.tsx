@@ -61,7 +61,7 @@ export function LessonsModal({
               <button
                 onClick={() => del(l.id)}
                 className="h-8 w-8 rounded-lg hover:bg-white grid place-items-center text-ink/40 hover:text-red-500 shrink-0"
-                title={tr(lang, "download")}
+                title={tr(lang, "remove")}
               >
                 <Icon name="delete" className="text-[20px]" />
               </button>

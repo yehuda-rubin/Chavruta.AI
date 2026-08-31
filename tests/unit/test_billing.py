@@ -68,7 +68,40 @@ def test_parse_event_extracts_fields():
         "uid": "txn_1", "more_info": "u-1", "status_code": "000", "amount": 49.9,
         "recurring_charge_information": {"recurring_uid": "rec_9"}}})
     assert ev == {"owner_id": "u-1", "success": True, "transaction_uid": "txn_1",
-                  "recurring_uid": "rec_9", "is_renewal": True, "amount": 49.9}
+                  "recurring_uid": "rec_9", "is_renewal": True, "amount": 49.9,
+                  "email": "", "name": ""}
+
+
+def test_parse_event_extracts_email_and_name_from_hash_data():
+    """Regression: PayPlus's real webhook callback has no plain customer_email/customer_name field
+    — despite the name, `transaction.data.hash_data` is base64-encoded JSON carrying what the
+    hosted payment page collected (verified against docs.payplus.co.il's transaction-callback
+    reference). Without decoding it, every PayPlus charge produced a receipt with no customer
+    name/email on it."""
+    hash_data = base64.b64encode(
+        json.dumps({"email": "dana@example.com", "name": "Dana Cohen",
+                   "vat_number": "123456789", "phone": "972500000000"}).encode()).decode()
+    ev = payplus.parse_event({"transaction": {
+        "uid": "txn_1", "more_info": "u-1", "status_code": "000", "amount": 49.9,
+        "data": {"hash_data": hash_data}}})
+    assert ev["email"] == "dana@example.com"
+    assert ev["name"] == "Dana Cohen"
+
+
+@pytest.mark.parametrize("txn", [
+    {"uid": "txn_1", "status_code": "000"},                           # no data at all
+    {"uid": "txn_1", "status_code": "000", "data": {}},                # no hash_data
+    {"uid": "txn_1", "status_code": "000", "data": {"hash_data": "not-valid-base64!!!"}},
+    {"uid": "txn_1", "status_code": "000",
+     "data": {"hash_data": base64.b64encode(b"not json").decode()}},
+])
+def test_parse_event_degrades_to_empty_strings_on_missing_or_malformed_customer_data(txn):
+    """A payment that already succeeded must never fail to process because the customer-info blob
+    is missing or unparseable — an empty receipt name is a config/logging problem, not a reason to
+    lose track of money that already moved."""
+    ev = payplus.parse_event({"transaction": txn})
+    assert ev["email"] == ""
+    assert ev["name"] == ""
 
 
 def test_handle_event_activates_paid(fresh_db, monkeypatch):
@@ -91,6 +124,36 @@ def test_handle_event_ignores_failure(fresh_db, monkeypatch):
     service.handle_event({"owner_id": "u-2", "success": False}, now=datetime(2026, 7, 19, tzinfo=UTC))
     assert fresh_db.get_plan("u-2") == "free"
     assert fresh_db.get_subscription("u-2") is None
+
+
+def test_coupon_discount_rebate_issues_a_credit_note(fresh_db, monkeypatch):
+    """Regression: the automatic coupon-discount rebate (a partial refund issued right inside the
+    webhook, when an account holds a coupon_discount_ils balance) refunded real money via
+    payplus.refund() but never issued the חשבונית זיכוי that reverses the ORIGINAL tax invoice for
+    that amount — unlike the operator-initiated refund() path, which always has. Every coupon
+    holder's renewal then left the books overstating income by the rebated amount."""
+    monkeypatch.setattr(service.greeninvoice, "issue_receipt", lambda **k: None)
+    monkeypatch.setattr(service.payplus, "refund", lambda *a, **k: {"ok": True})
+
+    credit_notes = []
+    monkeypatch.setattr(service.greeninvoice, "issue_credit_note",
+                        lambda **k: credit_notes.append(k) or {"number": "CN-1"})
+
+    fresh_db.upsert_subscription("u-3", provider="payplus", provider_ref="rec_3", status="active",
+                                 updated_at=datetime(2026, 7, 19, tzinfo=UTC).isoformat())
+    fresh_db.set_coupon_discount("u-3", 30.0)
+
+    service.handle_event({
+        "owner_id": "u-3", "success": True, "recurring_uid": "rec_3",
+        "transaction_uid": "txn_3", "is_renewal": False, "amount": 200.0,
+        "email": "dana@example.com", "name": "Dana Cohen",
+    }, now=datetime(2026, 7, 19, tzinfo=UTC))
+
+    assert len(credit_notes) == 1
+    assert credit_notes[0]["amount"] == 30.0
+    assert credit_notes[0]["email"] == "dana@example.com"
+    assert credit_notes[0]["name"] == "Dana Cohen"
+    assert fresh_db.get_subscription("u-3")["coupon_discount_ils"] == 0.0
 
 
 def test_cancel_keeps_paid_until_period_end_then_sweep_downgrades(fresh_db, monkeypatch):

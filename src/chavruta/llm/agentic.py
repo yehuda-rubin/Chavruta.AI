@@ -148,6 +148,14 @@ def max_marker(job_md: str) -> int:
 def append_sources(job_md: str, sources: list[SourceBlock], start_n: int) -> str:
     lines = ["", "## ADDITIONAL SOURCES (retrieved at your request)"]
     for i, s in enumerate(sources, start_n + 1):
+        # Stamp the marker onto the SourceBlock itself, not just into the rendered text — the
+        # pipeline's citation map (marker_map) is built from THESE objects after the loop ends, and
+        # used to independently re-derive the same number by counting (see pipeline.py's two
+        # `marker_map.setdefault` call sites). Two separately-computed numberings for the same data
+        # can drift apart if max_marker's text scan ever over/undercounts (e.g. a retrieved source's
+        # own body coincidentally containing a `[S#]`-shaped line) — writing it here once, onto the
+        # object the caller already receives back, makes this the single source of truth instead.
+        s.marker = f"S{i}"
         who = f" ({s.commentator_id})" if getattr(s, "commentator_id", None) else ""
         lines += [f"### [S{i}] {s.ref}{who}", (s.text or "").strip(), ""]
     lines += [
@@ -241,7 +249,11 @@ def agentic_request(llm, body_md: str, *, lang: str = "he",
                              token_budget, state["out_tokens"])
                 state["budget_exhausted"] = True
                 return None
-        prompt = GroundedPrompt(system=_REQUEST_SYSTEM, sources=[], question=job_md)
+        # bare=True: job_md already carries the real sources inline as plain instruction text: with
+        # bare=False, render_messages ALSO wraps it in the standard QA template (whose sources=[]
+        # branch adds "(no sources retrieved)"), so the model got that contradicting the sources it
+        # could plainly see in job_md right below it.
+        prompt = GroundedPrompt(system=_REQUEST_SYSTEM, sources=[], question=job_md, bare=True)
         try:
             # Unlike the bridge's file-poll transport (which returns None on timeout and never
             # raises), a real completion backend raises on any API error / timeout / rate-limit.

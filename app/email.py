@@ -107,8 +107,8 @@ def send_email(to: str | list[str], subject: str, html: str, text: str | None = 
         )
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
-                if resp.status != 200:
-                    _log.error("Resend API returned non-200 status: %d (batch %d/%d)",
+                if not (200 <= resp.status < 300):
+                    _log.error("Resend API returned non-2xx status: %d (batch %d/%d)",
                               resp.status, i, len(batches))
                     all_success = False
         except urllib.error.HTTPError as exc:

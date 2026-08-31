@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from collections import defaultdict
 from pathlib import Path
 
@@ -97,11 +98,30 @@ class LinkStore:
     """
 
     def __init__(self, db_path: str | Path, *, max_reached: int = 200) -> None:
-        self._db = sqlite3.connect(f"file:{Path(db_path)}?mode=ro", uri=True, check_same_thread=False)
+        # Path.as_uri() (not an f-string) — a raw path pasted after `file:` happens to work for the
+        # common case (SQLite's URI parser tolerates bare Windows backslashes and spaces), but a path
+        # containing a URI-reserved character (#, ?, %) silently mis-parses: the `#` case measured
+        # here connects successfully to the WRONG (nonexistent) location instead of raising, so a
+        # link-graph path under a directory with such a character would silently serve empty results
+        # rather than fail loudly. as_uri() percent-encodes properly on every platform.
+        self._uri = Path(db_path).resolve().as_uri() + "?mode=ro"
+        self._local = threading.local()
         self._max = max_reached
 
+    def _conn(self) -> sqlite3.Connection:
+        # A single sqlite3.Connection isn't safe under concurrent use from multiple threads — retrieval
+        # runs up to 4 requests in parallel (_PriorityGate) and interleaved execute() calls on one
+        # shared connection can raise "Recursive use of cursors not allowed". One connection per thread
+        # instead: cheap since this opens the same file read-only (mode=ro), so it adds no write
+        # contention, and gives each thread its own cursor state.
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(self._uri, uri=True)
+            self._local.conn = conn
+        return conn
+
     def neighbours(self, ref: str, work_ids: list[str] | None = None) -> list[str]:
-        return [r[0] for r in self._db.execute(
+        return [r[0] for r in self._conn().execute(
             "SELECT to_canon FROM edges WHERE from_canon=?", (ref,))]
 
     def expand(self, refs: list[str], depth: int = 1, work_ids: list[str] | None = None) -> list[str]:
@@ -124,4 +144,4 @@ class LinkStore:
         return reached
 
     def __len__(self) -> int:
-        return self._db.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
+        return self._conn().execute("SELECT COUNT(*) FROM edges").fetchone()[0]
