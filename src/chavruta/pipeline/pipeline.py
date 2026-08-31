@@ -50,7 +50,7 @@ _API_BACKENDS = frozenset({"api", "openai", "nebius"})
 _INTENT_MAX_TOKENS = {
     Intent.QA: 6000,
     Intent.EXPLAIN: 8000,
-    Intent.LESSON: 48000,
+    Intent.LESSON: 30000,
     Intent.COMPARE: 20000,
     Intent.HALACHA: 24000,     # a teshuva: source → poskim → pesak, can be substantial
 }

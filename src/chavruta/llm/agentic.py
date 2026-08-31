@@ -220,7 +220,7 @@ _REQUEST_SYSTEM = ("You are a grounded Torah study assistant. Follow the job bel
 
 
 def agentic_request(llm, body_md: str, *, lang: str = "he",
-                    max_tokens: int = 8000,
+                    max_tokens: int = 30000,
                     token_budget: int | None = None) -> tuple[str, list[SourceBlock]]:
     """Run the agentic loop for a completion backend (CloudLLM): each round sends the whole
     job markdown as one grounded prompt and returns the model's completion. Returns
