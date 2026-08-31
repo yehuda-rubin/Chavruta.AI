@@ -145,6 +145,7 @@ services:
       # nightly logs) go to their own writable volume instead; the container runs as uid 10001 and
       # cannot write into the repo checkout anyway.
       - ./eval:/app/eval:ro
+      - ./lessons:/app/lessons:ro
       - eval_out:/app/eval-out
     depends_on:
       - qdrant

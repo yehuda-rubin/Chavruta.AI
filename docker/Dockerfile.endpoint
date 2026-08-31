@@ -38,6 +38,8 @@ RUN pip install --upgrade pip \
 
 COPY src/ ./src/
 COPY app/ ./app/
+COPY lessons/ ./lessons/
+COPY scripts/ ./scripts/
 COPY pyproject.toml ./
 
 RUN pip install -e . --no-deps && chown -R app:app /app

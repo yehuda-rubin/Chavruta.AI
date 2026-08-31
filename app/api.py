@@ -1078,9 +1078,9 @@ def _lesson_job_md(question: str, hits, lang: str, *, audience: str | None,
         "short questions in the user's language — and STOP (no lesson yet). Otherwise go to STEP 2.",
         "",
         "STEP 2 — Write ONE answer with these parts, separated by these EXACT delimiter lines:",
-        "===SOURCE_SHEET===", "===LESSON_FLOW===", "===FULL_LESSON===", "===ORDER===", "",
-        "SOURCE_SHEET — the sources ARRANGED IN THE ORDER THEY ARE DISCUSSED (1 = first taught, then 2, …). "
-        "For each: a number, its reference, and its full text.",
+        "===LESSON_FLOW===", "===FULL_LESSON===", "===ORDER===", "",
+        "Do NOT write a separate source sheet — the platform automatically constructs the complete verified "
+        "source sheet from the citations and your ORDER list. Focus all depth, length, and tokens on LESSON_FLOW and FULL_LESSON.",
     ]
 
     if audience == "school":

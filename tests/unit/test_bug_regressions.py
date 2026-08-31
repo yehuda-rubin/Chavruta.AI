@@ -2654,3 +2654,24 @@ def test_widen_citations_from_note_resolves_fallback_license(monkeypatch):
     assert resp.citations[0].license == "Public Domain"
     assert resp.citations[0].version_title == "Vilna Edition"
 
+
+def test_lesson_job_md_prioritizes_flow_and_full_lesson():
+    from app.api import _lesson_job_md
+    hit = _RH(chunk_id="c1", ref="Genesis.1.1", text="בראשית", score=1.0)
+    job = _lesson_job_md("בריאת העולם", [hit], "he", audience="yeshiva", grade_band=None,
+                         length="medium", tpl=None, history=[])
+    assert "===LESSON_FLOW===" in job
+    assert "===FULL_LESSON===" in job
+    assert "===ORDER===" in job
+
+
+def test_split_lesson_handles_flow_and_full_lesson():
+    from app.api import _split_lesson
+    raw = "===LESSON_FLOW===\nמהלך\n===FULL_LESSON===\nשיעור מלא\n===ORDER===\nS1"
+    ss, lf, fl, order = _split_lesson(raw)
+    assert ss == ""
+    assert lf == "מהלך"
+    assert fl == "שיעור מלא"
+    assert order == "S1"
+
+
