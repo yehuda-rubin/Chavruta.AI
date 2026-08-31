@@ -28,22 +28,39 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # (docker-compose.yml) is runtime, too late for an already-frozen bundle, so a value has to reach
 # THIS stage as a build ARG instead.
 #
-# Written to .env.production.local, and ONLY when actually provided — never as a plain `ENV`. An
-# unconditional `ENV NEXT_PUBLIC_SUPABASE_URL=$ARG` (even when $ARG is empty) puts an EMPTY string
-# into process.env, and Next.js's env precedence puts process.env above every `.env*` file — so it
-# would SHADOW a real value this repo already keeps in `web/.env.production` (present on the deploy
-# host, git-ignored, loaded natively by `next build`; root .env / docker-compose `environment:` was
-# never the mechanism actually in use here). Caught live 2026-08-26: exactly that shadowing blanked
-# a working Supabase config and took auth down site-wide for one deploy, immediately rolled back.
-# Writing to the file conditionally means an empty ARG (this deployment) leaves the real file alone,
-# while a deployment that DOES configure via docker-compose build.args still gets it baked in.
+# TWO separate traps here, not one — both caught live 2026-08-26, taking Supabase auth down
+# site-wide, immediately rolled back:
+#
+# 1) An unconditional `ENV NEXT_PUBLIC_SUPABASE_URL=$ARG` (even when $ARG is empty) puts an EMPTY
+#    string into process.env, and Next.js's env precedence puts process.env above every `.env*`
+#    file — so it SHADOWS the real value this repo already keeps in `web/.env.production` (present
+#    on the deploy host, git-ignored, loaded natively by `next build`; root .env / docker-compose
+#    `environment:` was never the mechanism actually in use here). Fixed by writing to
+#    .env.production.local instead of a plain ENV, and only when the ARG is actually non-empty.
+#
+# 2) That fix alone still wasn't enough: BuildKit injects any EXPLICITLY-PASSED `ARG` — even an
+#    empty one — into the process environment of every later RUN in this stage, with no `ENV`
+#    instruction needed (verified directly: `env | grep SUPABASE` shows the var, empty, the moment
+#    docker-compose passes `--build-arg NEXT_PUBLIC_SUPABASE_URL=` via its `${VAR:-}` default —
+#    which it ALWAYS does, never omits the flag). So `npm run build` below still saw an empty
+#    process.env value and the shadowing happened anyway, file-write logic notwithstanding. Fixed
+#    by explicitly `unset`ting the ARG-sourced var, in the SAME RUN as `npm run build`, whenever
+#    it's empty — that's the only way `next build`'s process genuinely never sees it, since a fresh
+#    RUN re-injects the ARG independently every time (unsetting in an earlier separate RUN would
+#    not carry forward).
 ARG NEXT_PUBLIC_SUPABASE_URL
 ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
-RUN { [ -n "$NEXT_PUBLIC_SUPABASE_URL" ] && echo "NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL"; \
-      [ -n "$NEXT_PUBLIC_SUPABASE_ANON_KEY" ] && echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY"; \
-      true; } >> .env.production.local
-
-RUN npm run build
+RUN if [ -n "$NEXT_PUBLIC_SUPABASE_URL" ]; then \
+      echo "NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL" >> .env.production.local; \
+    else \
+      unset NEXT_PUBLIC_SUPABASE_URL; \
+    fi; \
+    if [ -n "$NEXT_PUBLIC_SUPABASE_ANON_KEY" ]; then \
+      echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY" >> .env.production.local; \
+    else \
+      unset NEXT_PUBLIC_SUPABASE_ANON_KEY; \
+    fi; \
+    npm run build
 
 # ── Stage 2: run ─────────────────────────────────────────────────────────────
 FROM node:22-alpine
