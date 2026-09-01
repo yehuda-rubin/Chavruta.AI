@@ -13,8 +13,9 @@ from datetime import date
 import app.api as api
 import app.db as db
 import app.devhelpers as devhelpers
-import chavruta.calendar.sefaria_calendar as cal
 import pytest
+
+import chavruta.calendar.sefaria_calendar as cal
 from chavruta.retrieval.base import RankedHit
 
 
@@ -230,3 +231,44 @@ def test_run_parsha_haftarah_gets_only_boundary_verses_no_commentary(monkeypatch
     assert not any(" on " in t for t in haftarah_targets)
     assert any("54.11" in t or "54:11" in t for t in haftarah_targets)   # opening verse
     assert any("55.5" in t or "55:5" in t for t in haftarah_targets)     # closing verse
+
+
+def test_cap_hits_preserves_min_commentaries_when_base_exceeds_cap():
+    base = [_hit(f"base{i}") for i in range(15)]
+    commentary = [_hit(f"c{i}", comm="rashi") for i in range(10)]
+    out = api._cap_hits(base + commentary, max_total=10, min_commentaries=5)
+    assert len(out) == 20  # 15 base + 5 commentary
+    assert sum(1 for h in out if not h.commentator_id) == 15
+    assert sum(1 for h in out if h.commentator_id) == 5
+
+
+def test_run_daf_yomi_fetches_multiple_segments_across_both_amudim(monkeypatch):
+    info = cal.DafYomiInfo(tractate="Chullin", daf=123)
+    monkeypatch.setattr(api, "_get_pipeline", lambda: __import__("types").SimpleNamespace(llm="llm"))
+    monkeypatch.setattr(api, "_resolve_daf_yomi_cached", lambda: info)
+    monkeypatch.setattr(api, "_wants_full_lesson", lambda *a, **k: False)
+    monkeypatch.setattr(api, "_generate_chavruta_turn",
+                        lambda *a, **k: api.QueryResponse(answer="ok", citations=[], grounded=True,
+                                                          intent="chavruta", files=[]))
+
+    fetch_calls = []
+
+    def _fake_fetch(targets, **k):
+        fetch_calls.append(list(targets))
+        return [_hit(t) for t in targets]
+
+    monkeypatch.setattr(api, "_fetch_ranked_hits", _fake_fetch)
+
+    api._run_daf_yomi("שאלה על הדף", "he")
+
+    assert len(fetch_calls) == 1
+    targets = fetch_calls[0]
+    # Verify segments beyond .1 are included for both amud a (245) and amud b (246)
+    assert any("Chullin.245.2" in t or "Chullin 245.2" in t for t in targets)
+    assert any("Chullin.245.10" in t or "Chullin 245.10" in t for t in targets)
+    assert any("Chullin.246.2" in t or "Chullin 246.2" in t for t in targets)
+    assert any("Chullin.246.10" in t or "Chullin 246.10" in t for t in targets)
+    # Verify Rashi is preloaded on segments beyond .1, while secondary commentaries like Tosafot are not
+    assert any("Rashi_on_Chullin.245.2" in t for t in targets)
+    assert any("Rashi_on_Chullin.246.2" in t for t in targets)
+    assert not any("Tosafot_on_Chullin" in t for t in targets)

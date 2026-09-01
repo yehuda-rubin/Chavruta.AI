@@ -58,7 +58,7 @@ Every knob in Chavruta.AI is an environment variable. No code changes are requir
 | Variable | Purpose | Default | Where read | Production risk if left at default |
 |----------|---------|---------|------------|-----------------------------------|
 | `CHAVRUTA_API_KEYS` | Comma-separated list of allowed API keys (empty = disabled) | `""` | `app/security.py:41` | **No authentication** – anyone can call the API |
-| `CHAVRUTA_CORS_ORIGINS` | Comma-separated list of allowed CORS origins (browser policy) | `http://localhost:5173,http://localhost:4173` | `app/api.py:186` | **Blocks legitimate requests** from your production domain |
+| `CHAVRUTA_CORS_ORIGINS` | Comma-separated list of allowed CORS origins (browser policy) | `http://localhost:3000,http://localhost:5173,http://localhost:4173` | `app/api.py:650` | **Blocks legitimate requests** from your production domain |
 | `CHAVRUTA_RATE_PER_MIN` | Requests per minute per IP (rate limiting) | `20` | `app/security.py:160` | **Too permissive** – allows abuse of expensive LLM calls |
 | `CHAVRUTA_RATE_PER_HOUR` | Requests per hour per IP (rate limiting) | `200` | `app/security.py:161` | **Too permissive** – allows sustained abuse |
 | `CHAVRUTA_TRUSTED_PROXY_HOPS` | Number of trusted reverse proxies in front of the app (for X-Forwarded-For parsing) | `0` | `app/security.py:176` | **IP spoofing** – attackers can rotate X-Forwarded-For to bypass rate limits |
@@ -110,7 +110,7 @@ These variables override the default subscription tiers and credit costs defined
 | `CHAVRUTA_SUB_PRICE_ILS` | Legacy single-price knob (pro tier monthly, superseded by tier-specific prices) | `49.9` | `app/plans.py:214` |
 | `CHAVRUTA_SUB_DESCRIPTION` | Invoice line description (empty = auto-generated Hebrew description) | `""` | `app/billing/service.py:30` |
 | `CHAVRUTA_BILLING_SWEEP_INTERVAL_S` | Interval for the billing downgrade sweeper (seconds) | `3600` | `app/billing/service.py:155` |
-| `CHAVRUTA_PUBLIC_URL` | Public base URL for payment provider callbacks | `http://localhost:5173` | `app/billing/payplus.py:55` |
+| `CHAVRUTA_PUBLIC_URL` | Public base URL for payment provider callbacks and web links | `http://localhost:3000` | `app/billing/payplus.py:55` |
 
 ### Credits & coupons
 

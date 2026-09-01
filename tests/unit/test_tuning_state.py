@@ -31,7 +31,8 @@ def tune():
     """
     path = ROOT / "scripts" / "tune_retrieval.py"
     src = path.read_text(encoding="utf-8")
-    head = src.split("import torch")[0]
+    import re
+    head = re.split(r"(?:try:\s*\n\s*)?import torch", src)[0]
     spec = importlib.util.spec_from_loader("tune_state_only", loader=None)
     mod = importlib.util.module_from_spec(spec)
     mod.__dict__["__file__"] = str(path)          # the head resolves ROOT from it

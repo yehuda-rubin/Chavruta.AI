@@ -67,7 +67,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))
 
-import torch  # noqa: F401,E402 — must precede qdrant_client on Windows (pyarrow DLL order)
+try:
+    import torch  # noqa: F401,E402 — must precede qdrant_client on Windows (pyarrow DLL order)
+except Exception:  # noqa: BLE001
+    pass
 
 from chavruta.corpus.refs import with_ref_variants  # noqa: E402
 from chavruta.corpus.schema import Intent, Query  # noqa: E402
