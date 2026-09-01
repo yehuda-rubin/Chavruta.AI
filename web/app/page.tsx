@@ -459,6 +459,7 @@ export default function Home() {
         onNewChat={newDiscussion}
         isAdmin={me?.is_admin}
         orgRole={me?.org_role}
+        userEmail={auth.user?.email}
       />
       <div className="flex flex-1 overflow-hidden px-4 pb-4 gap-4">
         {/* Sessions — desktop inline only (hidden on mobile, opened as a drawer). lg:contents keeps

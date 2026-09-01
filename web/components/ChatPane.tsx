@@ -147,9 +147,8 @@ function Bubble({ lang, m, onPreview, userInitial }: { lang: Lang; m: Message; o
   const hasFiles = m.files && m.files.length > 0;
   return (
     <div className="flex gap-3.5">
-      <div className="h-9 w-9 rounded-2xl bg-white/80 grid place-items-center text-tekhelet font-serif font-black shrink-0 shadow-sm">
-        ח
-      </div>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/logo.png" alt="חברותא" className="h-8 w-8 object-contain shrink-0 mt-1" />
       <div className={"bg-white/70 rounded-3xl rounded-tr-md p-5 shadow-sm ring-1 ring-white/60 " + (hasFiles ? "max-w-[85%] w-full" : "")}>
         {m.text && (
           <p className={`font-serif text-[18px] leading-loose ${dir} ${hasFiles ? "mb-3" : ""}`} style={{ whiteSpace: "pre-wrap" }}>
@@ -276,9 +275,8 @@ export function ChatPane({
 
         {messages.length === 0 ? (
           <div className="m-auto text-center px-6">
-            <div className="h-16 w-16 rounded-3xl grad grid place-items-center text-white font-serif text-3xl font-black mx-auto mb-5 shadow-lg shadow-tekhelet/20">
-              ח
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo.png" alt="חברותא" className="h-16 w-auto object-contain mx-auto mb-5" />
             <h2 className="font-serif text-3xl font-bold text-tekhelet mb-2">{tr(lang, "welcomeTitle")}</h2>
             <p className="text-ink/55 max-w-md mx-auto leading-relaxed">{tr(lang, "welcomeBody")}</p>
 
@@ -305,9 +303,8 @@ export function ChatPane({
         )}
         {thinkingHere && (
           <div className="flex gap-3.5">
-            <div className="h-9 w-9 rounded-2xl bg-white/80 grid place-items-center text-tekhelet font-serif font-black shrink-0 shadow-sm">
-              ח
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo.png" alt="חברותא" className="h-8 w-8 object-contain shrink-0 mt-1" />
             <div className="bg-white/70 rounded-3xl rounded-tr-md p-5 shadow-sm ring-1 ring-white/60 text-ink/50 font-serif">
               {tr(lang, intent === "lesson" ? "lessonThinking" : "thinking")}
             </div>

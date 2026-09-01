@@ -15,6 +15,7 @@ export function Header({
   onNewChat,
   isAdmin = false,
   orgRole = "",
+  userEmail,
 }: {
   lang: Lang;
   theme: "light" | "dark";
@@ -30,6 +31,7 @@ export function Header({
                                 // 'teacher' ONLY: a student belongs to a school but has nothing to
                                 // manage there, so a button leading to a page of other people's
                                 // usage would be a confusing dead end at best.
+  userEmail?: string | null;
 }) {
   // The operator belongs to no school, so their org_role is empty and this button never appeared for
   // them — the only way in was a link buried in the admin dashboard's sidebar, which is not where
@@ -38,6 +40,7 @@ export function Header({
   // title says which school it is going to open.
   const canManageOrg = orgRole === "admin" || orgRole === "teacher" || !!isAdmin;
   const orgButtonTitle = orgRole ? "פאנל המוסד" : "פאנל מוסד (בית ספר לדוגמה)";
+  const userInitial = userEmail ? userEmail[0].toUpperCase() : "א";
   return (
     <header className="h-[70px] flex items-center justify-between px-4 lg:px-8 shrink-0">
       <div className="flex items-center gap-2 lg:gap-3">
@@ -64,9 +67,8 @@ export function Header({
           className="flex items-center gap-2 lg:gap-3 hover:opacity-80 transition"
           title={tr(lang, "newChatShort")}
         >
-          <div className="h-11 w-11 rounded-2xl grad grid place-items-center text-white font-serif text-xl font-black shadow-lg shadow-tekhelet/20">
-            ח
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.png" alt={tr(lang, "brand")} className="h-10 w-auto object-contain" />
           <h1 className="font-serif text-2xl font-bold text-tekhelet hidden sm:block">{tr(lang, "brand")}</h1>
         </button>
       </div>
@@ -113,7 +115,7 @@ export function Header({
             <Icon name="admin_panel_settings" />
           </Link>
         )}
-        <div className="hidden sm:grid h-10 w-10 rounded-full grad place-items-center text-white font-bold">א</div>
+        <div className="hidden sm:grid h-10 w-10 rounded-full grad place-items-center text-white font-bold">{userInitial}</div>
       </div>
     </header>
   );

@@ -74,6 +74,31 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           navigating between chats), content anchored to a 100vh container overflows past the real
           visible area and gets clipped — caught live 2026-08-07 as the header vanishing on mobile. */}
       <body className="font-sans text-ink h-dvh overflow-hidden">
+        <section className="sr-only" aria-label="אודות חברותא AI">
+          <h1>חברותא AI · בית מדרש</h1>
+          <p>שותף ללימוד תורה — שאלה, הסבר ובניית שיעורים מעל המדף היהודי, עם מקורות מצוטטים.</p>
+          <p>
+            Chavruta.AI is an AI-powered study partner for Torah, Talmud, and Halachic literature,
+            grounded strictly in retrieved Jewish bookshelf sources: Tanakh, Mishnah, Talmud Bavli,
+            Talmud Yerushalmi, Rambam, Shulchan Arukh, Midrash, and commentaries.
+          </p>
+          <h2>יכולות מרכזיות / Core Capabilities</h2>
+          <ul>
+            <li>שאילתא (Q&A): מענה לשאלות לימודיות והלכתיות עם ציטוט מקורות מדויק.</li>
+            <li>הסבר מעמיק (In-depth Explanation): ביאור סוגיות, מושגים ומפרשים.</li>
+            <li>בניית שיעור (Lesson Builder): יצירת מערכי שיעור ודפי מקורות מותאמים לפי גיל וקהל יעד.</li>
+            <li>עיון במקורות (Source Explorer): עיון ישיר בטקסטים המצוטטים.</li>
+          </ul>
+          <nav aria-label="קישורים שימושיים">
+            <a href="/llms.txt">מידע מורחב למודלי שפה (llms.txt)</a>
+            <a href="/terms">תנאי שימוש (Terms)</a>
+            <a href="/privacy">מדיניות פרטיות (Privacy)</a>
+            <a href="/accessibility">הצהרת נגישות (Accessibility)</a>
+            <a href="/limits">מכסות ותוכניות (Limits)</a>
+            <a href="/school">חברותא למוסדות חינוך (Schools)</a>
+            <a href="/feedback">משוב (Feedback)</a>
+          </nav>
+        </section>
         <noscript>
           <div style={{ padding: "2rem", fontFamily: "sans-serif", maxWidth: "800px", margin: "0 auto" }}>
             <h1>חברותא AI · בית מדרש</h1>
