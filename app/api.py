@@ -15,6 +15,7 @@ import re
 import sys
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
@@ -1874,6 +1875,147 @@ def _daf_yomi_context_note(tractate: str, daf: int, he: bool) -> str:
            f"database's internal numbering, not the real daf number.)")
 
 
+# ── Source Sheet Companion Path (Spec 008) ───────────────────────────────────
+
+_SOURCESHEET_REBUILD_VERB = r"(?:בנה|לבנות|צור|ליצור|ערוך|לערוך|הפק|להפיק|הכן|להכין|כתוב|לכתוב|שכתב|לשכתב|חדש|לחדש|סכם|לסכם|הוצא|להוציא)"
+_SOURCESHEET_NOUN = r"(?:דף\s*מקורות|דף\s*המקורות|קובץ|חוברת|סיכום|ליווי)"
+_SOURCESHEET_BUILD_RE = re.compile(
+    rf"(?:{_SOURCESHEET_REBUILD_VERB}\s+(?:[^\n.?!]{{0,30}}?){_SOURCESHEET_NOUN}|{_SOURCESHEET_NOUN}\s+(?:חדש|מעודכן))",
+    re.IGNORECASE,
+)
+
+
+def _is_sourcesheet_rebuild_request(text: str) -> bool:
+    """Explicit signal that this turn in a source-sheet chat wants a file re-generated."""
+    clean = " ".join((text or "").split())
+    return bool(_SOURCESHEET_BUILD_RE.search(clean))
+
+
+def _sourcesheet_mode_enabled(owner_id: str) -> bool:
+    """The source sheet companion's rollout gate.
+
+    CHAVRUTA_SOURCE_SHEET_BETA_OWNERS is a comma-separated allowlist of owner_ids, or "*" once it is
+    open to everyone; empty (the default) means nobody. Admin owners always have access.
+    """
+    if _is_admin(owner_id):
+        return True
+    raw = os.environ.get("CHAVRUTA_SOURCE_SHEET_BETA_OWNERS", "").strip()
+    if raw == "*":
+        return True
+    if owner_id and owner_id in {o.strip() for o in raw.split(",") if o.strip()}:
+        return True
+    return bool(owner_id) and devhelpers.has_feature(owner_id, "sourcesheet")
+
+
+def _run_sourcesheet(
+    question: str,
+    lang: str,
+    history: list[Turn] | None = None,
+    owner_id: str = "local",
+    llm=None,
+) -> QueryResponse:
+    """Ingest and analyze a source sheet, creating a structured Companion Guide (Spec 008)."""
+    from chavruta.sourcesheet.analyzer import analyze_source_sheet
+    from chavruta.sourcesheet.parser import parse_source_sheet
+
+    he = (lang or "") != "en"
+
+    # Check for follow-up conversational study on an existing sheet
+    has_prior_sheet = any(getattr(h, "sourcesheet", False) for h in (history or []))
+    is_rebuild = _is_sourcesheet_rebuild_request(question)
+
+    if has_prior_sheet and not is_rebuild:
+        return _run_chavruta(question, lang, history=history, llm=llm)
+
+    parsed_items = parse_source_sheet(question)
+    if not parsed_items:
+        msg = (
+            "לא זוהו מקורות תורניים בדף שהועלה. אנא ודא שהקובץ או הטקסט מכיל מראי מקומות או ציטוטים."
+            if he
+            else "No rabbinic sources were detected. Please make sure the input contains citations or source text."
+        )
+        return QueryResponse(answer=msg, citations=[], grounded=False, intent="sourcesheet", files=[])
+
+    # Fetch verified corpus texts for identified refs (if retriever available)
+    corpus_lookup: dict[str, str] = {}
+    try:
+        if _pipeline is not None and hasattr(_pipeline, "retriever"):
+            retriever = _pipeline.retriever
+            if hasattr(retriever, "fetch_by_refs"):
+                for item in parsed_items:
+                    if item.ref:
+                        fetched = retriever.fetch_by_refs([item.ref])
+                        if fetched and getattr(fetched[0], "text_he", None):
+                            corpus_lookup[item.ref] = fetched[0].text_he
+    except Exception as exc:
+        _log.warning("sourcesheet corpus fetch fallback: %s", exc)
+
+    # Synthesize companion guide
+    topic_hint = parsed_items[0].header if parsed_items else "סוגיה תורנית"
+    guide = analyze_source_sheet(
+        items=parsed_items,
+        topic_hint=topic_hint,
+        corpus_lookup=corpus_lookup,
+        llm=llm,
+        lang=lang,
+    )
+
+    md_content = guide.to_markdown()
+    sheet_id = uuid.uuid4().hex[:12]
+
+    files = [
+        FileOut(
+            name=f"sourcesheet_{sheet_id}.md",
+            title="חוברת ליווי לדף מקורות (Markdown)" if he else "Source Sheet Companion (Markdown)",
+            content=md_content,
+            type="text/markdown",
+        ),
+        FileOut(
+            name=f"sourcesheet_summary_{sheet_id}.txt",
+            title="תקציר מהלך הסוגיה" if he else "Sugya Summary",
+            content=guide.summary,
+            type="text/plain",
+        ),
+    ]
+
+    # Save to SQLite database
+    try:
+        citations_out = [c for c in guide.citations]
+        db.save_source_sheet(
+            sheet_id=sheet_id,
+            title=guide.title,
+            raw_content=question,
+            parsed_sheet=[item.to_dict() for item in parsed_items],
+            files=[f.model_dump() for f in files],
+            citations=citations_out,
+            owner_id=owner_id,
+        )
+    except Exception as exc:
+        _log.warning("saving source sheet failed: %s", exc)
+
+    intro_msg = (
+        f"### {guide.title}\n\n"
+        f"**שאלת היסוד:** {guide.core_inquiry}\n\n"
+        f"עובדו בהצלחה **{len(parsed_items)} מקורות** בדף. "
+        f"חוברת הליווי המלאה נוצרה וזמינה להורדה בקבצים המצורפים, "
+        f"וניתן להמשיך ולדון בסוגיה כאן בשיחה."
+        if he
+        else f"### {guide.title}\n\n"
+        f"**Core Inquiry:** {guide.core_inquiry}\n\n"
+        f"Successfully analyzed **{len(parsed_items)} sources**. "
+        f"The full companion guide is ready for download in the attached files. "
+        f"You can continue to ask questions about the sheet here in the chat."
+    )
+
+    return QueryResponse(
+        answer=intro_msg,
+        citations=[CitationOut(ref=c, ref_he=c, text_he="", text_en="") for c in guide.citations],
+        grounded=True,
+        intent="sourcesheet",
+        files=files,
+    )
+
+
 # Global concurrency gate — every generation reaches the LLM/embedder/Qdrant through this one
 # function (sync routes call it inline; async routes call it from inside a job worker), so gating
 # HERE bounds total concurrent generations across BOTH paths combined, not per-path.
@@ -2064,6 +2206,16 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
             return _run_chavruta(question, lang, history=history, llm=llm)
         return _run_lesson(question, lang, history=history, audience=audience,
                            grade_band=grade_band, length=length, owner_id=owner_id, llm=llm)
+
+    if intent == Intent.SOURCESHEET or intent_str == "sourcesheet":
+        if not _sourcesheet_mode_enabled(owner_id):
+            msg = (
+                "מצב ניתוח דפי מקורות זמין כרגע בבטא סגורה בלבד."
+                if he
+                else "Source sheet mode is currently in private beta."
+            )
+            return QueryResponse(answer=msg, citations=[], grounded=False, intent="sourcesheet", files=[])
+        return _run_sourcesheet(question, lang, history=history, owner_id=owner_id, llm=llm)
 
     q = Query(text=question, lang=lang or None, intent=intent)
     answer = _get_pipeline().ask(q, history=history, llm=llm)
@@ -2918,6 +3070,7 @@ class MeOut(BaseModel):
     # enforcement (that's the server-side check in _run_query_impl, which runs regardless of what
     # the client shows).
     calendar_modes_enabled: bool = False
+    sourcesheet_enabled: bool = False
     # Admin dashboard link — see _is_admin. UI convenience only, same as the field above; the real
     # enforcement is the 404 every /admin/* route raises for a non-admin owner.
     is_admin: bool = False
@@ -3014,6 +3167,7 @@ def me(owner: str = Depends(current_owner)):
         blocked_until=ban["until"] if ban else None,
         blocked_reason=ban["reason"] if ban else "",
         calendar_modes_enabled=_calendar_modes_enabled(owner),
+        sourcesheet_enabled=_sourcesheet_mode_enabled(owner),
         is_admin=_is_admin(owner),
         org_id=(_org := orgs.membership(owner) or {}).get("org_id", "") or "",
         org_name=_org.get("name", "") or "",
@@ -3535,21 +3689,24 @@ _FULL_LESSON_FILE_NAMES = ("השיעור_המלא.doc", "full_lesson.doc")
 
 
 def _lesson_turn_text(m: dict) -> tuple[str, bool]:
-    """The text to carry into history for one saved turn, plus whether it was a completed LESSON.
-
-    `QueryResponse.answer` is deliberately empty for a finished lesson (see
-    `_generate_lesson_from_hits`) — its content lives only in `files`. Left as `m["text"]` as-is,
-    every consumer of `history` downstream (a chavruta follow-up, `_conversation_signals`, the raw
-    chat history hardened into the next LLM prompt via `render_messages`) would see an EMPTY
-    assistant turn sitting where the lesson was — as if nothing had been taught. Substituting the
-    full-lesson file's own text lets a follow-up turn actually discuss what was built.
-    """
+    """The text to carry into history for one saved turn, plus whether it was a completed LESSON."""
     text = m.get("text") or ""
     files = m.get("files") or []
     if text.strip() or not files:
         return text, False
     full = next((f for f in files if f.get("name") in _FULL_LESSON_FILE_NAMES), files[-1])
     return full.get("content") or "", True
+
+
+def _sourcesheet_turn_text(m: dict) -> tuple[str, bool]:
+    """The text to carry into history for one saved turn, plus whether it was a completed SOURCE SHEET."""
+    text = m.get("text") or ""
+    files = m.get("files") or []
+    is_sourcesheet = any("sourcesheet" in (f.get("name") or "") for f in files) or m.get("intent") == "sourcesheet"
+    if is_sourcesheet and files:
+        ss_md = next((f for f in files if (f.get("name") or "").endswith(".md")), files[0])
+        return ss_md.get("content") or text, True
+    return text, is_sourcesheet
 
 
 def _prepare_continue(session_id: str, req: QueryRequest, owner: str) -> tuple[list[Turn], str]:
@@ -3562,14 +3719,17 @@ def _prepare_continue(session_id: str, req: QueryRequest, owner: str) -> tuple[l
         raise HTTPException(status_code=404, detail="session not found")
     # Carry each assistant turn's CITED refs, not just its prose. db.get_messages already decodes
     # them; dropping them here is what let a five-turn discussion of a sugya lose the sugya (see
-    # _conversation_signals). `lesson=` marks a turn that finished a lesson (see _lesson_turn_text) —
-    # _run_query_impl uses it to tell a follow-up question from a request for a genuinely new lesson.
+    # _conversation_signals). `lesson=` and `sourcesheet=` mark turns that finished special modes.
     history = []
     for m in history_rows[-8:]:
         text, is_lesson = _lesson_turn_text(m)
+        ss_text, is_sourcesheet = _sourcesheet_turn_text(m)
+        if is_sourcesheet:
+            text = ss_text
         history.append(Turn(role=m["role"], text=text,
                             refs=[r for c in (m.get("citations") or []) if (r := (c or {}).get("ref"))],
-                            lesson=is_lesson))
+                            lesson=is_lesson,
+                            sourcesheet=is_sourcesheet))
     db.save_message(session_id, "user", req.question)
     # Sticky mode: a chat stays in the mode chosen on its first turn — ignore any intent the client
     # sends on later turns. Legacy sessions (mode=NULL) fall back to the per-request intent.
@@ -4398,3 +4558,32 @@ def org_set_cap(req: MemberActionIn, owner: str = Depends(current_owner)):
         raise HTTPException(status_code=404, detail="not found")
     orgs.log_access(m["org_id"], owner, "set_cap", req.owner_id)
     return {"owner_id": req.owner_id, "daily_cap": cap}
+
+
+# ── Source Sheet Companion Library (Spec 008) ────────────────────────────────
+
+@app.get("/sourcesheets")
+def list_saved_sourcesheets(owner: str = Depends(current_owner)):
+    if not _sourcesheet_mode_enabled(owner):
+        raise HTTPException(status_code=403, detail="Source sheet mode is currently in private beta.")
+    return db.list_source_sheets(owner)
+
+
+@app.get("/sourcesheets/{sheet_id}")
+def get_saved_sourcesheet(sheet_id: str, owner: str = Depends(current_owner)):
+    if not _sourcesheet_mode_enabled(owner):
+        raise HTTPException(status_code=403, detail="Source sheet mode is currently in private beta.")
+    sheet = db.get_source_sheet(sheet_id, owner)
+    if not sheet:
+        raise HTTPException(status_code=404, detail="Source sheet not found")
+    return sheet
+
+
+@app.delete("/sourcesheets/{sheet_id}")
+def delete_saved_sourcesheet(sheet_id: str, owner: str = Depends(current_owner)):
+    if not _sourcesheet_mode_enabled(owner):
+        raise HTTPException(status_code=403, detail="Source sheet mode is currently in private beta.")
+    deleted = db.delete_source_sheet(sheet_id, owner)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Source sheet not found")
+    return {"deleted": True, "id": sheet_id}

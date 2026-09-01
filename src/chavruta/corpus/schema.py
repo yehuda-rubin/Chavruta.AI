@@ -27,6 +27,7 @@ class Intent(str, Enum):
     COMPARE = "compare"
     LESSON = "lesson"
     HALACHA = "halacha"        # reserved / deferred until a halachic corpus is loaded
+    SOURCESHEET = "sourcesheet"
 
 
 @dataclass(frozen=True)
@@ -163,6 +164,8 @@ class Turn:
     # (app/api.py::_run_query_impl) tell "this session already has a finished lesson" from the turns
     # alone, without a second DB round-trip. Optional and False by default, same reasoning as `refs`.
     lesson: bool = False
+    # True for an assistant turn that completed a SOURCE SHEET companion guide.
+    sourcesheet: bool = False
 
 
 @dataclass

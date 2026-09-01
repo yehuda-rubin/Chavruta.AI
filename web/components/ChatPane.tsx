@@ -202,6 +202,7 @@ export function ChatPane({
   onSend,
   onPreviewFile,
   calendarModesEnabled,
+  sourcesheetModesEnabled,
   userEmail,
 }: {
   lang: Lang;
@@ -220,6 +221,7 @@ export function ChatPane({
   onSend: (text: string) => void;
   onPreviewFile: (f: FileOut) => void;
   calendarModesEnabled?: boolean;
+  sourcesheetModesEnabled?: boolean;
   // The signed-in user's email, when known — used only to derive the avatar initial. In local/dev
   // mode (no Supabase configured) there's no signed-in user at all, so this stays undefined and the
   // avatar falls back to the generic aleph glyph rather than rendering empty.
@@ -306,7 +308,14 @@ export function ChatPane({
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/logo.png" alt="חברותא" className="h-8 w-8 object-contain shrink-0 mt-1" />
             <div className="bg-white/70 rounded-3xl rounded-tr-md p-5 shadow-sm ring-1 ring-white/60 text-ink/50 font-serif">
-              {tr(lang, intent === "lesson" ? "lessonThinking" : "thinking")}
+              {tr(
+                lang,
+                intent === "lesson"
+                  ? "lessonThinking"
+                  : intent === "sourcesheet"
+                  ? "sourcesheetThinking"
+                  : "thinking"
+              )}
             </div>
           </div>
         )}
@@ -318,8 +327,14 @@ export function ChatPane({
           onSubmit={submit}
           className="max-w-2xl mx-auto flex items-center gap-2 glass rounded-full px-3 py-1.5 sm:py-2 focus-within:ring-2 focus-within:ring-indigo/30"
         >
-          <IntentBar lang={lang} intent={intent} locked={locked} onPick={onPickIntent}
-                    calendarModesEnabled={calendarModesEnabled} />
+          <IntentBar
+            lang={lang}
+            intent={intent}
+            locked={locked}
+            onPick={onPickIntent}
+            calendarModesEnabled={calendarModesEnabled}
+            sourcesheetModesEnabled={sourcesheetModesEnabled}
+          />
           <textarea
             ref={taRef}
             rows={1}

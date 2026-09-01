@@ -1,7 +1,7 @@
 // API client. Uses the SAME bare paths the active static UI calls (/query, /sessions, /lessons);
 // next.config.mjs rewrites them to the FastAPI backend, so there is no hardcoded host and no CORS.
 
-import type { Attachment, Message, QueryResponse, SavedLesson, Session } from "./types";
+import type { Attachment, Message, QueryResponse, SavedLesson, SavedSourceSheet, Session } from "./types";
 
 // The current Supabase access token, kept in sync by the auth provider (setAuthToken). When set, it's
 // attached as `Authorization: Bearer <token>` so the backend can verify the user and scope their data;
@@ -213,6 +213,11 @@ export const api = {
   listLessons: () => req<SavedLesson[]>("/lessons"),
   getLesson: (id: string) => req<SavedLesson>(`/lessons/${id}`),
   deleteLesson: (id: string) => req<void>(`/lessons/${id}`, { method: "DELETE" }),
+
+  // Source Sheet Companion — saved source sheets.
+  listSourceSheets: () => req<SavedSourceSheet[]>("/sourcesheets"),
+  getSourceSheet: (id: string) => req<SavedSourceSheet>(`/sourcesheets/${id}`),
+  deleteSourceSheet: (id: string) => req<{ deleted: boolean; id: string }>(`/sourcesheets/${id}`, { method: "DELETE" }),
 
   ready: () => req<{ status: string; points?: number; reason?: string }>("/ready"),
   me: () => req<Me>("/me"),
@@ -451,6 +456,7 @@ export interface Me {
   // Parshat HaShavua / Daf Yomi — beta-gated to a hand-picked allowlist (app/api.py::
   // _calendar_modes_enabled). false for everyone not on it; the picker hides both modes entirely.
   calendar_modes_enabled: boolean;
+  sourcesheet_enabled: boolean;
   // Admin dashboard link — see app/api.py::_is_admin. UI convenience only; the real gate is the
   // 404 every /admin/* route raises for a non-admin owner.
   is_admin: boolean;

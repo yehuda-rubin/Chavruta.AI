@@ -39,6 +39,7 @@ const nextConfig = {
       ...proxy("sessions"),   // incl. /sessions/async, /sessions/{id}/query[/async], /messages
       ...proxy("jobs"),       // async polling — the UI's main generation path
       ...proxy("lessons"),
+      ...proxy("sourcesheets"),
       ...proxy("me"),
       ...proxy("account"),    // /account/delete, /account/delete/cancel
       ...proxy("billing"),    // /billing/config, /checkout, /cancel

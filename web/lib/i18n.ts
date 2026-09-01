@@ -48,6 +48,9 @@ export const STRINGS = {
     chavrutaMode: "חברותא",
     parshaMode: "פרשת השבוע",
     dafYomiMode: "דף יומי",
+    sourcesheetMode: "דף מקורות",
+    sourcesheetThinking: "החברותא מנתחת את דף המקורות ובונה חוברת ליווי…",
+    mySourceSheets: "דפי המקורות שלי",
     chooseMode: "בחר מצב",
     // lesson options
     forWhom: "עבור:",
@@ -327,6 +330,9 @@ export const STRINGS = {
     chavrutaMode: "Chavruta",
     parshaMode: "Parshat Hashavua",
     dafYomiMode: "Daf Yomi",
+    sourcesheetMode: "Source Sheet",
+    sourcesheetThinking: "The Chavruta is analyzing the source sheet and building a companion guide…",
+    mySourceSheets: "My Source Sheets",
     chooseMode: "Choose mode",
     forWhom: "For:",
     audAuto: "Auto (from prompt)",
@@ -582,7 +588,7 @@ export const EXAMPLES: Record<Lang, string[]> = {
   ],
 };
 
-export const INTENTS = ["lesson", "explain", "qa", "shut", "chavruta", "parsha", "dafyomi"] as const;
+export const INTENTS = ["lesson", "explain", "qa", "shut", "chavruta", "parsha", "dafyomi", "sourcesheet"] as const;
 export type IntentId = (typeof INTENTS)[number];
 
 export function tr(lang: Lang, key: StringKey): string {

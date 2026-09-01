@@ -11,33 +11,34 @@ const LABEL_KEY: Record<IntentId, StringKey> = {
   chavruta: "chavrutaMode",
   parsha: "parshaMode",
   dafyomi: "dafYomiMode",
+  sourcesheet: "sourcesheetMode",
 };
 
-// Beta-gated modes (see app/api.py::_calendar_modes_enabled) — hidden from the picker entirely
-// unless the account has calendar_modes_enabled, so most users never see an unavailable option.
-const BETA_INTENTS: ReadonlySet<IntentId> = new Set(["parsha", "dafyomi"]);
+// Beta-gated modes
+const BETA_CALENDAR_INTENTS: ReadonlySet<IntentId> = new Set(["parsha", "dafyomi"]);
+const BETA_SOURCESHEET_INTENTS: ReadonlySet<IntentId> = new Set(["sourcesheet"]);
 
-// A single "current mode" trigger + chevron, opening a dropdown with every mode — replaces the old
-// segmented row of buttons, which ran out of room once parsha/daf-yomi were added. Lives inline in
-// the composer bar (where the mode label always was), so the dropdown opens UPWARD — this sits near
-// the bottom of the screen, and there's rarely room below it. Follows the same pattern as
-// SessionsPanel's "⋮" actions menu: a relative wrapper, a boolean open state, a document
-// click-outside listener, and an absolutely-positioned glass panel.
 export function IntentBar({
   lang,
   intent,
   locked,
   onPick,
   calendarModesEnabled = false,
+  sourcesheetModesEnabled = false,
 }: {
   lang: Lang;
   intent: IntentId;
   locked: boolean;
   onPick: (i: IntentId) => void;
   calendarModesEnabled?: boolean;
+  sourcesheetModesEnabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const visible = INTENTS.filter((i) => calendarModesEnabled || !BETA_INTENTS.has(i));
+  const visible = INTENTS.filter((i) => {
+    if (BETA_CALENDAR_INTENTS.has(i)) return calendarModesEnabled;
+    if (BETA_SOURCESHEET_INTENTS.has(i)) return sourcesheetModesEnabled;
+    return true;
+  });
 
   useEffect(() => {
     if (!open) return;

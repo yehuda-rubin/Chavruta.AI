@@ -81,6 +81,7 @@ def get_conn() -> sqlite3.Connection:
 # What was actually missing is below: WHAT each bump added. When a migration goes wrong the question
 # is never "was that major or minor", it is "what changed at 28". Reconstructed from git history.
 #
+#   32  saved_source_sheets (Source Sheet Companion)              2026-09-01
 #   31  messages.source_note                                      2026-08-14
 #   30  dev_helpers, helper_messages                              2026-08-13
 #   29  guard_findings                                            2026-08-13
@@ -97,7 +98,7 @@ def get_conn() -> sqlite3.Connection:
 #   18  billing_ledger                                            2026-07-26
 #   17  coupons                                                   2026-07-26
 #   ≤16 subscriptions, bans, deletion scheduling, per-owner scoping — see git log -G'^SCHEMA_VERSION'
-SCHEMA_VERSION = 31
+SCHEMA_VERSION = 32
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -272,6 +273,23 @@ def _migrate(conn: sqlite3.Connection) -> None:
             message_id  INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_saved_lessons_time ON saved_lessons(created_at DESC);
+
+        -- Source Sheet Companion: generated source sheet companion guides persisted for reuse.
+        CREATE TABLE IF NOT EXISTS saved_source_sheets (
+            id            TEXT PRIMARY KEY,
+            title         TEXT NOT NULL,
+            owner_id      TEXT NOT NULL DEFAULT 'local',
+            session_id    TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+            message_id    INTEGER,
+            raw_content   TEXT,
+            parsed_sheet  TEXT NOT NULL DEFAULT '[]', -- JSON: list of parsed source items
+            files         TEXT NOT NULL DEFAULT '[]', -- JSON: list of generated file dicts
+            citations     TEXT DEFAULT '[]',          -- JSON: list of verified citations
+            created_at    TEXT NOT NULL,
+            updated_at    TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_saved_source_sheets_owner
+            ON saved_source_sheets(owner_id, created_at DESC);
 
         -- Per-owner daily usage, one row per (owner, UTC day, meter). Two meters, two independent
         -- pools (see app/plans.py):
@@ -657,6 +675,25 @@ def _migrate(conn: sqlite3.Connection) -> None:
         mcols = {r[1] for r in conn.execute("PRAGMA table_info(messages)")}
         if "source_note" not in mcols:
             conn.execute("ALTER TABLE messages ADD COLUMN source_note TEXT NOT NULL DEFAULT ''")
+
+    if version < 32:
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS saved_source_sheets (
+                id            TEXT PRIMARY KEY,
+                title         TEXT NOT NULL,
+                owner_id      TEXT NOT NULL DEFAULT 'local',
+                session_id    TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+                message_id    INTEGER,
+                raw_content   TEXT,
+                parsed_sheet  TEXT NOT NULL DEFAULT '[]',
+                files         TEXT NOT NULL DEFAULT '[]',
+                citations     TEXT DEFAULT '[]',
+                created_at    TEXT NOT NULL,
+                updated_at    TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_saved_source_sheets_owner
+                ON saved_source_sheets(owner_id, created_at DESC);
+        """)
 
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
@@ -1138,6 +1175,91 @@ def get_lesson(lesson_id: str, owner_id: str = "local") -> dict[str, Any] | None
     d["files"] = json.loads(d["files"]) if d.get("files") else []
     d["citations"] = json.loads(d["citations"]) if d.get("citations") else []
     return d
+
+
+# ── 'Source Sheet Companion' saved-sheets library ──────────────────────────────
+
+def save_source_sheet(
+    sheet_id: str,
+    title: str,
+    raw_content: str,
+    parsed_sheet: list | dict,
+    files: list[dict],
+    citations: list[dict] | list[str] | None = None,
+    owner_id: str = "local",
+    session_id: str | None = None,
+    message_id: int | None = None,
+) -> None:
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        conn.execute(
+            "INSERT OR REPLACE INTO saved_source_sheets "
+            "(id, title, owner_id, session_id, message_id, raw_content, parsed_sheet, files, citations, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (
+                sheet_id,
+                title,
+                owner_id,
+                session_id,
+                message_id,
+                raw_content or "",
+                json.dumps(parsed_sheet, ensure_ascii=False),
+                json.dumps(files, ensure_ascii=False),
+                json.dumps(citations or [], ensure_ascii=False),
+                _now(),
+            ),
+        )
+
+
+def list_source_sheets(owner_id: str = "local") -> list[dict[str, Any]]:
+    with _LOCK:
+        rows = get_conn().execute(
+            "SELECT id, title, owner_id, session_id, message_id, created_at, updated_at "
+            "FROM saved_source_sheets WHERE owner_id=? ORDER BY created_at DESC",
+            (owner_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_source_sheet(sheet_id: str, owner_id: str = "local") -> dict[str, Any] | None:
+    with _LOCK:
+        r = get_conn().execute(
+            "SELECT * FROM saved_source_sheets WHERE id=? AND owner_id=?", (sheet_id, owner_id)
+        ).fetchone()
+    if not r:
+        return None
+    d = dict(r)
+    d["parsed_sheet"] = json.loads(d["parsed_sheet"]) if d.get("parsed_sheet") else []
+    d["files"] = json.loads(d["files"]) if d.get("files") else []
+    d["citations"] = json.loads(d["citations"]) if d.get("citations") else []
+    return d
+
+
+def link_source_sheet_message(sheet_id: str, message_id: int) -> None:
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        conn.execute("UPDATE saved_source_sheets SET message_id=? WHERE id=?", (message_id, sheet_id))
+
+
+def delete_source_sheet(sheet_id: str, owner_id: str = "local") -> bool:
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        row = conn.execute(
+            "SELECT message_id FROM saved_source_sheets WHERE id=? AND owner_id=?",
+            (sheet_id, owner_id),
+        ).fetchone()
+        if row is None:
+            return False
+        if row["message_id"] is not None:
+            conn.execute(
+                "UPDATE messages SET files='[]' WHERE id=? AND session_id IN "
+                "(SELECT id FROM sessions WHERE owner_id=?)",
+                (row["message_id"], owner_id),
+            )
+        conn.execute(
+            "DELETE FROM saved_source_sheets WHERE id=? AND owner_id=?", (sheet_id, owner_id)
+        )
+        return True
 
 
 def record_usage_event(**fields: Any) -> None:
@@ -2180,6 +2302,7 @@ def purge_owner(owner_id: str) -> None:
     with _LOCK, _tx(conn):
         conn.execute("DELETE FROM sessions WHERE owner_id=?", (owner_id,))         # messages cascade
         conn.execute("DELETE FROM saved_lessons WHERE owner_id=?", (owner_id,))
+        conn.execute("DELETE FROM saved_source_sheets WHERE owner_id=?", (owner_id,))
         conn.execute("DELETE FROM usage_counters WHERE owner_id=?", (owner_id,))
         # A member's school spending is counted under `org:<org_id>:<owner_id>` (orgs.member_meter_id),
         # which an exact-match delete misses — so the account id survived erasure inside a composite
