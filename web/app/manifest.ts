@@ -7,7 +7,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "חברותא AI",
     short_name: "חברותא",
     description:
-      "שותפה ללימוד תורה — שאלה, הסבר ובניית שיעורים מעל המדף היהודי, עם מקורות מצוטטים.",
+      "שותף ללימוד תורה — שאלה, הסבר ובניית שיעורים מעל המדף היהודי, עם מקורות מצוטטים.",
     lang: "he",
     dir: "rtl",
     start_url: "/",
