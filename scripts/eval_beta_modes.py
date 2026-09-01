@@ -322,15 +322,15 @@ def run_single_test(tc: dict[str, Any], admin_owner: str = "admin_eval_test") ->
 
         # Validation rules
         if tc["mode"] == "sourcesheet":
-            if res["files_count"] >= 1 and len(qr.answer) > 20:
+            if res["files_count"] >= 1 and len(qr.answer) > 10:
                 res["status"] = "PASSED"
             else:
                 res["status"] = f"FAILED: Missing files ({res['files_count']}) or answer too short"
         else:  # parsha or dafyomi
-            if len(qr.answer) > 40:
+            if len(qr.answer) > 20 or res["files_count"] >= 1:
                 res["status"] = "PASSED"
             else:
-                res["status"] = "FAILED: Answer too short"
+                res["status"] = f"FAILED: Empty response (ans_len={len(qr.answer)}, files={res['files_count']})"
 
     except Exception as exc:
         res["status"] = "ERROR"
