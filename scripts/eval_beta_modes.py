@@ -20,6 +20,10 @@ from typing import Any
 sys.path.insert(0, os.path.abspath("."))
 sys.path.insert(0, os.path.abspath("src"))
 
+os.environ["CHAVRUTA_CALENDAR_BETA_OWNERS"] = "*"
+os.environ["CHAVRUTA_SOURCE_SHEET_BETA_OWNERS"] = "*"
+os.environ["CHAVRUTA_ADMIN_OWNERS"] = "admin_eval_test"
+
 # ── 1. Source Sheet Companion Tests (10 tests) ───────────────────────────────
 
 SOURCESHEET_TESTS = [
