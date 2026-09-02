@@ -17,7 +17,8 @@ export function FilePreviewModal({ file, lang, onClose }: { file: FileOut | null
 
   if (!file) return null;
 
-  const isHtml = file.name.toLowerCase().endsWith(".html");
+  const isPdf = file.name.toLowerCase().endsWith(".pdf");
+  const isHtml = file.name.toLowerCase().endsWith(".html") || isPdf;
   const isDocx = file.name.toLowerCase().endsWith(".docx");
 
   return (
@@ -32,7 +33,16 @@ export function FilePreviewModal({ file, lang, onClose }: { file: FileOut | null
             {file.title && <p className="text-[12px] text-ink/50 truncate">{file.name}</p>}
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            {isHtml ? (
+            {isPdf ? (
+              <button
+                onClick={() => printHtmlContent(file.content || "")}
+                className="px-5 py-2 rounded-full grad text-white font-bold text-sm hover:opacity-95 transition flex items-center gap-1.5 shadow-sm"
+                title={lang === "he" ? "הורד / שמור כ-PDF" : "Download / Save as PDF"}
+              >
+                <Icon name="picture_as_pdf" className="text-[18px]" />
+                {lang === "he" ? "הורד / שמור כ-PDF" : "Download / Save as PDF"}
+              </button>
+            ) : isHtml ? (
               <>
                 <button
                   onClick={() => printHtmlContent(file.content || "")}

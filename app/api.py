@@ -2004,27 +2004,15 @@ def _run_sourcesheet(
         user_instruction=user_instruction,
     )
 
-    docx_bytes = guide.to_docx_bytes()
-    docx_b64 = base64.b64encode(docx_bytes).decode("ascii") if docx_bytes else ""
     html_printable = guide.to_html_printable()
-    md_content = guide.to_markdown()
     sheet_id = uuid.uuid4().hex[:12]
 
+    # Exactly ONE file: PDF format
     files = [
         FileOut(
-            name=f"sourcesheet_{sheet_id}.docx",
-            title="חוברת ליווי לדף מקורות (Word)" if he else "Source Sheet Companion (Word)",
-            content=docx_b64,
-        ),
-        FileOut(
-            name=f"sourcesheet_{sheet_id}.html",
-            title="דף מעוצב להדפסה ו-PDF" if he else "Printable Companion & PDF",
+            name=f"sourcesheet_{sheet_id}.pdf",
+            title=f"חוברת ליווי: {guide.title or guide.topic}" if he else f"Companion Guide: {guide.title or guide.topic}",
             content=html_printable,
-        ),
-        FileOut(
-            name=f"sourcesheet_{sheet_id}.md",
-            title="חוברת ליווי בפורמט Markdown" if he else "Source Sheet Companion (Markdown)",
-            content=md_content,
         ),
     ]
 
@@ -2065,7 +2053,7 @@ def _run_sourcesheet(
         f"{summary_block}"
         f"---\n"
         f"עובדו בהצלחה **{len(parsed_items)} מקורות** בדף. "
-        f"חוברת הליווי המלאה נוצרה וזמינה להורדה בקבצים המצורפים (קובץ Word מעוצב, דף להדפסה ישירה ו-PDF, וקובץ Markdown), "
+        f"חוברת הליווי המלאה זמינה כעת לצפייה ולהורדה כ-PDF מעוצב בקובץ המצורף, "
         f"וניתן להמשיך ולדון בסוגיה כאן בשיחה."
         if he
         else f"### {guide.title}\n\n"
@@ -2073,7 +2061,7 @@ def _run_sourcesheet(
         f"{summary_block}"
         f"---\n"
         f"Successfully analyzed **{len(parsed_items)} sources**. "
-        f"The full companion guide is ready for download in the attached files (Word document, printable PDF/HTML page, and Markdown), "
+        f"The full companion guide is ready for viewing and download as a styled PDF in the attachment. "
         f"You can continue to ask questions about the sheet here in the chat."
     )
 

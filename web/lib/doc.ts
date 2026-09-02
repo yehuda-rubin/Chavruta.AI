@@ -21,6 +21,12 @@ function triggerBlobDownload(blob: Blob, filename: string): void {
 }
 
 export function downloadDoc(filename: string, title: string, bodyText: string): void {
+  // If PDF file (rich printable HTML payload)
+  if (filename.toLowerCase().endsWith(".pdf")) {
+    printHtmlContent(bodyText || "");
+    return;
+  }
+
   // If modern .docx file with base64 content
   if (filename.toLowerCase().endsWith(".docx")) {
     try {

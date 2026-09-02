@@ -71,14 +71,20 @@ function ReportButton({ lang, messageId }: { lang: Lang; messageId: number }) {
 }
 
 function LessonFiles({ lang, files, onPreview }: { lang: Lang; files: FileOut[]; onPreview: (f: FileOut) => void }) {
+  const isSinglePdf = files.length === 1 && files[0].name.toLowerCase().endsWith(".pdf");
+  const headerText = isSinglePdf
+    ? (lang === "he" ? "חוברת ליווי להדפסה ו-PDF" : "Companion Guide (Printable PDF)")
+    : tr(lang, "lessonThreeFiles");
+
   return (
     <>
-      <p className="text-[11px] tracking-widest text-gold font-bold uppercase mb-2">{tr(lang, "lessonThreeFiles")}</p>
+      <p className="text-[11px] tracking-widest text-gold font-bold uppercase mb-2">{headerText}</p>
       <div className="flex flex-col gap-2">
         {files.map((f, idx) => {
+          const isPdf = f.name.toLowerCase().endsWith(".pdf");
           const isHtml = f.name.toLowerCase().endsWith(".html");
           const isMd = f.name.toLowerCase().endsWith(".md");
-          const iconName = isHtml ? "print" : isMd ? "menu_book" : "description";
+          const iconName = isPdf ? "picture_as_pdf" : isHtml ? "print" : isMd ? "menu_book" : "description";
 
           return (
             <div
@@ -93,16 +99,17 @@ function LessonFiles({ lang, files, onPreview }: { lang: Lang; files: FileOut[];
                 <span className="block font-serif font-bold text-tekhelet truncate">{f.title || f.name}</span>
                 <span className="block text-[11px] text-ink/50 truncate">{f.name}</span>
               </span>
-              {isHtml && (
+              {(isPdf || isHtml) && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     printHtmlContent(f.content || "");
                   }}
-                  className="h-8 w-8 rounded-lg hover:bg-white grid place-items-center text-tekhelet shrink-0 shadow-xs"
-                  title={tr(lang, "printPdf")}
+                  className="h-8 px-2.5 rounded-lg hover:bg-white text-tekhelet shrink-0 shadow-xs flex items-center gap-1 font-bold text-[12px]"
+                  title={lang === "he" ? "הורד / הדפס כ-PDF" : "Download / Print PDF"}
                 >
-                  <Icon name="print" className="text-[20px]" />
+                  <Icon name="picture_as_pdf" className="text-[18px]" />
+                  <span className="hidden sm:inline">{lang === "he" ? "שמור / הדפס כ-PDF" : "Save / Print PDF"}</span>
                 </button>
               )}
               <button
@@ -115,16 +122,18 @@ function LessonFiles({ lang, files, onPreview }: { lang: Lang; files: FileOut[];
               >
                 <Icon name="visibility" className="text-[20px]" />
               </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  downloadDoc(f.name, f.title || f.name.replace(/\.docx?$/, ""), f.content || "");
-                }}
-                className="h-8 w-8 rounded-lg hover:bg-white grid place-items-center text-gold shrink-0 shadow-xs"
-                title={tr(lang, "download")}
-              >
-                <Icon name="download" className="text-[20px]" />
-              </button>
+              {!isPdf && !isHtml && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    downloadDoc(f.name, f.title || f.name.replace(/\.docx?$/, ""), f.content || "");
+                  }}
+                  className="h-8 w-8 rounded-lg hover:bg-white grid place-items-center text-gold shrink-0 shadow-xs"
+                  title={tr(lang, "download")}
+                >
+                  <Icon name="download" className="text-[20px]" />
+                </button>
+              )}
             </div>
           );
         })}
