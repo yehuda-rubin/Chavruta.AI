@@ -2004,15 +2004,10 @@ def _run_sourcesheet(
         user_instruction=user_instruction,
     )
 
-    if he and llm:
-        guide.summary = _strip_markers(_fix_bleeding_sentences(guide.summary, he, llm), he=he)
-
     docx_bytes = guide.to_docx_bytes()
     docx_b64 = base64.b64encode(docx_bytes).decode("ascii") if docx_bytes else ""
     html_printable = guide.to_html_printable()
     md_content = guide.to_markdown()
-    if he and llm:
-        md_content = _strip_markers(_fix_bleeding_sentences(md_content, he, llm), he=he)
     sheet_id = uuid.uuid4().hex[:12]
 
     files = [

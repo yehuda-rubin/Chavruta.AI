@@ -33,27 +33,34 @@ _log = logging.getLogger("chavruta.sourcesheet.parser")
 
 HE_COMMENTATORS: dict[str, str] = {
     'רש"י': "Rashi",
-    "רשי": "Rashi",
+    'רש״י': "Rashi",
     'תוספות': "Tosafot",
     "תוס'": "Tosafot",
+    'תוס״': "Tosafot",
+    'תוספות ישנים': "Tosafot Yeshanim",
+    'תוס\' ישנים': "Tosafot Yeshanim",
     'רמב"ן': "Ramban",
-    "רמבן": "Ramban",
+    'רמב״ן': "Ramban",
     'רשב"א': "Rashba",
-    "רשבא": "Rashba",
+    'רשב״א': "Rashba",
     'ריטב"א': "Ritva",
-    "ריטבא": "Ritva",
+    'ריטב״א': "Ritva",
     'ר"ן': "Ran",
-    "רן": "Ran",
+    'ר״ן': "Ran",
+    'הר"ן': "Ran",
+    'הר״ן': "Ran",
     'רא"ש': "Rosh",
-    "ראש": "Rosh",
+    'רא״ש': "Rosh",
+    'הרא"ש': "Rosh",
+    'הרא״ש': "Rosh",
     'רי"ף': "Rif",
-    "ריף": "Rif",
+    'רי״ף': "Rif",
+    'הרי"ף': "Rif",
+    'הרי״ף': "Rif",
     'מאירי': "Meiri",
     'קצות החושן': "Ketzot HaChoshen",
     'קצוה"ח': "Ketzot HaChoshen",
-    'קצות': "Ketzot HaChoshen",
     'נתיבות המשפט': "Netivot HaMishpat",
-    'נתיבות': "Netivot HaMishpat",
     'משנה ברורה': "Mishnah Berurah",
     'משנ"ב': "Mishnah Berurah",
     'מגן אברהם': "Magen Avraham",
@@ -199,18 +206,7 @@ def parse_source_sheet(text: str) -> list[ParsedSourceItem]:
 
     # Split text into segments
     splits = [m.start() for m in _BULLET_RE.finditer(clean_text)]
-    if splits:
-        if splits[0] > 0:
-            preamble = clean_text[:splits[0]].strip()
-            pre_lines = [l.strip() for l in preamble.split("\n") if l.strip()]
-            detected_pre_ref, _, _ = _resolve_segment_ref(
-                header=pre_lines[0] if pre_lines else "",
-                body="\n".join(pre_lines[1:]) if len(pre_lines) > 1 else "",
-            )
-            # Only include segment before first bullet if it's an actual rabbinic source
-            if detected_pre_ref:
-                splits = [0] + splits
-    else:
+    if not splits:
         splits = [0]
 
     raw_segments: list[str] = []
@@ -278,12 +274,13 @@ def parse_source_sheet(text: str) -> list[ParsedSourceItem]:
 
 # ── Reference Resolution Logic ───────────────────────────────────────────────
 
-_EXTENDED_DAF = r"(?:\d+|[א-ת][\"'״׳]?[א-ת]|[א-ת]{1,3})"
+_STRICT_DAF = r"(?:\d+|[א-ת]{1,2}[\"'״׳][א-ת]|[א-ת][\"'״׳])"
+_ANY_DAF = r"(?:\d+|[א-ת]{1,2}[\"'״׳][א-ת]|[א-ת][\"'״׳]|[א-ת]{1,2})"
 _EXTENDED_AMUD = r"(?:ע[\"'״׳ ]?[אב]|עמוד\s*[אב]|:\s*|\.\s*|[אב]\b)"
 
 _TALMUD_AMUD_RE = re.compile(
     rf"(?P<tractate>{_book_alt(HE_TRACTATES)})"
-    rf"(?:{_SEP}(?:דף|דף\s*סדר)?\s*(?P<daf>{_EXTENDED_DAF}))?"
+    rf"(?:{_SEP}(?:(?:דף|דף\s*סדר)\s*(?P<daf_pre>{_ANY_DAF})|(?P<daf_strict>{_STRICT_DAF})|(?P<daf_amud>[א-ת]{{1,2}})(?={_SEP}?(?:[:.]|ע[\"'״׳ ]?[אב]|עמוד\s*[אב]|$))))?"
     rf"(?:{_SEP}?(?P<amud>{_EXTENDED_AMUD}))?",
 )
 
@@ -303,12 +300,13 @@ def _resolve_segment_ref(
 
     # Check for commentator on previous ref or standalone
     for comm_he, comm_en in HE_COMMENTATORS.items():
-        if comm_he in header or comm_he in search_scope[:60]:
+        comm_pat = rf"(?<![א-ת]){re.escape(comm_he)}(?![א-ת])"
+        if re.search(comm_pat, header) or re.search(comm_pat, search_scope[:60]):
             # Check if tractate/book follows the commentator explicitly
             t_match = _TALMUD_AMUD_RE.search(search_scope)
             if t_match:
                 tr_name = HE_TRACTATES.get(t_match.group("tractate"))
-                daf_raw = t_match.group("daf")
+                daf_raw = t_match.group("daf_pre") or t_match.group("daf_strict") or t_match.group("daf_amud")
                 amud_raw = t_match.group("amud") or "a"
                 if tr_name and daf_raw:
                     daf_val = _daf_value(daf_raw)
@@ -330,7 +328,7 @@ def _resolve_segment_ref(
     if t_match and not is_relative:
         tr_he = t_match.group("tractate")
         tr_name = HE_TRACTATES.get(tr_he)
-        daf_raw = t_match.group("daf")
+        daf_raw = t_match.group("daf_pre") or t_match.group("daf_strict") or t_match.group("daf_amud")
         amud_raw = t_match.group("amud") or "a"
         if tr_name and daf_raw:
             daf_val = _daf_value(daf_raw)
