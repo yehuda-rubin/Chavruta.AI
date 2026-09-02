@@ -495,10 +495,10 @@ export function ChatPane({
             <button
               type="button"
               onClick={onStop}
-              className="h-10 w-10 rounded-full bg-crimson hover:bg-crimson/90 text-white grid place-items-center shadow-lg transition-all animate-pulse"
+              className="h-10 w-10 rounded-full bg-red-600 hover:bg-red-700 active:scale-95 text-white grid place-items-center shadow-lg shadow-red-900/30 transition-all cursor-pointer shrink-0"
               title={lang === "he" ? "עצור מענה" : "Stop generation"}
             >
-              <span className="w-3.5 h-3.5 rounded-[3px] bg-white block" />
+              <span className="w-3.5 h-3.5 rounded-[2px] bg-white block shadow-sm" />
             </button>
           ) : (
             <button

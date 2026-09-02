@@ -111,6 +111,15 @@ export default function Home() {
     }
   }, []);
 
+  // Persist active session across page refreshes (F5)
+  useEffect(() => {
+    if (activeId) {
+      try { localStorage.setItem("chavruta-active-session", activeId); } catch {}
+    } else {
+      try { localStorage.removeItem("chavruta-active-session"); } catch {}
+    }
+  }, [activeId]);
+
   // Account + remaining daily quota (for the header pill). Refreshed on sign-in and after each turn.
   const refreshMe = useCallback(async () => {
     try {
@@ -132,6 +141,17 @@ export default function Home() {
   // signing in on the same tab) — otherwise the previous account's messages stay on screen until the
   // new user happens to click something, briefly leaking one account's chat into another's session.
   const [activeJobs, setActiveJobs] = useState<Record<string, string>>({}); // sessionId -> jobId
+
+  const appendCancelledMessage = useCallback(() => {
+    const cancelText = lang === "he" ? "המענה נעצר לבקשתך." : "Generation stopped.";
+    setMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (last && last.role === "assistant" && last.text === cancelText) {
+        return prev;
+      }
+      return [...prev, { role: "assistant", text: cancelText, citations: [], caveats: [] }];
+    });
+  }, [lang]);
 
   const setSessionJob = useCallback((sid: string, jid: string) => {
     setActiveJobs((prev) => {
@@ -195,10 +215,7 @@ export default function Home() {
             setLoadingTarget(null);
             const msg = (err as Error)?.message || "";
             if (msg.includes("cancelled")) {
-              setMessages((prev) => [
-                ...prev,
-                { role: "assistant", text: lang === "he" ? "המענה נעצר לבקשתך." : "Generation stopped.", citations: [], caveats: [] }
-              ]);
+              appendCancelledMessage();
             } else {
               const msgs = await api.sessionMessages(sid).catch(() => []);
               if (msgs.length) setMessages(msgs);
@@ -208,7 +225,7 @@ export default function Home() {
       })();
     }
     return () => { unmounted = true; };
-  }, [activeJobs, refreshSessions, refreshMe, lang, clearSessionJob]);
+  }, [activeJobs, refreshSessions, refreshMe, lang, clearSessionJob, appendCancelledMessage]);
 
   const selectSession = useCallback(async (s: Session) => {
     setActiveId(s.id);
@@ -228,6 +245,23 @@ export default function Home() {
       if (activeIdRef.current === s.id) setMessages([]);
     }
   }, [activeJobs]);
+
+  // Restore active session across page refreshes (F5) once sessions load
+  const initialSessionRestoredRef = useRef(false);
+  useEffect(() => {
+    if (!initialSessionRestoredRef.current && sessions.length > 0 && !activeId) {
+      initialSessionRestoredRef.current = true;
+      try {
+        const savedId = localStorage.getItem("chavruta-active-session");
+        if (savedId) {
+          const target = sessions.find((s) => s.id === savedId);
+          if (target) {
+            selectSession(target);
+          }
+        }
+      } catch {}
+    }
+  }, [sessions, activeId, selectSession]);
 
   const newDiscussion = useCallback(() => {
     setActiveId(null);
@@ -437,11 +471,8 @@ export default function Home() {
       /* ignore */
     }
     refreshMe();
-    setMessages((prev) => [
-      ...prev,
-      { role: "assistant", text: lang === "he" ? "המענה נעצר לבקשתך." : "Generation stopped.", citations: [], caveats: [] }
-    ]);
-  }, [loadingTarget, activeId, activeJobs, clearSessionJob, refreshMe, lang]);
+    appendCancelledMessage();
+  }, [loadingTarget, activeId, activeJobs, clearSessionJob, refreshMe, appendCancelledMessage]);
 
   const send = useCallback(
     async (text: string) => {
@@ -490,7 +521,7 @@ export default function Home() {
         const err = e as Error & { status?: number };
         const isCancelled = err?.message?.includes("cancelled");
         if (isCancelled) {
-          appendIfCurrent({ role: "assistant", text: lang === "he" ? "המענה נעצר לבקשתך." : "Generation stopped.", citations: [], caveats: [] });
+          appendCancelledMessage();
         } else {
           const msg =
             err?.name === "TypeError"
@@ -506,7 +537,7 @@ export default function Home() {
         refreshMe(); // update the remaining-quota pill (incl. after a 429)
       }
     },
-    [activeId, intent, lang, lessonFields, userSources, refreshSessions, refreshMe, setSessionJob, clearSessionJob],
+    [activeId, intent, lang, lessonFields, userSources, refreshSessions, refreshMe, setSessionJob, clearSessionJob, appendCancelledMessage],
   );
 
   // Auth gate (Supabase mode only). While the initial session check runs, show a minimal splash;
