@@ -95,7 +95,9 @@ class CompanionGuide:
 
         md.append("## ביאור מקורות הדף\n")
         for s in self.sections:
-            display_ref = (hebrew_display_ref(s.ref) or s.ref) if s.ref else ""
+            display_ref = ""
+            if s.ref and len(s.ref.split()) <= 4 and not any(k in s.ref for k in ["השוו", "האם", "סוגיית", "מהמשנה", "שיעור"]):
+                display_ref = hebrew_display_ref(s.ref) or s.ref
             md.append(f"### מקור {s.index}: {s.title} ({s.role_tag})\n")
             if display_ref:
                 status_badge = "מאומת מהמאגר" if s.status == STATUS_VERIFIED_CORPUS else "מדף המקורות"
@@ -492,7 +494,9 @@ class CompanionGuide:
 
         sections_html = []
         for s in self.sections:
-            disp_ref = (hebrew_display_ref(s.ref) or s.ref) if s.ref else ""
+            disp_ref = ""
+            if s.ref and len(s.ref.split()) <= 4 and not any(k in s.ref for k in ["השוו", "האם", "סוגיית", "מהמשנה", "שיעור"]):
+                disp_ref = hebrew_display_ref(s.ref) or s.ref
             s_title = html.escape(s.title or f"מקור {s.index}")
             s_role = html.escape(s.role_tag or "מקור")
 
@@ -1281,21 +1285,23 @@ def _synthesize_with_llm(
 לפניך דף מקורות תורני שחולץ לתוך מקטעי XML (מקורות מאומתים מהמאגר או טקסטים מדף המשתמש).
 עליך לנתח את הדף ברמה למדנית ופדגוגית גבוהה, ולבנות חוברת ליווי מקיפה למהלך הסוגיה.
 
-הנחיות חמורות (Principle I):
-- התבסס אך ורק על המקורות המופיעים ב-XML למטה. אל תמציא מקורות או מובאות שלא ניתנו.
-- אם מופיע מקור ללא טקסט (UNINDEXED BARE REF), ציין שהוא מראה מקום בלבד ואל תבדה את תוכנו.
-- זהה את נושא הסוגיה האמיתי (למשל: "פרישת כהן גדול ביום הכיפורים", "מצות תלמוד תורה וגדריה", "ייאוש שלא מדעת"). אל תשתמש בשמות קבצים, שמות מרצים או במחרוזות מערכת כנושא.
-- שפה וסגנון: כתוב אך ורק בעברית צחה, תורנית ועשירה. אין להשתמש באותיות לועזיות (למשל אל תכתוב R"A אלא ר' אבהו), אין להשתמש במילים לועזיות (כגון 'ריטואל' -> השתמש ב'מעשה המצוה' או 'טהרה'), ואין לשלב תווים בשפות זרות.
+הנחיות חמורות:
+1. התאמה מדויקת של המקורות: ברשימת המקורות ב-XML ישנם בדיוק {len(items)} מקורות (מ-S1 עד S{len(items)}).
+   חובה להחזיר בדיוק {len(items)} אובייקטים במערך "sections", כאשר כל אובייקט מתאים בדיוק למקור שלו לפי ה-source_id (S1 למקור הראשון, S2 לשני וכן הלאה).
+   אין לפצל מקור יחיד למספר אובייקטים, ואין להשמיט אף מקור!
+2. שפה וסגנון: כתוב אך ורק בעברית תורנית עשירה, רהוטה וצחה. ללא שום תווים לועזיים, ללא שמות באנגלית, וללא מילים זרות.
+3. ציר חקירה וטבלה: נסח חקירה ישיבתית אמיתית ובנה טבלת השוואת שיטות חדה.
 
-החזר פלט מובנה בפורמט JSON בלבד (עטוף ב-```json ... ``` או JSON ישיר בלבד, ללא מלל נוסף לפני או אחרי):
+החזר פלט מובנה בפורמט JSON בלבד (עטוף ב-```json ... ``` או JSON ישיר בלבד):
 {{
-  "topic": "נושא הסוגיה המרכזי והמדויק (2-5 מילים)",
+  "topic": "נושא הסוגיה המרכזי והמדויק בעברית",
   "core_inquiry": "שאלת היסוד, ציר החקירה והסברא העומדת במוקד הסוגיה (2-4 משפטים)",
   "summary": "סיכום מקיף, תמציתי ובהיר של מהלך הסוגיה, השתלשלות השיטות והמסקנה (3-5 פסקאות)",
   "sections": [
     {{
+      "source_id": "S1",
       "index": 1,
-      "title": "כותרת המקור בעברית (למשל: בבא מציעא דף כ\"א ע\"א / רמב\"ם הלכות ת\"ת)",
+      "title": "כותרת המקור בעברית (למשל: ויקרא ח' / בבא מציעא כ\"א ע\"א / רמב\"ן)",
       "role_tag": "מקור יסוד / עובדא דש\"ס | קושיא / דיוק | חידוש / יסוד הסברא | ראיה / סייעתא | שיטה חולקת | הכרעה הלכתית",
       "plain_explanation": "ביאור תמציתי ומאיר עיניים של המקור בעברית תורנית, תוך הדגשת מקומו במהלך",
       "diyuk": "דיוק בלשון המקור או דיבור המתחיל (אם ישנו)",
@@ -1349,13 +1355,22 @@ def _synthesize_with_llm(
         core_inquiry = _clean_hebrew_prose(data.get("core_inquiry") or f"בירור יסודות וגדרי {topic}.")
         summary = _clean_hebrew_prose(data.get("summary") or "")
 
-        llm_sections_data = {s.get("index", idx + 1): s for idx, s in enumerate(data.get("sections", []))}
+        llm_sections_data: dict[int, dict] = {}
+        for idx, s in enumerate(data.get("sections", [])):
+            s_id = str(s.get("source_id") or "")
+            if s_id.startswith("S") and s_id[1:].isdigit():
+                llm_sections_data[int(s_id[1:])] = s
+            elif "index" in s and isinstance(s["index"], int):
+                llm_sections_data[s["index"]] = s
+            else:
+                llm_sections_data[idx + 1] = s
+
         sections: list[SourceSection] = []
         citations: list[str] = []
 
         for item in items:
             sec_data = llm_sections_data.get(item.index, {})
-            ref = item.ref or item.header
+            ref = item.ref or (item.canonical_sefaria_ref if item.canonical_sefaria_ref and len(item.canonical_sefaria_ref.split()) <= 4 else None)
             canonical = item.canonical_sefaria_ref or ""
             corpus_text = _find_corpus_text(corpus_lookup, ref, canonical)
             has_body = bool(
@@ -1367,7 +1382,7 @@ def _synthesize_with_llm(
             if corpus_text:
                 status = STATUS_VERIFIED_CORPUS
                 snippet = corpus_text[:300] + ("…" if len(corpus_text) > 300 else "")
-                citations.append(ref)
+                citations.append(ref or item.header)
             elif has_body:
                 status = STATUS_USER_PROVIDED
                 snippet = item.cleaned_text
@@ -1477,7 +1492,7 @@ def analyze_source_sheet(
     ]
 
     for idx, item in enumerate(items):
-        ref = item.ref or item.header
+        ref = item.ref or (item.canonical_sefaria_ref if item.canonical_sefaria_ref and len(item.canonical_sefaria_ref.split()) <= 4 else None)
         canonical = item.canonical_sefaria_ref or ""
         corpus_text = _find_corpus_text(lookup, ref, canonical)
 

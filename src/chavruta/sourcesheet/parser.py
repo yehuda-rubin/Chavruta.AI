@@ -336,7 +336,7 @@ def _resolve_segment_ref(
     for comm_he, comm_en in HE_COMMENTATORS.items():
         comm_pat = rf"(?<![א-ת]){re.escape(comm_he)}(?![א-ת])"
         if re.search(comm_pat, header) or re.search(comm_pat, search_scope[:60]):
-            # Check if tractate/book follows the commentator explicitly
+            # Check if tractate follows the commentator explicitly
             t_match = _TALMUD_AMUD_RE.search(search_scope)
             if t_match:
                 tr_name = HE_TRACTATES.get(t_match.group("tractate"))
@@ -349,7 +349,25 @@ def _resolve_segment_ref(
                         base_talmud = f"{tr_name}.{daf_val}{amud_letter}"
                         target_ref = f"{comm_en} on {base_talmud}"
                         return target_ref, canonical_ref(target_ref), tr_name
-            # If no explicit tractate, inherit from last_known_ref
+
+            # Check if Tanakh follows the commentator explicitly
+            from chavruta.intents.hebrew_refs import _TANAKH_RE
+
+            tanakh_m = _TANAKH_RE.search(search_scope)
+            if tanakh_m:
+                b_he = tanakh_m.group("book")
+                b_name = HE_BOOKS.get(b_he)
+                c_raw = tanakh_m.group("ch")
+                v_raw = tanakh_m.group("vs")
+                if b_name and c_raw:
+                    c_val = _num(c_raw)
+                    if c_val:
+                        v_val = _num(v_raw) if v_raw else None
+                        base_tanakh = f"{b_name}.{c_val}" + (f".{v_val}" if v_val else "")
+                        target_ref = f"{comm_en} on {base_tanakh}"
+                        return target_ref, canonical_ref(target_ref), b_name
+
+            # If no explicit book/tractate, inherit from last_known_ref
             if last_known_ref:
                 base_ref = last_known_ref
                 if " on " in base_ref:

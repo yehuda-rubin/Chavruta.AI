@@ -2049,6 +2049,17 @@ def _run_sourcesheet(
     # Convert sections to citations so they appear in the UI's left-hand source cards
     citations_list = [
         CitationOut(
+            ref="דף מקורות שהועלה",
+            ref_he=f"דף המקורות: {guide.title or 'קובץ שהועלה'}",
+            text_he=sheet_text,
+            text_en="",
+            commentator="דף המקורות",
+            deep_link="",
+            license="user_provided",
+            version_title="קובץ שהועלה כמקור",
+        )
+    ] + [
+        CitationOut(
             ref=s.ref or s.title or f"מקור {s.index}",
             ref_he=s.title or s.ref or f"מקור {s.index}",
             text_he=s.expanded_context or s.source_snippet or s.plain_explanation or "",

@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Attachment, FileOut, Lang, Message, SavedLesson, Session } from "@/lib/types";
 import { api, LessonExtras, Me, Tier } from "@/lib/api";
 import { IntentId } from "@/lib/i18n";
@@ -34,7 +34,8 @@ export default function Home() {
   const [loadingTarget, setLoadingTarget] = useState<string | null>(null);
   const [intent, setIntent] = useState<IntentId>("qa");
   const [lessonFields, setLessonFields] = useState<LessonFields>({ audience: "", gradeBand: "", length: "" });
-  const [userSources, setUserSources] = useState<Attachment[]>([]);
+  const [sessionSources, setSessionSources] = useState<Record<string, Attachment[]>>({});
+  const [pendingNewSources, setPendingNewSources] = useState<Attachment[]>([]);
   const [subtitle, setSubtitle] = useState("");
   const [previewFile, setPreviewFile] = useState<FileOut | null>(null);
   const [me, setMe] = useState<Me | null>(null);
@@ -102,6 +103,39 @@ export default function Home() {
   useEffect(() => {
     localStorage.setItem("chavruta-src-open", srcDefaultOpen ? "1" : "0");
   }, [srcDefaultOpen]);
+
+  // Restore per-session uploaded sources from localStorage
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("chavruta-session-sources");
+      if (raw) setSessionSources(JSON.parse(raw));
+    } catch {}
+  }, []);
+
+  const userSources = useMemo(() => {
+    return activeId ? (sessionSources[activeId] || []) : pendingNewSources;
+  }, [activeId, sessionSources, pendingNewSources]);
+
+  const setUserSources = useCallback(
+    (action: Attachment[] | ((prev: Attachment[]) => Attachment[])) => {
+      if (activeId) {
+        setSessionSources((prev) => {
+          const current = prev[activeId] || [];
+          const next = typeof action === "function" ? action(current) : action;
+          const updated = { ...prev, [activeId]: next };
+          try {
+            localStorage.setItem("chavruta-session-sources", JSON.stringify(updated));
+          } catch {}
+          return updated;
+        });
+      } else {
+        setPendingNewSources((prev) => {
+          return typeof action === "function" ? action(prev) : action;
+        });
+      }
+    },
+    [activeId],
+  );
 
   const refreshSessions = useCallback(async () => {
     try {
