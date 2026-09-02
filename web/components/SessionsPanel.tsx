@@ -10,6 +10,7 @@ export function SessionsPanel({
   lang,
   sessions,
   activeId,
+  generatingIds = [],
   onNew,
   onSelect,
   onDelete,
@@ -24,6 +25,7 @@ export function SessionsPanel({
   lang: Lang;
   sessions: Session[];
   activeId: string | null;
+  generatingIds?: string[];
   onNew: () => void;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
@@ -124,6 +126,12 @@ export function SessionsPanel({
                   {pinned && <Icon name="push_pin" className="text-[13px] align-middle me-1 text-gold" />}
                   {s.title || s.first_q || tr(lang, "newChatShort")}
                 </span>
+              )}
+              {generatingIds.includes(s.id) && (
+                <span
+                  className="w-2 h-2 rounded-full bg-tekhelet animate-pulse shrink-0 me-1 shadow-sm"
+                  title={lang === "he" ? "מייצר תשובה..." : "Generating..."}
+                />
               )}
               {!editing && (
                 <div className="relative shrink-0">

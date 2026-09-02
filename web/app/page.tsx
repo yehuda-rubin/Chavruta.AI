@@ -131,27 +131,103 @@ export default function Home() {
   // Clear the open chat whenever the signed-in account changes (sign-out, or a different account
   // signing in on the same tab) — otherwise the previous account's messages stay on screen until the
   // new user happens to click something, briefly leaking one account's chat into another's session.
+  const [activeJobs, setActiveJobs] = useState<Record<string, string>>({}); // sessionId -> jobId
+
+  const setSessionJob = useCallback((sid: string, jid: string) => {
+    setActiveJobs((prev) => {
+      const next = { ...prev, [sid]: jid };
+      try { localStorage.setItem("chavruta_active_jobs", JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, []);
+
+  const clearSessionJob = useCallback((sid: string) => {
+    setActiveJobs((prev) => {
+      const next = { ...prev };
+      delete next[sid];
+      try { localStorage.setItem("chavruta_active_jobs", JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, []);
+
+  // Restore active background jobs from localStorage on initial page load
   useEffect(() => {
-    setActiveId(null);
-    setMessages([]);
-    setSubtitle("");
-    setUserSources([]);
-  }, [auth.user?.id]);
+    try {
+      const saved = localStorage.getItem("chavruta_active_jobs");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === "object") {
+          setActiveJobs(parsed);
+        }
+      }
+    } catch {}
+  }, []);
+
+  // Background polling worker: polls all in-flight jobs regardless of which session is open
+  useEffect(() => {
+    const entries = Object.entries(activeJobs);
+    if (!entries.length) return;
+
+    let unmounted = false;
+    for (const [sid, jid] of entries) {
+      (async () => {
+        try {
+          await api.pollJob(jid);
+          if (unmounted) return;
+          clearSessionJob(sid);
+          refreshSessions();
+          refreshMe();
+          if (activeIdRef.current === sid) {
+            const msgs = await api.sessionMessages(sid);
+            if (activeIdRef.current === sid) {
+              setMessages(msgs);
+              setLoading(false);
+              setLoadingTarget(null);
+            }
+          }
+        } catch (err: unknown) {
+          if (unmounted) return;
+          clearSessionJob(sid);
+          refreshSessions();
+          refreshMe();
+          if (activeIdRef.current === sid) {
+            setLoading(false);
+            setLoadingTarget(null);
+            const msg = (err as Error)?.message || "";
+            if (msg.includes("cancelled")) {
+              setMessages((prev) => [
+                ...prev,
+                { role: "assistant", text: lang === "he" ? "המענה נעצר לבקשתך." : "Generation stopped.", citations: [], caveats: [] }
+              ]);
+            } else {
+              const msgs = await api.sessionMessages(sid).catch(() => []);
+              if (msgs.length) setMessages(msgs);
+            }
+          }
+        }
+      })();
+    }
+    return () => { unmounted = true; };
+  }, [activeJobs, refreshSessions, refreshMe, lang, clearSessionJob]);
 
   const selectSession = useCallback(async (s: Session) => {
     setActiveId(s.id);
     setSubtitle(s.title || s.first_q || "");
     if (s.mode) setIntent(s.mode as IntentId);
-    // A fast click on session A then B can have A's fetch resolve after B's — activeIdRef is the
-    // always-current id (see its declaration above), so a stale response is dropped instead of
-    // overwriting the session the user actually has open now.
+    if (activeJobs[s.id]) {
+      setLoading(true);
+      setLoadingTarget(s.id);
+    } else {
+      setLoading(false);
+      setLoadingTarget(null);
+    }
     try {
       const msgs = await api.sessionMessages(s.id);
       if (activeIdRef.current === s.id) setMessages(msgs);
     } catch {
       if (activeIdRef.current === s.id) setMessages([]);
     }
-  }, []);
+  }, [activeJobs]);
 
   const newDiscussion = useCallback(() => {
     setActiveId(null);
@@ -159,6 +235,8 @@ export default function Home() {
     setUserSources([]);
     setSubtitle("");
     setIntent(defaultIntent);
+    setLoading(false);
+    setLoadingTarget(null);
   }, [defaultIntent]);
 
   const deleteSession = useCallback(
@@ -338,6 +416,33 @@ export default function Home() {
     }
   }, [lang]);
 
+  const stopGeneration = useCallback(async () => {
+    const targetSid = loadingTarget || activeId;
+    if (!targetSid) {
+      setLoading(false);
+      setLoadingTarget(null);
+      return;
+    }
+    const jid = activeJobs[targetSid];
+    clearSessionJob(targetSid);
+    setLoading(false);
+    setLoadingTarget(null);
+    try {
+      if (jid) {
+        await api.cancelJob(jid);
+      } else {
+        await api.cancelSession(targetSid);
+      }
+    } catch {
+      /* ignore */
+    }
+    refreshMe();
+    setMessages((prev) => [
+      ...prev,
+      { role: "assistant", text: lang === "he" ? "המענה נעצר לבקשתך." : "Generation stopped.", citations: [], caveats: [] }
+    ]);
+  }, [loadingTarget, activeId, activeJobs, clearSessionJob, refreshMe, lang]);
+
   const send = useCallback(
     async (text: string) => {
       const extras: LessonExtras | undefined =
@@ -357,39 +462,51 @@ export default function Home() {
         appendIfCurrent({ role: "assistant", text: r.answer, citations: r.citations || [], caveats: r.caveats || [], grounded: r.grounded, files: r.files, source_note: r.source_note });
       try {
         if (activeId) {
-          push(await api.sessionQueryAsync(activeId, text, intent, lang, extras, att));
+          const res = await api.sessionQueryAsync(activeId, text, intent, lang, extras, att, (jid) => {
+            setSessionJob(activeId, jid);
+          });
+          clearSessionJob(activeId);
+          push(res);
         } else {
           // Async create: the session id comes back immediately (onSession) so the new chat attaches
           // to the UI while the (possibly minutes-long) first lesson generates on the job queue.
-          const s = await api.createSessionAsync(text, intent, lang, extras, att, (id) => {
+          const s = await api.createSessionAsync(text, intent, lang, extras, att, (id, jid) => {
             target = id;
             setLoadingTarget(id);
             setActiveId(id);
             setSubtitle(text);
+            setSessionJob(id, jid);
             refreshSessions();
           });
+          if (target) clearSessionJob(target);
           push(s.result);
           refreshSessions();
         }
       } catch (e) {
+        if (target) clearSessionJob(target);
         // Friendly errors: a network failure → connection message; a 4xx with a clean server detail
         // (e.g. the bilingual quota/429 message) → show it; 5xx / job failure / timeout → generic
         // (never surface a raw exception or stack to the user).
         const err = e as Error & { status?: number };
-        const msg =
-          err?.name === "TypeError"
-            ? tr(lang, "errNetwork")
-            : err?.status && err.status < 500 && err.message
-              ? err.message
-              : tr(lang, "errGeneric");
-        appendIfCurrent({ role: "assistant", text: msg, citations: [], caveats: [] });
+        const isCancelled = err?.message?.includes("cancelled");
+        if (isCancelled) {
+          appendIfCurrent({ role: "assistant", text: lang === "he" ? "המענה נעצר לבקשתך." : "Generation stopped.", citations: [], caveats: [] });
+        } else {
+          const msg =
+            err?.name === "TypeError"
+              ? tr(lang, "errNetwork")
+              : err?.status && err.status < 500 && err.message
+                ? err.message
+                : tr(lang, "errGeneric");
+          appendIfCurrent({ role: "assistant", text: msg, citations: [], caveats: [] });
+        }
       } finally {
         setLoading(false);
         setLoadingTarget(null);
         refreshMe(); // update the remaining-quota pill (incl. after a 429)
       }
     },
-    [activeId, intent, lang, lessonFields, userSources, refreshSessions, refreshMe],
+    [activeId, intent, lang, lessonFields, userSources, refreshSessions, refreshMe, setSessionJob, clearSessionJob],
   );
 
   // Auth gate (Supabase mode only). While the initial session check runs, show a minimal splash;
@@ -419,6 +536,7 @@ export default function Home() {
       lang={lang}
       sessions={sessions}
       activeId={activeId}
+      generatingIds={Object.keys(activeJobs)}
       onNew={() => { newDiscussion(); if (mobile) setMobileSessions(false); }}
       onSelect={(id) => {
         const s = sessions.find((x) => x.id === id);
@@ -461,26 +579,11 @@ export default function Home() {
         orgRole={me?.org_role}
         userEmail={auth.user?.email}
       />
-      <div className="flex flex-1 overflow-hidden px-4 pb-4 gap-4">
-        {/* Sessions — desktop inline only (hidden on mobile, opened as a drawer). lg:contents keeps
-            the desktop flex row exactly as before. */}
+
+      <div className="flex-1 min-h-0 flex gap-3 overflow-hidden">
         <div className="hidden lg:contents">
           {sessionsCollapsed ? (
-            <Rail
-              side="start"
-              icon="forum"
-              title={tr(lang, "openChatsTip")}
-              onExpand={() => setSessionsCollapsed(false)}
-              extra={
-                <button
-                  onClick={newDiscussion}
-                  className="h-10 w-10 rounded-2xl grad text-white grid place-items-center hover:opacity-95 transition"
-                  title={tr(lang, "newChatShort")}
-                >
-                  <span className="material-symbols-outlined">add</span>
-                </button>
-              }
-            />
+            <Rail side="start" icon="chat" title={tr(lang, "openChatsTip")} onExpand={() => setSessionsCollapsed(false)} />
           ) : (
             sessionsPanel(false)
           )}
@@ -498,6 +601,7 @@ export default function Home() {
           onPickIntent={setIntent}
           onLessonChange={setLessonFields}
           onSend={send}
+          onStop={stopGeneration}
           onPreviewFile={setPreviewFile}
           calendarModesEnabled={me?.calendar_modes_enabled}
           sourcesheetModesEnabled={me?.sourcesheet_enabled}

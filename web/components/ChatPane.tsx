@@ -316,6 +316,7 @@ export function ChatPane({
   userEmail,
   userSources = [],
   onAddSource,
+  onStop,
 }: {
   lang: Lang;
   messages: Message[];
@@ -334,14 +335,31 @@ export function ChatPane({
   userEmail?: string | null;
   userSources?: Attachment[];
   onAddSource?: () => void;
+  onStop?: () => void;
 }) {
   const userInitial = userEmail ? userEmail[0].toUpperCase() : "א";
   const [input, setInput] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
+  const lastBubbleRef = useRef<HTMLDivElement>(null);
+  const prevCountRef = useRef(messages.length);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
+    const prevCount = prevCountRef.current;
+    const currentCount = messages.length;
+    prevCountRef.current = currentCount;
+
+    if (currentCount > prevCount) {
+      const last = messages[currentCount - 1];
+      if (last.role === "user") {
+        endRef.current?.scrollIntoView({ behavior: "smooth" });
+      } else if (last.role === "assistant") {
+        // Scroll to the start/top of the assistant message so the user can read naturally from the top
+        lastBubbleRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    } else if (thinkingHere) {
+      endRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [messages, thinkingHere]);
 
   // Auto-grow the composer up to 128px, like the static UI's autogrow().
@@ -421,7 +439,14 @@ export function ChatPane({
             </div>
           )
         ) : (
-          messages.map((m, i) => <Bubble key={m.id ?? i} lang={lang} m={m} onPreview={onPreviewFile} userInitial={userInitial} />)
+          messages.map((m, i) => {
+            const isLast = i === messages.length - 1;
+            return (
+              <div key={m.id ?? i} ref={isLast ? lastBubbleRef : undefined}>
+                <Bubble lang={lang} m={m} onPreview={onPreviewFile} userInitial={userInitial} />
+              </div>
+            );
+          })
         )}
         {thinkingHere && (
           <div className="flex gap-3.5">
@@ -466,14 +491,25 @@ export function ChatPane({
             className="flex-1 bg-transparent outline-none font-serif text-[16px] placeholder:text-ink/35 resize-none leading-snug sm:leading-relaxed max-h-32 py-1"
             placeholder={tr(lang, "askPlaceholder")}
           />
-          <button
-            type="submit"
-            disabled={loading}
-            className="h-10 w-10 rounded-full grad text-white grid place-items-center hover:opacity-95 shadow-lg shadow-tekhelet/20 disabled:opacity-40"
-            title={tr(lang, "send")}
-          >
-            <Icon name="arrow_upward" className="text-[20px]" />
-          </button>
+          {loading || thinkingHere ? (
+            <button
+              type="button"
+              onClick={onStop}
+              className="h-10 w-10 rounded-full bg-crimson hover:bg-crimson/90 text-white grid place-items-center shadow-lg transition-all animate-pulse"
+              title={lang === "he" ? "עצור מענה" : "Stop generation"}
+            >
+              <span className="w-3.5 h-3.5 rounded-[3px] bg-white block" />
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={loading || !input.trim()}
+              className="h-10 w-10 rounded-full grad text-white grid place-items-center hover:opacity-95 shadow-lg shadow-tekhelet/20 disabled:opacity-40"
+              title={tr(lang, "send")}
+            >
+              <Icon name="arrow_upward" className="text-[20px]" />
+            </button>
+          )}
         </form>
         <p className="text-center text-[10px] text-ink/35 mt-2.5">{tr(lang, "footer")}</p>
       </div>

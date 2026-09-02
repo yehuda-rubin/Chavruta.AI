@@ -3909,7 +3909,7 @@ def create_session_async(req: QueryRequest, owner: str = Depends(current_owner),
         jid = jobs.submit(owner, _metered(
             owner, reserved, req.intent,
             lambda: jsonable_encoder(_first_query_work(sid, req, owner, llm=llm)),
-            req, meter=meter))
+            req, meter=meter), session_id=sid)
     return JobAccepted(job_id=jid, session_id=sid)
 
 
@@ -3928,14 +3928,14 @@ def session_query_async(session_id: str, req: QueryRequest, owner: str = Depends
         history, intent = _prepare_continue(session_id, req, owner)
         jid = jobs.submit(owner, _metered(owner, reserved, req.intent, lambda: jsonable_encoder(
             _continue_query_work(session_id, req, history, intent, owner, llm=llm)),
-            req, meter=meter))
+            req, meter=meter), session_id=session_id)
     return JobAccepted(job_id=jid, session_id=session_id)
 
 
 class JobStatusOut(BaseModel):
-    status: str                 # pending | running | done | error
+    status: str                 # pending | running | done | error | cancelled
     result: dict | None = None  # present when status == done (the endpoint's normal response body)
-    error: str | None = None    # present when status == error
+    error: str | None = None    # present when status == error or cancelled
 
 
 @app.get("/jobs/{job_id}", response_model=JobStatusOut)
@@ -3948,7 +3948,26 @@ def get_job(job_id: str, owner: str = Depends(current_owner)):
         return JobStatusOut(status="done", result=job.result)
     if job.status == "error":
         return JobStatusOut(status="error", error=job.error)
+    if job.status == "cancelled":
+        return JobStatusOut(status="cancelled", error="cancelled by user")
     return JobStatusOut(status=job.status)
+
+
+@app.post("/jobs/{job_id}/cancel")
+def cancel_job(job_id: str, owner: str = Depends(current_owner)):
+    """Cancel an in-progress generation job."""
+    ok = jobs.cancel(job_id, owner)
+    return {"cancelled": ok, "job_id": job_id}
+
+
+@app.post("/sessions/{session_id}/cancel")
+def cancel_session_job(session_id: str, owner: str = Depends(current_owner)):
+    """Cancel any in-progress generation job for a session."""
+    active = jobs.get_active_for_session(session_id, owner)
+    if active:
+        ok = jobs.cancel(active.id, owner)
+        return {"cancelled": ok, "job_id": active.id, "session_id": session_id}
+    return {"cancelled": False, "session_id": session_id}
 
 
 class MessageOut(BaseModel):
@@ -3967,10 +3986,13 @@ class MessageOut(BaseModel):
 
 
 @app.get("/sessions/{session_id}/messages", response_model=list[MessageOut])
-def get_messages(session_id: str, owner: str = Depends(current_owner)):
+def get_messages(session_id: str, response: Response, owner: str = Depends(current_owner)):
     msgs = db.get_messages(session_id, owner)
     if not msgs:
         raise HTTPException(status_code=404, detail="session not found")
+    active = jobs.get_active_for_session(session_id, owner)
+    if active:
+        response.headers["X-Active-Job-Id"] = active.id
     return msgs
 
 

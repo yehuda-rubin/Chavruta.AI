@@ -79,5 +79,27 @@ def test_many_jobs_all_complete():
     assert results == {n * n for n in range(10)}
 
 
+def test_job_cancellation_and_session_lookup():
+    reg = JobRegistry(max_workers=2)
+    ev = time.sleep
+
+    # Submit a job attached to session_123
+    jid = reg.submit("alice", lambda: ev(0.5) or {"status": "ok"}, session_id="session_123")
+    active = reg.get_active_for_session("session_123", "alice")
+    assert active is not None
+    assert active.id == jid
+    assert active.session_id == "session_123"
+
+    # Cancel the job
+    assert reg.cancel(jid, "alice") is True
+    job = reg.get(jid, "alice")
+    assert job.status == "cancelled"
+    assert job.cancel_event.is_set()
+
+    # Active session lookup now returns None
+    assert reg.get_active_for_session("session_123", "alice") is None
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+

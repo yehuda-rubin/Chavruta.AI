@@ -141,7 +141,7 @@ interface JobAccepted {
   session_id?: string;
 }
 interface JobStatus<T> {
-  status: "pending" | "running" | "done" | "error";
+  status: "pending" | "running" | "done" | "error" | "cancelled";
   result?: T;
   error?: string;
 }
@@ -167,6 +167,7 @@ async function pollJob<T>(jobId: string, intervalMs = 1400, timeoutMs = 10 * 60 
       continue;
     }
     if (s.status === "done") return s.result as T;
+    if (s.status === "cancelled") throw new Error("cancelled by user");
     if (s.status === "error") throw new Error(s.error || "generation failed");
     if (Date.now() - start > timeoutMs) throw new Error("timed out waiting for generation");
     await new Promise((r) => setTimeout(r, intervalMs));
@@ -195,19 +196,25 @@ export const api = {
   // is polled off the job queue so a long lesson never trips a gateway timeout.
   createSessionAsync: async (
     q: string, intent: string, lang: string, extras?: LessonExtras, att?: Attachment[],
-    onSession?: (id: string) => void,
+    onSession?: (id: string, jobId: string) => void,
   ) => {
     const acc = await req<JobAccepted>("/sessions/async", { method: "POST", body: body(q, intent, lang, extras, att) });
-    if (acc.session_id && onSession) onSession(acc.session_id);
+    if (acc.session_id && onSession) onSession(acc.session_id, acc.job_id);
     return pollJob<CreatedSession>(acc.job_id);
   },
 
   sessionQueryAsync: async (
     id: string, q: string, intent: string, lang: string, extras?: LessonExtras, att?: Attachment[],
+    onJob?: (jobId: string) => void,
   ) => {
     const acc = await req<JobAccepted>(`/sessions/${id}/query/async`, { method: "POST", body: body(q, intent, lang, extras, att) });
+    if (onJob) onJob(acc.job_id);
     return pollJob<QueryResponse>(acc.job_id);
   },
+
+  pollJob: <T>(jobId: string) => pollJob<T>(jobId),
+  cancelJob: (jobId: string) => req<{ cancelled: boolean; job_id: string }>(`/jobs/${jobId}/cancel`, { method: "POST" }),
+  cancelSession: (sessionId: string) => req<{ cancelled: boolean; job_id?: string; session_id: string }>(`/sessions/${sessionId}/cancel`, { method: "POST" }),
 
   // My Shiurim — saved lessons.
   listLessons: () => req<SavedLesson[]>("/lessons"),
