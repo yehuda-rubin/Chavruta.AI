@@ -111,15 +111,6 @@ export default function Home() {
     }
   }, []);
 
-  // Persist active session across page refreshes (F5)
-  useEffect(() => {
-    if (activeId) {
-      try { localStorage.setItem("chavruta-active-session", activeId); } catch {}
-    } else {
-      try { localStorage.removeItem("chavruta-active-session"); } catch {}
-    }
-  }, [activeId]);
-
   // Account + remaining daily quota (for the header pill). Refreshed on sign-in and after each turn.
   const refreshMe = useCallback(async () => {
     try {
@@ -229,6 +220,7 @@ export default function Home() {
 
   const selectSession = useCallback(async (s: Session) => {
     setActiveId(s.id);
+    try { localStorage.setItem("chavruta-active-session", s.id); } catch {}
     setSubtitle(s.title || s.first_q || "");
     if (s.mode) setIntent(s.mode as IntentId);
     if (activeJobs[s.id]) {
@@ -249,7 +241,7 @@ export default function Home() {
   // Restore active session across page refreshes (F5) once sessions load
   const initialSessionRestoredRef = useRef(false);
   useEffect(() => {
-    if (!initialSessionRestoredRef.current && sessions.length > 0 && !activeId) {
+    if (!initialSessionRestoredRef.current && sessions.length > 0) {
       initialSessionRestoredRef.current = true;
       try {
         const savedId = localStorage.getItem("chavruta-active-session");
@@ -261,10 +253,11 @@ export default function Home() {
         }
       } catch {}
     }
-  }, [sessions, activeId, selectSession]);
+  }, [sessions, selectSession]);
 
   const newDiscussion = useCallback(() => {
     setActiveId(null);
+    try { localStorage.removeItem("chavruta-active-session"); } catch {}
     setMessages([]);
     setUserSources([]);
     setSubtitle("");
@@ -280,7 +273,10 @@ export default function Home() {
       } catch {
         /* ignore */
       }
-      if (id === activeId) newDiscussion();
+      if (id === activeId) {
+        try { localStorage.removeItem("chavruta-active-session"); } catch {}
+        newDiscussion();
+      }
       refreshSessions();
     },
     [activeId, newDiscussion, refreshSessions],
@@ -505,6 +501,7 @@ export default function Home() {
             target = id;
             setLoadingTarget(id);
             setActiveId(id);
+            try { localStorage.setItem("chavruta-active-session", id); } catch {}
             setSubtitle(text);
             setSessionJob(id, jid);
             refreshSessions();
