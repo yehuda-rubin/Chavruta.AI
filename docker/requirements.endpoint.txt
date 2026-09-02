@@ -13,3 +13,5 @@ numpy==2.4.6
 sentence-transformers==5.5.1
 PyJWT[crypto]==2.13.0
 sentry-sdk[fastapi]==2.66.1
+pypdf==5.3.1
+python-docx==1.1.2

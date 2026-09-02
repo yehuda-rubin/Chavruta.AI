@@ -2486,7 +2486,13 @@ def _attachment_text(att: Attachment) -> str:
 
             import docx
             d = docx.Document(io.BytesIO(raw))
-            return "\n".join(p.text for p in d.paragraphs).strip()
+            para_text = "\n".join(p.text for p in d.paragraphs if p.text.strip())
+            table_text = "\n".join(
+                " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
+                for table in d.tables
+                for row in table.rows
+            )
+            return (para_text + ("\n" + table_text if table_text else "")).strip()
         except Exception as exc:
             _log.warning("attachment docx extract failed (%s): %s", att.name, exc)
             return ""
