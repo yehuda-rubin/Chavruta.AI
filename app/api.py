@@ -1980,16 +1980,46 @@ def _run_sourcesheet(
     pipeline = _get_pipeline()
     llm = llm or getattr(pipeline, "llm", None)
 
-    # Fetch verified corpus texts for identified refs (if retriever available)
+    # Fetch verified corpus texts for identified refs via Qdrant store
     corpus_lookup: dict[str, str] = {}
     try:
-        retriever = getattr(pipeline, "retriever", None)
-        if retriever is not None and hasattr(retriever, "fetch_by_refs"):
-            for item in parsed_items:
-                if item.ref:
-                    fetched = retriever.fetch_by_refs([item.ref])
-                    if fetched and getattr(fetched[0], "text_he", None):
-                        corpus_lookup[item.ref] = fetched[0].text_he
+        from chavruta.corpus.refs import with_ref_variants
+
+        ref_map: dict[str, list[str]] = {}
+        all_targets: list[str] = []
+
+        for item in parsed_items:
+            candidates: list[str] = []
+            if item.ref:
+                candidates.append(item.ref)
+            if item.canonical_sefaria_ref:
+                candidates.append(item.canonical_sefaria_ref)
+
+            for cr in candidates:
+                variants = with_ref_variants([cr])
+                # Expand chapter-level Tanakh refs (e.g. Leviticus.8 -> verses 1..36)
+                if "." in cr:
+                    p = cr.split(".")
+                    if len(p) == 2 and p[1].isdigit():
+                        variants.extend(with_ref_variants([f"{p[0]}.{p[1]}.{v}" for v in range(1, 37)]))
+                for v in variants:
+                    ref_map.setdefault(v, []).append(cr)
+                    if item.ref:
+                        ref_map.setdefault(v, []).append(item.ref)
+                    if item.canonical_sefaria_ref:
+                        ref_map.setdefault(v, []).append(item.canonical_sefaria_ref)
+                    all_targets.append(v)
+
+        if all_targets:
+            hits = _fetch_ranked_hits(all_targets, limit=max(len(all_targets) * 4, 300))
+            for h in hits:
+                origs = ref_map.get(h.ref, [])
+                if not origs and h.canonical_ref:
+                    origs = ref_map.get(h.canonical_ref, [])
+                for orig in origs:
+                    prev = corpus_lookup.get(orig, "")
+                    if h.text_he and h.text_he not in prev:
+                        corpus_lookup[orig] = (prev + "\n" + h.text_he).strip()
     except Exception as exc:
         _log.warning("sourcesheet corpus fetch fallback: %s", exc)
 

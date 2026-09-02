@@ -1163,6 +1163,26 @@ class CompanionGuide:
 
 # ── XML-Isolated Context Construction (Principle I) ──────────────────────────
 
+def _find_corpus_text(lookup: dict[str, str], ref: str | None, canonical: str | None) -> str | None:
+    if not lookup:
+        return None
+    for r in [canonical, ref]:
+        if not r or r == "None":
+            continue
+        if r in lookup:
+            return lookup[r]
+        r_clean = r.strip().replace(" ", ".")
+        if r_clean in lookup:
+            return lookup[r_clean]
+        r_space = r.strip().replace(".", " ")
+        if r_space in lookup:
+            return lookup[r_space]
+        for k, v in lookup.items():
+            if k.startswith(r + ".") or k.startswith(r_clean + "."):
+                return v
+    return None
+
+
 def build_sourcesheet_prompt_context(
     items: list[ParsedSourceItem],
     corpus_lookup: dict[str, str] | None = None,
@@ -1175,7 +1195,7 @@ def build_sourcesheet_prompt_context(
         source_id = f"S{item.index}"
         ref = item.ref or "None"
         canonical = item.canonical_sefaria_ref or ""
-        corpus_text = lookup.get(canonical) or lookup.get(ref)
+        corpus_text = _find_corpus_text(lookup, ref, canonical)
 
         has_substantive_body = bool(
             item.cleaned_text
@@ -1337,7 +1357,7 @@ def _synthesize_with_llm(
             sec_data = llm_sections_data.get(item.index, {})
             ref = item.ref or item.header
             canonical = item.canonical_sefaria_ref or ""
-            corpus_text = corpus_lookup.get(canonical) or corpus_lookup.get(ref)
+            corpus_text = _find_corpus_text(corpus_lookup, ref, canonical)
             has_body = bool(
                 item.cleaned_text
                 and item.cleaned_text.strip() != item.header.strip()
@@ -1459,7 +1479,7 @@ def analyze_source_sheet(
     for idx, item in enumerate(items):
         ref = item.ref or item.header
         canonical = item.canonical_sefaria_ref or ""
-        corpus_text = lookup.get(canonical) or lookup.get(ref)
+        corpus_text = _find_corpus_text(lookup, ref, canonical)
 
         has_substantive_body = bool(
             item.cleaned_text

@@ -178,7 +178,7 @@ def extract_sheet_text(raw: bytes | str, filename: str = "", mime: str = "") -> 
 _BULLET_RE = re.compile(
     r"(?m)^(?:"
     r"[-*•]\s+|"
-    r"\[?\s*(?:אות\s+|מקור\s+|סימן\s+|סעיף\s+)?(?:\d+|[א-ת][״'׳\"]?[א-ת]?)\s*[\].):–-]\s*|"
+    r"\[?\s*(?:אות\s+|מקור\s+|סימן\s+|סעיף\s+)?(?P<bullet>\d+|[א-ת][״'׳\"]?[א-ת]?)\s*[\].)–-]\s*|"
     r"#{1,4}\s+|"
     r"===+\s*"
     r")",
@@ -205,17 +205,43 @@ def parse_source_sheet(text: str) -> list[ParsedSourceItem]:
     clean_text = clean_text.strip()
 
     # Split text into segments
-    splits = [m.start() for m in _BULLET_RE.finditer(clean_text)]
-    if not splits:
-        splits = [0]
+    matches = list(_BULLET_RE.finditer(clean_text))
+    if not matches:
+        raw_segments = [clean_text]
+    else:
+        raw_tuples: list[tuple[str, str]] = []
+        for i, m in enumerate(matches):
+            start = m.start()
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(clean_text)
+            seg = clean_text[start:end].strip()
+            bullet_key = m.group("bullet") or str(i + 1)
+            bullet_key = re.sub(r"[\"'\s״׳]", "", bullet_key)
+            if seg:
+                raw_tuples.append((bullet_key, seg))
 
-    raw_segments: list[str] = []
-    for i in range(len(splits)):
-        start = splits[i]
-        end = splits[i + 1] if i + 1 < len(splits) else len(clean_text)
-        seg = clean_text[start:end].strip()
-        if seg:
-            raw_segments.append(seg)
+        # If bullet keys repeat (e.g. syllabus/outline followed by full source text), merge them
+        seen_keys = set()
+        has_repeats = False
+        for k, _ in raw_tuples:
+            if k in seen_keys and len(k) <= 2:
+                has_repeats = True
+                break
+            seen_keys.add(k)
+
+        if has_repeats:
+            merged_by_key: dict[str, str] = {}
+            for k, seg in raw_tuples:
+                if k not in merged_by_key:
+                    merged_by_key[k] = seg
+                else:
+                    prev = merged_by_key[k]
+                    if len(seg) > len(prev):
+                        merged_by_key[k] = f"{prev}\n\n{seg}"
+                    else:
+                        merged_by_key[k] = f"{seg}\n\n{prev}"
+            raw_segments = list(merged_by_key.values())
+        else:
+            raw_segments = [s for _, s in raw_tuples]
 
     # Fallback if no bullets found: split on double newlines
     if len(raw_segments) <= 1:
@@ -229,8 +255,16 @@ def parse_source_sheet(text: str) -> list[ParsedSourceItem]:
 
     for idx, raw_seg in enumerate(raw_segments, start=1):
         lines = [line.strip() for line in raw_seg.split("\n") if line.strip()]
-        header = lines[0] if lines else ""
-        body = "\n".join(lines[1:]) if len(lines) > 1 else lines[0] if lines else ""
+        if not lines:
+            continue
+
+        # If the first line is just an isolated bullet marker (e.g. "א." or "1."), look for the real title
+        first_line_idx = 0
+        if re.match(r"^\[?\s*(?:אות\s+|מקור\s+)?(?:\d+|[א-ת])\s*[\].)–-]?\s*$", lines[0]):
+            first_line_idx = 1 if len(lines) > 1 else 0
+
+        header = lines[first_line_idx] if lines else ""
+        body = "\n".join(lines[first_line_idx + 1:]) if len(lines) > first_line_idx + 1 else lines[0] if lines else ""
 
         # Extract Dibur Hamatchil if any
         dh_match = _DH_RE.search(raw_seg)

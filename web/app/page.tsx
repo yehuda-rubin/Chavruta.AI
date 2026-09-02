@@ -220,6 +220,7 @@ export default function Home() {
 
   const selectSession = useCallback(async (s: Session) => {
     setActiveId(s.id);
+    setUserSources([]); // Clear pending attachment when switching chats
     try { localStorage.setItem("chavruta-active-session", s.id); } catch {}
     setSubtitle(s.title || s.first_q || "");
     if (s.mode) setIntent(s.mode as IntentId);
@@ -415,6 +416,7 @@ export default function Home() {
   const openLesson = useCallback(async (l: SavedLesson) => {
     setShowLessons(false);
     setActiveId(null);
+    setUserSources([]);
     setIntent("lesson");
     setSubtitle(l.topic);
     // GET /lessons deliberately omits `files` and `citations` — the Word documents are large and
@@ -477,6 +479,7 @@ export default function Home() {
           ? { audience: lessonFields.audience, grade_band: lessonFields.gradeBand, length: lessonFields.length }
           : undefined;
       const att = userSources.length ? userSources : undefined;
+      if (userSources.length) setUserSources([]);
       // The conversation this turn belongs to. For a follow-up it's the current chat; for a brand-new
       // chat it becomes known when onSession fires. Answers are only shown if this is still on screen.
       let target = activeId;
