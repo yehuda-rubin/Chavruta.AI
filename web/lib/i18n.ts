@@ -84,6 +84,7 @@ export const STRINGS = {
     view: "צפה",
     download: "הורד",
     downloadWord: "הורד Word",
+    printPdf: "הדפסה ל-PDF",
     noContent: "אין תוכן להצגה.",
     // add-source
     addSrcTitle: "הוסף מקור למודל",
@@ -377,6 +378,7 @@ export const STRINGS = {
     view: "View",
     download: "Download",
     downloadWord: "Download Word",
+    printPdf: "Print to PDF",
     noContent: "No content to display.",
     addSrcTitle: "Add a source for the model",
     addSrcDesc: "Paste source text, or upload a file — PDF or Word. The sources you add are sent to the model with your next question.",

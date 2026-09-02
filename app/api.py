@@ -8,6 +8,7 @@ The pipeline is loaded once at startup and shared across requests.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -310,17 +311,9 @@ def _has_bleed(text: str) -> bool:
 
 
 _SENTENCE_SPLIT_RE = re.compile(r"([.!?]\s+|\n+)")   # captured so separators are preserved verbatim
-_MAX_BLEED_FIXES = 20   # bound worst-case latency/cost if something is very wrong with one answer.
-# Was 3, then 8 — both were still too low in practice. A long lesson or responsa answer quoting many
-# sources can bleed in a dozen-plus sentences, and every sentence over the cap reaches the user in
-# broken Hebrew, which is exactly the defect this whole mechanism exists to prevent. The cap's job is
-# to stop a runaway answer from costing unbounded time and money, not to ration the fix — 20 covers
-# every real answer seen so far while still bounding the pathological case.
-_BLEED_FIX_WORKERS = 4
-# Raising the cap without this would have made the worst case 20 sentences x 2 attempts = 40 model
-# calls IN SERIES, all of them blocking the user's response. The rewrites are independent of each
-# other (each sees one sentence and nothing else), so they parallelise exactly. Small pool: this runs
-# alongside other users' generation calls, and the point is to cut the tail, not to burst the provider.
+_MAX_BLEED_FIXES = 60   # bound worst-case latency/cost: expanded 3x from 20 to 60 sentences.
+# Covers even very long lessons or multi-source sheets while still bounding pathological runaway.
+_BLEED_FIX_WORKERS = 8   # concurrent parallel rewrite workers to keep latency low.
 
 _BLEED_FIX_SYSTEM = (
     "Rewrite the given Hebrew sentence so it contains NO English or other non-Hebrew words or "
@@ -2011,15 +2004,32 @@ def _run_sourcesheet(
         user_instruction=user_instruction,
     )
 
+    if he and llm:
+        guide.summary = _strip_markers(_fix_bleeding_sentences(guide.summary, he, llm), he=he)
+
+    docx_bytes = guide.to_docx_bytes()
+    docx_b64 = base64.b64encode(docx_bytes).decode("ascii") if docx_bytes else ""
+    html_printable = guide.to_html_printable()
     md_content = guide.to_markdown()
+    if he and llm:
+        md_content = _strip_markers(_fix_bleeding_sentences(md_content, he, llm), he=he)
     sheet_id = uuid.uuid4().hex[:12]
 
     files = [
         FileOut(
+            name=f"sourcesheet_{sheet_id}.docx",
+            title="חוברת ליווי לדף מקורות (Word)" if he else "Source Sheet Companion (Word)",
+            content=docx_b64,
+        ),
+        FileOut(
+            name=f"sourcesheet_{sheet_id}.html",
+            title="דף מעוצב להדפסה ו-PDF" if he else "Printable Companion & PDF",
+            content=html_printable,
+        ),
+        FileOut(
             name=f"sourcesheet_{sheet_id}.md",
-            title="חוברת ליווי לדף מקורות" if he else "Source Sheet Companion",
+            title="חוברת ליווי בפורמט Markdown" if he else "Source Sheet Companion (Markdown)",
             content=md_content,
-            type="text/markdown",
         ),
     ]
 
@@ -2060,7 +2070,7 @@ def _run_sourcesheet(
         f"{summary_block}"
         f"---\n"
         f"עובדו בהצלחה **{len(parsed_items)} מקורות** בדף. "
-        f"חוברת הליווי המלאה נוצרה וזמינה להורדה בקבצים המצורפים, "
+        f"חוברת הליווי המלאה נוצרה וזמינה להורדה בקבצים המצורפים (קובץ Word מעוצב, דף להדפסה ישירה ו-PDF, וקובץ Markdown), "
         f"וניתן להמשיך ולדון בסוגיה כאן בשיחה."
         if he
         else f"### {guide.title}\n\n"
@@ -2068,7 +2078,7 @@ def _run_sourcesheet(
         f"{summary_block}"
         f"---\n"
         f"Successfully analyzed **{len(parsed_items)} sources**. "
-        f"The full companion guide is ready for download in the attached files. "
+        f"The full companion guide is ready for download in the attached files (Word document, printable PDF/HTML page, and Markdown), "
         f"You can continue to ask questions about the sheet here in the chat."
     )
 

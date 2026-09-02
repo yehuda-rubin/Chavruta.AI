@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Attachment, FileOut, Lang, Message } from "@/lib/types";
 import { EXAMPLES, IntentId, tr } from "@/lib/i18n";
 import { commentatorTag, isHe, renderText } from "@/lib/format";
-import { downloadDoc } from "@/lib/doc";
+import { downloadDoc, printHtmlContent } from "@/lib/doc";
 import { api } from "@/lib/api";
 import { Icon } from "./Icon";
 import { HelperPrompt } from "./HelperPrompt";
@@ -75,41 +75,59 @@ function LessonFiles({ lang, files, onPreview }: { lang: Lang; files: FileOut[];
     <>
       <p className="text-[11px] tracking-widest text-gold font-bold uppercase mb-2">{tr(lang, "lessonThreeFiles")}</p>
       <div className="flex flex-col gap-2">
-        {files.map((f, idx) => (
-          <div
-            key={idx}
-            onClick={() => onPreview(f)}
-            className="fileCard flex items-center gap-3 w-full bg-white/70 hover:bg-white/95 ring-1 ring-line/70 rounded-2xl p-3.5 transition cursor-pointer"
-          >
-            <span className="h-10 w-10 rounded-xl grad grid place-items-center text-white shrink-0">
-              <Icon name="description" />
-            </span>
-            <span className="flex-1 min-w-0">
-              <span className="block font-serif font-bold text-tekhelet truncate">{f.name}</span>
-              <span className="block text-[11px] text-ink/50">{tr(lang, "clickView")}</span>
-            </span>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onPreview(f);
-              }}
-              className="h-8 w-8 rounded-lg hover:bg-white grid place-items-center text-tekhelet shrink-0"
-              title={tr(lang, "view")}
+        {files.map((f, idx) => {
+          const isHtml = f.name.toLowerCase().endsWith(".html");
+          const isMd = f.name.toLowerCase().endsWith(".md");
+          const iconName = isHtml ? "print" : isMd ? "menu_book" : "description";
+
+          return (
+            <div
+              key={idx}
+              onClick={() => onPreview(f)}
+              className="fileCard flex items-center gap-3 w-full bg-white/70 hover:bg-white/95 ring-1 ring-line/70 rounded-2xl p-3.5 transition cursor-pointer"
             >
-              <Icon name="visibility" className="text-[20px]" />
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                downloadDoc(f.name, f.title || f.name.replace(/\.docx?$/, ""), f.content || "");
-              }}
-              className="h-8 w-8 rounded-lg hover:bg-white grid place-items-center text-gold shrink-0"
-              title={tr(lang, "download")}
-            >
-              <Icon name="download" className="text-[20px]" />
-            </button>
-          </div>
-        ))}
+              <span className="h-10 w-10 rounded-xl grad grid place-items-center text-white shrink-0 shadow-sm">
+                <Icon name={iconName} className="text-[20px]" />
+              </span>
+              <span className="flex-1 min-w-0">
+                <span className="block font-serif font-bold text-tekhelet truncate">{f.title || f.name}</span>
+                <span className="block text-[11px] text-ink/50 truncate">{f.name}</span>
+              </span>
+              {isHtml && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    printHtmlContent(f.content || "");
+                  }}
+                  className="h-8 w-8 rounded-lg hover:bg-white grid place-items-center text-tekhelet shrink-0 shadow-xs"
+                  title={tr(lang, "printPdf")}
+                >
+                  <Icon name="print" className="text-[20px]" />
+                </button>
+              )}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onPreview(f);
+                }}
+                className="h-8 w-8 rounded-lg hover:bg-white grid place-items-center text-tekhelet shrink-0 shadow-xs"
+                title={tr(lang, "view")}
+              >
+                <Icon name="visibility" className="text-[20px]" />
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  downloadDoc(f.name, f.title || f.name.replace(/\.docx?$/, ""), f.content || "");
+                }}
+                className="h-8 w-8 rounded-lg hover:bg-white grid place-items-center text-gold shrink-0 shadow-xs"
+                title={tr(lang, "download")}
+              >
+                <Icon name="download" className="text-[20px]" />
+              </button>
+            </div>
+          );
+        })}
       </div>
     </>
   );
