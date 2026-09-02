@@ -1496,14 +1496,6 @@ def _wants_full_lesson(question: str, llm=None) -> bool:
     clean = " ".join((question or "").split()).strip()
     if not clean:
         return False
-    # Fast regex check for explicit lesson/worksheet building requests
-    lesson_build_re = re.compile(
-        r"(?:בנה|תבנה|הכן|תהכין|ערוך|תערוך|הפק|תהפיק|צור|תיצור)\s+(?:לי\s+)?(?:מערך\s+)?(?:שיעור|דפי\s+עבודה|דף\s+מקורות)",
-        re.IGNORECASE,
-    )
-    if lesson_build_re.search(clean):
-        return True
-
     llm = llm or _classifier_llm() or _get_pipeline().llm
     try:
         prompt = GroundedPrompt(system=_WANTS_LESSON_SYSTEM, sources=[], question=clean, bare=True)
@@ -1655,6 +1647,16 @@ def _conversation_signals(user_turns: list[str], question: str, rq: Query, histo
         rq.named_refs = _carried_refs(history) or detect_hebrew_refs(convo)
 
 
+_EMPTY_META_SOURCES_RE = re.compile(
+    r"^(?:"
+    r"(?:תסביר|תסכם|סכם|באר|תבאר|הסבר|נתח|תנתח|פרט|תפרט|מה\s+(?:הם|הן|אומרים|אומרות|כתוב\s+ב))\s+(?:לי\s+)?(?:את\s+)?(?:כל\s+)?(?:ה)?(?:מקורות(?:\s+ש(?:הבאת|ציינת|הובאו|קיימים))?|דף(?:\s+המקורות)?|טקסטים|מובאות|ציטוטים|הדף)"
+    r"|"
+    r"(?:explain|summarize|analyze|break\s+down|clarify|what\s+(?:are|do))\s+(?:me\s+)?(?:the\s+)?(?:all\s+)?(?:sources|source\s+sheet|sheet|citations|texts)(?:\s+(?:say|mean|mentioned|above))?"
+    r")(?:\s*[:.?!—–-])?$",
+    re.IGNORECASE,
+)
+
+
 def _run_chavruta(question: str, lang: str, history=None, llm=None) -> QueryResponse:
     """Socratic study-partner mode: retrieve on the topic, then Claude plays a chavruta that asks
     questions and learns WITH the user (grounded), rather than lecturing. When retrieval confidence
@@ -1664,6 +1666,23 @@ def _run_chavruta(question: str, lang: str, history=None, llm=None) -> QueryResp
     llm = llm or pipeline.llm
     user_turns = [(getattr(h, "text", "") or "").strip() for h in (history or [])
                   if getattr(h, "role", "user") == "user" and (getattr(h, "text", "") or "").strip()]
+    carried = _carried_refs(history)
+    clean_q = " ".join(question.split()).strip()
+
+    if _EMPTY_META_SOURCES_RE.match(clean_q) and carried:
+        # User asked to explain/summarize the existing sources from previous turns:
+        # Ground directly on the carried citations rather than semantic searching for "מקור"
+        targets = with_ref_variants(carried)
+        hits = _fetch_ranked_hits(targets, limit=len(targets) * 2) if hasattr(pipeline, "retriever") else []
+        if not hits:
+            q = Query(text=" ".join(carried), lang=lang or None, intent=Intent.QA, named_refs=carried)
+            rq = pipeline._resolve_query(q)
+            rq.named_refs = carried
+            res = pipeline.retriever.retrieve(rq, top_k=10)
+            hits = list(res.hits)
+        he = (lang or "") != "en"
+        return _generate_chavruta_turn(question, hits, lang or "he", he, history, weak=(not hits), llm=llm)
+
     anchor = (user_turns[0] + " " + question) if user_turns else question   # keep retrieval on the topic
     q = Query(text=anchor, lang=lang or None, intent=Intent.QA)
     rq = pipeline._resolve_query(q)
@@ -2257,6 +2276,26 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
             )
             return QueryResponse(answer=msg, citations=[], grounded=False, intent="sourcesheet", files=[])
         return _run_sourcesheet(question, lang, history=history, owner_id=owner_id, llm=llm)
+
+    has_attachments = ("## מקורות שצירף המשתמש" in question) or ("## Sources the user attached" in question)
+    has_prior_answers = any(getattr(h, "role", "") == "assistant" for h in (history or []))
+    carried = _carried_refs(history)
+    clean_q = " ".join(question.split()).strip()
+
+    # Catch open meta-queries ("תסביר את המקורות", "תסכם את הדף") when no sources are attached/cited
+    if _EMPTY_META_SOURCES_RE.match(clean_q) and not has_attachments:
+        if carried or has_prior_answers:
+            return _run_chavruta(question, lang, history=history, llm=llm)
+        msg = (
+            "לא זוהו מקורות או נושא מוגדר לביאור. "
+            "אנא ציינו את שם הסוגיה או מראה המקום (למשל: *'בבא מציעא דף כ\"א ע\"א'* או *'הלכות שבת פרק א'*), "
+            "או העלו דף מקורות (קובץ Word / PDF / טקסט) בסרגל השמאלי, והחברותא תבאר ותנתח אותם בשמחה."
+            if he
+            else "No specific sources or topic were provided to explain. "
+                 "Please specify a tractate or citation (e.g. *'Bava Metzia 21a'*, *'Mishneh Torah, Shabbat 1'*), "
+                 "or upload a source sheet in the left side panel, and Chavruta will be glad to analyze and explain it for you."
+        )
+        return QueryResponse(answer=msg, citations=[], grounded=False, intent=intent_str or "qa", files=[])
 
     q = Query(text=question, lang=lang or None, intent=intent)
     answer = _get_pipeline().ask(q, history=history, llm=llm)

@@ -82,3 +82,53 @@ def test_sourcesheet_followup_continues_conversation(monkeypatch):
     )
     assert len(called_chavruta) == 1
     assert resp.answer == "תשובת חברותא"
+
+
+def test_empty_meta_sources_query_without_attachments():
+    # When user asks "תסביר את המקורות" with no attachments and no prior turns
+    resp = api._run_query_impl(
+        question="תסביר את המקורות",
+        lang="he",
+        intent_str="qa",
+        history=[],
+        owner_id="user_123",
+    )
+    assert "לא זוהו מקורות או נושא מוגדר לביאור" in resp.answer
+    assert resp.grounded is False
+    assert len(resp.citations) == 0
+
+    # Also matches "תסכם את הדף"
+    resp_sheet = api._run_query_impl(
+        question="תסכם את הדף",
+        lang="he",
+        intent_str="qa",
+        history=[],
+        owner_id="user_123",
+    )
+    assert "לא זוהו מקורות או נושא מוגדר לביאור" in resp_sheet.answer
+
+
+def test_empty_meta_sources_query_with_prior_citations(monkeypatch):
+    called_chavruta = []
+
+    def fake_chavruta(question, lang, history=None, llm=None):
+        called_chavruta.append((question, getattr(history[1], "refs", [])))
+        return api.QueryResponse(answer="ביאור המקורות", citations=[], grounded=True, intent="chavruta", files=[])
+
+    monkeypatch.setattr(api, "_run_chavruta", fake_chavruta)
+
+    history = [
+        Turn(role="user", text="מה הדין?"),
+        Turn(role="assistant", text="תשובה", refs=["Bava_Metzia.21a.1", "Rashi_on_Bava_Metzia.21a.1"]),
+    ]
+
+    resp = api._run_query_impl(
+        question="תסביר את המקורות",
+        lang="he",
+        intent_str="qa",
+        history=history,
+        owner_id="user_123",
+    )
+    assert len(called_chavruta) == 1
+    assert called_chavruta[0][1] == ["Bava_Metzia.21a.1", "Rashi_on_Bava_Metzia.21a.1"]
+    assert resp.answer == "ביאור המקורות"
