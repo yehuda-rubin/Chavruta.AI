@@ -1493,9 +1493,20 @@ def _wants_full_lesson(question: str, llm=None) -> bool:
     reply defaults to False (the cheaper, safer path), same philosophy as _fix_bleeding_sentences —
     a misfire here must never break a turn. `llm` overrides the classifier lookup (dependency
     injection for tests)."""
+    clean = " ".join((question or "").split()).strip()
+    if not clean:
+        return False
+    # Fast regex check for explicit lesson/worksheet building requests
+    lesson_build_re = re.compile(
+        r"(?:בנה|תבנה|הכן|תהכין|ערוך|תערוך|הפק|תהפיק|צור|תיצור)\s+(?:לי\s+)?(?:מערך\s+)?(?:שיעור|דפי\s+עבודה|דף\s+מקורות)",
+        re.IGNORECASE,
+    )
+    if lesson_build_re.search(clean):
+        return True
+
     llm = llm or _classifier_llm() or _get_pipeline().llm
     try:
-        prompt = GroundedPrompt(system=_WANTS_LESSON_SYSTEM, sources=[], question=question, bare=True)
+        prompt = GroundedPrompt(system=_WANTS_LESSON_SYSTEM, sources=[], question=clean, bare=True)
         res = llm.generate(prompt, lang="he", max_tokens=10, temperature=0.0)
         reply = (res.text or "").strip()
     except Exception:
@@ -1784,14 +1795,15 @@ def _run_parsha(question: str, lang: str, history=None, owner_id: str = "local",
             boundary_refs = {haftarah_verse_refs[0], haftarah_verse_refs[-1]}
             haftarah_hits = _fetch_ranked_hits(with_ref_variants(list(boundary_refs)), limit=20)
     topic = info.name_he if he else info.name_en
-    question = f"{_parsha_context_note(info, he)}\n{question}"
-    if _wants_full_lesson(question):
+    raw_question = question
+    if _wants_full_lesson(raw_question):
         tpl = _select_template(topic, "yeshiva", "")
         return _generate_lesson_from_hits(topic, _cap_hits(hits, _LESSON_HIT_CAP, min_commentaries=15) + haftarah_hits,
                                           lang, he, audience="yeshiva", grade_band="", length="medium",
                                           tpl=tpl, history=history, owner_id=owner_id, llm=llm)
     hits = _cap_hits(hits, _CHAVRUTA_HIT_CAP, min_commentaries=15) + haftarah_hits
-    return _generate_qa_turn_from_hits(question, hits, lang, he, history, llm=llm)
+    prompt = f"{_parsha_context_note(info, he)}\n{raw_question}"
+    return _generate_qa_turn_from_hits(prompt, hits, lang, he, history, llm=llm)
 
 
 def _parsha_context_note(info, he: bool) -> str:
@@ -1847,14 +1859,15 @@ def _run_daf_yomi(question: str, lang: str, history=None, owner_id: str = "local
     hits = _fetch_ranked_hits(targets, limit=max(len(targets) * 4, 400))
     hits.sort(key=daf_yomi_sort_key)
     topic = f"{info.tractate} {info.daf}"
-    if _wants_full_lesson(question):
+    raw_question = question
+    if _wants_full_lesson(raw_question):
         tpl = _select_template(topic, "yeshiva", "")
         return _generate_lesson_from_hits(topic, _cap_hits(hits, _LESSON_HIT_CAP, min_commentaries=15), lang, he,
                                           audience="yeshiva", grade_band="", length="medium",
                                           tpl=tpl, history=history, owner_id=owner_id, llm=llm)
     hits = _cap_hits(hits, _CHAVRUTA_HIT_CAP, min_commentaries=15)
-    question = f"{_daf_yomi_context_note(info.tractate, info.daf, he)}\n{question}"
-    return _generate_chavruta_turn(question, hits, lang, he, history, weak=(not hits), llm=llm)
+    prompt = f"{_daf_yomi_context_note(info.tractate, info.daf, he)}\n{raw_question}"
+    return _generate_chavruta_turn(prompt, hits, lang, he, history, weak=(not hits), llm=llm)
 
 
 def _daf_yomi_context_note(tractate: str, daf: int, he: bool) -> str:
@@ -1927,7 +1940,26 @@ def _run_sourcesheet(
     if has_prior_sheet and not is_rebuild:
         return _run_chavruta(question, lang, history=history, llm=llm)
 
-    parsed_items = parse_source_sheet(question)
+    # Separate user instruction/prompt from attached source sheet content if augmented
+    header_marker_he = "## מקורות שצירף המשתמש"
+    header_marker_en = "## Sources the user attached"
+    user_instruction = ""
+    sheet_text = question
+
+    if header_marker_he in question:
+        parts = question.split(header_marker_he, 1)
+        user_instruction = parts[0].strip()
+        sheet_text = parts[1].strip()
+    elif header_marker_en in question:
+        parts = question.split(header_marker_en, 1)
+        user_instruction = parts[0].strip()
+        sheet_text = parts[1].strip()
+
+    parsed_items = parse_source_sheet(sheet_text)
+    if not parsed_items and user_instruction:
+        # Fallback to whole question if split yielded no items
+        parsed_items = parse_source_sheet(question)
+
     if not parsed_items:
         msg = (
             "לא זוהו מקורות תורניים בדף שהועלה. אנא ודא שהקובץ או הטקסט מכיל מראי מקומות או ציטוטים."
@@ -1958,6 +1990,7 @@ def _run_sourcesheet(
         corpus_lookup=corpus_lookup,
         llm=llm,
         lang=lang,
+        user_instruction=user_instruction,
     )
 
     md_content = guide.to_markdown()
@@ -1978,16 +2011,31 @@ def _run_sourcesheet(
         ),
     ]
 
+    # Convert sections to citations so they appear in the UI's left-hand source cards
+    citations_list = [
+        CitationOut(
+            ref=s.ref or s.title or f"מקור {s.index}",
+            ref_he=s.title or s.ref or f"מקור {s.index}",
+            text_he=s.expanded_context or s.source_snippet or s.plain_explanation or "",
+            text_en="",
+            commentator=s.role_tag or "",
+            deep_link="",
+            license="user_provided" if s.status != "corpus" else "public domain",
+            version_title="דף מקורות" if s.status != "corpus" else "מאגר חברותא",
+        )
+        for s in guide.sections
+        if (s.ref or s.source_snippet or s.expanded_context or s.title)
+    ]
+
     # Save to SQLite database
     try:
-        citations_out = [c for c in guide.citations]
         db.save_source_sheet(
             sheet_id=sheet_id,
             title=guide.title,
             raw_content=question,
             parsed_sheet=[item.to_dict() for item in parsed_items],
             files=[f.model_dump() for f in files],
-            citations=citations_out,
+            citations=guide.citations,
             owner_id=owner_id,
         )
     except Exception as exc:
@@ -2009,7 +2057,7 @@ def _run_sourcesheet(
 
     return QueryResponse(
         answer=intro_msg,
-        citations=[CitationOut(ref=c, ref_he=c, text_he="", text_en="") for c in guide.citations],
+        citations=citations_list,
         grounded=True,
         intent="sourcesheet",
         files=files,

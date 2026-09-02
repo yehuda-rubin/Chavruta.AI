@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import type { FileOut, Lang, Message } from "@/lib/types";
+import type { Attachment, FileOut, Lang, Message } from "@/lib/types";
 import { EXAMPLES, IntentId, tr } from "@/lib/i18n";
 import { commentatorTag, isHe, renderText } from "@/lib/format";
 import { downloadDoc } from "@/lib/doc";
@@ -188,6 +188,116 @@ function Bubble({ lang, m, onPreview, userInitial }: { lang: Lang; m: Message; o
   );
 }
 
+function SourceSheetHero({
+  lang,
+  userSources = [],
+  onAddSource,
+  onPickExample,
+}: {
+  lang: Lang;
+  userSources?: Attachment[];
+  onAddSource?: () => void;
+  onPickExample: (ex: string) => void;
+}) {
+  const examples = [
+    tr(lang, "sourcesheetEx1"),
+    tr(lang, "sourcesheetEx2"),
+    tr(lang, "sourcesheetEx3"),
+  ];
+
+  return (
+    <div className="m-auto text-center px-4 max-w-xl">
+      <div className="inline-flex items-center justify-center h-16 w-16 rounded-3xl grad text-white shadow-lg shadow-tekhelet/20 mb-4">
+        <Icon name="description" className="text-3xl" />
+      </div>
+      <h2 className="font-serif text-3xl font-bold text-tekhelet mb-2">
+        {tr(lang, "sourcesheetHeroTitle")}
+      </h2>
+      <p className="text-ink/65 text-sm leading-relaxed mb-6">
+        {tr(lang, "sourcesheetHeroSubtitle")}
+      </p>
+
+      {/* 3 Step Instruction flow */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-start mb-6">
+        <div className="glass rounded-2xl p-3 bg-white/60">
+          <div className="text-[11px] font-bold text-gold uppercase mb-1">
+            {tr(lang, "sourcesheetStep1")}
+          </div>
+          <p className="text-xs text-ink/60">PDF, Word או הדבקת טקסט</p>
+        </div>
+        <div className="glass rounded-2xl p-3 bg-white/60">
+          <div className="text-[11px] font-bold text-gold uppercase mb-1">
+            {tr(lang, "sourcesheetStep2")}
+          </div>
+          <p className="text-xs text-ink/60">סיכום, שאלות, השוואת שיטות</p>
+        </div>
+        <div className="glass rounded-2xl p-3 bg-white/60">
+          <div className="text-[11px] font-bold text-gold uppercase mb-1">
+            {tr(lang, "sourcesheetStep3")}
+          </div>
+          <p className="text-xs text-ink/60">תרשים זרימה וחוברת מלאה</p>
+        </div>
+      </div>
+
+      {/* Upload action & current sources badge */}
+      {userSources.length > 0 ? (
+        <div className="mb-6 p-3.5 rounded-2xl bg-emerald-50/80 ring-1 ring-emerald-300/60 flex items-center justify-between gap-3 text-start">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="h-8 w-8 rounded-xl bg-emerald-500 text-white grid place-items-center shrink-0">
+              <Icon name="check" className="text-[18px]" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-emerald-900 truncate">
+                {userSources.map((s) => s.name).join(", ")}
+              </p>
+              <p className="text-[11px] text-emerald-700">
+                {tr(lang, "sourcesheetUploadedBadge")} ({userSources.length})
+              </p>
+            </div>
+          </div>
+          {onAddSource && (
+            <button
+              onClick={onAddSource}
+              className="text-xs font-semibold text-emerald-800 hover:underline shrink-0"
+            >
+              + {tr(lang, "addSource")}
+            </button>
+          )}
+        </div>
+      ) : (
+        onAddSource && (
+          <div className="mb-6">
+            <button
+              onClick={onAddSource}
+              className="w-full py-3.5 px-6 rounded-2xl grad text-white font-bold text-base hover:opacity-95 transition shadow-lg shadow-tekhelet/20 flex items-center justify-center gap-2.5 cursor-pointer"
+            >
+              <Icon name="upload_file" className="text-xl" />
+              {tr(lang, "sourcesheetUploadBtn")}
+            </button>
+          </div>
+        )
+      )}
+
+      {/* Example Prompt suggestions */}
+      <p className="text-xs text-ink/45 mb-2.5 font-medium">
+        {tr(lang, "sourcesheetExamplesLabel")}
+      </p>
+      <div className="flex flex-col gap-2">
+        {examples.map((ex, idx) => (
+          <button
+            key={idx}
+            onClick={() => onPickExample(ex)}
+            className="text-start text-sm text-ink/75 glass rounded-2xl px-4 py-2.5 hover:text-tekhelet hover:bg-white/70 transition font-serif flex items-center justify-between gap-2"
+          >
+            <span>{ex}</span>
+            <Icon name="arrow_forward" className="text-ink/30 text-sm shrink-0" />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function ChatPane({
   lang,
   messages,
@@ -204,13 +314,12 @@ export function ChatPane({
   calendarModesEnabled,
   sourcesheetModesEnabled,
   userEmail,
+  userSources = [],
+  onAddSource,
 }: {
   lang: Lang;
   messages: Message[];
   loading: boolean;
-  // Whether the PENDING request belongs to the chat currently on screen — `loading` alone stays true
-  // in the background while its owning chat isn't the active one, so the "thinking" bubble must gate
-  // on this instead or it renders in whichever chat you happen to switch to.
   thinkingHere: boolean;
   intent: IntentId;
   locked: boolean;
@@ -222,10 +331,9 @@ export function ChatPane({
   onPreviewFile: (f: FileOut) => void;
   calendarModesEnabled?: boolean;
   sourcesheetModesEnabled?: boolean;
-  // The signed-in user's email, when known — used only to derive the avatar initial. In local/dev
-  // mode (no Supabase configured) there's no signed-in user at all, so this stays undefined and the
-  // avatar falls back to the generic aleph glyph rather than rendering empty.
   userEmail?: string | null;
+  userSources?: Attachment[];
+  onAddSource?: () => void;
 }) {
   const userInitial = userEmail ? userEmail[0].toUpperCase() : "א";
   const [input, setInput] = useState("");
@@ -276,30 +384,42 @@ export function ChatPane({
         <HelperPrompt lang={lang} />
 
         {messages.length === 0 ? (
-          <div className="m-auto text-center px-6">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo.png" alt="חברותא" className="h-16 w-auto object-contain mx-auto mb-5" />
-            <h2 className="font-serif text-3xl font-bold text-tekhelet mb-2">{tr(lang, "welcomeTitle")}</h2>
-            <p className="text-ink/55 max-w-md mx-auto leading-relaxed">{tr(lang, "welcomeBody")}</p>
+          intent === "sourcesheet" ? (
+            <SourceSheetHero
+              lang={lang}
+              userSources={userSources}
+              onAddSource={onAddSource}
+              onPickExample={(ex) => {
+                setInput(ex);
+                taRef.current?.focus();
+              }}
+            />
+          ) : (
+            <div className="m-auto text-center px-6">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo.png" alt="חברותא" className="h-16 w-auto object-contain mx-auto mb-5" />
+              <h2 className="font-serif text-3xl font-bold text-tekhelet mb-2">{tr(lang, "welcomeTitle")}</h2>
+              <p className="text-ink/55 max-w-md mx-auto leading-relaxed">{tr(lang, "welcomeBody")}</p>
 
-            {/* Onboarding — clickable example prompts prefill the composer so a new user knows where
-                to start. */}
-            <p className="text-xs text-ink/45 mt-7 mb-2.5">{tr(lang, "examplesLabel")}</p>
-            <div className="flex flex-col gap-2 max-w-md mx-auto">
-              {EXAMPLES[lang].map((ex) => (
-                <button
-                  key={ex}
-                  onClick={() => {
-                    setInput(ex);
-                    taRef.current?.focus();
-                  }}
-                  className="text-start text-sm text-ink/70 glass rounded-2xl px-4 py-2.5 hover:text-tekhelet hover:bg-white/60 transition font-serif"
-                >
-                  {ex}
-                </button>
-              ))}
+              {/* Onboarding — clickable example prompts prefill the composer so a new user knows where
+                  to start. */}
+              <p className="text-xs text-ink/45 mt-7 mb-2.5">{tr(lang, "examplesLabel")}</p>
+              <div className="flex flex-col gap-2 max-w-md mx-auto">
+                {EXAMPLES[lang].map((ex) => (
+                  <button
+                    key={ex}
+                    onClick={() => {
+                      setInput(ex);
+                      taRef.current?.focus();
+                    }}
+                    className="text-start text-sm text-ink/70 glass rounded-2xl px-4 py-2.5 hover:text-tekhelet hover:bg-white/60 transition font-serif"
+                  >
+                    {ex}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )
         ) : (
           messages.map((m, i) => <Bubble key={m.id ?? i} lang={lang} m={m} onPreview={onPreviewFile} userInitial={userInitial} />)
         )}

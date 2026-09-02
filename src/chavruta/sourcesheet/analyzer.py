@@ -268,6 +268,7 @@ def analyze_source_sheet(
     corpus_lookup: dict[str, str] | None = None,
     llm=None,
     lang: str = "he",
+    user_instruction: str = "",
 ) -> CompanionGuide:
     """Synthesize a complete Source Sheet Companion Guide.
 
@@ -338,8 +339,20 @@ def analyze_source_sheet(
         )
         sections.append(sec)
 
-    # Derive topic
-    detected_topic = topic_hint or (items[0].header if items else "סוגיה תורנית")
+    # Derive and clean topic
+    cleaned_topic = (topic_hint or "").strip()
+    imperative_prefixes = [
+        r"^(?:תסכם|סכם|באר|תבאר|הסבר|תסביר|נתח|תנתח|בנה|תבנה|הצג|תציג)\s+(?:לי\s+)?(?:את\s+)?(?:כל\s+)?(?:המהלך\s+של\s+)?(?:דף\s+המקורות|הסוגיה|המקורות|הדף)?(?:\s*[:—–-])?\s*",
+        r"^(?:מה\s+הוא|מהו|מהם|כיצד|איך)\s+",
+    ]
+    for pat in imperative_prefixes:
+        cleaned_topic = re.sub(pat, "", cleaned_topic, flags=re.IGNORECASE).strip()
+
+    first_header = items[0].header if items else "סוגיה תורנית"
+    for pat in imperative_prefixes:
+        first_header = re.sub(pat, "", first_header, flags=re.IGNORECASE).strip()
+
+    detected_topic = cleaned_topic or first_header or (items[0].ref if items else "סוגיה תורנית")
     first_ref = items[0].ref or "סוגיית היסוד"
 
     # Mermaid Flowchart
@@ -386,6 +399,11 @@ def analyze_source_sheet(
         ],
     }
 
+    if user_instruction:
+        summary_text = f"ניתוח דף המקורות בהתאם לבקשתך: {user_instruction}\n\nסוגיית {detected_topic} נפרסת לאורך {len(sections)} מקורות מרכזיים, המתווים את המעבר מן הדין היסודי אל הבירור המושגי וההכרעה."
+    else:
+        summary_text = f"סוגיית {detected_topic} נפרסת לאורך {len(sections)} מקורות מרכזיים, המתווים את המעבר מן הדין היסודי אל הבירור המושגי וההכרעה."
+
     return CompanionGuide(
         title=f"מהלך הסוגיה — {detected_topic}",
         topic=detected_topic,
@@ -394,6 +412,6 @@ def analyze_source_sheet(
         sections=sections,
         opinion_table=opinion_table,
         chavruta_questions=chavruta_questions,
-        summary=f"סוגיית {detected_topic} נפרסת לאורך {len(sections)} מקורות מרכזיים, המתווים את המעבר מן הדין היסודי אל הבירור המושגי וההכרעה.",
+        summary=summary_text,
         citations=citations,
     )

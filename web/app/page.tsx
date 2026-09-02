@@ -156,6 +156,7 @@ export default function Home() {
   const newDiscussion = useCallback(() => {
     setActiveId(null);
     setMessages([]);
+    setUserSources([]);
     setSubtitle("");
     setIntent(defaultIntent);
   }, [defaultIntent]);
@@ -370,7 +371,6 @@ export default function Home() {
           push(s.result);
           refreshSessions();
         }
-        setUserSources([]); // consumed by this turn
       } catch (e) {
         // Friendly errors: a network failure → connection message; a 4xx with a clean server detail
         // (e.g. the bilingual quota/429 message) → show it; 5xx / job failure / timeout → generic
@@ -502,6 +502,8 @@ export default function Home() {
           calendarModesEnabled={me?.calendar_modes_enabled}
           sourcesheetModesEnabled={me?.sourcesheet_enabled}
           userEmail={auth.user?.email}
+          userSources={userSources}
+          onAddSource={() => setShowAddSource(true)}
         />
 
         <div className="hidden lg:contents">
