@@ -291,9 +291,9 @@ _TALMUD_AMUD_RE = re.compile(
 def _resolve_segment_ref(
     header: str,
     body: str,
-    last_known_ref: str | None,
-    last_known_book: str | None,
-    dh: str | None,
+    last_known_ref: str | None = None,
+    last_known_book: str | None = None,
+    dh: str | None = None,
 ) -> tuple[str | None, str | None, str | None]:
     """Identify or infer the canonical reference of a segment."""
     search_scope = f"{header} {body[:200]}"
