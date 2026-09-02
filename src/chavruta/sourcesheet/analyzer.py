@@ -15,6 +15,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from chavruta.corpus.schema import Citation
+from chavruta.llm.base import GroundedPrompt
 from chavruta.sourcesheet.parser import ParsedSourceItem
 
 _log = logging.getLogger("chavruta.sourcesheet.analyzer")
@@ -263,14 +264,21 @@ def build_sourcesheet_prompt_context(
 # ── Structured Sugya Synthesis Engine ────────────────────────────────────────
 
 def _clean_topic_text(text: str) -> str:
-    """Sanitize and strip leaked system instructions or imperative query prefixes from topic."""
+    """Sanitize and strip leaked system instructions, filenames or imperative query prefixes from topic."""
     if not text:
         return ""
+    cleaned = text
     # Strip system prompt leakage
-    cleaned = re.sub(r"\(לא מהמאגר[^\)]*\)", "", text)
+    cleaned = re.sub(r"\(לא מהמאגר[^\)]*\)", "", cleaned)
     cleaned = re.sub(r"\(not from the corpus[^\)]*\)", "", cleaned)
     cleaned = re.sub(r"##\s+(?:מקורות שצירף המשתמש|Sources the user attached)[^\n]*", "", cleaned)
     cleaned = re.sub(r"###\s+(?:מקור|Source)\s*\d*", "", cleaned)
+    # Strip markdown heading and file extension artifacts (e.g. "### 02 הרב חיים וולפסון - פרישת כהן גדול.docx")
+    cleaned = re.sub(r"###\s*", "", cleaned)
+    cleaned = re.sub(r"\.(?:docx|pdf|txt|doc)\b", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^\s*\d+[\s._-]*", "", cleaned)
+    # Strip author names/prefixes like "הרב חיים וולפסון - "
+    cleaned = re.sub(r"^(?:הרב\s+[^\n-–—]+[-–—]\s*)", "", cleaned)
     # Strip imperative query prefixes
     imperative_prefixes = [
         r"^(?:תסכם|סכם|באר|תבאר|הסבר|תסביר|נתח|תנתח|בנה|תבנה|הצג|תציג)\s+(?:לי\s+)?(?:את\s+)?(?:כל\s+)?(?:המהלך\s+של\s+)?(?:דף\s+המקורות|הסוגיה|המקורות|הדף)?(?:\s*[:—–-])?\s*",
@@ -298,7 +306,7 @@ def _synthesize_with_llm(
 הנחיות חמורות (Principle I):
 - התבסס אך ורק על המקורות המופיעים ב-XML למטה. אל תמציא מקורות או מובאות שלא ניתנו.
 - אם מופיע מקור ללא טקסט (UNINDEXED BARE REF), ציין שהוא מראה מקום בלבד ואל תבדה את תוכנו.
-- זהה את נושא הסוגיה האמיתי (למשל: "מצות תלמוד תורה וגדריה", "ייאוש שלא מדעת", "קניין כסף"). אל תשתמש בהוראות משתמש או במחרוזות מערכת כנושא.
+- זהה את נושא הסוגיה האמיתי (למשל: "פרישת כהן גדול ביום הכיפורים", "מצות תלמוד תורה וגדריה", "ייאוש שלא מדעת"). אל תשתמש בשמות קבצים, שמות מרצים או במחרוזות מערכת כנושא.
 
 החזר פלט מובנה בפורמט JSON בלבד (עטוף ב-```json ... ``` או JSON ישיר בלבד, ללא מלל נוסף לפני או אחרי):
 {{
@@ -336,8 +344,10 @@ def _synthesize_with_llm(
 """
     try:
         response_text = ""
+        system = "אתה תלמיד חכם מובהק, מגיד שיעור ועורך תורני מומחה במערכת 'חברותא AI'."
         if hasattr(llm, "generate"):
-            res = llm.generate(prompt, lang="he", max_tokens=3500, temperature=0.2)
+            grounded_prompt = GroundedPrompt(system=system, sources=[], question=prompt, bare=True)
+            res = llm.generate(grounded_prompt, lang="he", max_tokens=3500, temperature=0.2)
             response_text = res.text if hasattr(res, "text") else str(res)
         elif hasattr(llm, "complete"):
             response_text = str(llm.complete(prompt))

@@ -192,6 +192,11 @@ def parse_source_sheet(text: str) -> list[ParsedSourceItem]:
         return []
 
     clean_text = text.replace("\r\n", "\n").replace("\r", "\n")
+    # Strip attachment filename headers (e.g. "### 02 הרב חיים וולפסון - פרישת כהן גדול.docx")
+    clean_text = re.sub(r"^\s*###\s+[^\n]+\.(?:docx|pdf|txt|doc)\s*\n?", "", clean_text, flags=re.IGNORECASE)
+    clean_text = re.sub(r"^\s*###\s+(?:מקור|source)\s*\d*\s*\n?", "", clean_text, flags=re.IGNORECASE)
+    clean_text = clean_text.strip()
+
     # Split text into segments
     splits = [m.start() for m in _BULLET_RE.finditer(clean_text)]
     if not splits or splits[0] != 0:

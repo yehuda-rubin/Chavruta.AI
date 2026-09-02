@@ -1984,17 +1984,19 @@ def _run_sourcesheet(
         )
         return QueryResponse(answer=msg, citations=[], grounded=False, intent="sourcesheet", files=[])
 
+    pipeline = _get_pipeline()
+    llm = llm or getattr(pipeline, "llm", None)
+
     # Fetch verified corpus texts for identified refs (if retriever available)
     corpus_lookup: dict[str, str] = {}
     try:
-        if _pipeline is not None and hasattr(_pipeline, "retriever"):
-            retriever = _pipeline.retriever
-            if hasattr(retriever, "fetch_by_refs"):
-                for item in parsed_items:
-                    if item.ref:
-                        fetched = retriever.fetch_by_refs([item.ref])
-                        if fetched and getattr(fetched[0], "text_he", None):
-                            corpus_lookup[item.ref] = fetched[0].text_he
+        retriever = getattr(pipeline, "retriever", None)
+        if retriever is not None and hasattr(retriever, "fetch_by_refs"):
+            for item in parsed_items:
+                if item.ref:
+                    fetched = retriever.fetch_by_refs([item.ref])
+                    if fetched and getattr(fetched[0], "text_he", None):
+                        corpus_lookup[item.ref] = fetched[0].text_he
     except Exception as exc:
         _log.warning("sourcesheet corpus fetch fallback: %s", exc)
 
