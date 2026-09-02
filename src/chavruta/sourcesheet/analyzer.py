@@ -78,26 +78,27 @@ class CompanionGuide:
 
     def to_markdown(self) -> str:
         """Produce a complete, beautifully-formatted Markdown companion guide."""
+        from chavruta.corpus.refs import hebrew_display_ref
+
         md = []
         md.append(f"# חוברת ליווי לדף מקורות: {self.title or self.topic}\n")
         md.append(f"> **נושא הסוגיה:** {self.topic}\n")
-        md.append("## שאלת היסוד וציר החקירה (The Core Inquiry)")
+        md.append("## שאלת היסוד וציר החקירה\n")
         md.append(f"{self.core_inquiry}\n")
 
         if self.flowchart_mermaid:
-            md.append("## מפת מהלך הסוגיה (Thematic Flowchart)")
+            md.append("## מפת מהלך הסוגיה\n")
             md.append("```mermaid")
             md.append(self.flowchart_mermaid)
             md.append("```\n")
 
-        md.append("## ביאור מקורות הדף (מקור-אחר-מקור)\n")
+        md.append("## ביאור מקורות הדף\n")
         for s in self.sections:
-            badge = STATUS_LABELS_HE.get(s.status, s.status)
-            md.append(f"### מקור {s.index}: {s.title} `{s.role_tag}`")
-            md.append(f"> **סטטוס מקור:** *[{badge}]*")
-            if s.ref:
-                md.append(f"> **מראה מקום:** `{s.ref}`")
-            md.append("")
+            display_ref = (hebrew_display_ref(s.ref) or s.ref) if s.ref else ""
+            md.append(f"### מקור {s.index}: {s.title} ({s.role_tag})\n")
+            if display_ref:
+                status_badge = "מאומת מהמאגר" if s.status == STATUS_VERIFIED_CORPUS else "מדף המקורות"
+                md.append(f"**מראה מקום:** {display_ref} *({status_badge})*\n")
 
             if s.status == STATUS_MISSING_REF:
                 md.append(
@@ -110,16 +111,16 @@ class CompanionGuide:
             if s.plain_explanation:
                 md.append(f"**ביאור הפשט והמהלך:**\n{s.plain_explanation}\n")
             if s.diyuk:
-                md.append(f"**נקודת הדיוק (דיוק הלשון):**\n*{s.diyuk}*\n")
+                md.append(f"**נקודת הדיוק:**\n*{s.diyuk}*\n")
             if s.difficult_words:
                 words_str = ", ".join(f"**{k}**: {v}" for k, v in s.difficult_words.items())
-                md.append(f"**מילים מנחות וביאורי מילים:** {words_str}\n")
+                md.append(f"**ביאורי מילים:** {words_str}\n")
             if s.author_note:
-                md.append(f"💡 **הערת עורך הדף:** `{s.author_note}`\n")
+                md.append(f"💡 **הערת עורך הדף:** {s.author_note}\n")
             md.append("---\n")
 
         if self.opinion_table:
-            md.append("## טבלת השוואת שיטות ומחלוקות")
+            md.append("## טבלת השוואת שיטות ומחלוקות\n")
             md.append("| שיטה / בעל הדעה | סברת היסוד | הראיה / המקור | נפקא מינה |")
             md.append("|---|---|---|---|")
             for row in self.opinion_table:
@@ -131,23 +132,23 @@ class CompanionGuide:
             md.append("")
 
         if self.chavruta_questions:
-            md.append("## שאלות לעיון וחזרת החברותא")
+            md.append("## שאלות לעיון וחזרת החברותא\n")
             if self.chavruta_questions.get("peshat"):
-                md.append("### 1. רמת פשט והבנת המקורות:")
+                md.append("### 1. שאלות פשט והבנת המקורות:")
                 for q in self.chavruta_questions["peshat"]:
                     md.append(f"- {q}")
             if self.chavruta_questions.get("comparison"):
-                md.append("\n### 2. רמת השוואה ודיוק שיטות:")
+                md.append("\n### 2. שאלות השוואה ודיוק שיטות:")
                 for q in self.chavruta_questions["comparison"]:
                     md.append(f"- {q}")
             if self.chavruta_questions.get("sevara"):
-                md.append("\n### 3. רמת סברא והעמקה מושגית:")
+                md.append("\n### 3. שאלות סברא והעמקה מושגית:")
                 for q in self.chavruta_questions["sevara"]:
                     md.append(f"- {q}")
             md.append("")
 
         if self.summary:
-            md.append("## סיכום ומסקנות הסוגיה")
+            md.append("## סיכום ומסקנות הסוגיה\n")
             md.append(f"{self.summary}\n")
 
         return "\n".join(md)
@@ -289,6 +290,18 @@ def _clean_topic_text(text: str) -> str:
     return cleaned.strip().strip(":—–- ")
 
 
+def _clean_hebrew_prose(text: str) -> str:
+    """Strip foreign script artifacts and replace transliterations with pure Hebrew."""
+    if not text:
+        return ""
+    cleaned = re.sub(r'[\u4e00-\u9fff]+', '', text)
+    cleaned = re.sub(r'\britual[יi]ת?\b', 'של טהרה', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\britual[יi]ם\b', 'דיני טהרה', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\britual\b', 'טהרה וקדושה', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\b[rR]itual\b', 'טהרה וקדושה', cleaned)
+    return cleaned.strip()
+
+
 def _synthesize_with_llm(
     items: list[ParsedSourceItem],
     topic_hint: str,
@@ -307,6 +320,7 @@ def _synthesize_with_llm(
 - התבסס אך ורק על המקורות המופיעים ב-XML למטה. אל תמציא מקורות או מובאות שלא ניתנו.
 - אם מופיע מקור ללא טקסט (UNINDEXED BARE REF), ציין שהוא מראה מקום בלבד ואל תבדה את תוכנו.
 - זהה את נושא הסוגיה האמיתי (למשל: "פרישת כהן גדול ביום הכיפורים", "מצות תלמוד תורה וגדריה", "ייאוש שלא מדעת"). אל תשתמש בשמות קבצים, שמות מרצים או במחרוזות מערכת כנושא.
+- שפה וסגנון: כתוב אך ורק בעברית צחה, תורנית ועשירה. אין להשתמש באותיות לועזיות (למשל אל תכתוב R"A אלא ר' אבהו), אין להשתמש במילים לועזיות (כגון 'ריטואל' -> השתמש ב'מעשה המצוה' או 'טהרה'), ואין לשלב תווים בשפות זרות.
 
 החזר פלט מובנה בפורמט JSON בלבד (עטוף ב-```json ... ``` או JSON ישיר בלבד, ללא מלל נוסף לפני או אחרי):
 {{
@@ -316,16 +330,16 @@ def _synthesize_with_llm(
   "sections": [
     {{
       "index": 1,
-      "title": "כותרת המקור (למשל: בבא מציעא דף כ\"א ע\"א / רמב\"ם הלכות ת\"ת)",
+      "title": "כותרת המקור בעברית (למשל: בבא מציעא דף כ\"א ע\"א / רמב\"ם הלכות ת\"ת)",
       "role_tag": "מקור יסוד / עובדא דש\"ס | קושיא / דיוק | חידוש / יסוד הסברא | ראיה / סייעתא | שיטה חולקת | הכרעה הלכתית",
-      "plain_explanation": "ביאור תמציתי ומאיר עיניים של המקור, תוך הדגשת מקומו במהלך",
+      "plain_explanation": "ביאור תמציתי ומאיר עיניים של המקור בעברית תורנית, תוך הדגשת מקומו במהלך",
       "diyuk": "דיוק בלשון המקור או דיבור המתחיל (אם ישנו)",
       "difficult_words": {{"מילה קשה": "פירושה"}}
     }}
   ],
   "opinion_table": [
     {{
-      "opinion": "שם השיטה / בעל הדעה",
+      "opinion": "שם השיטה / בעל הדעה בעברית",
       "reason": "טעם וסברא מרכזית",
       "proof": "מקור וראיה",
       "nafka_mina": "נפקא מינה להלכה או למעשה"
@@ -344,7 +358,7 @@ def _synthesize_with_llm(
 """
     try:
         response_text = ""
-        system = "אתה תלמיד חכם מובהק, מגיד שיעור ועורך תורני מומחה במערכת 'חברותא AI'."
+        system = "אתה תלמיד חכם מובהק, מגיד שיעור ועורך תורני מומחה במערכת 'חברותא AI'. כתוב בעברית תורנית צחה בלבד."
         if hasattr(llm, "generate"):
             grounded_prompt = GroundedPrompt(system=system, sources=[], question=prompt, bare=True)
             res = llm.generate(grounded_prompt, lang="he", max_tokens=3500, temperature=0.2)
@@ -367,8 +381,8 @@ def _synthesize_with_llm(
         data = json.loads(raw_json)
         raw_topic = data.get("topic") or topic_hint or (items[0].header if items else "סוגיה תורנית")
         topic = _clean_topic_text(raw_topic) or "סוגיה תורנית"
-        core_inquiry = data.get("core_inquiry") or f"בירור יסודות וגדרי {topic}."
-        summary = data.get("summary") or ""
+        core_inquiry = _clean_hebrew_prose(data.get("core_inquiry") or f"בירור יסודות וגדרי {topic}.")
+        summary = _clean_hebrew_prose(data.get("summary") or "")
 
         llm_sections_data = {s.get("index", idx + 1): s for idx, s in enumerate(data.get("sections", []))}
         sections: list[SourceSection] = []
@@ -398,9 +412,9 @@ def _synthesize_with_llm(
 
             raw_title = sec_data.get("title") or item.header or ref or f"מקור {item.index}"
             title = _clean_topic_text(raw_title) or (ref or f"מקור {item.index}")
-            role = sec_data.get("role_tag") or "מקור"
-            explanation = sec_data.get("plain_explanation") or f"ביאור מקור {item.index} במסגרת מהלך הסוגיה."
-            diyuk = sec_data.get("diyuk") or (item.dibur_hamatchil and f'ד"ה "{item.dibur_hamatchil}"')
+            role = _clean_hebrew_prose(sec_data.get("role_tag") or "מקור")
+            explanation = _clean_hebrew_prose(sec_data.get("plain_explanation") or f"ביאור מקור {item.index} במסגרת מהלך הסוגיה.")
+            diyuk = _clean_hebrew_prose(sec_data.get("diyuk") or (item.dibur_hamatchil and f'ד"ה "{item.dibur_hamatchil}"') or "")
 
             sec = SourceSection(
                 index=item.index,
@@ -411,15 +425,21 @@ def _synthesize_with_llm(
                 source_snippet=snippet,
                 expanded_context=corpus_text,
                 plain_explanation=explanation,
-                diyuk=diyuk,
+                diyuk=diyuk or None,
                 difficult_words=sec_data.get("difficult_words") or {},
                 author_note=item.author_note_text,
             )
             sections.append(sec)
 
-        flowchart = data.get("flowchart_mermaid") or ""
-        opinion_table = data.get("opinion_table") or []
-        chavruta_questions = data.get("chavruta_questions") or {}
+        flowchart = _clean_hebrew_prose(data.get("flowchart_mermaid") or "")
+        opinion_table = [
+            {k: _clean_hebrew_prose(v) for k, v in row.items()}
+            for row in (data.get("opinion_table") or [])
+        ]
+        chavruta_questions = {
+            level: [_clean_hebrew_prose(q) for q in qs]
+            for level, qs in (data.get("chavruta_questions") or {}).items()
+        }
 
         return CompanionGuide(
             title=f"מהלך הסוגיה — {topic}",

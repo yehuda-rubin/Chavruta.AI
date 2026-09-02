@@ -199,8 +199,19 @@ def parse_source_sheet(text: str) -> list[ParsedSourceItem]:
 
     # Split text into segments
     splits = [m.start() for m in _BULLET_RE.finditer(clean_text)]
-    if not splits or splits[0] != 0:
-        splits = [0] + splits
+    if splits:
+        if splits[0] > 0:
+            preamble = clean_text[:splits[0]].strip()
+            pre_lines = [l.strip() for l in preamble.split("\n") if l.strip()]
+            detected_pre_ref, _, _ = _resolve_segment_ref(
+                header=pre_lines[0] if pre_lines else "",
+                body="\n".join(pre_lines[1:]) if len(pre_lines) > 1 else "",
+            )
+            # Only include segment before first bullet if it's an actual rabbinic source
+            if detected_pre_ref:
+                splits = [0] + splits
+    else:
+        splits = [0]
 
     raw_segments: list[str] = []
     for i in range(len(splits)):

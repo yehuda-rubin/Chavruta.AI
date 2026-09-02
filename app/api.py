@@ -2017,15 +2017,9 @@ def _run_sourcesheet(
     files = [
         FileOut(
             name=f"sourcesheet_{sheet_id}.md",
-            title="חוברת ליווי לדף מקורות (Markdown)" if he else "Source Sheet Companion (Markdown)",
+            title="חוברת ליווי לדף מקורות" if he else "Source Sheet Companion",
             content=md_content,
             type="text/markdown",
-        ),
-        FileOut(
-            name=f"sourcesheet_summary_{sheet_id}.txt",
-            title="תקציר מהלך הסוגיה" if he else "Sugya Summary",
-            content=guide.summary,
-            type="text/plain",
         ),
     ]
 
