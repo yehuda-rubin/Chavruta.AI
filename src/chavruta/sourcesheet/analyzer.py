@@ -262,6 +262,173 @@ def build_sourcesheet_prompt_context(
 
 # ── Structured Sugya Synthesis Engine ────────────────────────────────────────
 
+def _clean_topic_text(text: str) -> str:
+    """Sanitize and strip leaked system instructions or imperative query prefixes from topic."""
+    if not text:
+        return ""
+    # Strip system prompt leakage
+    cleaned = re.sub(r"\(לא מהמאגר[^\)]*\)", "", text)
+    cleaned = re.sub(r"\(not from the corpus[^\)]*\)", "", cleaned)
+    cleaned = re.sub(r"##\s+(?:מקורות שצירף המשתמש|Sources the user attached)[^\n]*", "", cleaned)
+    cleaned = re.sub(r"###\s+(?:מקור|Source)\s*\d*", "", cleaned)
+    # Strip imperative query prefixes
+    imperative_prefixes = [
+        r"^(?:תסכם|סכם|באר|תבאר|הסבר|תסביר|נתח|תנתח|בנה|תבנה|הצג|תציג)\s+(?:לי\s+)?(?:את\s+)?(?:כל\s+)?(?:המהלך\s+של\s+)?(?:דף\s+המקורות|הסוגיה|המקורות|הדף)?(?:\s*[:—–-])?\s*",
+        r"^(?:מה\s+הוא|מהו|מהם|כיצד|איך)\s+",
+    ]
+    for pat in imperative_prefixes:
+        cleaned = re.sub(pat, "", cleaned, flags=re.IGNORECASE).strip()
+    return cleaned.strip().strip(":—–- ")
+
+
+def _synthesize_with_llm(
+    items: list[ParsedSourceItem],
+    topic_hint: str,
+    corpus_lookup: dict[str, str],
+    llm: Any,
+    lang: str,
+    user_instruction: str = "",
+) -> CompanionGuide | None:
+    """Invoke the LLM to perform deep Torah synthesis of the source sheet."""
+    sources_xml = build_sourcesheet_prompt_context(items, corpus_lookup)
+    prompt = f"""אתה תלמיד חכם מובהק, מגיד שיעור ועורך תורני מומחה במערכת 'חברותא AI'.
+לפניך דף מקורות תורני שחולץ לתוך מקטעי XML (מקורות מאומתים מהמאגר או טקסטים מדף המשתמש).
+עליך לנתח את הדף ברמה למדנית ופדגוגית גבוהה, ולבנות חוברת ליווי מקיפה למהלך הסוגיה.
+
+הנחיות חמורות (Principle I):
+- התבסס אך ורק על המקורות המופיעים ב-XML למטה. אל תמציא מקורות או מובאות שלא ניתנו.
+- אם מופיע מקור ללא טקסט (UNINDEXED BARE REF), ציין שהוא מראה מקום בלבד ואל תבדה את תוכנו.
+- זהה את נושא הסוגיה האמיתי (למשל: "מצות תלמוד תורה וגדריה", "ייאוש שלא מדעת", "קניין כסף"). אל תשתמש בהוראות משתמש או במחרוזות מערכת כנושא.
+
+החזר פלט מובנה בפורמט JSON בלבד (עטוף ב-```json ... ``` או JSON ישיר בלבד, ללא מלל נוסף לפני או אחרי):
+{{
+  "topic": "נושא הסוגיה המרכזי והמדויק (2-5 מילים)",
+  "core_inquiry": "שאלת היסוד, ציר החקירה והסברא העומדת במוקד הסוגיה (2-4 משפטים)",
+  "summary": "סיכום מקיף, תמציתי ובהיר של מהלך הסוגיה, השתלשלות השיטות והמסקנה (3-5 פסקאות)",
+  "sections": [
+    {{
+      "index": 1,
+      "title": "כותרת המקור (למשל: בבא מציעא דף כ\"א ע\"א / רמב\"ם הלכות ת\"ת)",
+      "role_tag": "מקור יסוד / עובדא דש\"ס | קושיא / דיוק | חידוש / יסוד הסברא | ראיה / סייעתא | שיטה חולקת | הכרעה הלכתית",
+      "plain_explanation": "ביאור תמציתי ומאיר עיניים של המקור, תוך הדגשת מקומו במהלך",
+      "diyuk": "דיוק בלשון המקור או דיבור המתחיל (אם ישנו)",
+      "difficult_words": {{"מילה קשה": "פירושה"}}
+    }}
+  ],
+  "opinion_table": [
+    {{
+      "opinion": "שם השיטה / בעל הדעה",
+      "reason": "טעם וסברא מרכזית",
+      "proof": "מקור וראיה",
+      "nafka_mina": "נפקא מינה להלכה או למעשה"
+    }}
+  ],
+  "chavruta_questions": {{
+    "peshat": ["שאלת פשט והבנה 1", "שאלת פשט והבנה 2"],
+    "comparison": ["שאלת השוואת שיטות 1", "שאלת השוואת שיטות 2"],
+    "sevara": ["שאלת סברא, חקירה ולמדנות 1", "שאלת סברא ולמדנות 2"]
+  }},
+  "flowchart_mermaid": "flowchart TD\\n    A[שאלת היסוד] --> B[מקור 1]\\n    B --> C[מקור 2]"
+}}
+
+מקורות הדף לעיון:
+{sources_xml}
+"""
+    try:
+        response_text = ""
+        if hasattr(llm, "generate"):
+            res = llm.generate(prompt, lang="he", max_tokens=3500, temperature=0.2)
+            response_text = res.text if hasattr(res, "text") else str(res)
+        elif hasattr(llm, "complete"):
+            response_text = str(llm.complete(prompt))
+
+        if not response_text:
+            return None
+
+        # Extract JSON block
+        json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response_text, re.DOTALL)
+        raw_json = json_match.group(1) if json_match else response_text.strip()
+        if not json_match and "{" in raw_json and "}" in raw_json:
+            raw_json = raw_json[raw_json.find("{"):raw_json.rfind("}") + 1]
+
+        # Convert unescaped Hebrew acronym quotes (e.g. רמב"ם -> רמב״ם) to avoid invalid JSON syntax
+        raw_json = re.sub(r'(?<=[\u0590-\u05FF])"(?=[\u0590-\u05FF])', '״', raw_json)
+
+        data = json.loads(raw_json)
+        raw_topic = data.get("topic") or topic_hint or (items[0].header if items else "סוגיה תורנית")
+        topic = _clean_topic_text(raw_topic) or "סוגיה תורנית"
+        core_inquiry = data.get("core_inquiry") or f"בירור יסודות וגדרי {topic}."
+        summary = data.get("summary") or ""
+
+        llm_sections_data = {s.get("index", idx + 1): s for idx, s in enumerate(data.get("sections", []))}
+        sections: list[SourceSection] = []
+        citations: list[str] = []
+
+        for item in items:
+            sec_data = llm_sections_data.get(item.index, {})
+            ref = item.ref or item.header
+            canonical = item.canonical_sefaria_ref or ""
+            corpus_text = corpus_lookup.get(canonical) or corpus_lookup.get(ref)
+            has_body = bool(
+                item.cleaned_text
+                and item.cleaned_text.strip() != item.header.strip()
+                and len(item.cleaned_text.strip()) > 5
+            )
+
+            if corpus_text:
+                status = STATUS_VERIFIED_CORPUS
+                snippet = corpus_text[:300] + ("…" if len(corpus_text) > 300 else "")
+                citations.append(ref)
+            elif has_body:
+                status = STATUS_USER_PROVIDED
+                snippet = item.cleaned_text
+            else:
+                status = STATUS_MISSING_REF
+                snippet = "(טקסט אינו קיים בדף ואינו במאגר)"
+
+            raw_title = sec_data.get("title") or item.header or ref or f"מקור {item.index}"
+            title = _clean_topic_text(raw_title) or (ref or f"מקור {item.index}")
+            role = sec_data.get("role_tag") or "מקור"
+            explanation = sec_data.get("plain_explanation") or f"ביאור מקור {item.index} במסגרת מהלך הסוגיה."
+            diyuk = sec_data.get("diyuk") or (item.dibur_hamatchil and f'ד"ה "{item.dibur_hamatchil}"')
+
+            sec = SourceSection(
+                index=item.index,
+                title=title,
+                ref=ref if ref != "None" else None,
+                status=status,
+                role_tag=role,
+                source_snippet=snippet,
+                expanded_context=corpus_text,
+                plain_explanation=explanation,
+                diyuk=diyuk,
+                difficult_words=sec_data.get("difficult_words") or {},
+                author_note=item.author_note_text,
+            )
+            sections.append(sec)
+
+        flowchart = data.get("flowchart_mermaid") or ""
+        opinion_table = data.get("opinion_table") or []
+        chavruta_questions = data.get("chavruta_questions") or {}
+
+        return CompanionGuide(
+            title=f"מהלך הסוגיה — {topic}",
+            topic=topic,
+            core_inquiry=core_inquiry,
+            flowchart_mermaid=flowchart,
+            sections=sections,
+            opinion_table=opinion_table,
+            chavruta_questions=chavruta_questions,
+            summary=summary,
+            citations=citations,
+        )
+    except Exception as exc:
+        _log.warning("sourcesheet LLM synthesis failed, falling back to deterministic: %s", exc)
+        return None
+
+
+# ── Structured Sugya Synthesis Engine ────────────────────────────────────────
+
 def analyze_source_sheet(
     items: list[ParsedSourceItem],
     topic_hint: str = "",
@@ -272,7 +439,7 @@ def analyze_source_sheet(
 ) -> CompanionGuide:
     """Synthesize a complete Source Sheet Companion Guide.
 
-    Can run in pure deterministic mode or invoke LLM for high-order sugya synthesis.
+    Uses LLM for deep Torah analysis when available, with deterministic fallback.
     """
     if not items:
         return CompanionGuide(
@@ -287,10 +454,24 @@ def analyze_source_sheet(
         )
 
     lookup = corpus_lookup or {}
+
+    # Try LLM synthesis first if LLM is provided
+    if llm is not None:
+        guide = _synthesize_with_llm(
+            items=items,
+            topic_hint=topic_hint,
+            corpus_lookup=lookup,
+            llm=llm,
+            lang=lang,
+            user_instruction=user_instruction,
+        )
+        if guide is not None:
+            return guide
+
+    # Deterministic fallback
     sections: list[SourceSection] = []
     citations: list[str] = []
 
-    # Assign default pedagogical roles based on order & structure
     role_cycle = [
         "מקור יסוד / עובדא דש\"ס",
         "קושיא / דיוק",
@@ -322,9 +503,9 @@ def analyze_source_sheet(
             snippet = "(טקסט אינו קיים בדף ואינו במאגר)"
 
         role = role_cycle[idx % len(role_cycle)]
-        title = item.header if item.header and len(item.header) < 60 else (ref or f"מקור {item.index}")
+        raw_title = item.header if item.header and len(item.header) < 60 else (ref or f"מקור {item.index}")
+        title = _clean_topic_text(raw_title) or (ref or f"מקור {item.index}")
 
-        # Deterministic / Default analysis
         sec = SourceSection(
             index=item.index,
             title=title,
@@ -339,19 +520,8 @@ def analyze_source_sheet(
         )
         sections.append(sec)
 
-    # Derive and clean topic
-    cleaned_topic = (topic_hint or "").strip()
-    imperative_prefixes = [
-        r"^(?:תסכם|סכם|באר|תבאר|הסבר|תסביר|נתח|תנתח|בנה|תבנה|הצג|תציג)\s+(?:לי\s+)?(?:את\s+)?(?:כל\s+)?(?:המהלך\s+של\s+)?(?:דף\s+המקורות|הסוגיה|המקורות|הדף)?(?:\s*[:—–-])?\s*",
-        r"^(?:מה\s+הוא|מהו|מהם|כיצד|איך)\s+",
-    ]
-    for pat in imperative_prefixes:
-        cleaned_topic = re.sub(pat, "", cleaned_topic, flags=re.IGNORECASE).strip()
-
-    first_header = items[0].header if items else "סוגיה תורנית"
-    for pat in imperative_prefixes:
-        first_header = re.sub(pat, "", first_header, flags=re.IGNORECASE).strip()
-
+    cleaned_topic = _clean_topic_text(topic_hint)
+    first_header = _clean_topic_text(items[0].header) if items else ""
     detected_topic = cleaned_topic or first_header or (items[0].ref if items else "סוגיה תורנית")
     first_ref = items[0].ref or "סוגיית היסוד"
 
@@ -366,7 +536,6 @@ def analyze_source_sheet(
         mermaid_nodes.append(f'    {prev_char} -->|{curr_sec.role_tag}| {curr_char}["מקור {curr_sec.index}: {curr_sec.title[:30]}"]')
     flowchart_code = "\n".join(mermaid_nodes)
 
-    # Sample opinion table
     opinion_table = [
         {
             "opinion": sections[0].title if sections else "שיטה ראשונה",
@@ -383,7 +552,6 @@ def analyze_source_sheet(
             "nafka_mina": "צמצום או הרחבת גדרי הדין",
         })
 
-    # Tiered Chavruta Questions
     chavruta_questions = {
         "peshat": [
             f"מהי נקודת הפתיחה המרכזית העולה מתוך {sections[0].title}?",

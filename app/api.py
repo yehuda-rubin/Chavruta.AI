@@ -1960,19 +1960,16 @@ def _run_sourcesheet(
         return _run_chavruta(question, lang, history=history, llm=llm)
 
     # Separate user instruction/prompt from attached source sheet content if augmented
-    header_marker_he = "## מקורות שצירף המשתמש"
-    header_marker_en = "## Sources the user attached"
+    header_regex = re.compile(
+        r"##\s+(?:מקורות שצירף המשתמש|Sources the user attached)[^\n]*\n?",
+        re.IGNORECASE,
+    )
     user_instruction = ""
     sheet_text = question
 
-    if header_marker_he in question:
-        parts = question.split(header_marker_he, 1)
-        user_instruction = parts[0].strip()
-        sheet_text = parts[1].strip()
-    elif header_marker_en in question:
-        parts = question.split(header_marker_en, 1)
-        user_instruction = parts[0].strip()
-        sheet_text = parts[1].strip()
+    if match := header_regex.search(question):
+        user_instruction = question[:match.start()].strip()
+        sheet_text = question[match.end():].strip()
 
     parsed_items = parse_source_sheet(sheet_text)
     if not parsed_items and user_instruction:
@@ -2002,7 +1999,7 @@ def _run_sourcesheet(
         _log.warning("sourcesheet corpus fetch fallback: %s", exc)
 
     # Synthesize companion guide
-    topic_hint = parsed_items[0].header if parsed_items else "סוגיה תורנית"
+    topic_hint = user_instruction or (parsed_items[0].header if parsed_items else "סוגיה תורנית")
     guide = analyze_source_sheet(
         items=parsed_items,
         topic_hint=topic_hint,
@@ -2060,15 +2057,20 @@ def _run_sourcesheet(
     except Exception as exc:
         _log.warning("saving source sheet failed: %s", exc)
 
+    summary_block = f"{guide.summary}\n\n" if guide.summary else ""
     intro_msg = (
         f"### {guide.title}\n\n"
         f"**שאלת היסוד:** {guide.core_inquiry}\n\n"
+        f"{summary_block}"
+        f"---\n"
         f"עובדו בהצלחה **{len(parsed_items)} מקורות** בדף. "
         f"חוברת הליווי המלאה נוצרה וזמינה להורדה בקבצים המצורפים, "
         f"וניתן להמשיך ולדון בסוגיה כאן בשיחה."
         if he
         else f"### {guide.title}\n\n"
         f"**Core Inquiry:** {guide.core_inquiry}\n\n"
+        f"{summary_block}"
+        f"---\n"
         f"Successfully analyzed **{len(parsed_items)} sources**. "
         f"The full companion guide is ready for download in the attached files. "
         f"You can continue to ask questions about the sheet here in the chat."

@@ -60,3 +60,53 @@ def test_build_sourcesheet_prompt_context_xml():
     xml = build_sourcesheet_prompt_context(items, corpus_lookup={"Bava Metzia 21a": "טקסט מאומת"})
     assert '<source id="S1" status="VERIFIED_CORPUS"' in xml
     assert "<corpus_verified_text>טקסט מאומת</corpus_verified_text>" in xml
+
+
+def test_sourcesheet_llm_synthesis_and_clean_topic():
+    raw = "1. בבא מציעא דף כ\"א ע\"א:\nאמר רבא ייאוש שלא מדעת."
+    items = parse_source_sheet(raw)
+
+    class FakeLLMResponse:
+        text = """```json
+{
+  "topic": "סוגיית ייאוש שלא מדעת",
+  "core_inquiry": "האם ייאוש בעלים למפרע מועיל או שמא בעינן ידיעה בפועל.",
+  "summary": "הסוגיה בבבא מציעא פותחת במחלוקת אביי ורבא...",
+  "sections": [
+    {
+      "index": 1,
+      "title": "בבא מציעא כ\"א ע\"א",
+      "role_tag": "מקור יסוד / עובדא דש\"ס",
+      "plain_explanation": "העמדת מחלוקת אביי ורבא בדין אבידה שנמצאה קודם שידעו הבעלים.",
+      "diyuk": "מדייק רבא דכל שלא ידע לא הוי ייאוש",
+      "difficult_words": {}
+    }
+  ],
+  "opinion_table": [
+    {"opinion": "רבא", "reason": "לא ידע לא מייאש", "proof": "משנה", "nafka_mina": "חייב להכריז"}
+  ],
+  "chavruta_questions": {
+    "peshat": ["מהי סברת רבא?"],
+    "comparison": [],
+    "sevara": ["האם ייאוש הוא מעשה קניין או הסרת בעלות?"]
+  },
+  "flowchart_mermaid": "flowchart TD\\n    A --> B"
+}
+```"""
+
+    class FakeLLM:
+        def generate(self, prompt, **kwargs):
+            return FakeLLMResponse()
+
+    # Pass leaked system instruction as topic hint
+    leaked_hint = "תסכם את הדף (לא מהמאגר — התייחס אליהם כמקור נוסף)"
+    guide = analyze_source_sheet(items, topic_hint=leaked_hint, llm=FakeLLM())
+
+    assert guide.topic == "סוגיית ייאוש שלא מדעת"
+    assert "לא מהמאגר" not in guide.topic
+    assert "סוגיית ייאוש שלא מדעת" in guide.title
+    assert guide.core_inquiry == "האם ייאוש בעלים למפרע מועיל או שמא בעינן ידיעה בפועל."
+    assert "העמדת מחלוקת אביי ורבא" in guide.sections[0].plain_explanation
+    assert len(guide.opinion_table) == 1
+    assert "מהי סברת רבא?" in guide.chavruta_questions["peshat"]
+
