@@ -78,14 +78,25 @@ Both optional; unset means off. `CHAVRUTA_ADMIN_OWNERS` is a dedicated allowlist
 | `CHAVRUTA_COST_PER_M_TOKENS` | Price per MILLION normalized tokens (prompt + 3x completion). Unset ⇒ the admin panel's spend view reports tokens only and no money, on purpose — a guessed rate renders an authoritative-looking figure that is not | `0` (tokens only) | `app/api.py::admin_usage_over_time` |
 | `SENTRY_DSN` | Backend error tracking (sentry.io, free tier) — sign up, create a Python/FastAPI project, paste its DSN | `""` (off) | `app/api.py::_configure_sentry` |
 
-## Email sending (Resend)
+## Email sending (Broadcasts & Auth Multi-Provider Pool)
 
-Optional; unset means off. Used for operator-initiated broadcasts (e.g. policy updates), not auth/transactional emails (those go through Supabase). Recipients are sent via BCC for privacy — no recipient sees another recipient's address. The module follows the project's "no value = inert" convention: if not configured, `send_email()` returns `False` and logs a warning rather than raising an exception.
+Optional; unset means off. Used for:
+1. Operator broadcasts (`app/email.py`, Resend).
+2. Transactional Auth emails via Supabase Send Email Hook (`app/email_pool.py`, Waterfall hybrid: Brevo free tier -> Amazon SES overflow).
 
 | Variable | Purpose | Default | Where read |
-|----------|---------|---------|------------|
-| `RESEND_API_KEY` | Resend API key — get one at https://resend.com (free tier: 100 emails/day) | `""` (off) | `app/email.py` |
-| `RESEND_FROM` | Sender email address — use `@resend.dev` for initial testing without a verified domain | `""` (off) | `app/email.py` |
+| :--- | :--- | :--- | :--- |
+| `BREVO_API_KEY` | Brevo API key — free tier gives 300 emails/day | `""` (off) | `app/email_pool.py` |
+| `BREVO_FROM` | Sender address for Brevo (e.g. `Chavruta.AI <auth@chavrutaai.org>`) | `EMAIL_FROM` | `app/email_pool.py` |
+| `AWS_SES_SMTP_HOST` | Amazon SES SMTP endpoint (e.g. `email-smtp.eu-central-1.amazonaws.com`) | `""` (off) | `app/email_pool.py` |
+| `AWS_SES_SMTP_PORT` | Amazon SES SMTP port | `587` | `app/email_pool.py` |
+| `AWS_SES_SMTP_USER` | Amazon SES SMTP username | `""` (off) | `app/email_pool.py` |
+| `AWS_SES_SMTP_PASSWORD` | Amazon SES SMTP password | `""` (off) | `app/email_pool.py` |
+| `AWS_SES_FROM` | Sender address for Amazon SES | `EMAIL_FROM` | `app/email_pool.py` |
+| `EMAIL_FROM` | Default sender address across all email providers | `Chavruta.AI <auth@chavrutaai.org>` | `app/email_pool.py` |
+| `SUPABASE_AUTH_HOOK_SECRET` | Standard Webhooks HMAC-SHA256 secret (from Supabase dashboard) to authenticate incoming Send Email hooks | `""` (unverified in local dev) | `app/api.py` |
+| `RESEND_API_KEY` | Resend API key — get one at https://resend.com (free tier: 100 emails/day) | `""` (off) | `app/email.py`, `app/email_pool.py` |
+| `RESEND_FROM` | Sender email address for Resend | `""` (off) | `app/email.py`, `app/email_pool.py` |
 
 ## Plans, quotas & billing
 

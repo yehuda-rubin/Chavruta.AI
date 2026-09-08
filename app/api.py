@@ -465,6 +465,7 @@ def _strip_instruction_echo(text: str, he: bool) -> str:
 from contextlib import asynccontextmanager, contextmanager
 
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -3716,6 +3717,86 @@ async def billing_webhook(request: Request):
         raise HTTPException(status_code=400, detail="bad payload") from exc
     billing.handle_event(payplus.parse_event(payload))
     return {"ok": True}
+
+
+@app.post("/auth/email-hook")
+@app.post("/account/email-hook")
+async def auth_email_hook(request: Request):
+    """Supabase Auth 'Send Email' Hook callback.
+
+    Public (no bearer token) but verified via Standard Webhooks HMAC-SHA256 signature
+    when SUPABASE_AUTH_HOOK_SECRET is configured. Exempt from the bearer auth gate.
+
+    Dispatches transactional authentication emails (sign-up verification, password recovery,
+    magic link) through the multi-provider EmailPool (Brevo -> Amazon SES hybrid).
+    """
+    secret = os.environ.get("SUPABASE_AUTH_HOOK_SECRET", "").strip()
+    raw = await request.body()
+
+    if secret:
+        from app.email_pool import verify_supabase_hook
+        if not verify_supabase_hook(raw, dict(request.headers), secret):
+            _log.warning("Invalid signature on auth email hook")
+            return JSONResponse(
+                status_code=401,
+                content={"error": {"http_code": 401, "message": "Invalid webhook signature"}},
+            )
+
+    import json
+    try:
+        payload = json.loads(raw or b"{}")
+    except Exception as exc:
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"http_code": 400, "message": f"Malformed payload: {exc}"}},
+        )
+
+    user = payload.get("user") or {}
+    email_data = payload.get("email_data") or {}
+
+    recipient = (user.get("email") or "").strip()
+    action_type = email_data.get("email_action_type") or "signup"
+    token_hash = email_data.get("token_hash") or ""
+    token_otp = email_data.get("token") or None
+    redirect_to = email_data.get("redirect_to") or ""
+    site_url = email_data.get("site_url") or os.environ.get("SUPABASE_URL", "https://chavrutaai.org")
+
+    if not recipient:
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"http_code": 400, "message": "Recipient email missing in payload"}},
+        )
+
+    from app.email_pool import build_verify_link, pool, render_auth_email
+
+    verify_link = build_verify_link(
+        site_url=site_url,
+        token_hash=token_hash,
+        action_type=action_type,
+        redirect_to=redirect_to,
+    )
+    subject, html_body, text_body = render_auth_email(
+        action_type=action_type,
+        action_url=verify_link,
+        token=token_otp,
+    )
+
+    ok, provider_or_reason = pool.send(
+        to=recipient,
+        subject=subject,
+        html=html_body,
+        text=text_body,
+    )
+
+    if not ok:
+        _log.warning("Email delivery failed for %s (reason: %s)", recipient, provider_or_reason)
+        # Propagate structured error back to Supabase GoTrue so the client receives the quota message
+        return JSONResponse(
+            status_code=429,
+            content={"error": {"http_code": 429, "message": "email_daily_quota_exhausted"}},
+        )
+
+    return JSONResponse(status_code=200, content={})
 
 
 # ── Sessions ──────────────────────────────────────────────────────────────────

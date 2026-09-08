@@ -7,9 +7,17 @@ import { TERMS_VERSION } from "@/lib/legal";
 import { Icon } from "./Icon";
 
 // Map Supabase's English auth errors onto localized copy — this is a Hebrew-first product, so the
-// message a user actually sees must be Hebrew. Unknown errors fall through to a generic string.
-function authErrorKey(msg: string): StringKey {
+function authErrorKey(msg: string, mode: "in" | "up" = "in"): StringKey {
   const m = msg.toLowerCase();
+  if (
+    m.includes("email_daily_quota_exhausted") ||
+    m.includes("quota") ||
+    m.includes("daily limit") ||
+    m.includes("limit exceeded") ||
+    m.includes("confirmation mail")
+  ) {
+    return mode === "up" ? "authErrDailyQuotaExceeded" : "authErrResetQuotaExceeded";
+  }
   if (m.includes("invalid login")) return "authErrBadCreds";
   if (m.includes("already registered") || m.includes("already been registered")) return "authErrRegistered";
   if (m.includes("not confirmed") || m.includes("confirm your email")) return "authErrUnconfirmed";
@@ -75,7 +83,7 @@ export function SignIn({ lang }: { lang: Lang }) {
     } catch (err) {
       // Supabase returns an English message (e.g. "Invalid login credentials") — localize it.
       const raw = err instanceof Error ? err.message : "";
-      setError(tr(lang, authErrorKey(raw)));
+      setError(tr(lang, authErrorKey(raw, mode)));
     } finally {
       setBusy(false);
     }
@@ -94,7 +102,7 @@ export function SignIn({ lang }: { lang: Lang }) {
       setNotice(tr(lang, "resetPasswordSent"));
     } catch (err) {
       const raw = err instanceof Error ? err.message : "";
-      setError(tr(lang, authErrorKey(raw)));
+      setError(tr(lang, authErrorKey(raw, "in")));
     } finally {
       setResetBusy(false);
     }
@@ -184,7 +192,16 @@ export function SignIn({ lang }: { lang: Lang }) {
             </label>
           )}
 
-          {error && <p className="text-xs text-red-600 leading-relaxed">{error}</p>}
+          {error && (
+            error === tr(lang, "authErrDailyQuotaExceeded") || error === tr(lang, "authErrResetQuotaExceeded") ? (
+              <div className="rounded-2xl p-3 bg-amber-500/10 border border-amber-500/25 text-amber-900 flex items-start gap-2.5 text-xs leading-relaxed">
+                <Icon name="schedule" className="text-amber-700 text-base shrink-0 mt-0.5" />
+                <span>{error}</span>
+              </div>
+            ) : (
+              <p className="text-xs text-red-600 leading-relaxed">{error}</p>
+            )
+          )}
           {notice && <p className="text-xs text-green-700 leading-relaxed">{notice}</p>}
 
           <button

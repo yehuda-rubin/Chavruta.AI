@@ -109,9 +109,18 @@ def _api_keys() -> set[str]:
     return {k.strip() for k in os.environ.get("CHAVRUTA_API_KEYS", "").split(",") if k.strip()}
 
 
-# /billing/webhook is public — the payment provider posts to it with no bearer token; it is
-# authenticated instead by its own HMAC signature (verified in the route).
-_AUTH_EXEMPT = ("/health", "/ready", "/docs", "/openapi.json", "/redoc", "/billing/webhook")
+# /billing/webhook and /auth/email-hook are public — external providers post to them with no bearer
+# token; they are authenticated instead by their own HMAC signatures (verified in the routes).
+_AUTH_EXEMPT = (
+    "/health",
+    "/ready",
+    "/docs",
+    "/openapi.json",
+    "/redoc",
+    "/billing/webhook",
+    "/auth/email-hook",
+    "/account/email-hook",
+)
 
 
 def _bearer(authorization: str | None) -> str:

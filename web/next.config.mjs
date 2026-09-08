@@ -42,6 +42,7 @@ const nextConfig = {
       ...proxy("sourcesheets"),
       ...proxy("me"),
       ...proxy("account"),    // /account/delete, /account/delete/cancel
+      ...proxy("auth"),       // /auth/email-hook
       ...proxy("billing"),    // /billing/config, /checkout, /cancel
       ...proxy("coupons"),    // /coupons/redeem
       // These three were all missing, and none failed loudly — each feature reported the 404 HTML

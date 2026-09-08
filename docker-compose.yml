@@ -123,6 +123,19 @@ services:
       # Chat history — persisted to the named volume below.
       CHAVRUTA_DB_PATH: /app-data/chavruta.db
 
+      # Email sending (Multi-provider pool & broadcasts)
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      BREVO_API_KEY: ${BREVO_API_KEY:-}
+      BREVO_FROM: ${BREVO_FROM:-}
+      AWS_SES_SMTP_HOST: ${AWS_SES_SMTP_HOST:-}
+      AWS_SES_SMTP_PORT: ${AWS_SES_SMTP_PORT:-587}
+      AWS_SES_SMTP_USER: ${AWS_SES_SMTP_USER:-}
+      AWS_SES_SMTP_PASSWORD: ${AWS_SES_SMTP_PASSWORD:-}
+      AWS_SES_FROM: ${AWS_SES_FROM:-}
+      SUPABASE_AUTH_HOOK_SECRET: ${SUPABASE_AUTH_HOOK_SECRET:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM: ${RESEND_FROM:-}
+
       # Where the nightly evaluation writes what it generates (harvested pairs, per-night logs).
       # Separate from /app/eval, which is the read-only curated question sets — see the volumes below.
       CHAVRUTA_EVAL_OUT: /app/eval-out
