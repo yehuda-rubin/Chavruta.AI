@@ -44,10 +44,11 @@ def source_body(text: str) -> str:
     """Drop the internal "[label] Ref daf:seg" header line a stored document carries, leaving
     the source's actual text. The header is prompt scaffolding (and may hold a pre-correction
     daf label) — never the thing to quote back to the user."""
-    if text.startswith("["):
-        nl = text.find("\n")
-        if nl != -1:
-            return text[nl + 1:]
+    if not text:
+        return ""
+    m = re.match(r"^\s*\[[^\]\n]+\][^\n]*(?:\r?\n|$)", text)
+    if m:
+        return text[m.end():]
     return text
 
 
@@ -122,6 +123,9 @@ SYSTEM_BASE_HE = (
     "כל טענה חייבת ציון מקור בסוגריים, לדוגמה [S1]. צטט את לשון המקור העברית כשרלוונטי. "
     "אסור להמציא מקורות, ציטוטים או ייחוסים שאינם במקורות שסופקו. "
     "אם המקורות אינם עונים על השאלה — אמור זאת בפשטות. ייחס כל דבר לפרשן הנכון. "
+    "אם המקורות שסופקו אינם עוסקים במישרין בשאלה שנשאלה (כגון מנהג, פיוט או מקרה ספציפי שאינו מוזכר במקורות) — "
+    "אמור זאת ביושר ובבירור. אל תבנה פסיקה, חיוב או איסור חדש (כגון חיוב עשרה או איסור אמירה ביחיד) מתוך "
+    "היקש מאולץ על מקורות שאינם מדברים על כך. ענה תמיד מתוך מה שנאמר במפורש במקורות שסופקו. "
     "כשטענה מתארת דמות מזוהה וממשית (דמות היסטורית, פוסק, רב חי או שנפטר לאחרונה) — במיוחד "
     "לגבי התנהגותו, כוונותיו או אופיו — הישאר קרוב ללשון המקור עצמו ולא לניסוח חופשי משלך, "
     "ואל תוסיף הערכה או שיפוט שאינם עולים מן המקור עצמו. "
@@ -225,7 +229,7 @@ MAX_SOURCE_CHARS = 1500  # Talmud/Rishonim/responsa segments often exceed 600 an
 
 def build_prompt(
     question: str, hits: list[RankedHit], *, intent: Intent = Intent.QA, history=None,
-    lang: str = "en",
+    lang: str = "en", distilled_question: str = "",
 ) -> tuple[GroundedPrompt, dict[str, RankedHit]]:
     """Build a grounded prompt and the marker→hit map used to enforce citations."""
     sources: list[SourceBlock] = []
@@ -233,14 +237,22 @@ def build_prompt(
     for i, h in enumerate(hits, start=1):
         marker = f"S{i}"
         marker_map[marker] = h
-        text = h.text if len(h.text) <= MAX_SOURCE_CHARS else h.text[:MAX_SOURCE_CHARS] + "…"
+        raw_text = source_body(getattr(h, "text", "") or "")
+        text = raw_text if len(raw_text) <= MAX_SOURCE_CHARS else raw_text[:MAX_SOURCE_CHARS] + "…"
+        raw_he = source_body(getattr(h, "text_he", "") or getattr(h, "text", "") or "")
+        text_he = raw_he if len(raw_he) <= MAX_SOURCE_CHARS else raw_he[:MAX_SOURCE_CHARS] + "…"
         sources.append(SourceBlock(
-            marker=marker, ref=h.ref, commentator_id=h.commentator_id, text=text
+            marker=marker, ref=h.ref, commentator_id=h.commentator_id, text=text,
+            text_he=text_he,
+            text_en=getattr(h, "text_en", "") or "",
+            deep_link=getattr(h, "deep_link", "") or "",
+            license=getattr(h, "license", "") or "",
+            version_title=getattr(h, "version_title", "") or "",
         ))
     llm_history = [LLMTurn(role=t.role, text=t.text) for t in (history or [])]
     prompt = GroundedPrompt(
         system=_system_for(intent, lang), sources=sources, question=question,
-        history=llm_history,
+        history=llm_history, distilled_question=distilled_question,
     )
     return prompt, marker_map
 
@@ -792,7 +804,7 @@ def no_source_answer(lang: str, intent: Intent = Intent.QA) -> Answer:
 
 
 def build_lesson_walkthrough_prompt(plan: LessonPlan, question: str, lang: str = "he",
-                                    shut: bool = False, history=None):
+                                    shut: bool = False, history=None, distilled_question: str = ""):
     """Prompt the model to deliver the lesson — or responsa (`shut=True`) — as a flowing
     walkthrough (the "מהלך"), laying out the arc's stages in order with sources as [S#].
 
@@ -814,12 +826,13 @@ def build_lesson_walkthrough_prompt(plan: LessonPlan, question: str, lang: str =
                 m = f"S{len(seen) + 1}"
                 seen[cit.chunk_id] = m
                 marker_map[m] = cit
-                text = cit.quote or ""
-                if len(text) > MAX_SOURCE_CHARS:
-                    text = text[:MAX_SOURCE_CHARS] + "…"
+                raw_text = source_body(getattr(cit, "quote", "") or getattr(cit, "text", "") or "")
+                text = raw_text if len(raw_text) <= MAX_SOURCE_CHARS else raw_text[:MAX_SOURCE_CHARS] + "…"
+                raw_he = source_body(getattr(cit, "text_he", "") or getattr(cit, "quote", "") or "")
+                text_he = raw_he if len(raw_he) <= MAX_SOURCE_CHARS else raw_he[:MAX_SOURCE_CHARS] + "…"
                 sources.append(SourceBlock(
                     marker=m, ref=cit.ref, commentator_id=cit.commentator_id, text=text,
-                    text_he=getattr(cit, "text_he", "") or getattr(cit, "quote", ""),
+                    text_he=text_he,
                     text_en=getattr(cit, "text_en", ""),
                     deep_link=getattr(cit, "deep_link", "") or "",
                     license=getattr(cit, "license", "") or "",
@@ -829,21 +842,25 @@ def build_lesson_walkthrough_prompt(plan: LessonPlan, question: str, lang: str =
         stages.append((sec.heading, markers))
 
     if lang == "he":
-        lines = [f"(הקשר בלבד — אל תחזור על זה) הנושא שנשאל: {question}",
-                 "", "שלבי המהלך, לפי הסדר:"]
+        q_line = f"(הקשר בלבד — אל תחזור על זה) הנושא שנשאל: {question}"
+        if distilled_question and distilled_question != question:
+            q_line += f"\nשאלת המיקוד: {distilled_question}"
+        lines = [q_line, "", "שלבי המהלך, לפי הסדר:"]
         lines += [f"• {h} — מקורות: {', '.join(ms) if ms else '—'}" for h, ms in stages]
         lines += ["", "כתוב כעת את המהלך המלא לפי השלבים — פתח ישר מן המקור, בלי לחזור על השאלה."]
         system = SYSTEM_SHUT_WALKTHROUGH_HE if shut else SYSTEM_LESSON_WALKTHROUGH_HE
     else:
-        lines = [f"(context only — do not restate it) The question asked: {question}",
-                 "", "Arc, in order:"]
+        q_line = f"(context only — do not restate it) The question asked: {question}"
+        if distilled_question and distilled_question != question:
+            q_line += f"\nFocused question: {distilled_question}"
+        lines = [q_line, "", "Arc, in order:"]
         lines += [f"• {h} — sources: {', '.join(ms) if ms else '—'}" for h, ms in stages]
         lines += ["", "Now write the full walkthrough following these stages — open straight "
                   "from the source, without restating the question."]
         system = SYSTEM_SHUT_WALKTHROUGH if shut else SYSTEM_LESSON_WALKTHROUGH
     llm_history = [LLMTurn(role=t.role, text=t.text) for t in (history or [])]
     prompt = GroundedPrompt(system=system, sources=sources, question="\n".join(lines),
-                            history=llm_history)
+                            history=llm_history, distilled_question=distilled_question)
     return prompt, marker_map
 
 

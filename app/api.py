@@ -491,7 +491,7 @@ from chavruta.llm import base as llm_base
 from chavruta.llm.base import GroundedPrompt
 from chavruta.pipeline.pipeline import _max_tokens_for
 from chavruta.intents.hebrew_refs import detect_tractates, detect_hebrew_refs
-from chavruta.intents.router import detect_commentators
+from chavruta.intents.router import detect_commentators, is_pure_greeting
 
 import app.accounts as accounts
 import app.orgs as orgs
@@ -1053,9 +1053,19 @@ def _lesson_job_md(question: str, hits, lang: str, *, audience: str | None,
         lines += [""]
 
     lines += ["## TOPIC", question.strip(), "", "## SOURCES"]
+    from chavruta.corpus.refs import talmud_hebrew_display_ref, talmud_english_display_ref, hebrew_display_ref
+    from chavruta.generation.grounded import source_body
     for i, h in enumerate(hits, 1):
         who = f" ({h.commentator_id})" if getattr(h, "commentator_id", None) else ""
-        lines += [f"### [S{i}] {h.ref}{who}", (getattr(h, "text", "") or "").strip(), ""]
+        ref_str = getattr(h, "ref", "") or ""
+        if lang == "he":
+            title = talmud_hebrew_display_ref(ref_str) or hebrew_display_ref(ref_str) or ref_str
+            header = f"### [S{i}] {title} (מזהה מקור: {ref_str}){who}"
+        else:
+            title = talmud_english_display_ref(ref_str) or ref_str
+            header = f"### [S{i}] {title} (source ID: {ref_str}){who}"
+        clean_text = source_body(getattr(h, "text", "") or "").strip()
+        lines += [header, clean_text, ""]
 
     # ── Clarify gate (applies to every audience) ──
     lines += [
@@ -1373,7 +1383,176 @@ def _generate_lesson_from_hits(topic: str, hits, lang: str, he: bool, *, audienc
                          intent="lesson", caveats=caveats, files=files, lesson_id=lesson_id)
 
 
-def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bool = False) -> str:
+def _recover_lesson_topic(history: list[Turn] | None) -> str:
+    """Recover the core lesson topic from previous lesson files or user query."""
+    if not history:
+        return ""
+    for h in reversed(history):
+        if getattr(h, "role", "") == "assistant" and getattr(h, "lesson", False):
+            files = getattr(h, "files", []) or []
+            for f in files:
+                title = f.get("title") or ""
+                if " — " in title:
+                    part = title.split(" — ", 1)[1]
+                    topic = part.split(" · ", 1)[0].strip()
+                    if topic:
+                        return topic
+    # Fallback to earliest substantive user query
+    for h in history:
+        if getattr(h, "role", "") == "user":
+            txt = (getattr(h, "text", "") or "").strip()
+            if txt and not _is_clarify_answer(txt):
+                return txt
+    return ""
+
+
+def _edit_lesson_file(
+    question: str,
+    lang: str,
+    history: list[Turn],
+    decision,
+    owner_id: str = "local",
+    llm=None,
+) -> QueryResponse:
+    """Single-file edit: updates only the requested file (flow, full, or sources).
+
+    Preserves the other 2 files completely unchanged, saving ~70% latency and token costs.
+    """
+    pipeline = _get_pipeline()
+    llm = llm or pipeline.llm
+    he = (lang or "he") != "en"
+
+    # 1. Find the previous lesson files from history
+    last_lesson_turn = None
+    for h in reversed(history or []):
+        if getattr(h, "role", "") == "assistant" and getattr(h, "lesson", False) and getattr(h, "files", None):
+            last_lesson_turn = h
+            break
+
+    if not last_lesson_turn or not last_lesson_turn.files:
+        # Fallback to full lesson generation if no files in history
+        return _run_lesson(
+            decision.topic or question,
+            lang=lang,
+            history=history,
+            owner_id=owner_id,
+            llm=llm,
+        )
+
+    prev_files = last_lesson_turn.files  # list of dicts: {"name": ..., "title": ..., "content": ...}
+    target = getattr(decision, "target_file", None) or "flow"
+
+    # Identify target file index and label
+    target_idx = None
+    if target == "flow":
+        target_names = ("מהלך_השיעור", "lesson_flow")
+        label = "מהלך השיעור" if he else "Lesson Flow"
+    elif target == "full":
+        target_names = ("השיעור_המלא", "full_lesson")
+        label = "השיעור המלא" if he else "Full Lesson"
+    else:  # sources
+        target_names = ("דף_מקורות", "source_sheet")
+        label = "דף המקורות" if he else "Source Sheet"
+
+    for idx, f in enumerate(prev_files):
+        fname = (f.get("name") or "").lower()
+        if any(tn in fname for tn in target_names):
+            target_idx = idx
+            break
+
+    if target_idx is None:
+        target_idx = 1 if len(prev_files) > 1 and target == "flow" else (2 if len(prev_files) > 2 and target == "full" else 0)
+
+    target_file = prev_files[target_idx]
+    old_content = target_file.get("content") or ""
+
+    # 2. Build editing job prompt for generator model
+    instruction = getattr(decision, "instruction", None) or question
+    job = "\n".join([
+        f"lang: {lang}", "",
+        f"## TASK — EDIT LESSON FILE: {label}",
+        "The user requested an edit to this specific document of the lesson.", "",
+        f"## USER INSTRUCTION",
+        instruction.strip(), "",
+        f"## ORIGINAL DOCUMENT CONTENT",
+        old_content.strip(), "",
+        "## INSTRUCTIONS",
+        f"1. Apply the user's requested edit precisely to this document ({label}).",
+        "2. Maintain the structure, timing/stages, pedagogic tone, and formatting of the original document.",
+        "3. Preserve all source citations [S#] intact so they match the existing sources.",
+        "4. LANGUAGE: write ONLY in the question's language without foreign words.",
+        "5. Output ONLY the complete updated document text. Do NOT include any meta-commentary, introduction, or closing remarks.",
+    ])
+
+    raw, _ = llm.request(job, lang=lang, token_budget=3000)
+    new_content = _strip_instruction_echo(raw.strip(), he)
+    new_content = _strip_markers(new_content, he=he).strip()
+
+    if not new_content:
+        new_content = old_content  # safety fallback
+
+    # 3. Assemble updated files
+    updated_files = []
+    for idx, f in enumerate(prev_files):
+        if idx == target_idx:
+            updated_files.append(
+                FileOut(
+                    name=f.get("name", f"{target}.doc"),
+                    title=f.get("title", label),
+                    content=new_content,
+                )
+            )
+        else:
+            updated_files.append(
+                FileOut(
+                    name=f.get("name", ""),
+                    title=f.get("title", ""),
+                    content=f.get("content", ""),
+                )
+            )
+
+    # Re-use citations from previous turn
+    raw_cits = getattr(last_lesson_turn, "citations", []) or []
+    used_cits = []
+    for c in raw_cits:
+        if isinstance(c, dict):
+            used_cits.append(CitationOut(**c))
+        elif isinstance(c, CitationOut):
+            used_cits.append(c)
+
+    # Persist updated lesson in DB library
+    topic = getattr(decision, "topic", "") or _recover_lesson_topic(history) or "שיעור מעודכן"
+    lesson_id = ""
+    try:
+        import uuid
+        lesson_id = uuid.uuid4().hex[:12]
+        db.save_lesson(
+            lesson_id,
+            topic,
+            audience="",
+            grade_band="",
+            length="",
+            lang=lang,
+            files=[f.model_dump() for f in updated_files],
+            citations=[c.model_dump() for c in used_cits],
+            owner_id=owner_id,
+        )
+    except Exception:
+        lesson_id = ""
+
+    ans = f"עדכנתי את {label} בהתאם לבקשתך." if he else f"Updated {label} according to your request."
+    return QueryResponse(
+        answer=ans,
+        citations=used_cits,
+        grounded=bool(used_cits),
+        intent="lesson",
+        files=updated_files,
+        lesson_id=lesson_id,
+    )
+
+
+def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bool = False,
+                     distilled_question: str = "") -> str:
     """Bridge job: play a Socratic study-partner (chavruta) — learn WITH the user, don't lecture."""
     lines = [f"lang: {lang}", "", "## ROLE",
              "אתה **חברותא** לימודי — אתה לומד יחד עם המשתמש, בגובה העיניים, ולא מרצה מלמעלה.", ""]
@@ -1406,6 +1585,8 @@ def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bo
     for i, h in enumerate(hits, 1):
         who = f" ({h.commentator_id})" if getattr(h, "commentator_id", None) else ""
         lines += [f"### [S{i}] {h.ref}{who}", (getattr(h, "text", "") or "").strip(), ""]
+    if distilled_question and distilled_question != question:
+        lines += ["## FOCUSED CORE QUESTION", distilled_question.strip(), ""]
     lines += [
         "## INSTRUCTIONS FOR CLAUDE (the chavruta)",
         "Study b'chavruta — do NOT deliver a lecture or dump the whole sugya. Instead, in ONE short, warm "
@@ -1503,11 +1684,12 @@ def _wants_full_lesson(question: str, llm=None) -> bool:
 
 
 def _generate_chavruta_turn(question: str, hits, lang: str, he: bool, history, weak: bool,
-                            llm) -> QueryResponse:
+                            llm, distilled_question: str = "") -> QueryResponse:
     """The chavruta generation tail, shared by `_run_chavruta` (hits from semantic retrieval) and
     `_run_parsha`/`_run_daf_yomi` (hits from a calendar-resolved ref) — identical from here on
     regardless of how `hits` was produced, same principle as _generate_lesson_from_hits below."""
-    job = _chavruta_job_md(question, hits, lang, history, weak_retrieval=weak)
+    job = _chavruta_job_md(question, hits, lang, history, weak_retrieval=weak,
+                           distilled_question=distilled_question)
     # A chavruta turn is a conversational exchange, not a treatise — budget it like EXPLAIN.
     raw, fetched = llm.request(job, lang=lang,
                               token_budget=_max_tokens_for(Intent.EXPLAIN, _get_pipeline().profile))
@@ -1678,8 +1860,11 @@ def _run_chavruta(question: str, lang: str, history=None, llm=None) -> QueryResp
         return _generate_chavruta_turn(question, hits, lang or "he", he, history, weak=(not hits), llm=llm)
 
     anchor = (user_turns[0] + " " + question) if user_turns else question   # keep retrieval on the topic
-    q = Query(text=anchor, lang=lang or None, intent=Intent.QA)
-    rq = pipeline._resolve_query(q)
+    q = Query(text=anchor, lang=lang or None, intent=Intent.CHAVRUTA)
+    try:
+        rq = pipeline._resolve_query(q, history=history)
+    except TypeError:
+        rq = pipeline._resolve_query(q)
     _conversation_signals(user_turns, question, rq, history)
     lang = rq.lang or lang or "he"
     he = lang != "en"
@@ -1690,7 +1875,8 @@ def _run_chavruta(question: str, lang: str, history=None, llm=None) -> QueryResp
     # (~0.02-0.06) on a different scale than relevance_threshold, so comparing them lit 'weak' on
     # EVERY hybrid turn and nudged the chavruta to stall instead of teach.
     weak = result.is_empty
-    return _generate_chavruta_turn(question, hits, lang, he, history, weak, llm)
+    return _generate_chavruta_turn(question, hits, lang, he, history, weak, llm,
+                                  distilled_question=getattr(rq, "distilled_text", "") or "")
 
 
 def _calendar_cache_key(kind: str, today) -> str:
@@ -2025,7 +2211,9 @@ def _run_sourcesheet(
         _log.warning("sourcesheet corpus fetch fallback: %s", exc)
 
     # Synthesize companion guide
-    topic_hint = user_instruction or (parsed_items[0].header if parsed_items else "סוגיה תורנית")
+    from chavruta.intents.llm_planner import distill_query
+    distilled_hint = distill_query(user_instruction or question, history=history, intent=Intent.SOURCESHEET)
+    topic_hint = distilled_hint or user_instruction or (parsed_items[0].header if parsed_items else "סוגיה תורנית")
     guide = analyze_source_sheet(
         items=parsed_items,
         topic_hint=topic_hint,
@@ -2151,12 +2339,30 @@ _in_flight_count = 0
 _concurrency_at_start: ContextVar[int] = ContextVar("_concurrency_at_start", default=0)
 
 
+def _greeting_response(lang: str, intent_str: str = "") -> QueryResponse:
+    he = (lang or "") != "en"
+    greeting = (
+        "שלום וברכה! אני חברותא — שותף הלימוד שלך. במה נוכל להעמיק היום? אפשר לעיין בסוגיה, ללמוד משנה או גמרא עם מפרשים, או לברר שאלה הלכתית."
+        if he
+        else "Hello and welcome! I am Chavruta — your study partner. What shall we explore today? We can delve into a sugya, study Mishnah or Gemara with commentaries, or clarify a halachic question."
+    )
+    return QueryResponse(
+        answer=greeting,
+        citations=[],
+        grounded=False,
+        intent=intent_str or "qa",
+        files=[],
+    )
+
+
 def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
                audience: str = "", grade_band: str = "", length: str = "",
                owner_id: str = "local", llm=None) -> QueryResponse:
     """Safety wrapper: a retrieval/LLM/backend failure degrades to an honest error response instead
     of a 500 for the whole request (real HTTPExceptions — e.g. 422 bad intent — still propagate).
     `llm` defaults to the pipeline's own shared backend; a caller may override it (BYOK)."""
+    if is_pure_greeting(question):
+        return _greeting_response(lang, intent_str)
     he = (lang or "") != "en"
     # Every route reaches generation through here — /query, /sessions/{id}/query, its async twin and
     # the calendar paths. Setting the flag on ONE of them is what made the trailing source list work
@@ -2265,6 +2471,8 @@ def _is_admin(owner_id: str) -> bool:
 def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Turn],
                     audience: str = "", grade_band: str = "", length: str = "",
                     owner_id: str = "local", llm=None) -> QueryResponse:
+    if is_pure_greeting(question):
+        return _greeting_response(lang, intent_str)
     he = (lang or "") != "en"
     if intent_str == "shut":          # UI's responsa mode → HALACHA intent
         intent_str = "halacha"
@@ -2295,8 +2503,19 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
         # request to build or change one runs _run_lesson again; anything else continues as a
         # grounded chavruta turn instead — _prepare_continue already folded the lesson's own text
         # into history (_lesson_turn_text), so the discussion is anchored on what was actually taught.
-        if any(h.role == "assistant" and h.lesson for h in history) and not _is_lesson_build_request(question):
-            return _run_chavruta(question, lang, history=history, llm=llm)
+        if any(h.role == "assistant" and h.lesson for h in history):
+            from chavruta.intents.llm_planner import classify_lesson_followup
+            last_topic = _recover_lesson_topic(history)
+            decision = classify_lesson_followup(question, history=history, last_lesson_topic=last_topic)
+            if decision.action == "chat":
+                return _run_chavruta(question, lang, history=history, llm=llm)
+            elif decision.action == "edit_file" and decision.target_file:
+                return _edit_lesson_file(question, lang, history=history, decision=decision,
+                                         owner_id=owner_id, llm=llm)
+            else:  # rebuild_all
+                rebuild_topic = decision.topic or last_topic or question
+                return _run_lesson(rebuild_topic, lang, history=history, audience=audience,
+                                   grade_band=grade_band, length=length, owner_id=owner_id, llm=llm)
         return _run_lesson(question, lang, history=history, audience=audience,
                            grade_band=grade_band, length=length, owner_id=owner_id, llm=llm)
 
@@ -2915,7 +3134,9 @@ def _settle_tokens(owner: str, res: Reservation, usage: dict, intent: str,
     """
     if owner == "local":
         return
-    actual = plans.normalized_tokens(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
+    actual = usage.get("billed_tokens") if "billed_tokens" in usage else plans.normalized_tokens(
+        usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
+    )
     if not actual and not res.tokens:
         return
     if res.ctx and meter == db.TOKENS:
@@ -3066,8 +3287,9 @@ def _record_event(owner: str, intent: str, req: QueryRequest | None, usage: dict
             lang=(req.lang if req else "") or "he",
             prompt_tokens=usage.get("prompt_tokens", 0),
             completion_tokens=usage.get("completion_tokens", 0),
-            billed_tokens=plans.normalized_tokens(usage.get("prompt_tokens", 0),
-                                                  usage.get("completion_tokens", 0)),
+            billed_tokens=usage.get("billed_tokens") if "billed_tokens" in usage else plans.normalized_tokens(
+                usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
+            ),
             llm_calls=usage.get("calls", 0),
             ms=ms,
             concurrent_at_start=_concurrency_at_start.get(),
@@ -3928,7 +4150,9 @@ def _prepare_continue(session_id: str, req: QueryRequest, owner: str) -> tuple[l
         history.append(Turn(role=m["role"], text=text,
                             refs=[r for c in (m.get("citations") or []) if (r := (c or {}).get("ref"))],
                             lesson=is_lesson,
-                            sourcesheet=is_sourcesheet))
+                            sourcesheet=is_sourcesheet,
+                            files=m.get("files") or [],
+                            citations=m.get("citations") or []))
     db.save_message(session_id, "user", req.question)
     # Sticky mode: a chat stays in the mode chosen on its first turn — ignore any intent the client
     # sends on later turns. Legacy sessions (mode=NULL) fall back to the per-request intent.

@@ -155,3 +155,92 @@ def test_a_segment_with_no_hebrew_keeps_its_english_rather_than_losing_the_whole
 ])
 def test_the_refs_that_already_worked_are_unchanged(ref, expected):
     assert hebrew_display_ref(ref) == expected
+
+
+# ── Human-readable Talmud daf formatting (Part 1) ──────────────────────────────
+
+from chavruta.corpus.refs import talmud_hebrew_display_ref
+from chavruta.generation.grounded import source_body
+from chavruta.llm.base import GroundedPrompt, SourceBlock, render_messages
+
+
+@pytest.mark.parametrize("ref,expected", [
+    ("Berakhot.98.12", 'מסכת ברכות דף מ"ט ע"ב'),
+    ("Bava_Metzia.3.1", 'מסכת בבא מציעא דף ב\' ע"א'),
+    ("Rashi_on_Berakhot.98.12.1", 'רש"י על מסכת ברכות דף מ"ט ע"ב'),
+    ("Yoma.148.10", 'מסכת יומא דף ע"ד ע"ב'),
+])
+def test_talmud_hebrew_display_ref(ref, expected):
+    assert talmud_hebrew_display_ref(ref) == expected
+
+
+@pytest.mark.parametrize("ref", [
+    "Genesis.1.1",
+    "Mishnah_Berakhot.1.1",
+    "Jerusalem_Talmud_Berakhot.1.1.1",
+    "Shulchan_Arukh,_Orach_Chayim.310.1",
+])
+def test_talmud_hebrew_display_ref_non_talmud_returns_none(ref):
+    assert talmud_hebrew_display_ref(ref) is None
+
+
+def test_hebrew_prompt_source_header_formatting():
+    prompt = GroundedPrompt(
+        system="system",
+        question="שאלה",
+        sources=[
+            SourceBlock(marker="S1", ref="Berakhot.98.12", commentator_id=None, text="טקסט ברכות"),
+            SourceBlock(marker="S2", ref="Genesis.1.1", commentator_id=None, text="טקסט בראשית"),
+        ],
+    )
+    msgs = render_messages(prompt, "he")
+    user_content = msgs[-1]["content"]
+    assert '[S1] מסכת ברכות דף מ"ט ע"ב (מזהה מקור: Berakhot.98.12):\nטקסט ברכות' in user_content
+    assert '[S2] בראשית 1:1 (מזהה מקור: Genesis.1.1):\nטקסט בראשית' in user_content
+
+
+def test_source_body_strips_raw_ingest_header():
+    raw = "[ברכות] Berakhot 98:12\nמתני׳ מאימתי קורין את שמע בערבין"
+    assert source_body(raw) == "מתני׳ מאימתי קורין את שמע בערבין"
+    assert source_body("[ברכות] Berakhot 98:12") == ""
+    assert source_body("טקסט נקי") == "טקסט נקי"
+
+
+from chavruta.corpus.refs import talmud_english_display_ref
+
+
+@pytest.mark.parametrize("ref,expected", [
+    ("Berakhot.98.12", "Tractate Berakhot daf 49b"),
+    ("Bava_Metzia.3.1", "Tractate Bava Metzia daf 2a"),
+    ("Rashi_on_Berakhot.98.12.1", "Rashi on Tractate Berakhot daf 49b"),
+    ("Tosafot_on_Berakhot.98.12.1", "Tosafot on Tractate Berakhot daf 49b"),
+    ("Yoma.148.10", "Tractate Yoma daf 74b"),
+])
+def test_talmud_english_display_ref(ref, expected):
+    assert talmud_english_display_ref(ref) == expected
+
+
+@pytest.mark.parametrize("ref", [
+    "Genesis.1.1",
+    "Mishnah_Berakhot.1.1",
+    "Jerusalem_Talmud_Berakhot.1.1.1",
+    "Shulchan_Arukh,_Orach_Chayim.310.1",
+])
+def test_talmud_english_display_ref_non_talmud_returns_none(ref):
+    assert talmud_english_display_ref(ref) is None
+
+
+def test_english_prompt_source_header_formatting():
+    prompt = GroundedPrompt(
+        system="system",
+        question="question",
+        sources=[
+            SourceBlock(marker="S1", ref="Berakhot.98.12", commentator_id=None, text="Berakhot text"),
+            SourceBlock(marker="S2", ref="Genesis.1.1", commentator_id=None, text="Genesis text"),
+        ],
+    )
+    msgs = render_messages(prompt, "en")
+    user_content = msgs[-1]["content"]
+    assert '[S1] Tractate Berakhot daf 49b (source ID: Berakhot.98.12):\nBerakhot text' in user_content
+    assert '[S2] Genesis.1.1:\nGenesis text' in user_content
+

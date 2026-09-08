@@ -28,6 +28,7 @@ class Intent(str, Enum):
     LESSON = "lesson"
     HALACHA = "halacha"        # reserved / deferred until a halachic corpus is loaded
     SOURCESHEET = "sourcesheet"
+    CHAVRUTA = "chavruta"
 
 
 @dataclass(frozen=True)
@@ -166,6 +167,8 @@ class Turn:
     lesson: bool = False
     # True for an assistant turn that completed a SOURCE SHEET companion guide.
     sourcesheet: bool = False
+    files: list[dict] = field(default_factory=list)
+    citations: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -186,6 +189,7 @@ class Query:
     # tractate rather than anchoring, so "what does Rashi say in Sukkah" can reach Rashi on Sukkah
     # even when the daf is never given.
     tractates: list[str] | None = None
+    distilled_text: str = ""
 
 
 @dataclass

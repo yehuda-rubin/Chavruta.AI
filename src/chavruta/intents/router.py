@@ -91,6 +91,19 @@ _HALACHA_PAT = re.compile(
     r"|האם\s+(מותר|אסור|צריך|חייב|כשר|מחו?יי?ב)|מה\s+הדין|מהי?\s+ההלכה|מה\s+ההלכה"
     r"|הלכה\s+למעשה|כיצד\s+(נוהגים|יש\s+לנהוג|פוסקים)", re.IGNORECASE)
 
+_PURE_GREETING_PAT = re.compile(
+    r"^[\s]*(?:שלום|שלום\s+עליכם|היי|הי|בוקר\s+טוב|ערב\s+טוב|צהריים\s+טובים|מה\s+נשמע|מה\s+שלומך|מה\s+קורה|hello|hi|hey)[\s.!?,]*$",
+    re.IGNORECASE,
+)
+
+
+def is_pure_greeting(text: str) -> bool:
+    """Return True if text is ONLY a standalone greeting with no substantive content."""
+    if not text:
+        return False
+    return bool(_PURE_GREETING_PAT.match(text))
+
+
 
 # Modern technology terms whose halachically-operative concept shares no root with the surface
 # word. A question like "is it permitted to play on a COMPUTER on Shabbat" embeds close to the

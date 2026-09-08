@@ -86,3 +86,50 @@ def test_normalized_tokens_survives_missing_usage():
 
     assert plans.normalized_tokens(0, 0) == 0
     assert plans.normalized_tokens(-10, -10) == 0
+
+
+def test_normalized_tokens_distiller_model():
+    """Distiller models: Gemma-3-27B (0.40/1.25) and Llama-3.3-70B (0.65/2.0)."""
+    from app import plans
+
+    gemma_model = "google/gemma-3-27b-it"
+    # 1000 * 0.40 + 0 * 1.25 = 400
+    assert plans.normalized_tokens(1000, 0, model=gemma_model) == 400
+    # 0 * 0.40 + 1000 * 1.25 = 1250
+    assert plans.normalized_tokens(0, 1000, model=gemma_model) == 1250
+    # 1000 * 0.40 + 200 * 1.25 = 400 + 250 = 650
+    assert plans.normalized_tokens(1000, 200, model=gemma_model) == 650
+    assert plans.billed_tokens_for_model(1000, 200, gemma_model) == 650
+
+    llama_model = "meta-llama/Llama-3.3-70B-Instruct"
+    # 1000 * 0.65 + 0 * 2.0 = 650
+    assert plans.normalized_tokens(1000, 0, model=llama_model) == 650
+    # 0 * 0.65 + 1000 * 2.0 = 2000
+    assert plans.normalized_tokens(0, 1000, model=llama_model) == 2000
+    # 1000 * 0.65 + 200 * 2.0 = 650 + 400 = 1050
+    assert plans.normalized_tokens(1000, 200, model=llama_model) == 1050
+    assert plans.billed_tokens_for_model(1000, 200, llama_model) == 1050
+
+    # Case insensitivity and substring matching ("llama-3.3-70b" or "70b")
+    assert plans.normalized_tokens(100, 50, model="meta-llama/llama-3.3-70b-instruct") == round(100 * 0.65 + 50 * 2.0)
+    assert plans.normalized_tokens(100, 50, model="deepseek-ai/DeepSeek-R1-Distill-Llama-70B") == round(100 * 0.65 + 50 * 2.0)
+    assert plans.normalized_tokens(100, 50, model="google/gemma-3-27b-it") == round(100 * 0.40 + 50 * 1.25)
+
+    # Baseline / unknown model falls back to prompt + 3 * completion
+    assert plans.normalized_tokens(1000, 200, model="Qwen/Qwen3-235B-A22B-Instruct-2507") == 1600
+    assert plans.normalized_tokens(1000, 200, model="") == 1600
+
+
+def test_metering_record_with_model():
+    """metering.record records model and tracks billed_tokens accordingly."""
+    with metering.meter() as usage:
+        metering.record(100, 20, model="meta-llama/Llama-3.3-70B-Instruct")
+        metering.record(1000, 200, model="Qwen/Qwen3-235B-A22B-Instruct-2507")
+    assert usage["prompt_tokens"] == 1100
+    assert usage["completion_tokens"] == 220
+    assert usage["calls"] == 2
+    # Distiller: round(100 * 0.65 + 20 * 2.0) = 105
+    # Baseline: 1000 + 3 * 200 = 1600
+    # Total billed_tokens: 1705
+    assert usage["billed_tokens"] == 1705
+

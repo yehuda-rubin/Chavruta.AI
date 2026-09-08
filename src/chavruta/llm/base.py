@@ -59,6 +59,11 @@ class SourceBlock:
 class Turn:
     role: str
     text: str
+    refs: list[str] = field(default_factory=list)
+    lesson: bool = False
+    sourcesheet: bool = False
+    files: list[dict] = field(default_factory=list)
+    citations: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -74,6 +79,7 @@ class GroundedPrompt:
     # template entirely: `question` goes to the model as a plain instruction, nothing wrapped around
     # it. Use this for anything that isn't itself a grounded-answer request.
     bare: bool = False
+    distilled_question: str = ""
 
 
 @dataclass
@@ -120,30 +126,42 @@ def render_messages(prompt: GroundedPrompt, lang: str) -> list[dict]:
         # The English ref stays on the line: it is what `enforce_citations` and the source sheet key
         # on, and a model that wants to be precise can still copy it. The Hebrew name is what it can
         # actually say out loud in a Hebrew answer.
-        # Imported here, not at module scope, to keep llm/ free of a hard dependency on corpus/.
-        from chavruta.corpus.refs import hebrew_display_ref
+        from chavruta.corpus.refs import (
+            hebrew_display_ref,
+            talmud_hebrew_display_ref,
+            talmud_english_display_ref,
+        )
 
         lines = []
         for s in prompt.sources:
             who = f" ({s.commentator_id})" if s.commentator_id else ""
-            name = (hebrew_display_ref(s.ref) or "") if lang == "he" else ""
-            label = f"{name} — {s.ref}" if name else s.ref
-            lines.append(f"[{s.marker}] {label}{who}:\n{s.text}")
+            if lang == "he":
+                clean_he_title = talmud_hebrew_display_ref(s.ref) or hebrew_display_ref(s.ref) or ""
+                label = f"{clean_he_title} (מזהה מקור: {s.ref})" if clean_he_title else s.ref
+                lines.append(f"[{s.marker}] {label}{who}:\n{s.text}")
+            else:
+                clean_en_title = talmud_english_display_ref(s.ref) or ""
+                label = f"{clean_en_title} (source ID: {s.ref})" if clean_en_title else s.ref
+                lines.append(f"[{s.marker}] {label}{who}:\n{s.text}")
         sources_block = "\n\n".join(lines)
     else:
         sources_block = "(no sources retrieved)"
 
     if lang == "he":
+        prefix = f"השאלה המקורית:\n{prompt.question}\n\n" if prompt.distilled_question else ""
+        focus_suffix = f"\n\nשאלת המיקוד לתשובה:\n{prompt.distilled_question}" if prompt.distilled_question else ""
         user = (
+            f"{prefix}"
             f"המקורות (הידע היחיד המותר לך):\n{sources_block}\n\n"
-            f"השאלה: {prompt.question}\n\n"
+            f"השאלה: {prompt.question}"
+            f"{focus_suffix}\n\n"
             f"ענה בעברית בצורה ברורה, מלאה ומנומקת — הסבר את התשובה ופַתח אותה, אל תסתפק במשפט יבש אחד. "
             f"כתוב אך ורק בעברית תקנית, ללא מילים בשפה זרה. "
             f"צרף לכל טענה את סימון המקור, למשל [S1]. "
             f"צטט את לשון המקור כשרלוונטי. אם אין תשובה במקורות — אמור זאת ואל תמציא. "
-            f"המזהה שאחרי הקו בכותרת כל מקור (למשל 'Yoma.148.10') הוא זיהוי פנימי בלבד — לעולם אל "
+            f"המזהה שבסוגריים 'מזהה מקור' (למשל 'Yoma.148.10') הוא זיהוי פנימי בלבד — לעולם אל "
             f"תעתיק אותו כמו שהוא לתוך התשובה. אם ברצונך לציין דף גמרא בפרוזה, כתוב אותו בצורה אנושית "
-            f"(למשל 'יומא עד ע\"ב'), לא במספר הפנימי; ואם ברצונך לציין שם חיבור, השתמש בשם העברי "
+            f"(למשל 'יומא עד ע\"ב' או 'מסכת ברכות דף מ\"ט ע\"ב'), לא במספר הפנימי; ואם ברצונך לציין שם חיבור, השתמש בשם העברי "
             f"שבתחילת הכותרת, לא בחלק האנגלי."
         )
         if _SOURCE_NOTE.get():
@@ -176,16 +194,21 @@ def render_messages(prompt: GroundedPrompt, lang: str) -> list[dict]:
                 "אל תוסיף מחבר, תאריך או תיאור, וגם לא חיבור שלא הופיע ברשימה שקיבלת."
             )
     else:
+        prefix = f"ORIGINAL QUESTION:\n{prompt.question}\n\n" if prompt.distilled_question else ""
+        focus_suffix = f"\n\nFOCUS QUESTION:\n{prompt.distilled_question}" if prompt.distilled_question else ""
         user = (
+            f"{prefix}"
             f"SOURCES (the only knowledge you may use):\n{sources_block}\n\n"
-            f"QUESTION: {prompt.question}\n\n"
+            f"QUESTION: {prompt.question}"
+            f"{focus_suffix}\n\n"
             f"Answer in English clearly and fully — explain and develop your answer, do not reply with a "
             f"single terse sentence. Write the explanation in English (you may quote the Hebrew source text), "
             f"but do NOT mix in stray words from other languages (no Chinese/Russian/etc.). Cite every claim by "
             f"its source marker like [S1]. If the sources do not contain the answer, say so plainly and do not invent. "
-            f"The identifier after the dash in each source's header (e.g. 'Yoma.148.10') is an internal "
+            f"The identifier in parentheses 'source ID' (e.g. 'Yoma.148.10') is an internal "
             f"reference only — never copy it verbatim into your answer. If you want to name a Gemara daf "
-            f"in prose, use its human form (e.g. 'Yoma 74b'), not the internal number."
+            f"in prose, use its human form (e.g. 'Tractate Yoma daf 74b' or 'Yoma 74b'), not the internal number; "
+            f"and use the title given before the parentheses."
         )
     messages.append({"role": "user", "content": user})
     return messages

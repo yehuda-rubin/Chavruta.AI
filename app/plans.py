@@ -188,13 +188,34 @@ TIERS: tuple[Tier, ...] = (
 # cost unit — `billed_tokens * $0.20 / 1e6` is the real dollar figure for any account, tier or turn,
 # with no conversion factor to get wrong. Measured 2026-08-12 over 166 production turns: 19,566
 # prompt + 1,315 completion per turn = 23,512 normalized ≈ $0.0047. If the provider or its pricing
-# ratio ever changes, this constant is where that shows up.
 COMPLETION_WEIGHT = 3
 
+DISTILLER_MODEL = "google/gemma-3-27b-it"
+DISTILLER_INPUT_WEIGHT = 0.40   # $0.08 / $0.20 (Gemma 3 27B on Nebius)
+DISTILLER_OUTPUT_WEIGHT = 1.25  # $0.25 / $0.20 (Gemma 3 27B on Nebius)
 
-def normalized_tokens(prompt_tokens: int, completion_tokens: int) -> int:
-    """What one LLM call costs in the unit the quota is denominated in."""
-    return max(0, int(prompt_tokens or 0)) + COMPLETION_WEIGHT * max(0, int(completion_tokens or 0))
+
+def normalized_tokens(prompt_tokens: int, completion_tokens: int, model: str = "") -> int:
+    """What one LLM call costs in the unit the quota is denominated in.
+
+    Baseline model (Qwen3-235B): prompt + 3 * completion.
+    Distiller model (google/gemma-3-27b-it): round(prompt * 0.40 + completion * 1.25).
+    Alternate distiller (Llama-3.3-70B): round(prompt * 0.65 + completion * 2.0).
+    """
+    p = max(0, int(prompt_tokens or 0))
+    c = max(0, int(completion_tokens or 0))
+    m = (model or "").lower()
+    if "gemma" in m or "27b" in m:
+        # Gemma 3 27B on Nebius: $0.08 / $0.25 vs baseline $0.20 / $0.60
+        return round(p * DISTILLER_INPUT_WEIGHT + c * DISTILLER_OUTPUT_WEIGHT)
+    if "llama-3.3-70b" in m or "70b" in m:
+        return round(p * 0.65 + c * 2.0)
+    return p + COMPLETION_WEIGHT * c
+
+
+def billed_tokens_for_model(prompt_tokens: int, completion_tokens: int, model: str) -> int:
+    """Unified token billing calculation supporting different models."""
+    return normalized_tokens(prompt_tokens, completion_tokens, model=model)
 
 _BY_ID = {t.id: t for t in TIERS}
 _ALIASES = {"paid": "pro"}          # pre-tier billing wrote 'paid'; it means the standard paid tier

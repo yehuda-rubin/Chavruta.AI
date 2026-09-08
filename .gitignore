@@ -165,6 +165,9 @@ design/poster/
 # from scratch, describing the RETRIEVAL PATTERN that failed — never a user's sentence.
 harvested_failures*.jsonl
 eval/harvested*.jsonl
+tests/unit/test_real_user_queries.py
+tests/real/
+.system_generated/
 
 # ---- Faith variants / independent forks (planning & code) ----
 variants/

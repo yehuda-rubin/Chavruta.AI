@@ -260,9 +260,14 @@ class ChavrutaPipeline:
         if hasattr(llm, "source_fetcher"):
             llm.source_fetcher = self._build_source_fetcher()
 
-    def _resolve_query(self, request: Query) -> Query:
+    def _resolve_query(self, request: Query, history=None) -> Query:
         if request.lang is None or request.lang == "":
             request.lang = _detect_lang(request.text)
+        from chavruta.intents.llm_planner import distill_query
+        distilled = distill_query(request.text, history=history, intent=request.intent)
+        request.distilled_text = distilled
+        if not request.search_text:
+            request.search_text = distilled
         if self.router is not None:
             return self.router.route(request)
         return request
@@ -358,7 +363,11 @@ class ChavrutaPipeline:
                 lines += [f"### [{s.marker}] {s.ref}{who}", (s.text or "").strip(), ""]
         else:
             lines += ["(no sources retrieved)", ""]
-        lines += ["## QUESTION", prompt.question.strip(), "", "## INSTRUCTIONS"]
+        lines += ["## QUESTION", prompt.question.strip()]
+        distilled = getattr(prompt, "distilled_question", "")
+        if distilled and distilled != prompt.question:
+            lines += ["", "## FOCUSED QUESTION", distilled.strip()]
+        lines += ["", "## INSTRUCTIONS"]
         lines += (["ענה אך ורק מהמקורות; צטט כל טענה בסימון [S#]; כתוב בעברית ברורה ומלאה, ללא מילים בשפה "
                    "זרה; אם אין תשובה במקורות — אמור זאת בפירוש ואל תמציא."] if he else
                   ["Answer ONLY from the SOURCES; cite every claim by [S#]; write in clear, full English "
@@ -372,7 +381,7 @@ class ChavrutaPipeline:
         override (BYOK — app/api.py::_byok_llm) so a single turn is billed to the caller's own
         provider key instead, without touching the pipeline's shared state."""
         llm = llm or self.llm
-        query = self._anchor_followup(self._resolve_query(request), history)
+        query = self._anchor_followup(self._resolve_query(request, history=history), history)
 
         # Out-of-corpus work honesty (spec edge case): the question explicitly asks about
         # a body of work that is not loaded → say so; never substitute similar-sounding
@@ -427,6 +436,12 @@ class ChavrutaPipeline:
         if query.intent in (Intent.LESSON, Intent.HALACHA):
             return self._lesson_answer(query, result, llm, history=history)
 
+        if query.intent in (Intent.CHAVRUTA, "chavruta"):
+            return self._chavruta_answer(query, result, llm, history=history)
+
+        if query.intent in (Intent.SOURCESHEET, "sourcesheet"):
+            return self._sourcesheet_answer(query, result, llm, history=history)
+
         return self._qa_answer(query, result, llm, history=history, missing_note=missing_note)
 
     def _qa_answer(self, query, result, llm=None, *, history=None, missing_note=None):
@@ -435,8 +450,10 @@ class ChavrutaPipeline:
         calendar modes, which build a `RetrievalResult` from a calendar-resolved ref instead of
         running the retriever, same principle as `_lesson_answer` being callable either way."""
         llm = llm or self.llm
+        distilled = getattr(query, "distilled_text", "") or ""
         prompt, marker_map = grounded.build_prompt(
-            query.text, result.hits, intent=query.intent, history=history, lang=query.lang
+            query.text, result.hits, intent=query.intent, history=history, lang=query.lang,
+            distilled_question=distilled,
         )
         # Run through the agentic ===NEED_SOURCES=== loop so the model can pull MORE sources when the
         # retrieved set is THIN (it answers in a single round if the sources already suffice). On a
@@ -565,13 +582,16 @@ class ChavrutaPipeline:
         """
         llm = llm or self.llm
         is_shut = query.intent is Intent.HALACHA
+        distilled = getattr(query, "distilled_text", "") or ""
         plan = self._build_lesson(query, result)
         if plan.sections:
             prompt, marker_map = grounded.build_lesson_walkthrough_prompt(
-                plan, query.text, lang=query.lang, shut=is_shut, history=history)
+                plan, query.text, lang=query.lang, shut=is_shut, history=history,
+                distilled_question=distilled)
         else:
             prompt, marker_map = grounded.build_prompt(
-                query.text, result.hits, intent=query.intent, lang=query.lang, history=history)
+                query.text, result.hits, intent=query.intent, lang=query.lang, history=history,
+                distilled_question=distilled)
         # Run through the agentic ===NEED_SOURCES=== loop, same as _qa_answer: a lesson/responsa
         # whose initial sources share only a surface word with a modern real-world question (e.g.
         # "computer" retrieving a games sugya instead of the corpus's own electricity/muktzeh
@@ -604,6 +624,58 @@ class ChavrutaPipeline:
                         retrieved_refs=[h.ref for h in result.hits] + [s.ref for s in (fetched or [])])
         answer.lesson_plan = plan
         return grounded.maybe_halacha_caveat(answer, query.lang)
+
+    def _chavruta_answer(self, query: Query, result, llm=None, *, history=None) -> Answer:
+        """Socratic study-partner chavruta turn with prompt sandwiching."""
+        llm = llm or self.llm
+        distilled = getattr(query, "distilled_text", "") or ""
+        prompt, marker_map = grounded.build_prompt(
+            query.text, result.hits, intent=Intent.QA, history=history, lang=query.lang,
+            distilled_question=distilled,
+        )
+        raw, fetched = self._agentic_generate(prompt, query.lang, Intent.QA, llm)
+        from chavruta.llm.agentic import is_degrade_message
+        if is_degrade_message(raw):
+            llm_out = llm.generate(
+                prompt, lang=query.lang,
+                max_tokens=_max_tokens_for(Intent.QA, self.profile),
+                temperature=self.profile.llm_temperature,
+            )
+            raw, fetched = llm_out.text, getattr(llm_out, "fetched_sources", None) or []
+        for i, s in enumerate(fetched or [], len(marker_map) + 1):
+            marker_map.setdefault(s.marker or f"S{i}", s)
+        text, citations, is_grounded = grounded.enforce_citations(raw, marker_map)
+        return Answer(
+            text=text, citations=citations, grounded=is_grounded,
+            no_source=not is_grounded, intent=Intent.CHAVRUTA,
+            retrieved_refs=[h.ref for h in result.hits] + [s.ref for s in (fetched or [])],
+        )
+
+    def _sourcesheet_answer(self, query: Query, result, llm=None, *, history=None) -> Answer:
+        """Sourcesheet intent synthesis using retrieved sources and prompt sandwiching."""
+        llm = llm or self.llm
+        distilled = getattr(query, "distilled_text", "") or ""
+        prompt, marker_map = grounded.build_prompt(
+            query.text, result.hits, intent=Intent.SOURCESHEET, history=history, lang=query.lang,
+            distilled_question=distilled,
+        )
+        raw, fetched = self._agentic_generate(prompt, query.lang, Intent.SOURCESHEET, llm)
+        from chavruta.llm.agentic import is_degrade_message
+        if is_degrade_message(raw):
+            llm_out = llm.generate(
+                prompt, lang=query.lang,
+                max_tokens=_max_tokens_for(Intent.SOURCESHEET, self.profile),
+                temperature=self.profile.llm_temperature,
+            )
+            raw, fetched = llm_out.text, getattr(llm_out, "fetched_sources", None) or []
+        for i, s in enumerate(fetched or [], len(marker_map) + 1):
+            marker_map.setdefault(s.marker or f"S{i}", s)
+        text, citations, is_grounded = grounded.enforce_citations(raw, marker_map)
+        return Answer(
+            text=text, citations=citations, grounded=is_grounded,
+            no_source=not is_grounded, intent=Intent.SOURCESHEET,
+            retrieved_refs=[h.ref for h in result.hits] + [s.ref for s in (fetched or [])],
+        )
 
     def _template_index(self, intent=None):
         """Lazily load the template index for the intent — the responsa (שו"ת) set for HALACHA,
