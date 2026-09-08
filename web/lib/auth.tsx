@@ -14,6 +14,8 @@ interface AuthState {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, meta?: Record<string, unknown>) => Promise<{ needsConfirm: boolean }>;
   signOut: () => Promise<void>;
+  // Resends sign-up email confirmation link (e.g. if user missed the first email).
+  resendConfirmation: (email: string) => Promise<void>;
   // Sends a recovery-link email; the link lands on /reset-password, which exchanges it for a
   // session (detectSessionInUrl) and calls updatePassword below.
   resetPassword: (email: string) => Promise<void>;
@@ -76,6 +78,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await sb.auth.signOut();
   }, []);
 
+  const resendConfirmation = useCallback(async (email: string) => {
+    const sb = getSupabase();
+    if (!sb) return;
+    const { error } = await sb.auth.resend({
+      type: "signup",
+      email: email.trim(),
+    });
+    if (error) throw error;
+  }, []);
+
   const resetPassword = useCallback(async (email: string) => {
     const sb = getSupabase();
     if (!sb) return;
@@ -102,9 +114,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<AuthState>(
     () => ({
       enabled: supabaseEnabled, loading, user, signIn, signUp, signOut,
-      resetPassword, updatePassword, updateMetadata,
+      resendConfirmation, resetPassword, updatePassword, updateMetadata,
     }),
-    [loading, user, signIn, signUp, signOut, resetPassword, updatePassword, updateMetadata],
+    [loading, user, signIn, signUp, signOut, resendConfirmation, resetPassword, updatePassword, updateMetadata],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

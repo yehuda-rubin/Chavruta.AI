@@ -217,15 +217,26 @@ class ResendProvider(EmailProvider):
 
 
 class EmailPool:
-    """Manages the hybrid email pool (Brevo -> Amazon SES -> Resend) with quota tracking."""
+    """Manages the hybrid email pool (Amazon SES / Brevo / Resend) with quota tracking."""
 
     def __init__(self, providers: list[EmailProvider] | None = None):
         self._lock = threading.Lock()
-        self._providers = providers or [
-            BrevoProvider(),      # Primary (Free 300/day)
-            AmazonSESProvider(),  # Overflow / Backup (Capped at $1)
-            ResendProvider(),     # Optional 3rd fallback
-        ]
+        if providers is not None:
+            self._providers = providers
+        else:
+            primary = os.environ.get("EMAIL_PRIMARY_PROVIDER", "amazon_ses").strip().lower()
+            if primary == "brevo":
+                self._providers = [
+                    BrevoProvider(),      # Primary (Free 300/day)
+                    AmazonSESProvider(),  # Overflow / Backup
+                    ResendProvider(),     # 3rd fallback
+                ]
+            else:
+                self._providers = [
+                    AmazonSESProvider(),  # Primary (Verified & Active)
+                    BrevoProvider(),      # Secondary / Overflow
+                    ResendProvider(),     # 3rd fallback
+                ]
         # In-memory tracking: { "YYYY-MM-DD": { "provider_name": count } }
         self._usage: dict[str, dict[str, int]] = {}
 

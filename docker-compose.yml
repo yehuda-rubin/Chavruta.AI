@@ -124,6 +124,7 @@ services:
       CHAVRUTA_DB_PATH: /app-data/chavruta.db
 
       # Email sending (Multi-provider pool & broadcasts)
+      EMAIL_PRIMARY_PROVIDER: ${EMAIL_PRIMARY_PROVIDER:-amazon_ses}
       EMAIL_FROM: ${EMAIL_FROM:-}
       BREVO_API_KEY: ${BREVO_API_KEY:-}
       BREVO_FROM: ${BREVO_FROM:-}

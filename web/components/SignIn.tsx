@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Lang } from "@/lib/types";
 import { tr, type StringKey } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
@@ -31,7 +31,7 @@ function authErrorKey(msg: string, mode: "in" | "up" = "in"): StringKey {
 // (our own markup) precisely so the form is native Hebrew RTL — the reason we chose Supabase over a
 // prebuilt component library. Email + password, with a sign-up toggle.
 export function SignIn({ lang }: { lang: Lang }) {
-  const { signIn, signUp, resetPassword } = useAuth();
+  const { signIn, signUp, resendConfirmation, resetPassword } = useAuth();
   const [resetBusy, setResetBusy] = useState(false);
   const [mode, setMode] = useState<"in" | "up">("in");
   const [email, setEmail] = useState("");
@@ -47,6 +47,37 @@ export function SignIn({ lang }: { lang: Lang }) {
   // lawful under the anti-spam law (Communications Law §30A), which needs explicit prior consent
   // separate from accepting the terms.
   const [marketingConsent, setMarketingConsent] = useState(false);
+
+  // Email confirmation state & 60-second cooldown timer
+  const [confirmPendingEmail, setConfirmPendingEmail] = useState<string | null>(null);
+  const [resendCooldown, setResendCooldown] = useState(60);
+  const [resendBusy, setResendBusy] = useState(false);
+  const [resendSuccess, setResendSuccess] = useState(false);
+
+  useEffect(() => {
+    if (!confirmPendingEmail || resendCooldown <= 0) return;
+    const interval = setInterval(() => {
+      setResendCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [confirmPendingEmail, resendCooldown]);
+
+  const handleResend = async () => {
+    if (!confirmPendingEmail || resendCooldown > 0 || resendBusy) return;
+    setResendBusy(true);
+    setError("");
+    setResendSuccess(false);
+    try {
+      await resendConfirmation(confirmPendingEmail);
+      setResendSuccess(true);
+      setResendCooldown(60);
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : "";
+      setError(tr(lang, authErrorKey(raw, "up")));
+    } finally {
+      setResendBusy(false);
+    }
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -76,7 +107,11 @@ export function SignIn({ lang }: { lang: Lang }) {
           marketing_consent: marketingConsent,
           marketing_consent_at: new Date().toISOString(),
         });
-        if (needsConfirm) setNotice(tr(lang, "authCheckEmail"));
+        if (needsConfirm) {
+          setConfirmPendingEmail(email.trim());
+          setResendCooldown(60);
+          setResendSuccess(false);
+        }
       } else {
         await signIn(email.trim(), password);
       }
@@ -107,6 +142,79 @@ export function SignIn({ lang }: { lang: Lang }) {
       setResetBusy(false);
     }
   };
+
+  if (confirmPendingEmail) {
+    return (
+      <div className="min-h-dvh grid place-items-center p-4">
+        <div className="glass rounded-[28px] p-8 w-full max-w-sm flex flex-col gap-5 text-center">
+          <div className="h-16 w-16 rounded-2xl grad mx-auto grid place-items-center text-white shadow-md">
+            <Icon name="mark_email_read" className="text-[32px]" />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <h2 className="font-serif text-2xl font-bold text-tekhelet">{tr(lang, "authConfirmSentTitle")}</h2>
+            <p className="text-xs text-ink/75 leading-relaxed">
+              {tr(lang, "authConfirmSentDesc")}{" "}
+              <strong className="text-tekhelet font-semibold dir-ltr inline-block">{confirmPendingEmail}</strong>
+            </p>
+            <p className="text-[11px] text-ink/50 leading-relaxed mt-1">
+              {tr(lang, "authConfirmCheckSpam")}
+            </p>
+          </div>
+
+          {resendSuccess && (
+            <div className="rounded-2xl p-2.5 bg-emerald-500/10 border border-emerald-500/25 text-emerald-800 text-xs flex items-center justify-center gap-2">
+              <Icon name="check_circle" className="text-emerald-600 text-sm" />
+              <span>{tr(lang, "authResendSuccess")}</span>
+            </div>
+          )}
+
+          {error && (
+            error === tr(lang, "authErrDailyQuotaExceeded") ? (
+              <div className="rounded-2xl p-3 bg-amber-500/10 border border-amber-500/25 text-amber-900 flex items-start gap-2.5 text-xs leading-relaxed text-right">
+                <Icon name="schedule" className="text-amber-700 text-base shrink-0 mt-0.5" />
+                <span>{error}</span>
+              </div>
+            ) : (
+              <p className="text-xs text-red-600 leading-relaxed">{error}</p>
+            )
+          )}
+
+          <div className="flex flex-col gap-2.5 pt-1">
+            <button
+              onClick={handleResend}
+              disabled={resendBusy || resendCooldown > 0}
+              className="py-3 px-4 rounded-full grad text-white font-bold text-sm hover:opacity-95 transition disabled:opacity-50 flex items-center justify-center gap-2 shadow-sm"
+            >
+              {resendBusy ? (
+                <span>{tr(lang, "authWorking")}</span>
+              ) : resendCooldown > 0 ? (
+                <>
+                  <Icon name="schedule" className="text-base" />
+                  <span>{tr(lang, "authResendCooldown").replace("{seconds}", String(resendCooldown))}</span>
+                </>
+              ) : (
+                <>
+                  <Icon name="refresh" className="text-base" />
+                  <span>{tr(lang, "authResendEmail")}</span>
+                </>
+              )}
+            </button>
+
+            <button
+              onClick={() => {
+                setConfirmPendingEmail(null);
+                setError("");
+                setResendSuccess(false);
+              }}
+              className="text-xs text-ink/55 hover:text-tekhelet py-1 transition"
+            >
+              {tr(lang, "authChangeEmail")}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const field =
     "w-full glass rounded-2xl px-4 py-3 font-serif text-[15px] outline-none focus:ring-2 focus:ring-indigo/30";
@@ -199,7 +307,23 @@ export function SignIn({ lang }: { lang: Lang }) {
                 <span>{error}</span>
               </div>
             ) : (
-              <p className="text-xs text-red-600 leading-relaxed">{error}</p>
+              <div className="flex flex-col gap-1.5">
+                <p className="text-xs text-red-600 leading-relaxed">{error}</p>
+                {error === tr(lang, "authErrUnconfirmed") && email.trim() && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConfirmPendingEmail(email.trim());
+                      setResendCooldown(0);
+                      setError("");
+                      setResendSuccess(false);
+                    }}
+                    className="text-xs text-tekhelet font-semibold hover:underline self-start"
+                  >
+                    {tr(lang, "authResendEmail")}
+                  </button>
+                )}
+              </div>
             )
           )}
           {notice && <p className="text-xs text-green-700 leading-relaxed">{notice}</p>}

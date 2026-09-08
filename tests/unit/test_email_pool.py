@@ -127,6 +127,16 @@ def test_pool_empty_unconfigured():
     assert reason == "no_providers_configured"
 
 
+def test_pool_primary_provider_selection(monkeypatch):
+    monkeypatch.setenv("EMAIL_PRIMARY_PROVIDER", "amazon_ses")
+    pool_ses = ep.EmailPool()
+    assert pool_ses._providers[0].name == "amazon_ses"
+
+    monkeypatch.setenv("EMAIL_PRIMARY_PROVIDER", "brevo")
+    pool_brevo = ep.EmailPool()
+    assert pool_brevo._providers[0].name == "brevo"
+
+
 def test_pool_waterfall_uses_brevo_first():
     mock_brevo = MagicMock(spec=ep.EmailProvider)
     mock_brevo.name = "brevo"
