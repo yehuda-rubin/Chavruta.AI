@@ -316,6 +316,128 @@
     color: var(--muted);
   }
 
+  /* Real UI Mockup */
+  .ui-mockup {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.06);
+    overflow: hidden;
+    margin-top: 20px;
+  }
+  .mockup-header {
+    background: color-mix(in srgb, var(--tekhelet) 5%, var(--panel));
+    border-bottom: 1px solid var(--line);
+    padding: 12px 18px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .mockup-dots {
+    display: flex;
+    gap: 6px;
+  }
+  .mockup-dots span {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--line);
+  }
+  .mockup-title {
+    font-size: 0.84rem;
+    font-weight: 600;
+    color: var(--muted);
+  }
+  .mockup-chat {
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .mockup-msg {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .mockup-msg.user {
+    align-self: flex-end;
+    max-width: 84%;
+  }
+  .mockup-msg.ai {
+    align-self: flex-start;
+    max-width: 100%;
+  }
+  .msg-sender {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .mockup-msg.user .msg-text {
+    background: var(--tekhelet);
+    color: #ffffff;
+    padding: 12px 18px;
+    border-radius: 14px 14px 2px 14px;
+    font-size: 0.98rem;
+  }
+  @media (prefers-color-scheme: dark) {
+    .mockup-msg.user .msg-text {
+      background: #2b4975;
+      color: #ffffff;
+    }
+  }
+  .mockup-msg.ai .msg-text {
+    background: color-mix(in srgb, var(--bg) 60%, var(--panel));
+    border: 1px solid var(--line);
+    padding: 14px 18px;
+    border-radius: 14px 14px 14px 2px;
+    font-size: 0.98rem;
+    color: var(--ink);
+    line-height: 1.55;
+  }
+  .mockup-citation {
+    margin-top: 10px;
+    background: var(--gold-bg);
+    border: 1px solid var(--gold-soft);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .cite-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .cite-pill {
+    background: var(--gold);
+    color: #ffffff;
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 6px;
+  }
+  .cite-ref {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--tekhelet-2);
+  }
+  .cite-quote {
+    font-family: 'Heebo', serif;
+    font-size: 1.05rem;
+    color: var(--ink);
+    line-height: 1.6;
+    margin: 8px 0;
+    font-weight: 600;
+  }
+  .cite-note {
+    font-size: 0.82rem;
+    color: var(--muted);
+    font-style: italic;
+  }
+
   /* Features */
   .feature-list {
     display: grid;
@@ -466,7 +588,7 @@
 
   <!-- Hero -->
   <section class="hero">
-    <div class="pill-tag">Built for Serious Torah Learning</div>
+    <div class="pill-tag">Built for Torah Learning</div>
     <h1>Learn Torah with AI.<br>Verify Every Source.</h1>
     <div class="hero-tagline">Your next chavruta is always ready.</div>
     <p class="lead">
@@ -516,6 +638,48 @@
         <p>
           Retrieves actual passages from Sefaria's authentic corpus. Citations are connected directly to the source texts, so you can click, open, and verify them yourself.
         </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Real UI Mockup -->
+  <section class="block">
+    <div class="section-label">Real Example</div>
+    <h2>See How It Works</h2>
+    <p class="subhead">
+      Authentic citations from Sefaria, connected directly to the source text.
+    </p>
+
+    <div class="ui-mockup">
+      <div class="mockup-header">
+        <div class="mockup-dots">
+          <span></span><span></span><span></span>
+        </div>
+        <div class="mockup-title">Chavruta.AI · Beit Midrash Session</div>
+      </div>
+      <div class="mockup-chat">
+        <div class="mockup-msg user">
+          <div class="msg-sender">You</div>
+          <div class="msg-text">What does Rashi say about why the Torah begins with Bereishit instead of the first mitzvah?</div>
+        </div>
+        <div class="mockup-msg ai">
+          <div class="msg-sender">Chavruta.AI</div>
+          <div class="msg-text">
+            Rashi addresses this immediately on the very first verse, quoting Rabbi Yitzchak that the Torah should have started with <em>"HaChodesh HaZeh Lachem"</em> (Exodus 12:2) as the first commandment given to the Jewish nation:
+          </div>
+          <div class="mockup-citation">
+            <div class="cite-top">
+              <span class="cite-pill">✓ Sefaria Source</span>
+              <span class="cite-ref">Rashi on Genesis 1:1:1</span>
+            </div>
+            <div class="cite-quote" dir="rtl" lang="he">
+              "אָמַר רַבִּי יִצְחָק לֹא הָיָה צָרִיךְ לְהַתְחִיל אֶת הַתּוֹרָה אֶלָּא מֵהַחֹדֶשׁ הַזֶּה לָכֶם, שֶׁהִיא מִצְוָה רִאשׁוֹנָה שֶׁנִּצְטַוּוּ בָּהּ יִשְׂרָאֵל, וּמַה טַּעַם פָּתַח בִּבְרֵאשִׁית..."
+            </div>
+            <div class="cite-note">
+              Clickable citation · Opens directly in Sefaria's authentic edition
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </section>
