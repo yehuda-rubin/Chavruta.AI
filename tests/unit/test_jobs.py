@@ -100,6 +100,15 @@ def test_job_cancellation_and_session_lookup():
     assert reg.get_active_for_session("session_123", "alice") is None
 
 
+def test_cancellation_attributes_accessible_on_registry_and_module():
+    from app.jobs import JobCancelledError, is_cancelled, registry
+    assert hasattr(registry, "JobCancelledError")
+    assert registry.JobCancelledError is JobCancelledError
+    assert hasattr(registry, "is_cancelled")
+    assert callable(registry.is_cancelled)
+    assert is_cancelled() is False
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
 

@@ -70,6 +70,9 @@ class JobRegistry:
     jobs past their TTL so the dict can't grow without bound.
     """
 
+    JobCancelledError = JobCancelledError
+    is_cancelled = staticmethod(is_cancelled)
+
     def __init__(self, max_workers: int = 2, ttl_s: float = 3600.0):
         self._pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="job")
         self._jobs: dict[str, Job] = {}

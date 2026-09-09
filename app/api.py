@@ -504,7 +504,7 @@ import app.devhelpers as devhelpers
 import app.db as db
 from app import plans
 from app.billing import payplus
-from app.jobs import registry as jobs
+from app.jobs import JobCancelledError, is_cancelled, registry as jobs
 
 
 # ── Startup ───────────────────────────────────────────────────────────────────
@@ -2418,7 +2418,7 @@ def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
                                owner_id, llm)
     except HTTPException:
         raise
-    except jobs.JobCancelledError:
+    except JobCancelledError:
         raise
     except Exception:
         _log.exception("query processing failed (intent=%r)", intent_str)
@@ -2584,8 +2584,8 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
         )
         return QueryResponse(answer=msg, citations=[], grounded=False, intent=intent_str or "qa", files=[])
 
-    if jobs.is_cancelled():
-        raise jobs.JobCancelledError("job cancelled by user")
+    if is_cancelled():
+        raise JobCancelledError("job cancelled by user")
     q = Query(
         text=question,
         lang=lang or None,
@@ -2594,8 +2594,8 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
         search_text=dist_res.distilled_query or None,
     )
     answer = _get_pipeline().ask(q, history=history, llm=llm)
-    if jobs.is_cancelled():
-        raise jobs.JobCancelledError("job cancelled by user")
+    if is_cancelled():
+        raise JobCancelledError("job cancelled by user")
 
     def _cite(c) -> CitationOut:
         from chavruta.corpus.refs import license_for_ref
