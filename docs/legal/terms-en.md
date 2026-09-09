@@ -8,9 +8,9 @@
 
 **Version 1.13 · Effective 2 September 2026**
 
-Changes in version 1.13: section 10 updated for **Stop Generation** — clarified that when a user
-stops an in-progress response, quota usage is calculated strictly based on actual tokens consumed up
-to the cancellation, with a single-cancellation allowance per message when using credits.
+Changes in version 1.13: section 10 updated for **Stop Generation** — clarified that submitting
+a question or request consumes the required quota or credits at the start of processing, and stopping
+an in-progress response mid-stream does not entitle the user to a refund of quota or credits.
 
 Changes in version 1.12: a new section **11a — Development Helpers** covers users we invite
 to help test the Service. Its central point is stated explicitly precisely because it is not
@@ -216,10 +216,9 @@ restore the subscription** — stopping a recurring charge is not reversible at 
 you would need to subscribe again. The 14-day cancellation right above applies as usual, independently
 of account deletion.
 
-**Stopping an In-Progress Response (Stop Generation):** when you choose to stop a response while it is being
-generated, token consumption is measured and billed based solely on actual tokens processed up to the
-moment of cancellation. For accounts utilising extra credits, an allowance of one cancellation per message
-is granted without duplicate deduction.
+**Stopping an In-Progress Response (Stop Generation):** submitting a question or request consumes the
+required quota or credits at the start of processing. Stopping generation mid-stream at the user's
+initiative does not entitle the user to a refund of quota or credits.
 
 ## 11. Coupons
 Coupons may be offered from time to time. A coupon grants a specific benefit (a time-limited plan tier

@@ -1684,6 +1684,7 @@ TOKENS, LESSON = "tokens", "lesson"
 # (never persisted — see app/api.py::_byok_llm). Own meters so the two pools never mix: the plan
 # quota still resets/reports exactly as it did before this existed.
 BYOK_TOKENS, BYOK_LESSON = "byok_tokens", "byok_lesson"
+CREDIT_STOP_REFUNDS = "credit_stop_refunds"
 
 
 def _counts(conn, owner_id: str, day: str, meter: str) -> tuple[int, int]:
@@ -1951,6 +1952,36 @@ def spend_credits(owner_id: str, amount: int) -> tuple[bool, int]:
             return False, have
         conn.execute("UPDATE accounts SET credits = credits - ? WHERE owner_id=?", (amount, owner_id))
         return True, have - amount
+
+
+def refund_stopped_credits(owner_id: str, credits_spent: int, max_weekly: int = 3,
+                           day: str | None = None) -> int:
+    """Refund up to `max_weekly` credits per week (Sunday-start) for user-stopped generations.
+    Returns the number of credits actually refunded (0 if weekly limit reached).
+    """
+    if credits_spent <= 0 or max_weekly <= 0:
+        return 0
+    target_day = day or today_il()
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        _day_spent, week_refunded = _counts(conn, owner_id, target_day, CREDIT_STOP_REFUNDS)
+        available = max(0, max_weekly - week_refunded)
+        to_refund = min(credits_spent, available)
+        if to_refund <= 0:
+            return 0
+        conn.execute(
+            "INSERT INTO accounts (owner_id, credits) VALUES (?,?) "
+            "ON CONFLICT(owner_id) DO UPDATE SET credits = credits + excluded.credits",
+            (owner_id, to_refund))
+        row = conn.execute(
+            "SELECT count FROM usage_counters WHERE owner_id=? AND day=? AND meter=?",
+            (owner_id, target_day, CREDIT_STOP_REFUNDS)).fetchone()
+        current = int(row["count"]) if row else 0
+        conn.execute(
+            "INSERT INTO usage_counters (owner_id, day, meter, count) VALUES (?,?,?,?) "
+            "ON CONFLICT(owner_id, day, meter) DO UPDATE SET count = excluded.count",
+            (owner_id, target_day, CREDIT_STOP_REFUNDS, current + to_refund))
+        return to_refund
 
 
 # ── Coupons ───────────────────────────────────────────────────────────────────

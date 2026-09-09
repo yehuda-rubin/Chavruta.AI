@@ -2418,6 +2418,8 @@ def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
                                owner_id, llm)
     except HTTPException:
         raise
+    except jobs.JobCancelledError:
+        raise
     except Exception:
         _log.exception("query processing failed (intent=%r)", intent_str)
         return QueryResponse(
@@ -2582,6 +2584,8 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
         )
         return QueryResponse(answer=msg, citations=[], grounded=False, intent=intent_str or "qa", files=[])
 
+    if jobs.is_cancelled():
+        raise jobs.JobCancelledError("job cancelled by user")
     q = Query(
         text=question,
         lang=lang or None,
@@ -2590,6 +2594,8 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
         search_text=dist_res.distilled_query or None,
     )
     answer = _get_pipeline().ask(q, history=history, llm=llm)
+    if jobs.is_cancelled():
+        raise jobs.JobCancelledError("job cancelled by user")
 
     def _cite(c) -> CitationOut:
         from chavruta.corpus.refs import license_for_ref
@@ -4266,7 +4272,7 @@ def query_async(req: QueryRequest, owner: str = Depends(current_owner),
         jid = jobs.submit(owner, _metered(owner, reserved, req.intent, lambda: jsonable_encoder(
             _run_query(q, req.lang, req.intent, [], audience=req.audience,
                        grade_band=req.grade_band, length=req.length, owner_id=owner, llm=llm)),
-            req, meter=meter))
+            req, meter=meter), credits_spent=reserved.credits_spent)
     return JobAccepted(job_id=jid)
 
 
@@ -4287,7 +4293,7 @@ def create_session_async(req: QueryRequest, owner: str = Depends(current_owner),
         jid = jobs.submit(owner, _metered(
             owner, reserved, req.intent,
             lambda: jsonable_encoder(_first_query_work(sid, req, owner, llm=llm)),
-            req, meter=meter), session_id=sid)
+            req, meter=meter), session_id=sid, credits_spent=reserved.credits_spent)
     return JobAccepted(job_id=jid, session_id=sid)
 
 
@@ -4306,7 +4312,7 @@ def session_query_async(session_id: str, req: QueryRequest, owner: str = Depends
         history, intent = _prepare_continue(session_id, req, owner)
         jid = jobs.submit(owner, _metered(owner, reserved, req.intent, lambda: jsonable_encoder(
             _continue_query_work(session_id, req, history, intent, owner, llm=llm)),
-            req, meter=meter), session_id=session_id)
+            req, meter=meter), session_id=session_id, credits_spent=reserved.credits_spent)
     return JobAccepted(job_id=jid, session_id=session_id)
 
 
@@ -4334,8 +4340,13 @@ def get_job(job_id: str, owner: str = Depends(current_owner)):
 @app.post("/jobs/{job_id}/cancel")
 def cancel_job(job_id: str, owner: str = Depends(current_owner)):
     """Cancel an in-progress generation job."""
-    ok = jobs.cancel(job_id, owner)
-    return {"cancelled": ok, "job_id": job_id}
+    ok, spent = jobs.cancel_job(job_id, owner)
+    refunded = 0
+    if ok and spent > 0:
+        refunded = db.refund_stopped_credits(owner, spent, max_weekly=3)
+        if refunded:
+            _log.info("owner=%s refunded %d credit(s) on stop (spent %d)", owner, refunded, spent)
+    return {"cancelled": ok, "job_id": job_id, "refunded_credits": refunded}
 
 
 @app.post("/sessions/{session_id}/cancel")
@@ -4343,9 +4354,14 @@ def cancel_session_job(session_id: str, owner: str = Depends(current_owner)):
     """Cancel any in-progress generation job for a session."""
     active = jobs.get_active_for_session(session_id, owner)
     if active:
-        ok = jobs.cancel(active.id, owner)
-        return {"cancelled": ok, "job_id": active.id, "session_id": session_id}
-    return {"cancelled": False, "session_id": session_id}
+        ok, spent = jobs.cancel_job(active.id, owner)
+        refunded = 0
+        if ok and spent > 0:
+            refunded = db.refund_stopped_credits(owner, spent, max_weekly=3)
+            if refunded:
+                _log.info("owner=%s refunded %d credit(s) on stop (spent %d)", owner, refunded, spent)
+        return {"cancelled": ok, "job_id": active.id, "session_id": session_id, "refunded_credits": refunded}
+    return {"cancelled": False, "session_id": session_id, "refunded_credits": 0}
 
 
 class MessageOut(BaseModel):
