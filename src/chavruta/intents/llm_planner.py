@@ -129,11 +129,11 @@ def parse_distiller_output(raw: str, original_query: str) -> DistillerResult:
     # Check for HHH (Chitchat / Idle / Greeting / Thanks)
     first_token = clean.split()[0].strip("[]:-,. ").upper() if clean.split() else ""
     if first_token == "HHH":
-        # SAFETY NET: If the user's input actually contained a question or halachic/Torah inquiry,
-        # it is NEVER chitchat even if the model started with HHH!
-        has_question_mark = "?" in orig_clean or "؟" in orig_clean
+        # SAFETY NET: Only override HHH to study if the user's input actually contains
+        # explicit halachic/Torah inquiry keywords (e.g. מותר, אסור, חזיר, כיפור, שבת, כשר, הלכה, דין, רב...).
+        # Casual non-Torah questions (e.g. "אתה אוהב שוקולד?", "מה שלומך?", "איך קוראים לך?") remain HHH!
         has_halachic_kw = any(w in _HALACHIC_INTERROGATIVE_KEYWORDS for w in orig_words)
-        if (has_question_mark and len(orig_words) > 3) or has_halachic_kw:
+        if has_halachic_kw:
             return DistillerResult(action="study", distilled_query=original_query, raw=raw)
 
         answer = strip_control_codes(clean)

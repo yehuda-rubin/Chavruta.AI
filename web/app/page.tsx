@@ -572,15 +572,22 @@ export default function Home() {
         appendIfCurrent({ role: "assistant", text: r.answer, citations: r.citations || [], caveats: r.caveats || [], grounded: r.grounded, files: r.files, source_note: r.source_note });
       try {
         if (activeId) {
-          const res = await api.sessionQueryAsync(activeId, text, intent, lang, extras, att, (jid) => {
+          await api.sessionQueryAsync(activeId, text, intent, lang, extras, att, (jid) => {
             setSessionJob(activeId, jid);
           });
           clearSessionJob(activeId);
-          push(res);
+          try {
+            const msgs = await api.sessionMessages(activeId);
+            if (activeIdRef.current === activeId) setMessages(msgs);
+          } catch {
+            /* ignore */
+          }
         } else {
           // Async create: the session id comes back immediately (onSession) so the new chat attaches
           // to the UI while the (possibly minutes-long) first lesson generates on the job queue.
-          const s = await api.createSessionAsync(text, intent, lang, extras, att, (id, jid) => {
+          let createdId = "";
+          await api.createSessionAsync(text, intent, lang, extras, att, (id, jid) => {
+            createdId = id;
             target = id;
             setLoadingTarget(id);
             setActiveId(id);
@@ -592,8 +599,16 @@ export default function Home() {
             setSessionJob(id, jid);
             refreshSessions();
           });
-          if (target) clearSessionJob(target);
-          push(s.result);
+          const finalId = createdId || target;
+          if (finalId) {
+            clearSessionJob(finalId);
+            try {
+              const msgs = await api.sessionMessages(finalId);
+              if (activeIdRef.current === finalId) setMessages(msgs);
+            } catch {
+              /* ignore */
+            }
+          }
           refreshSessions();
         }
       } catch (e) {
