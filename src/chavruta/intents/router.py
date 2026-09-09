@@ -104,6 +104,65 @@ def is_pure_greeting(text: str) -> bool:
     return bool(_PURE_GREETING_PAT.match(text))
 
 
+_PURE_ACK_PREFIXES = (
+    "תודה", "יישר כוח", "יישר כח", "חזק וברוך", "שכוייח", "חן חן",
+    "מעולה תודה", "אחלה תודה", "סבבה תודה", "הבנתי תודה", "אוקיי תודה", "אוקי תודה",
+    "בסדר גמור תודה", "נפלא תודה", "מצוין תודה",
+    "thanks", "thank you", "great thanks", "got it thanks",
+)
+
+_STANDALONE_ACKS = {
+    "תודה", "תודה רבה", "תודה רבה לך", "תודה לך", "יישר כוח", "יישר כח", "יישר כוחך",
+    "חזק וברוך", "שכוייח", "חן חן", "מעולה", "אחלה", "סבבה", "הבנתי", "בסדר גמור",
+    "מצוין", "נפלא", "thanks", "thank you", "thank you very much", "got it",
+}
+
+_NON_ACK_KEYWORDS = {
+    "?", "؟", "מה", "האם", "למה", "מדוע", "איך", "כיצד", "מתי", "איפה", "היכן",
+    "מי", "מניין", "איזה", "איזו", "אילו", "אבל", "אלא", "ומה", "והאם", "ולמה",
+    "תסביר", "הסבר", "פרט", "תפרט", "הרחב", "תרחיב", "תביא", "תראה",
+    "מקור", "מקורות", "פסוק", "גמרא", "סוגיה", "שיעור", "דין", "הלכה", "מותר", "אסור",
+    "what", "why", "how", "when", "where", "who", "which", "but",
+}
+
+
+def is_conversational_acknowledgement(text: str) -> bool:
+    """Return True if text is a conversational acknowledgement/gratitude/closing turn
+    without any substantive inquiry or question.
+    """
+    if not text:
+        return False
+    clean = " ".join(text.strip().split())
+    if not clean:
+        return False
+    if "?" in clean or "؟" in clean:
+        return False
+
+    stripped = clean.strip(".!?,;:~- ")
+    low_stripped = stripped.lower()
+    if stripped in _STANDALONE_ACKS or low_stripped in _STANDALONE_ACKS:
+        return True
+
+    words = clean.split()
+    if len(words) > 14:
+        return False
+
+    matched_prefix = False
+    for p in _PURE_ACK_PREFIXES:
+        if clean.startswith(p) or clean.lower().startswith(p):
+            matched_prefix = True
+            break
+    if not matched_prefix and not any(w in ("תודה", "מעולה", "הבנתי", "שכוייח") for w in words[:2]):
+        return False
+
+    clean_words_lower = [w.strip(".!?,;:~-\"'״`()").lower() for w in words]
+    for w in clean_words_lower:
+        if w in _NON_ACK_KEYWORDS:
+            return False
+
+    return True
+
+
 
 # Modern technology terms whose halachically-operative concept shares no root with the surface
 # word. A question like "is it permitted to play on a COMPUTER on Shabbat" embeds close to the

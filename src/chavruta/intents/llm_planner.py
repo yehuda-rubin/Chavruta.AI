@@ -71,12 +71,106 @@ def _parse(raw: str) -> dict:
     return {"refs": refs, "commentators": comms, "intent": intent}
 
 
+from dataclasses import dataclass, field
+
+
+@dataclass
+class DistillerResult:
+    action: str  # "chitchat" | "study"
+    answer: str = ""  # direct answer if chitchat (codes stripped)
+    distilled_query: str = ""  # cleaned search query if study (codes stripped)
+    requested_files: list[str] = field(default_factory=list)  # e.g. ["sources", "flow"]
+    raw: str = ""  # raw model output
+
+
 DISTILLER_MODEL = "google/gemma-3-27b-it"
 
+_CONTROL_CODES_MAP = {
+    "ZZZ": ["sources", "flow", "full"],
+    "XXX": ["sources"],
+    "YYY": ["flow"],
+    "WWW": ["full"],
+    "PPP": ["pdf"],
+    "NNN": [],
+}
+
+_ALL_CONTROL_CODES = ("HHH", "ZZZ", "XXX", "YYY", "WWW", "PPP", "NNN")
+
+_CONTROL_CODES_PREFIX_RE = re.compile(
+    r"^(?:\[?(?:HHH|ZZZ|XXX|YYY|WWW|PPP|NNN)\]?[\s:\-]*)+",
+    re.IGNORECASE,
+)
+
+
+def strip_control_codes(text: str) -> str:
+    """Completely hide/strip internal routing and file control codes from user-facing text."""
+    if not text:
+        return ""
+    clean = _CONTROL_CODES_PREFIX_RE.sub("", text.strip()).strip()
+    return clean
+
+
+def parse_distiller_output(raw: str, original_query: str) -> DistillerResult:
+    """Parse the distiller output into action, answer, query, and requested files."""
+    clean = (raw or "").strip()
+    if not clean:
+        return DistillerResult(action="study", distilled_query=original_query, raw=raw)
+
+    # Check for HHH (Chitchat / Idle / Greeting / Thanks)
+    first_token = clean.split()[0].strip("[]:-,. ").upper() if clean.split() else ""
+    if first_token == "HHH":
+        answer = strip_control_codes(clean)
+        return DistillerResult(action="chitchat", answer=answer, raw=raw)
+
+    # Check for file codes (single or multiple space-separated, e.g. "XXX YYY")
+    words = clean.split()
+    requested_files: list[str] = []
+    idx = 0
+    while idx < len(words):
+        token = words[idx].strip("[]:-,. ").upper()
+        if token in _CONTROL_CODES_MAP:
+            for f in _CONTROL_CODES_MAP[token]:
+                if f not in requested_files:
+                    requested_files.append(f)
+            idx += 1
+        else:
+            break
+
+    remaining_query = " ".join(words[idx:]).strip()
+    distilled = strip_control_codes(remaining_query) if remaining_query else original_query
+    return DistillerResult(
+        action="study",
+        distilled_query=distilled if distilled else original_query,
+        requested_files=requested_files,
+        raw=raw,
+    )
+
+
 _DISTILL_SYSTEM = (
-    "You extract the single core Halachic or Torah question/topic from a user query. "
-    "Return ONLY the single core question or topic in 1 concise sentence in Hebrew. "
-    "No introduction, no formatting, no quotes, no extra prose."
+    "You are the query classifier, router, and distiller for Chavruta (Torah study partner).\n"
+    "Analyze the user's input (and conversation history if present) and output strictly in this protocol:\n\n"
+    "1. IDLE / CHITCHAT / GREETING / THANKS / NON-TORAH (שאלת סרק, תודה, ברכה, סגירת שיחה):\n"
+    "Start with code HHH followed by a short, warm, polite response in Hebrew.\n"
+    "Do NOT search or extract any query.\n"
+    "Example input: 'תודה אגיד לו שצדקתי'\n"
+    "Example output: HHH בשמחה רבה! שמחתי לעזור. שיהיה בהצלחה בדיון, ותמיד כאן לכל שאלה נוספת.\n"
+    "Example input: 'שלום מה נשמע?'\n"
+    "Example output: HHH שלום וברכה! הכול מצוין, ברוך השם. במה נוכל להעמיק היום?\n\n"
+    "2. TORAH / HALACHA / STUDY QUERY:\n"
+    "Start with the file generation code(s):\n"
+    "- NNN: ללא קבצים (תשובה טקסטואלית רגילה)\n"
+    "- ZZZ: כל הקבצים (שיעור מלא: דף מקורות + מהלך השיעור + שיעור מלא)\n"
+    "- XXX: דף מקורות בלבד\n"
+    "- YYY: מהלך השיעור בלבד\n"
+    "- WWW: השיעור המלא בלבד\n"
+    "- PPP: חוברת ליווי להדפסה ו-PDF\n"
+    "If the user asks for a combination of two or more files, write their codes separated by space (e.g. 'XXX YYY').\n"
+    "After the file code(s), write the single distilled core question/topic in Hebrew in 1 concise sentence.\n"
+    "Example input: 'האם מותר לאכול חזיר בפסח?' -> NNN איסור אכילת חזיר בפסח\n"
+    "Example input: 'תכין לי רק דף מקורות על הלכות שבת' -> XXX הלכות שבת\n"
+    "Example input: 'אני רוצה דף מקורות ומהלך שיעור על תפילה' -> XXX YYY סוגיית תפילה\n"
+    "Example input: 'תכין לי שיעור שלם על תנורו של עכנאי' -> ZZZ סוגיית תנורו של עכנאי\n"
+    "Example input: 'תודה, אבל מה המקור לדין הזה?' -> NNN מקור להלכה שנדונה\n"
 )
 
 _INDIRECT_PREFIXES = (
@@ -90,7 +184,10 @@ _INDIRECT_PREFIXES = (
 
 
 def _is_short_and_direct(text: str, history=None) -> bool:
+    from chavruta.intents.router import is_conversational_acknowledgement
     clean = text.strip()
+    if is_conversational_acknowledgement(clean):
+        return True
     words = clean.split()
     if not words or len(words) > 10:
         return False
@@ -98,29 +195,32 @@ def _is_short_and_direct(text: str, history=None) -> bool:
     for prefix in _INDIRECT_PREFIXES:
         if low.startswith(prefix):
             return False
-    # If history is present and question is a short follow-up (<= 6 words),
-    # it depends on context and needs distillation with history:
     if history and len(words) <= 6:
         return False
     return True
 
 
-def distill_query(
+def classify_and_distill(
     text: str, history=None, intent=None, *, client=None, model: str = DISTILLER_MODEL
-) -> str:
-    """Extract the single core question/topic in 1 sentence in Hebrew.
-
-    - If text is short and simple (e.g. <= 10 words and direct), returns text directly
-      without an LLM call.
-    - Otherwise, calls meta-llama/Llama-3.3-70B-Instruct via Nebius OpenAI client to
-      extract the single core question/topic in 1 sentence in Hebrew.
-    - Records usage with metering.record(prompt_tokens, completion_tokens, model=...).
-    """
+) -> DistillerResult:
+    """Classify user intent, determine file generation codes, and distill question in Hebrew."""
     if not text or not text.strip():
-        return ""
+        return DistillerResult(action="study", distilled_query="", raw="")
     clean = text.strip()
-    if _is_short_and_direct(clean, history=history):
-        return clean
+
+    from chavruta.intents.router import is_pure_greeting, is_conversational_acknowledgement
+    if is_pure_greeting(clean):
+        return DistillerResult(
+            action="chitchat",
+            answer="שלום וברכה! אני חברותא — שותף הלימוד שלך. במה נוכל להעמיק היום? אפשר לעיין בסוגיה, ללמוד משנה או גמרא עם מפרשים, או לברר שאלה הלכתית.",
+            raw="HHH",
+        )
+    if is_conversational_acknowledgement(clean):
+        if any(w in clean for w in ("צדק", "צדקתי", "אגיד לו", "אומר לו", "אספר לו", "אעדכן")):
+            ack = "בשמחה רבה! שמחתי לעזור ולברר את הדברים. שיהיה בהצלחה בדיון! תמיד כאן בשמחה לכל שאלה, לימוד סוגיה או בירור הלכתי נוסף."
+        else:
+            ack = "בשמחה רבה! תמיד כאן לעזרתך לכל שאלה, לימוד סוגיה או בירור הלכתי נוסף."
+        return DistillerResult(action="chitchat", answer=ack, raw="HHH")
 
     from chavruta.llm import metering
 
@@ -148,7 +248,7 @@ def distill_query(
             from openai import OpenAI
             api_key = os.environ.get("CHAVRUTA_LLM_API_KEY") or os.environ.get("NEBIUS_API_KEY") or ""
             if not api_key:
-                return clean
+                return DistillerResult(action="study", distilled_query=clean, raw=clean)
             base_url = (os.environ.get("CHAVRUTA_LLM_BASE_URL") or
                         os.environ.get("NEBIUS_BASE_URL") or
                         "https://api.studio.nebius.ai/v1")
@@ -158,17 +258,23 @@ def distill_query(
             model=model,
             messages=messages,
             temperature=0.0,
-            max_tokens=64,
+            max_tokens=80,
         )
         usage = getattr(resp, "usage", None)
         prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
         completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
         metering.record(prompt_tokens, completion_tokens, model=model)
         content = (resp.choices[0].message.content or "").strip()
-        content = content.strip("\"'״`").strip()
-        return content if content else clean
+        return parse_distiller_output(content, original_query=clean)
     except Exception:
-        return clean
+        return DistillerResult(action="study", distilled_query=clean, raw=clean)
+
+
+def distill_query(
+    text: str, history=None, intent=None, *, client=None, model: str = DISTILLER_MODEL
+) -> str:
+    res = classify_and_distill(text, history=history, intent=intent, client=client, model=model)
+    return res.distilled_query if res.action == "study" else text
 
 
 # ── Lesson Follow-up Intent & File Edit Classifier ───────────────────────────

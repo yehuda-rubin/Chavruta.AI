@@ -21,6 +21,22 @@ import { Blocked } from "@/components/Blocked";
 import { ConfirmConsent } from "@/components/ConfirmConsent";
 import { useAuth } from "@/lib/auth";
 
+function isPageReload(): boolean {
+  if (typeof window === "undefined" || !window.performance) return false;
+  try {
+    const navEntries = window.performance.getEntriesByType?.("navigation") as
+      | PerformanceNavigationTiming[]
+      | undefined;
+    if (navEntries && navEntries.length > 0) {
+      return navEntries[0].type === "reload";
+    }
+    const legacy = (window.performance as unknown as { navigation?: { type: number } }).navigation;
+    return legacy?.type === 1;
+  } catch {
+    return false;
+  }
+}
+
 export default function Home() {
   const auth = useAuth();
   const [lang, setLang] = useState<Lang>("he");
@@ -255,7 +271,10 @@ export default function Home() {
   const selectSession = useCallback(async (s: Session) => {
     setActiveId(s.id);
     setUserSources([]); // Clear pending attachment when switching chats
-    try { localStorage.setItem("chavruta-active-session", s.id); } catch {}
+    try {
+      sessionStorage.setItem("chavruta-active-session", s.id);
+      localStorage.setItem("chavruta-active-session", s.id);
+    } catch {}
     setSubtitle(s.title || s.first_q || "");
     if (s.mode) setIntent(s.mode as IntentId);
     if (activeJobs[s.id]) {
@@ -273,13 +292,23 @@ export default function Home() {
     }
   }, [activeJobs]);
 
-  // Restore active session across page refreshes (F5) once sessions load
+  // Restore active session across page refreshes (F5) once sessions load.
+  // When opening afresh (new tab / direct visit), always start in a new chat.
   const initialSessionRestoredRef = useRef(false);
   useEffect(() => {
     if (!initialSessionRestoredRef.current && sessions.length > 0) {
       initialSessionRestoredRef.current = true;
+      if (!isPageReload()) {
+        try {
+          sessionStorage.removeItem("chavruta-active-session");
+          localStorage.removeItem("chavruta-active-session");
+        } catch {}
+        return;
+      }
       try {
-        const savedId = localStorage.getItem("chavruta-active-session");
+        const savedId =
+          sessionStorage.getItem("chavruta-active-session") ||
+          localStorage.getItem("chavruta-active-session");
         if (savedId) {
           const target = sessions.find((s) => s.id === savedId);
           if (target) {
@@ -292,7 +321,10 @@ export default function Home() {
 
   const newDiscussion = useCallback(() => {
     setActiveId(null);
-    try { localStorage.removeItem("chavruta-active-session"); } catch {}
+    try {
+      sessionStorage.removeItem("chavruta-active-session");
+      localStorage.removeItem("chavruta-active-session");
+    } catch {}
     setMessages([]);
     setUserSources([]);
     setSubtitle("");
@@ -309,7 +341,10 @@ export default function Home() {
         /* ignore */
       }
       if (id === activeId) {
-        try { localStorage.removeItem("chavruta-active-session"); } catch {}
+        try {
+          sessionStorage.removeItem("chavruta-active-session");
+          localStorage.removeItem("chavruta-active-session");
+        } catch {}
         newDiscussion();
       }
       refreshSessions();
@@ -538,7 +573,10 @@ export default function Home() {
             target = id;
             setLoadingTarget(id);
             setActiveId(id);
-            try { localStorage.setItem("chavruta-active-session", id); } catch {}
+            try {
+              sessionStorage.setItem("chavruta-active-session", id);
+              localStorage.setItem("chavruta-active-session", id);
+            } catch {}
             setSubtitle(text);
             setSessionJob(id, jid);
             refreshSessions();

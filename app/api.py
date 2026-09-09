@@ -490,8 +490,10 @@ from chavruta.llm.agentic import is_degrade_message
 from chavruta.llm import base as llm_base
 from chavruta.llm.base import GroundedPrompt
 from chavruta.pipeline.pipeline import _max_tokens_for
+from chavruta.generation.grounded import strip_mudgash_label
 from chavruta.intents.hebrew_refs import detect_tractates, detect_hebrew_refs
-from chavruta.intents.router import detect_commentators, is_pure_greeting
+from chavruta.intents.router import detect_commentators, is_pure_greeting, is_conversational_acknowledgement
+from chavruta.intents.llm_planner import classify_and_distill, strip_control_codes
 
 import app.accounts as accounts
 import app.orgs as orgs
@@ -1148,7 +1150,7 @@ def _split_lesson(text: str) -> tuple[str, str, str, str]:
 
 def _run_lesson(question: str, lang: str, history=None, audience: str = "",
                 grade_band: str = "", length: str = "", owner_id: str = "local",
-                llm=None) -> QueryResponse:
+                llm=None, target_files: list[str] | None = None) -> QueryResponse:
     """Dedicated LESSON path: resolve audience/grade → pick a template from the template RAG →
     real source retrieval → Claude writes the 3 files at the right register (or asks clarifying
     questions first) via the bridge → 3 Word files + only-cited sources (in discussion order).
@@ -1209,11 +1211,13 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
         fset = {b.ref for b in floor}
         hits = floor + [h for h in hits if h.ref not in fset]
     return _generate_lesson_from_hits(topic, hits, lang, he, audience=aud, grade_band=band,
-                                      length=length, tpl=tpl, history=history, owner_id=owner_id, llm=llm)
+                                      length=length, tpl=tpl, history=history, owner_id=owner_id, llm=llm,
+                                      target_files=target_files)
 
 
 def _generate_lesson_from_hits(topic: str, hits, lang: str, he: bool, *, audience: str, grade_band: str,
-                               length: str, tpl: dict | None, history, owner_id: str, llm) -> QueryResponse:
+                               length: str, tpl: dict | None, history, owner_id: str, llm,
+                               target_files: list[str] | None = None) -> QueryResponse:
     """The lesson generation tail, shared by `_run_lesson` (hits from semantic retrieval) and
     `_run_parsha`/`_run_daf_yomi` (hits from a calendar-resolved ref, when the model decides the
     user wants a full lesson rather than a chavruta turn) — identical from here on regardless of
@@ -1356,9 +1360,16 @@ def _generate_lesson_from_hits(topic: str, hits, lang: str, he: bool, *, audienc
              else ["source_sheet.doc", "lesson_flow.doc", "full_lesson.doc"])
     titles = ([f"דף מקורות — {topic}{tag}", f"מהלך השיעור — {topic}{tag}", f"שיעור מלא — {topic}{tag}"] if he
               else [f"Source Sheet — {topic}{tag}", f"Lesson Flow — {topic}{tag}", f"Full Lesson — {topic}{tag}"])
+    raw_files = [
+        ("sources", names[0], titles[0], ss),
+        ("flow", names[1], titles[1], lf),
+        ("full", names[2], titles[2], fl),
+    ]
+    if target_files:
+        raw_files = [rf for rf in raw_files if rf[0] in target_files]
     # skip any file that came out blank (malformed split) — a blank Word download is worse than 2 good files
-    files = [FileOut(name=names[i], title=titles[i], content=c)
-             for i, c in enumerate((ss, lf, fl)) if c.strip()]
+    files = [FileOut(name=rf[1], title=rf[2], content=rf[3])
+             for rf in raw_files if rf[3].strip()]
     caveats = ([("הערה: ציטוטים בשיעור שלא אומתו מול המקורות — יש לבדוק: «" + "», «".join(bad_q[:2]) + "»")
                 if he else ("Note: quote(s) in the lesson were not found in the sources — verify: «"
                             + "», «".join(bad_q[:2]) + "»")] if bad_q else [])
@@ -2355,6 +2366,25 @@ def _greeting_response(lang: str, intent_str: str = "") -> QueryResponse:
     )
 
 
+def _acknowledgement_response(lang: str, intent_str: str = "", question: str = "") -> QueryResponse:
+    he = (lang or "") != "en"
+    if he:
+        clean = question.strip() if question else ""
+        if any(w in clean for w in ("צדק", "צדקתי", "אגיד לו", "אומר לו", "אספר לו", "אעדכן")):
+            ack = "בשמחה רבה! שמחתי לעזור ולברר את הדברים. שיהיה בהצלחה בדיון! תמיד כאן בשמחה לכל שאלה, לימוד סוגיה או בירור הלכתי נוסף."
+        else:
+            ack = "בשמחה רבה! תמיד כאן לעזרתך לכל שאלה, לימוד סוגיה או בירור הלכתי נוסף."
+    else:
+        ack = "You're very welcome! Glad I could help clarify. Feel free to reach out anytime for more questions or Torah study."
+    return QueryResponse(
+        answer=ack,
+        citations=[],
+        grounded=False,
+        intent=intent_str or "qa",
+        files=[],
+    )
+
+
 def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
                audience: str = "", grade_band: str = "", length: str = "",
                owner_id: str = "local", llm=None) -> QueryResponse:
@@ -2363,6 +2393,8 @@ def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
     `llm` defaults to the pipeline's own shared backend; a caller may override it (BYOK)."""
     if is_pure_greeting(question):
         return _greeting_response(lang, intent_str)
+    if is_conversational_acknowledgement(question):
+        return _acknowledgement_response(lang, intent_str, question)
     he = (lang or "") != "en"
     # Every route reaches generation through here — /query, /sessions/{id}/query, its async twin and
     # the calendar paths. Setting the flag on ONE of them is what made the trailing source list work
@@ -2473,6 +2505,14 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
                     owner_id: str = "local", llm=None) -> QueryResponse:
     if is_pure_greeting(question):
         return _greeting_response(lang, intent_str)
+    if is_conversational_acknowledgement(question):
+        return _acknowledgement_response(lang, intent_str, question)
+
+    dist_res = classify_and_distill(question, history=history, intent=intent_str)
+    if dist_res.action == "chitchat" and dist_res.answer:
+        clean_ans = strip_control_codes(strip_mudgash_label(dist_res.answer))
+        return QueryResponse(answer=clean_ans, citations=[], grounded=False, intent=intent_str or "qa", files=[])
+
     he = (lang or "") != "en"
     if intent_str == "shut":          # UI's responsa mode → HALACHA intent
         intent_str = "halacha"
@@ -2491,18 +2531,9 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=f"unknown intent: {intent_str!r}") from exc
 
-    if intent == Intent.LESSON:            # lesson mode → Claude writes the 3 files, audience-adapted
-        # Mode is STICKY (see _prepare_continue) — every turn in a lesson-mode chat lands here,
-        # forever, regardless of what the client sends. Without this check, a plain follow-up
-        # question ("תסביר לי יותר על מה שרש\"י אמר") fell straight into _run_lesson, which has no
-        # notion of "this isn't a new topic" beyond the narrow audience/length clarify-echo
-        # (_is_clarify_answer) — it retrieved sources for the follow-up's OWN wording and silently
-        # built a second, unrelated lesson, spending a real weekly lesson-pool charge on garbage
-        # (caught live 2026-08-21, reading the code with the founder — never shipped a working
-        # follow-up path). Once a lesson has actually finished in this session, only an EXPLICIT
-        # request to build or change one runs _run_lesson again; anything else continues as a
-        # grounded chavruta turn instead — _prepare_continue already folded the lesson's own text
-        # into history (_lesson_turn_text), so the discussion is anchored on what was actually taught.
+    lesson_target_files = dist_res.requested_files if dist_res.requested_files else None
+    if intent == Intent.LESSON or (dist_res.requested_files and not intent_str):
+        lesson_topic = dist_res.distilled_query or question
         if any(h.role == "assistant" and h.lesson for h in history):
             from chavruta.intents.llm_planner import classify_lesson_followup
             last_topic = _recover_lesson_topic(history)
@@ -2513,11 +2544,13 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
                 return _edit_lesson_file(question, lang, history=history, decision=decision,
                                          owner_id=owner_id, llm=llm)
             else:  # rebuild_all
-                rebuild_topic = decision.topic or last_topic or question
+                rebuild_topic = decision.topic or last_topic or lesson_topic
                 return _run_lesson(rebuild_topic, lang, history=history, audience=audience,
-                                   grade_band=grade_band, length=length, owner_id=owner_id, llm=llm)
-        return _run_lesson(question, lang, history=history, audience=audience,
-                           grade_band=grade_band, length=length, owner_id=owner_id, llm=llm)
+                                   grade_band=grade_band, length=length, owner_id=owner_id, llm=llm,
+                                   target_files=lesson_target_files)
+        return _run_lesson(lesson_topic, lang, history=history, audience=audience,
+                           grade_band=grade_band, length=length, owner_id=owner_id, llm=llm,
+                           target_files=lesson_target_files)
 
     if intent == Intent.SOURCESHEET or intent_str == "sourcesheet":
         if not _sourcesheet_mode_enabled(owner_id):
@@ -2549,7 +2582,13 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
         )
         return QueryResponse(answer=msg, citations=[], grounded=False, intent=intent_str or "qa", files=[])
 
-    q = Query(text=question, lang=lang or None, intent=intent)
+    q = Query(
+        text=question,
+        lang=lang or None,
+        intent=intent,
+        distilled_text=dist_res.distilled_query or None,
+        search_text=dist_res.distilled_query or None,
+    )
     answer = _get_pipeline().ask(q, history=history, llm=llm)
 
     def _cite(c) -> CitationOut:
@@ -2587,6 +2626,8 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
     text = _strip_instruction_echo(answer.text, he)
     text, source_note = _split_source_note(text)
     clean = _strip_markers(_fix_bleeding_sentences(text, he, resolved_llm), he=he)
+    clean = strip_mudgash_label(clean)
+    clean = strip_control_codes(clean)
 
     out = QueryResponse(
         answer=clean,
