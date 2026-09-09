@@ -318,10 +318,10 @@
       <p class="lead">שואלים שאלה על סוגיה, פרשה או הלכה — ומקבלים תשובה עם ציטוט מדויק מהמקור עצמו. אם אין מקור, הוא אומר את זה בפירוש, במקום להמציא.</p>
     </div>
     <div data-lang-block="en">
-      <h1>A Torah study partner that answers from real sources</h1>
-      <p class="lead">Ask a question on a sugya, a parsha, or a halachic topic — and get an answer with an exact quote from the source itself. If there's no source, it says so plainly, instead of inventing one.</p>
+      <h1>Learn Torah with AI.<br>Verify Every Source.</h1>
+      <p class="lead">Chavruta.AI is an AI learning companion for Torah, Talmud, and Jewish texts — grounded in authentic Sefaria sources you can open, verify, and explore.</p>
     </div>
-    <img class="hero-image" src="hero.jpg" alt="לומד יושב עם ספרים פתוחים על השולחן, בשיחה עם דמות חברותא דיגיטלית זוהרת שנראית כמותו — החברותא שואל שאלה על הפסוק">
+    <img class="hero-image" src="hero-chavruta.jpg" alt="לומד יושב עם ספרים פתוחים על השולחן, בשיחה עם דמות חברותא דיגיטלית זוהרת שנראית כמותו — החברותא שואל שאלה על הפסוק">
     <a class="cta" href="https://chavrutaai.org" target="_blank" rel="noopener">
       <span data-lang-block="he">נסו בחינם</span>
       <span data-lang-block="en">Try it free</span>
@@ -580,6 +580,21 @@
     html.setAttribute('dir', next === 'he' ? 'rtl' : 'ltr');
     document.getElementById('langToggle').textContent = next === 'he' ? 'English' : 'עברית';
   }
+
+  (function() {
+    try {
+      var params = new URLSearchParams(window.location.search);
+      var pLang = params.get('lang');
+      if (pLang === 'en') {
+        toggleLang();
+      } else if (!pLang) {
+        var browserLang = (navigator.language || '').toLowerCase();
+        if (browserLang && !browserLang.startsWith('he')) {
+          toggleLang();
+        }
+      }
+    } catch(e) {}
+  })();
 </script>
 
 </body>

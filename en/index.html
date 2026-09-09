@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chavruta.AI — Learn Torah with AI. Verify Every Source.</title>
+<meta name="description" content="Chavruta.AI is an AI learning companion for Torah, Talmud, and Jewish texts — grounded in real Sefaria sources you can open, check, and verify.">
+
+<meta property="og:type" content="website">
+<link rel="canonical" href="https://yehuda-rubin.github.io/Chavruta.AI/en/">
+<meta property="og:url" content="https://yehuda-rubin.github.io/Chavruta.AI/en/">
+<meta property="og:title" content="Chavruta.AI — Learn Torah with AI. Verify Every Source.">
+<meta property="og:description" content="An AI learning companion for Torah and Talmud grounded in authentic Sefaria sources you can open and verify. Free to try.">
+<meta property="og:image" content="https://yehuda-rubin.github.io/Chavruta.AI/hero-chavruta.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="800">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Chavruta.AI — Learn Torah with AI. Verify Every Source.">
+<meta name="twitter:description" content="AI learning companion for Torah and Talmud grounded in real Sefaria sources.">
+<meta name="twitter:image" content="https://yehuda-rubin.github.io/Chavruta.AI/hero-chavruta.jpg">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Chavruta.AI",
+  "applicationCategory": "EducationalApplication",
+  "operatingSystem": "Web",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  },
+  "description": "AI learning companion for Torah and Talmud grounded in authentic sources from Sefaria."
+}
+</script>
+
+<style>
+  @font-face {
+    font-family: 'Heebo';
+    font-style: normal;
+    font-weight: 400 700;
+    font-display: swap;
+    src: url('../fonts/heebo-latin.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122;
+  }
+  @font-face {
+    font-family: 'Heebo';
+    font-style: normal;
+    font-weight: 400 700;
+    font-display: swap;
+    src: url('../fonts/heebo-hebrew.woff2') format('woff2');
+    unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
+  }
+
+  :root {
+    --ink: #1c1a17;
+    --tekhelet: #002045;
+    --tekhelet-2: #163665;
+    --gold: #8a6510;
+    --gold-soft: #b88f2e;
+    --gold-bg: rgba(184, 143, 46, 0.08);
+    --bg: #faf7ef;
+    --panel: #ffffff;
+    --line: #ece2cf;
+    --muted: #5a5650;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #eae6df;
+      --tekhelet: #9dc0f8;
+      --tekhelet-2: #c6d7fb;
+      --gold: #e8c66b;
+      --gold-soft: #f0d78a;
+      --gold-bg: rgba(232, 198, 107, 0.12);
+      --bg: #0f1626;
+      --panel: #16203a;
+      --line: #2a3554;
+      --muted: #a3a9bd;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Heebo", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--tekhelet-2); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+
+  header.top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .brand {
+    font-weight: 700;
+    font-size: 1.25rem;
+    color: var(--tekhelet);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    letter-spacing: -0.01em;
+  }
+  .nav-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .lang-btn {
+    font-family: inherit;
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--ink);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    font-weight: 500;
+  }
+  .lang-btn:hover { border-color: var(--gold-soft); text-decoration: none; }
+
+  /* Hero */
+  .hero {
+    padding: 56px 0 44px;
+    text-align: center;
+  }
+  .pill-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--gold-bg);
+    border: 1px solid var(--gold-soft);
+    color: var(--gold);
+    font-size: 0.82rem;
+    font-weight: 700;
+    padding: 5px 14px;
+    border-radius: 999px;
+    margin-bottom: 20px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .hero h1 {
+    font-size: clamp(2rem, 5vw, 3.1rem);
+    color: var(--tekhelet);
+    margin: 0 0 16px;
+    line-height: 1.18;
+    font-weight: 800;
+    letter-spacing: -0.025em;
+  }
+  .hero p.lead {
+    font-size: 1.2rem;
+    color: var(--muted);
+    max-width: 640px;
+    margin: 0 auto 28px;
+    line-height: 1.55;
+  }
+  .hero-image-wrap {
+    position: relative;
+    max-width: 720px;
+    margin: 20px auto 32px;
+  }
+  .hero-image {
+    width: 100%;
+    height: auto;
+    border-radius: 18px;
+    box-shadow: 0 16px 40px rgba(0,0,0,0.18);
+    display: block;
+    border: 1px solid var(--line);
+  }
+  .cta-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .cta-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: var(--tekhelet);
+    color: #ffffff !important;
+    text-decoration: none !important;
+    font-weight: 700;
+    padding: 16px 42px;
+    border-radius: 12px;
+    font-size: 1.15rem;
+    box-shadow: 0 4px 16px rgba(0, 32, 69, 0.25);
+    transition: transform 0.12s ease, background 0.15s ease;
+  }
+  .cta-primary:hover {
+    background: var(--tekhelet-2);
+    transform: translateY(-1px);
+  }
+  @media (prefers-color-scheme: dark) {
+    .cta-primary {
+      background: #739fe6;
+      color: #0c121e !important;
+    }
+    .cta-primary:hover {
+      background: #8cb1ef;
+    }
+  }
+  .cta-subtext {
+    font-size: 0.88rem;
+    color: var(--muted);
+    font-weight: 500;
+  }
+
+  /* Problem & Contrast */
+  section.block {
+    padding: 50px 0;
+    border-top: 1px solid var(--line);
+  }
+  .section-label {
+    text-transform: uppercase;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: var(--gold);
+    margin-bottom: 8px;
+  }
+  section.block h2 {
+    color: var(--tekhelet);
+    font-size: clamp(1.5rem, 3.5vw, 2.1rem);
+    margin: 0 0 14px;
+    line-height: 1.25;
+    letter-spacing: -0.015em;
+  }
+  section.block p.subhead {
+    font-size: 1.08rem;
+    color: var(--muted);
+    margin: 0 0 24px;
+    max-width: 700px;
+  }
+
+  .contrast-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 24px;
+  }
+  @media (max-width: 680px) {
+    .contrast-grid { grid-template-columns: 1fr; }
+  }
+  .contrast-card {
+    background: var(--panel);
+    border-radius: 14px;
+    padding: 22px 24px;
+    border: 1px solid var(--line);
+  }
+  .contrast-card.bad {
+    border-color: rgba(210, 50, 50, 0.3);
+    background: color-mix(in srgb, red 3%, var(--panel));
+  }
+  .contrast-card.good {
+    border-color: rgba(30, 130, 60, 0.4);
+    background: color-mix(in srgb, green 3%, var(--panel));
+  }
+  .card-badge {
+    font-size: 0.8rem;
+    font-weight: 700;
+    margin-bottom: 10px;
+    display: inline-block;
+  }
+  .contrast-card.bad .card-badge { color: #b82828; }
+  .contrast-card.good .card-badge { color: #1e7d38; }
+  .contrast-card h3 {
+    margin: 0 0 8px;
+    font-size: 1.15rem;
+    color: var(--tekhelet);
+  }
+  .contrast-card p {
+    margin: 0;
+    font-size: 0.94rem;
+    color: var(--muted);
+  }
+
+  /* Features */
+  .feature-list {
+    display: grid;
+    gap: 20px;
+    margin-top: 28px;
+  }
+  .feature-item {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 24px 26px;
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+  }
+  .feature-num {
+    background: var(--gold-bg);
+    color: var(--gold);
+    border: 1px solid var(--gold-soft);
+    font-weight: 800;
+    font-size: 1.1rem;
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .feature-body h3 {
+    margin: 0 0 6px;
+    font-size: 1.22rem;
+    color: var(--tekhelet-2);
+  }
+  .feature-body p {
+    margin: 0;
+    font-size: 0.96rem;
+    color: var(--muted);
+  }
+
+  /* Trust Box */
+  .trust-banner {
+    background: var(--panel);
+    border: 1px solid var(--gold-soft);
+    border-radius: 16px;
+    padding: 28px 30px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.03);
+  }
+  .trust-banner h3 {
+    margin: 0 0 10px;
+    color: var(--tekhelet);
+    font-size: 1.3rem;
+  }
+  .trust-banner p {
+    margin: 0 0 14px;
+    font-size: 0.96rem;
+    color: var(--muted);
+  }
+  .trust-points {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 16px;
+    font-size: 0.92rem;
+  }
+  @media (max-width: 600px) {
+    .trust-points { grid-template-columns: 1fr; }
+  }
+  .trust-point {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--ink);
+    font-weight: 500;
+  }
+
+  /* FAQ */
+  .faq-list {
+    display: grid;
+    gap: 16px;
+    margin-top: 24px;
+  }
+  .faq-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 20px 22px;
+  }
+  .faq-card h3 {
+    margin: 0 0 8px;
+    font-size: 1.05rem;
+    color: var(--tekhelet-2);
+  }
+  .faq-card p {
+    margin: 0;
+    font-size: 0.94rem;
+    color: var(--muted);
+  }
+
+  /* Bottom CTA */
+  .bottom-cta {
+    text-align: center;
+    padding: 64px 0 72px;
+  }
+  .bottom-cta h2 {
+    font-size: clamp(1.8rem, 4vw, 2.5rem);
+    color: var(--tekhelet);
+    margin: 0 0 14px;
+  }
+  .bottom-cta p {
+    font-size: 1.1rem;
+    color: var(--muted);
+    max-width: 580px;
+    margin: 0 auto 28px;
+  }
+
+  /* Footer */
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 32px 0 48px;
+    text-align: center;
+    font-size: 0.88rem;
+    color: var(--muted);
+  }
+  .footer-links {
+    display: flex;
+    justify-content: center;
+    gap: 18px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+</style>
+</head>
+<body>
+
+<header class="top wrap">
+  <div class="brand">
+    <span>🕍</span>
+    <span>Chavruta.AI</span>
+  </div>
+  <div class="nav-actions">
+    <a href="../" class="lang-btn" title="Switch to Hebrew">עברית</a>
+    <a href="https://chavrutaai.org?utm_source=landing-us&lang=en" class="lang-btn" style="border-color: var(--tekhelet); color: var(--tekhelet); font-weight: 600;">Sign In</a>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="pill-tag">Torah Learning with Real Sources</div>
+    <h1>Learn Torah with AI.<br>Verify Every Source.</h1>
+    <p class="lead">
+      Chavruta.AI is an AI learning companion for Torah, Talmud, and Jewish texts — grounded in authentic Sefaria sources you can open, verify, and explore.
+    </p>
+
+    <div class="hero-image-wrap">
+      <img
+        class="hero-image"
+        src="../hero-chavruta.jpg"
+        alt="A Jewish learner at a Beit Midrash table studying with a glowing blue holographic AI Chavruta partner"
+      >
+    </div>
+
+    <div class="cta-group">
+      <a class="cta-primary" href="https://chavrutaai.org?utm_source=landing-us&lang=en" target="_blank" rel="noopener">
+        Start Learning Free →
+      </a>
+      <span class="cta-subtext">Free plan available · No credit card required</span>
+    </div>
+  </section>
+
+  <!-- Problem -->
+  <section class="block">
+    <div class="section-label">The Problem</div>
+    <h2>AI can answer almost anything.<br>Can you trust its Torah sources?</h2>
+    <p class="subhead">
+      General AI models are brilliant at sounding confident — but notoriously prone to "hallucinating" Torah citations, misquoting mefarshim, or inventing sources that simply do not exist.
+    </p>
+
+    <div class="contrast-grid">
+      <div class="contrast-card bad">
+        <span class="card-badge">✕ GENERAL AI CHAT</span>
+        <h3>Plausible Hallucinations</h3>
+        <p>
+          Quotes a commentary from memory or approximation. You spend 20 minutes looking for the Tosafot or Rashba, only to realize the citation was fabricated.
+        </p>
+      </div>
+      <div class="contrast-card good">
+        <span class="card-badge">✓ CHAVRUTA.AI</span>
+        <h3>Grounded & Clickable Citations</h3>
+        <p>
+          Retrieves actual passages from Sefaria's open-access corpus. Every quotation is cited verbatim and linked so you can verify the original text instantly.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Solution & Features -->
+  <section class="block">
+    <div class="section-label">Core Capabilities</div>
+    <h2>Meet Your AI Chavruta</h2>
+    <p class="subhead">
+      Designed to complement the traditional learning process — whether you're preparing a chabura, going through a sugya, or reviewing mefarshim.
+    </p>
+
+    <div class="feature-list">
+      <div class="feature-item">
+        <div class="feature-num">1</div>
+        <div class="feature-body">
+          <h3>Explore a Sugya & Mefarshim</h3>
+          <p>
+            Ask conceptual or textual questions on Gemara, Tanakh, or Halacha. Understand what Rashi, Tosafot, Ramban, or modern commentaries say on the exact passage.
+          </p>
+        </div>
+      </div>
+
+      <div class="feature-item">
+        <div class="feature-num">2</div>
+        <div class="feature-body">
+          <h3>Interactive Chavruta Dialogue</h3>
+          <p>
+            Learn in back-and-forth chavruta mode. Challenge hypotheses, test logical progressions in the Talmudic debate, and clarify difficult Aramaic phrases.
+          </p>
+        </div>
+      </div>
+
+      <div class="feature-item">
+        <div class="feature-num">3</div>
+        <div class="feature-body">
+          <h3>Build a Shiur & Source Sheet</h3>
+          <p>
+            Turn a topic into a structured lesson plan with an accompanying source sheet (Mareh Mekomot) formatted for download and classroom or beit midrash distribution.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Trust -->
+  <section class="block">
+    <div class="trust-banner">
+      <div class="section-label">Integrity First</div>
+      <h3>Real Sources. Open. Check. Learn.</h3>
+      <p>
+        Our core principle: <strong>No invented sources, ever.</strong> If retrieval cannot find an authentic source in the corpus, the system will explicitly state that no source was found rather than inventing a plausible-sounding answer.
+      </p>
+      <div class="trust-points">
+        <div class="trust-point">✓ Built on Sefaria's open-access editions</div>
+        <div class="trust-point">✓ Exact Hebrew & Aramaic citations</div>
+        <div class="trust-point">✓ Not a psak halacha — a pure study companion</div>
+        <div class="trust-point">✓ Transparent attribution for every text</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="block">
+    <div class="section-label">Questions & Answers</div>
+    <h2>Frequently Asked Questions</h2>
+
+    <div class="faq-list">
+      <div class="faq-card">
+        <h3>Is it really free?</h3>
+        <p>
+          Yes. There is a generous free daily plan that lets you learn, explore sources, and build shiurim without entering any credit card information.
+        </p>
+      </div>
+
+      <div class="faq-card">
+        <h3>Does this replace a Rabbi or Halachic authority?</h3>
+        <p>
+          Absolutely not. Chavruta.AI is an educational research and study assistant. It does not provide halacha l'ma'aseh (binding halachic rulings). Always consult a qualified Rav for any practical halachic decision.
+        </p>
+      </div>
+
+      <div class="faq-card">
+        <h3>Does it handle Gemara Aramaic?</h3>
+        <p>
+          Yes. Sources from the Talmud are retrieved and quoted in their original Aramaic and Hebrew, accompanied by clear explanations in English (or Hebrew).
+        </p>
+      </div>
+
+      <div class="faq-card">
+        <h3>Who is this service intended for?</h3>
+        <p>
+          The service is designed for adult learners (ages 18+) — including Yeshiva and Kollel students, Baalei Batim, educators, rebbeim, and parents preparing shiurim or learning independently.
+        </p>
+      </div>
+
+      <div class="faq-card">
+        <h3>What texts are covered in the corpus?</h3>
+        <p>
+          Tanakh, Mishnah, Bavli, Yerushalmi, major Midrashim, classic Rishonim (Rashi, Tosafot, Rambam, Ramban, Rashba, etc.), and foundational Poskim (Tur, Shulchan Aruch, Mishnah Berurah).
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Bottom CTA -->
+  <section class="bottom-cta">
+    <h2>Your next chavruta is always ready.</h2>
+    <p>
+      Ask questions, challenge ideas, and explore the Jewish bookshelf with sources you can actually verify.
+    </p>
+    <div class="cta-group">
+      <a class="cta-primary" href="https://chavrutaai.org?utm_source=landing-us&lang=en" target="_blank" rel="noopener">
+        Start Learning Free →
+      </a>
+      <span class="cta-subtext">Free plan · No credit card required</span>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="footer-links">
+      <a href="../">Hebrew Homepage</a>
+      <a href="https://chavrutaai.org/terms" target="_blank" rel="noopener">Terms of Use</a>
+      <a href="https://chavrutaai.org/privacy" target="_blank" rel="noopener">Privacy Policy</a>
+      <a href="mailto:rubinyehuda8@gmail.com">Contact</a>
+    </div>
+    <div>&copy; Chavruta.AI · Operated by Yehuda Rubin</div>
+  </div>
+</footer>
+
+</body>
+</html>
