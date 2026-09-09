@@ -20,6 +20,8 @@
 <meta name="twitter:description" content="AI learning companion for Torah and Talmud grounded in real Sefaria sources.">
 <meta name="twitter:image" content="https://yehuda-rubin.github.io/Chavruta.AI/hero-chavruta.jpg">
 
+<link rel="icon" type="image/png" href="../icon.png">
+
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -98,7 +100,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 20px 0;
+    padding: 18px 0;
     border-bottom: 1px solid var(--line);
   }
   .brand {
@@ -107,8 +109,17 @@
     color: var(--tekhelet);
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     letter-spacing: -0.01em;
+    text-decoration: none;
+  }
+  .brand:hover { text-decoration: none; }
+  .brand-logo {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    object-fit: cover;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
   }
   .nav-actions {
     display: flex;
@@ -130,7 +141,7 @@
 
   /* Hero */
   .hero {
-    padding: 56px 0 44px;
+    padding: 48px 0 36px;
     text-align: center;
   }
   .pill-tag {
@@ -144,44 +155,37 @@
     font-weight: 700;
     padding: 5px 14px;
     border-radius: 999px;
-    margin-bottom: 20px;
+    margin-bottom: 18px;
     letter-spacing: 0.04em;
     text-transform: uppercase;
   }
   .hero h1 {
-    font-size: clamp(2rem, 5vw, 3.1rem);
+    font-size: clamp(2rem, 4.8vw, 3.1rem);
     color: var(--tekhelet);
-    margin: 0 0 16px;
-    line-height: 1.18;
+    margin: 0 0 12px;
+    line-height: 1.16;
     font-weight: 800;
     letter-spacing: -0.025em;
   }
+  .hero-tagline {
+    font-size: clamp(1.15rem, 2.8vw, 1.45rem);
+    color: var(--gold);
+    font-weight: 700;
+    margin: 0 0 14px;
+  }
   .hero p.lead {
-    font-size: 1.2rem;
+    font-size: 1.15rem;
     color: var(--muted);
-    max-width: 640px;
-    margin: 0 auto 28px;
-    line-height: 1.55;
-  }
-  .hero-image-wrap {
-    position: relative;
-    max-width: 720px;
-    margin: 20px auto 32px;
-  }
-  .hero-image {
-    width: 100%;
-    height: auto;
-    border-radius: 18px;
-    box-shadow: 0 16px 40px rgba(0,0,0,0.18);
-    display: block;
-    border: 1px solid var(--line);
+    max-width: 620px;
+    margin: 0 auto 24px;
+    line-height: 1.5;
   }
   .cta-group {
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 8px;
-    margin-top: 10px;
+    margin: 0 auto 32px;
   }
   .cta-primary {
     display: inline-flex;
@@ -217,9 +221,23 @@
     font-weight: 500;
   }
 
+  .hero-image-wrap {
+    position: relative;
+    max-width: 660px;
+    margin: 0 auto 10px;
+  }
+  .hero-image {
+    width: 100%;
+    height: auto;
+    border-radius: 16px;
+    box-shadow: 0 14px 36px rgba(0,0,0,0.16);
+    display: block;
+    border: 1px solid var(--line);
+  }
+
   /* Problem & Contrast */
   section.block {
-    padding: 50px 0;
+    padding: 48px 0;
     border-top: 1px solid var(--line);
   }
   .section-label {
@@ -238,17 +256,29 @@
     letter-spacing: -0.015em;
   }
   section.block p.subhead {
-    font-size: 1.08rem;
+    font-size: 1.12rem;
     color: var(--muted);
+    margin: 0 0 20px;
+    max-width: 680px;
+    line-height: 1.55;
+  }
+  .punch-quote {
+    background: var(--panel);
+    border-left: 4px solid var(--gold-soft);
+    padding: 14px 18px;
+    border-radius: 0 10px 10px 0;
+    font-size: 1.05rem;
+    color: var(--ink);
     margin: 0 0 24px;
-    max-width: 700px;
+    font-weight: 500;
+    font-style: italic;
   }
 
   .contrast-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 16px;
-    margin-top: 24px;
+    margin-top: 20px;
   }
   @media (max-width: 680px) {
     .contrast-grid { grid-template-columns: 1fr; }
@@ -289,14 +319,14 @@
   /* Features */
   .feature-list {
     display: grid;
-    gap: 20px;
-    margin-top: 28px;
+    gap: 18px;
+    margin-top: 24px;
   }
   .feature-item {
     background: var(--panel);
     border: 1px solid var(--line);
     border-radius: 14px;
-    padding: 24px 26px;
+    padding: 22px 24px;
     display: flex;
     gap: 20px;
     align-items: flex-start;
@@ -331,7 +361,7 @@
     background: var(--panel);
     border: 1px solid var(--gold-soft);
     border-radius: 16px;
-    padding: 28px 30px;
+    padding: 26px 28px;
     box-shadow: 0 6px 24px rgba(0,0,0,0.03);
   }
   .trust-banner h3 {
@@ -388,18 +418,18 @@
   /* Bottom CTA */
   .bottom-cta {
     text-align: center;
-    padding: 64px 0 72px;
+    padding: 56px 0 64px;
   }
   .bottom-cta h2 {
-    font-size: clamp(1.8rem, 4vw, 2.5rem);
+    font-size: clamp(1.8rem, 4vw, 2.4rem);
     color: var(--tekhelet);
-    margin: 0 0 14px;
+    margin: 0 0 12px;
   }
   .bottom-cta p {
     font-size: 1.1rem;
     color: var(--muted);
     max-width: 580px;
-    margin: 0 auto 28px;
+    margin: 0 auto 24px;
   }
 
   /* Footer */
@@ -422,10 +452,10 @@
 <body>
 
 <header class="top wrap">
-  <div class="brand">
-    <span>🕍</span>
+  <a href="./" class="brand">
+    <img src="../icon.png" alt="Chavruta.AI" class="brand-logo">
     <span>Chavruta.AI</span>
-  </div>
+  </a>
   <div class="nav-actions">
     <a href="../" class="lang-btn" title="Switch to Hebrew">עברית</a>
     <a href="https://chavrutaai.org?utm_source=landing-us&lang=en" class="lang-btn" style="border-color: var(--tekhelet); color: var(--tekhelet); font-weight: 600;">Sign In</a>
@@ -436,12 +466,22 @@
 
   <!-- Hero -->
   <section class="hero">
-    <div class="pill-tag">Torah Learning with Real Sources</div>
+    <div class="pill-tag">Built for Serious Torah Learning</div>
     <h1>Learn Torah with AI.<br>Verify Every Source.</h1>
+    <div class="hero-tagline">Your next chavruta is always ready.</div>
     <p class="lead">
-      Chavruta.AI is an AI learning companion for Torah, Talmud, and Jewish texts — grounded in authentic Sefaria sources you can open, verify, and explore.
+      Chavruta.AI is an AI learning companion for Torah, Talmud, and Jewish texts — grounded in authentic Sefaria sources you can open, check, and verify.
     </p>
 
+    <!-- Immediate CTA Above the Image -->
+    <div class="cta-group">
+      <a class="cta-primary" href="https://chavrutaai.org?utm_source=landing-us&lang=en" target="_blank" rel="noopener">
+        Start Learning Free →
+      </a>
+      <span class="cta-subtext">Free plan available · No credit card required</span>
+    </div>
+
+    <!-- Product Visual -->
     <div class="hero-image-wrap">
       <img
         class="hero-image"
@@ -449,56 +489,52 @@
         alt="A Jewish learner at a Beit Midrash table studying with a glowing blue holographic AI Chavruta partner"
       >
     </div>
-
-    <div class="cta-group">
-      <a class="cta-primary" href="https://chavrutaai.org?utm_source=landing-us&lang=en" target="_blank" rel="noopener">
-        Start Learning Free →
-      </a>
-      <span class="cta-subtext">Free plan available · No credit card required</span>
-    </div>
   </section>
 
   <!-- Problem -->
   <section class="block">
     <div class="section-label">The Problem</div>
     <h2>AI can answer almost anything.<br>Can you trust its Torah sources?</h2>
-    <p class="subhead">
-      General AI models are brilliant at sounding confident — but notoriously prone to "hallucinating" Torah citations, misquoting mefarshim, or inventing sources that simply do not exist.
-    </p>
+    
+    <div class="punch-quote">
+      "You ask AI for a source on a complex sugya.<br>
+      You get a brilliant, confident answer citing a commentary.<br>
+      You go look it up in the sefer — and it isn't there."
+    </div>
 
     <div class="contrast-grid">
       <div class="contrast-card bad">
         <span class="card-badge">✕ GENERAL AI CHAT</span>
         <h3>Plausible Hallucinations</h3>
         <p>
-          Quotes a commentary from memory or approximation. You spend 20 minutes looking for the Tosafot or Rashba, only to realize the citation was fabricated.
+          Quotes from fuzzy model memory or approximations. You spend 20 minutes looking for the cited Tosafot or Rashba, only to discover the citation was fabricated.
         </p>
       </div>
       <div class="contrast-card good">
         <span class="card-badge">✓ CHAVRUTA.AI</span>
-        <h3>Grounded & Clickable Citations</h3>
+        <h3>Sources You Can Open & Verify</h3>
         <p>
-          Retrieves actual passages from Sefaria's open-access corpus. Every quotation is cited verbatim and linked so you can verify the original text instantly.
+          Retrieves actual passages from Sefaria's authentic corpus. Citations are connected directly to the source texts, so you can click, open, and verify them yourself.
         </p>
       </div>
     </div>
   </section>
 
-  <!-- Solution & Features -->
+  <!-- Solution & Features (Chavruta dialogue #1) -->
   <section class="block">
     <div class="section-label">Core Capabilities</div>
     <h2>Meet Your AI Chavruta</h2>
     <p class="subhead">
-      Designed to complement the traditional learning process — whether you're preparing a chabura, going through a sugya, or reviewing mefarshim.
+      Not just a search engine or generic chat — an active learning partner designed to sharpen your learning.
     </p>
 
     <div class="feature-list">
       <div class="feature-item">
         <div class="feature-num">1</div>
         <div class="feature-body">
-          <h3>Explore a Sugya & Mefarshim</h3>
+          <h3>Interactive Chavruta Dialogue</h3>
           <p>
-            Ask conceptual or textual questions on Gemara, Tanakh, or Halacha. Understand what Rashi, Tosafot, Ramban, or modern commentaries say on the exact passage.
+            Learn in a back-and-forth chavruta mode. Challenge hypotheses, test logical progressions in a Talmudic debate, clarify difficult Aramaic phrases, and sharpen your understanding.
           </p>
         </div>
       </div>
@@ -506,9 +542,9 @@
       <div class="feature-item">
         <div class="feature-num">2</div>
         <div class="feature-body">
-          <h3>Interactive Chavruta Dialogue</h3>
+          <h3>Explore a Sugya & Mefarshim</h3>
           <p>
-            Learn in back-and-forth chavruta mode. Challenge hypotheses, test logical progressions in the Talmudic debate, and clarify difficult Aramaic phrases.
+            Ask conceptual or textual questions on Gemara, Tanakh, or Halacha. Understand what Rashi, Tosafot, Ramban, or later commentaries say on the exact passage.
           </p>
         </div>
       </div>
@@ -518,7 +554,7 @@
         <div class="feature-body">
           <h3>Build a Shiur & Source Sheet</h3>
           <p>
-            Turn a topic into a structured lesson plan with an accompanying source sheet (Mareh Mekomot) formatted for download and classroom or beit midrash distribution.
+            Turn any topic into a structured lesson plan with an accompanying source sheet (Mareh Mekomot) formatted for download and study.
           </p>
         </div>
       </div>
@@ -529,14 +565,14 @@
   <section class="block">
     <div class="trust-banner">
       <div class="section-label">Integrity First</div>
-      <h3>Real Sources. Open. Check. Learn.</h3>
+      <h3>Built to Prevent Invented Sources</h3>
       <p>
-        Our core principle: <strong>No invented sources, ever.</strong> If retrieval cannot find an authentic source in the corpus, the system will explicitly state that no source was found rather than inventing a plausible-sounding answer.
+        Instead of guessing or approximating from memory, Chavruta.AI is engineered to ground answers strictly in authentic Sefaria texts. If a source cannot be found in the corpus, the system tells you plainly rather than fabricating an answer.
       </p>
       <div class="trust-points">
-        <div class="trust-point">✓ Built on Sefaria's open-access editions</div>
+        <div class="trust-point">✓ Built on Sefaria's open-access corpus</div>
         <div class="trust-point">✓ Exact Hebrew & Aramaic citations</div>
-        <div class="trust-point">✓ Not a psak halacha — a pure study companion</div>
+        <div class="trust-point">✓ Not a psak halacha — a study companion</div>
         <div class="trust-point">✓ Transparent attribution for every text</div>
       </div>
     </div>
@@ -549,6 +585,13 @@
 
     <div class="faq-list">
       <div class="faq-card">
+        <h3>How is Chavruta.AI different from ChatGPT?</h3>
+        <p>
+          Chavruta.AI is built specifically for Torah learning. Instead of relying on a general model's memory, it retrieves authentic Jewish texts from a curated Sefaria-based corpus and connects its answers directly to the underlying sources you can open and check.
+        </p>
+      </div>
+
+      <div class="faq-card">
         <h3>Is it really free?</h3>
         <p>
           Yes. There is a generous free daily plan that lets you learn, explore sources, and build shiurim without entering any credit card information.
@@ -558,7 +601,7 @@
       <div class="faq-card">
         <h3>Does this replace a Rabbi or Halachic authority?</h3>
         <p>
-          Absolutely not. Chavruta.AI is an educational research and study assistant. It does not provide halacha l'ma'aseh (binding halachic rulings). Always consult a qualified Rav for any practical halachic decision.
+          No. Chavruta.AI is an educational research and study assistant. It does not provide halacha l'ma'aseh (binding halachic rulings). Always consult a qualified Rav for practical halachic questions.
         </p>
       </div>
 
@@ -572,7 +615,7 @@
       <div class="faq-card">
         <h3>Who is this service intended for?</h3>
         <p>
-          The service is designed for adult learners (ages 18+) — including Yeshiva and Kollel students, Baalei Batim, educators, rebbeim, and parents preparing shiurim or learning independently.
+          Chavruta.AI is designed for Jewish adults (ages 18+) who learn Torah regularly — whether studying daf yomi, preparing a shiur, exploring a sugya, or reviewing mefarshim.
         </p>
       </div>
 
