@@ -110,15 +110,32 @@ def strip_control_codes(text: str) -> str:
     return clean
 
 
+_HALACHIC_INTERROGATIVE_KEYWORDS = {
+    "מותר", "אסור", "הלכה", "הלכתי", "הלכתית", "דין", "דינים", "חזיר", "כיפור", "פסח", "שבת",
+    "כשר", "כשרות", "תפילה", "ברכה", "ברכות", "מצווה", "מצוות", "חג", "חגים", "צדק", "טעה",
+    "שאלתי", "הרב", "רב", "פוסק", "פוסקים", "גמרא", "משנה", "תורה", "רש\"י", "רמב\"ם", "שו\"ע",
+}
+
+
 def parse_distiller_output(raw: str, original_query: str) -> DistillerResult:
     """Parse the distiller output into action, answer, query, and requested files."""
     clean = (raw or "").strip()
     if not clean:
         return DistillerResult(action="study", distilled_query=original_query, raw=raw)
 
+    orig_clean = " ".join((original_query or "").strip().split())
+    orig_words = [w.strip("?!.,;:-\"'״`()").lower() for w in orig_clean.split()]
+
     # Check for HHH (Chitchat / Idle / Greeting / Thanks)
     first_token = clean.split()[0].strip("[]:-,. ").upper() if clean.split() else ""
     if first_token == "HHH":
+        # SAFETY NET: If the user's input actually contained a question or halachic/Torah inquiry,
+        # it is NEVER chitchat even if the model started with HHH!
+        has_question_mark = "?" in orig_clean or "؟" in orig_clean
+        has_halachic_kw = any(w in _HALACHIC_INTERROGATIVE_KEYWORDS for w in orig_words)
+        if (has_question_mark and len(orig_words) > 3) or has_halachic_kw:
+            return DistillerResult(action="study", distilled_query=original_query, raw=raw)
+
         answer = strip_control_codes(clean)
         return DistillerResult(action="chitchat", answer=answer, raw=raw)
 
@@ -149,13 +166,10 @@ def parse_distiller_output(raw: str, original_query: str) -> DistillerResult:
 _DISTILL_SYSTEM = (
     "You are the query classifier, router, and distiller for Chavruta (Torah study partner).\n"
     "Analyze the user's input (and conversation history if present) and output strictly in this protocol:\n\n"
-    "1. IDLE / CHITCHAT / GREETING / THANKS / NON-TORAH (שאלת סרק, תודה, ברכה, סגירת שיחה):\n"
-    "Start with code HHH followed by a short, warm, polite response in Hebrew.\n"
-    "Do NOT search or extract any query.\n"
-    "Example input: 'תודה אגיד לו שצדקתי'\n"
-    "Example output: HHH בשמחה רבה! שמחתי לעזור. שיהיה בהצלחה בדיון, ותמיד כאן לכל שאלה נוספת.\n"
-    "Example input: 'שלום מה נשמע?'\n"
-    "Example output: HHH שלום וברכה! הכול מצוין, ברוך השם. במה נוכל להעמיק היום?\n\n"
+    "1. IDLE / CHITCHAT / GREETING / THANKS (שאלת סרק, תודה, ברכה, פרידה):\n"
+    "CRITICAL: Use HHH ONLY for pure greetings ('שלום', 'מה נשמע'), pure thanks ('תודה רבה לך', 'יישר כוח'), or casual pleasantries that contain NO question about Torah, Halacha, mitzvot, or Jewish practice.\n"
+    "NEVER use HHH if the user asks a halachic or Torah question, asks whether something is permitted/forbidden (מותר/אסור), asks if someone was right/wrong (צדק/טעה) about a religious matter, or tells a personal story/memory that ends in a question.\n"
+    "Start with code HHH followed by a short, warm, polite response in Hebrew.\n\n"
     "2. TORAH / HALACHA / STUDY QUERY:\n"
     "Start with the file generation code(s):\n"
     "- NNN: ללא קבצים (תשובה טקסטואלית רגילה)\n"
@@ -165,12 +179,16 @@ _DISTILL_SYSTEM = (
     "- WWW: השיעור המלא בלבד\n"
     "- PPP: חוברת ליווי להדפסה ו-PDF\n"
     "If the user asks for a combination of two or more files, write their codes separated by space (e.g. 'XXX YYY').\n"
-    "After the file code(s), write the single distilled core question/topic in Hebrew in 1 concise sentence.\n"
-    "Example input: 'האם מותר לאכול חזיר בפסח?' -> NNN איסור אכילת חזיר בפסח\n"
-    "Example input: 'תכין לי רק דף מקורות על הלכות שבת' -> XXX הלכות שבת\n"
-    "Example input: 'אני רוצה דף מקורות ומהלך שיעור על תפילה' -> XXX YYY סוגיית תפילה\n"
-    "Example input: 'תכין לי שיעור שלם על תנורו של עכנאי' -> ZZZ סוגיית תנורו של עכנאי\n"
-    "Example input: 'תודה, אבל מה המקור לדין הזה?' -> NNN מקור להלכה שנדונה\n"
+    "After the file code(s), write the single distilled core question/topic in Hebrew in 1 concise sentence.\n\n"
+    "Examples:\n"
+    "- 'תודה רבה לך' -> HHH בשמחה רבה! תמיד כאן לכל שאלה ולימוד.\n"
+    "- 'שלום מה נשמע?' -> HHH שלום וברכה! הכול מצוין, ברוך השם. במה נוכל להעמיק היום?\n"
+    "- 'לפני כמה שנים שהייתי ילד שאלתי את הרב האם מותר לי לאכול ביום כיפור בשר חזיר והוא ענה לי לא הוא צדק?' -> NNN איסור אכילת חזיר ואיסור אכילה ביום כיפור\n"
+    "- 'האם מותר לאכול חזיר בפסח?' -> NNN איסור אכילת חזיר בפסח\n"
+    "- 'תכין לי רק דף מקורות על הלכות שבת' -> XXX הלכות שבת\n"
+    "- 'אני רוצה דף מקורות ומהלך שיעור על תפילה' -> XXX YYY סוגיית תפילה\n"
+    "- 'תכין לי שיעור שלם על תנורו של עכנאי' -> ZZZ סוגיית תנורו של עכנאי\n"
+    "- 'תודה, אבל מה המקור לדין הזה?' -> NNN מקור להלכה שנדונה\n"
 )
 
 _INDIRECT_PREFIXES = (

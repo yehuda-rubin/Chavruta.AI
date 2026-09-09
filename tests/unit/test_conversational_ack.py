@@ -165,11 +165,16 @@ def test_parse_distiller_output():
     assert res.requested_files == []
     assert res.distilled_query == "איסור אכילת חזיר בפסח"
 
-    # Model omitted prefix code
-    res = parse_distiller_output("איסור אכילת חזיר בפסח", "האם מותר לאכול חזיר בפסח?")
+    # Halachic question safety net: even if model output starts with HHH,
+    # if user asked a substantive halachic question, it is forced to study
+    halachic_q = "לפני כמה שנים שהייתי ילד שאלתי את הרב האם מותר לי לאכול ביום כיפור בשר חזיר והוא ענה לי לא הוא צדק?"
+    res = parse_distiller_output("HHH בשמחה! איזה זיכרון חמוד.", halachic_q)
     assert res.action == "study"
-    assert res.requested_files == []
-    assert res.distilled_query == "איסור אכילת חזיר בפסח"
+    assert res.distilled_query == halachic_q
+
+    # Pure chitchat with HHH remains chitchat
+    res = parse_distiller_output("HHH בשמחה רבה! תמיד כאן.", "תודה רבה לך!")
+    assert res.action == "chitchat"
 
 
 def test_classify_and_distill_mock():

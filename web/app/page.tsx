@@ -556,7 +556,18 @@ export default function Home() {
       setLoadingTarget(target);
       setMessages((prev) => [...prev, { role: "user", text, citations: [], caveats: [] }]);
       const appendIfCurrent = (msg: Message) =>
-        setMessages((prev) => (activeIdRef.current === target ? [...prev, msg] : prev));
+        setMessages((prev) => {
+          if (activeIdRef.current !== target) return prev;
+          const last = prev[prev.length - 1];
+          if (
+            last &&
+            last.role === "assistant" &&
+            (last.text === msg.text || (msg.text && last.text.trim() === msg.text.trim()))
+          ) {
+            return prev;
+          }
+          return [...prev, msg];
+        });
       const push = (r: { answer: string; citations?: Message["citations"]; caveats?: string[]; grounded?: boolean; files?: Message["files"]; source_note?: string }) =>
         appendIfCurrent({ role: "assistant", text: r.answer, citations: r.citations || [], caveats: r.caveats || [], grounded: r.grounded, files: r.files, source_note: r.source_note });
       try {
