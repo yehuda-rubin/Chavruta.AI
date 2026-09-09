@@ -95,8 +95,27 @@ export default function Home() {
     setDefaultIntent(di);
     setIntent(di);
     setSrcDefaultOpen(g("chavruta-src-open") === "1");
-    const saveLang = g("chavruta-lang") as Lang | null;
-    if (saveLang) setLang(saveLang);
+    let initialLang: Lang = "en";
+    let hasUrlOverride = false;
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const paramLang = urlParams.get("lang");
+      if (paramLang === "he" || paramLang === "en") {
+        initialLang = paramLang;
+        hasUrlOverride = true;
+      }
+    } catch {}
+
+    if (!hasUrlOverride) {
+      const saveLang = g("chavruta-lang") as Lang | null;
+      if (saveLang === "he" || saveLang === "en") {
+        initialLang = saveLang;
+      } else {
+        const browserLang = (navigator.language || "").toLowerCase();
+        initialLang = browserLang.startsWith("he") ? "he" : "en";
+      }
+    }
+    setLang(initialLang);
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     setSystemDark(mq.matches);
     const onMq = (e: MediaQueryListEvent) => setSystemDark(e.matches);
