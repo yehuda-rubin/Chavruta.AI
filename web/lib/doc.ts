@@ -1,3 +1,5 @@
+import type { Lang } from "./types";
+
 // Client-side .doc export — ported from the static UI's downloadDoc. Builds a Word-openable HTML
 // blob (RTL, Frank Ruhl Libre) so a lesson's files download without a server round-trip.
 function esc(s: string): string {
@@ -20,7 +22,7 @@ function triggerBlobDownload(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
-export function downloadDoc(filename: string, title: string, bodyText: string): void {
+export function downloadDoc(filename: string, title: string, bodyText: string, lang: Lang = "he"): void {
   // If PDF file (rich printable HTML payload)
   if (filename.toLowerCase().endsWith(".pdf")) {
     printHtmlContent(bodyText || "");
@@ -66,13 +68,16 @@ export function downloadDoc(filename: string, title: string, bodyText: string): 
     .split("\n")
     .map((line) => (line.trim() ? `<p>${fmt(line)}</p>` : "<p>&nbsp;</p>"))
     .join("");
+  const bodyContent =
+    lang === "en"
+      ? `<body dir="ltr" style="font-family: Calibri, Arial, sans-serif; font-size: 12pt; line-height: 1.6; text-align: left; color: #1c1a17;"><h1 style="color: #002045; font-size: 20pt; text-align: left;">${esc(title)}</h1>${paras}</body></html>`
+      : `<body dir="rtl" style="font-family:'Frank Ruhl Libre','David',serif;font-size:13pt;line-height:1.7;color:#1c1a17;"><h1 style="color:#002045;font-size:20pt">${esc(title)}</h1>${paras}</body></html>`;
   const html =
     '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" ' +
     'xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>' +
     esc(title) +
     "</title></head>" +
-    "<body dir=\"rtl\" style=\"font-family:'Frank Ruhl Libre','David',serif;font-size:13pt;line-height:1.7;color:#1c1a17;\">" +
-    `<h1 style="color:#002045;font-size:20pt">${esc(title)}</h1>${paras}</body></html>`;
+    bodyContent;
   const blob = new Blob(["\ufeff", html], { type: "application/msword" });
   triggerBlobDownload(blob, filename);
 }

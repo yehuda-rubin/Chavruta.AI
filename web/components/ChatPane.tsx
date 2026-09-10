@@ -126,7 +126,7 @@ function LessonFiles({ lang, files, onPreview }: { lang: Lang; files: FileOut[];
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    downloadDoc(f.name, f.title || f.name.replace(/\.docx?$/, ""), f.content || "");
+                    downloadDoc(f.name, f.title || f.name.replace(/\.docx?$/, ""), f.content || "", lang);
                   }}
                   className="h-8 w-8 rounded-lg hover:bg-white grid place-items-center text-gold shrink-0 shadow-xs"
                   title={tr(lang, "download")}
@@ -175,7 +175,7 @@ function Bubble({ lang, m, onPreview, userInitial }: { lang: Lang; m: Message; o
   return (
     <div className="flex gap-3.5">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/logo.png" alt="חברותא" className="h-8 w-8 object-contain shrink-0 mt-1" />
+      <img src="/logo.png" alt={tr(lang, "brand")} className="h-8 w-8 object-contain shrink-0 mt-1" />
       <div className={"bg-white/70 rounded-3xl rounded-tr-md p-5 shadow-sm ring-1 ring-white/60 " + (hasFiles ? "max-w-[85%] w-full" : "")}>
         {m.text && (
           <p className={`font-serif text-[18px] leading-loose ${dir} ${hasFiles ? "mb-3" : ""}`} style={{ whiteSpace: "pre-wrap" }}>
@@ -250,19 +250,19 @@ function SourceSheetHero({
           <div className="text-[11px] font-bold text-gold uppercase mb-1">
             {tr(lang, "sourcesheetStep1")}
           </div>
-          <p className="text-xs text-ink/60">PDF, Word או הדבקת טקסט</p>
+          <p className="text-xs text-ink/60">{tr(lang, "sourcesheetStep1Desc")}</p>
         </div>
         <div className="glass rounded-2xl p-3 bg-white/60">
           <div className="text-[11px] font-bold text-gold uppercase mb-1">
             {tr(lang, "sourcesheetStep2")}
           </div>
-          <p className="text-xs text-ink/60">סיכום, שאלות, השוואת שיטות</p>
+          <p className="text-xs text-ink/60">{tr(lang, "sourcesheetStep2Desc")}</p>
         </div>
         <div className="glass rounded-2xl p-3 bg-white/60">
           <div className="text-[11px] font-bold text-gold uppercase mb-1">
             {tr(lang, "sourcesheetStep3")}
           </div>
-          <p className="text-xs text-ink/60">תרשים זרימה וחוברת מלאה</p>
+          <p className="text-xs text-ink/60">{tr(lang, "sourcesheetStep3Desc")}</p>
         </div>
       </div>
 
@@ -364,7 +364,7 @@ export function ChatPane({
   onAddSource?: () => void;
   onStop?: () => void;
 }) {
-  const userInitial = userEmail ? userEmail[0].toUpperCase() : "א";
+  const userInitial = userEmail ? userEmail[0].toUpperCase() : (lang === "en" ? "A" : "א");
   const [input, setInput] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
   const lastBubbleRef = useRef<HTMLDivElement>(null);
@@ -442,7 +442,7 @@ export function ChatPane({
           ) : (
             <div className="m-auto text-center px-6">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/logo.png" alt="חברותא" className="h-16 w-auto object-contain mx-auto mb-5" />
+              <img src="/logo.png" alt={tr(lang, "brand")} className="h-16 w-auto object-contain mx-auto mb-5" />
               <h2 className="font-serif text-3xl font-bold text-tekhelet mb-2">{tr(lang, "welcomeTitle")}</h2>
               <p className="text-ink/55 max-w-md mx-auto leading-relaxed">{tr(lang, "welcomeBody")}</p>
 
@@ -478,7 +478,7 @@ export function ChatPane({
         {thinkingHere && (
           <div className="flex gap-3.5">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo.png" alt="חברותא" className="h-8 w-8 object-contain shrink-0 mt-1" />
+            <img src="/logo.png" alt={tr(lang, "brand")} className="h-8 w-8 object-contain shrink-0 mt-1" />
             <div className="bg-white/70 rounded-3xl rounded-tr-md p-5 shadow-sm ring-1 ring-white/60 text-ink/50 font-serif">
               {tr(
                 lang,

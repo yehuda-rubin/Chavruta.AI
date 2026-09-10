@@ -733,31 +733,49 @@ _BAND_PED = {
            "גשר אל עיון בית־מדרש עם פיגומים ורלוונטיות; משך ~45–60 דק'.",
 }
 
+_BAND_PED_EN = {
+    "a-c": "Grades 1–3 (ages 6–9): Concrete thinking and short attention span; learning through storytelling, imagery, movement; simple English — explain difficult terms; one key idea per lesson; ~30 min.",
+    "d-f": "Grades 4–6 (ages 9–12): Early abstract thinking; worked examples, graphic organizers, comparing two opinions; worksheet and exit ticket; intro to chavruta study; ~45 min.",
+    "g-i": "Grades 7–9 (ages 12–15): Dispute and conceptual roots, chavruta debate, reasoned argumentation from two sources; basic lamdanic/talmudic terminology with clear explanations; ~45 min.",
+    "j-l": "Grades 10–12 (ages 15–18): Source-based textual analysis, two-sided inquiry, introduction to later authorities (Acharonim), synthesis essay; bridging to beit-midrash iyun; ~45–60 min.",
+}
+
 # lesson length → retrieval breadth + concrete time budget + a depth instruction.
 # Minutes scale with the audience: a school lesson is bounded by the class period (and by the
 # age band), a beit-midrash iyun can run longer.
 _LENGTHS = {
-    "short":  {"top_k": 10, "he": "קצר",  "yeshiva_min": "25–35 דק׳", "words": "700–1000",
+    "short":  {"top_k": 10, "he": "קצר", "en": "Short", "yeshiva_min": "25–35 דק׳", "yeshiva_min_en": "25–35 min", "words": "700–1000",
                "school_min": {"a-c": "15–20 דק׳", "d-f": "25–30 דק׳", "g-i": "25–30 דק׳", "j-l": "30–35 דק׳"},
-               "depth": "שיעור קצר וממוקד, אך כתוב במלואו: מעט מקורות, מהלך תמציתי, ושיעור מלא של כ-700–1000 מילים."},
-    "medium": {"top_k": 16, "he": "בינוני", "yeshiva_min": "45–60 דק׳", "words": "1600–2400",
+               "school_min_en": {"a-c": "15–20 min", "d-f": "25–30 min", "g-i": "25–30 min", "j-l": "30–35 min"},
+               "depth": "שיעור קצר וממוקד, אך כתוב במלואו: מעט מקורות, מהלך תמציתי, ושיעור מלא של כ-700–1000 מילים.",
+               "depth_en": "A short, focused lesson written out in full: few sources, concise flow, and a complete lesson of ~700–1000 words."},
+    "medium": {"top_k": 16, "he": "בינוני", "en": "Medium", "yeshiva_min": "45–60 דק׳", "yeshiva_min_en": "45–60 min", "words": "1600–2400",
                "school_min": {"a-c": "30 דק׳", "d-f": "45 דק׳", "g-i": "45 דק׳", "j-l": "45–50 דק׳"},
+               "school_min_en": {"a-c": "30 min", "d-f": "45 min", "g-i": "45 min", "j-l": "45–50 min"},
                "depth": "שיעור באורך בינוני, מפורט ומלא: כיסוי מאוזן ומעמיק של המקורות והמהלך. השיעור המלא "
-                        "צריך להיות **לפחות 1600–2400 מילים** — פַתח כל שלב לעומק, אל תסכם ואל תקצר."},
-    "long":   {"top_k": 26, "he": "ארוך",  "yeshiva_min": "75–90 דק׳", "words": "3000–4500",
+                        "צריך להיות **לפחות 1600–2400 מילים** — פַתח כל שלב לעומק, אל תסכם ואל תקצר.",
+               "depth_en": "A medium-length lesson, detailed and complete: balanced, in-depth coverage of sources and pedagogical flow. The full lesson "
+                           "must be **at least 1600–2400 words** — develop every stage thoroughly, do not summarize or truncate."},
+    "long":   {"top_k": 26, "he": "ארוך", "en": "Long", "yeshiva_min": "75–90 דק׳", "yeshiva_min_en": "75–90 min", "words": "3000–4500",
                "school_min": {"a-c": "40 דק׳ (בשני חלקים)", "d-f": "60–90 דק׳ (שיעור כפול)",
                               "g-i": "60–90 דק׳ (שיעור כפול)", "j-l": "90 דק׳ (שיעור כפול)"},
+               "school_min_en": {"a-c": "40 min (two parts)", "d-f": "60–90 min (double period)",
+                                 "g-i": "60–90 min (double period)", "j-l": "90 min (double period)"},
                "depth": "שיעור ארוך ומעמיק: מקורות רבים, מהלך מפורט, ושיעור מלא ומקיף של **3000–4500 מילים** — "
-                        "פַתח כל שיטה במלואה, הקשה ותרץ, נתח כל צד של החקירה לעומק."},
+                        "פַתח כל שיטה במלואה, הקשה ותרץ, נתח כל צד של החקירה לעומק.",
+               "depth_en": "A long, comprehensive in-depth lesson: extensive sources, detailed progression, and a thorough full lesson of **3000–4500 words** — "
+                           "fully develop each opinion, raise questions and resolve them, analyzing each dimension thoroughly."},
 }
 
 
-def _length_minutes(length: str, audience: str | None, grade_band: str | None) -> str:
+def _length_minutes(length: str, audience: str | None, grade_band: str | None, lang: str = "he") -> str:
     """The concrete time budget for this (length × audience × grade band)."""
     ln = _LENGTHS.get(length, _LENGTHS["medium"])
+    is_en = (lang == "en")
     if audience == "school":
-        return ln["school_min"].get(grade_band or "", ln["school_min"]["d-f"])
-    return ln["yeshiva_min"]
+        key = "school_min_en" if is_en else "school_min"
+        return ln[key].get(grade_band or "", ln[key]["d-f"])
+    return ln["yeshiva_min_en"] if is_en else ln["yeshiva_min"]
 
 
 def _templates_client():
@@ -774,14 +792,24 @@ def _templates_client():
 _REPO_DIR = Path(__file__).resolve().parents[1]
 
 
-def _attach_template_bodies(pl: dict) -> None:
+def _attach_template_bodies(pl: dict, lang: str = "he") -> None:
     """Load the template's actual .md file bodies (the pedagogical scaffold) from disk into the
     payload — the RAG manifest only carries metadata, so without this the template files are never
     read at generation time and the whole template library is dead at runtime."""
     files = pl.get("files") or {}
-    d = _REPO_DIR / (pl.get("dir") or "")
+    files_en = pl.get("files_en") or {}
+    dir_str = pl.get("dir") or (f"lessons/templates/{pl.get('id')}" if pl.get("id") else "")
+    d = _REPO_DIR / dir_str
     for role in ("full_lesson", "lesson_flow", "source_sheet"):
-        fn = files.get(role)
+        fn = None
+        if lang == "en":
+            fn = files_en.get(role)
+            if not fn:
+                candidate = f"TEMPLATE_{role}_en.md"
+                if (d / candidate).is_file():
+                    fn = candidate
+        if not fn:
+            fn = files.get(role)
         if fn:
             try:
                 # `dir`/`fn` come from the template collection's payload, not from a user — but this
@@ -795,7 +823,7 @@ def _attach_template_bodies(pl: dict) -> None:
                 _log.warning("template body unreadable (role=%s, file=%s)", role, fn)
 
 
-def _select_template(topic: str, audience: str | None = None, grade_band: str | None = None):
+def _select_template(topic: str, audience: str | None = None, grade_band: str | None = None, lang: str = "he"):
     """Pick the best-matching lesson-template PAYLOAD from the template RAG (filtered by
     audience/grade), with its .md file bodies loaded in."""
     try:
@@ -814,7 +842,7 @@ def _select_template(topic: str, audience: str | None = None, grade_band: str | 
         if not res.points:
             return None
         pl = dict(res.points[0].payload or {})
-        _attach_template_bodies(pl)
+        _attach_template_bodies(pl, lang=lang)
         return pl
     except Exception:
         return None
@@ -958,7 +986,7 @@ def _resolve_topic(question: str, history) -> str:
 
 
 # Tolerate the model bolding/indenting the delimiter (**===FULL_LESSON===**, leading spaces, RTL marks).
-def _source_sheet_entry(n: int, c: CitationOut) -> str:
+def _source_sheet_entry(n: int, c: CitationOut, lang: str = "he") -> str:
     """One source on the sheet: the verbatim text, plus credit where the licence requires it.
 
     A source sheet REPRODUCES the text — it is not a citation. CC-BY, CC-BY-SA and CC-BY-NC all
@@ -967,14 +995,17 @@ def _source_sheet_entry(n: int, c: CitationOut) -> str:
     it omits which edition the text is and under what terms. Public-domain and CC0 sources need no
     credit line, so they don't get noise.
 
-    The heading uses the HEBREW ref when one is known (`ref_he`, already resolved by the caller via
-    hebrew_display_ref) — a Hebrew source sheet handed to a class shouldn't title every source in
-    transliterated English. Falls back to the English ref when no Hebrew rendering exists, which is
-    the same honest-gap rule hebrew_display_ref itself follows. Likewise the body prefers the Hebrew
-    text and only falls back to the English one when the source has no Hebrew at all (some responsa
-    in the corpus exist only as English translations).
+    When lang == 'en', prioritizes the English text (c.text_en) if available and formats an
+    English or bilingual heading so English lessons do not force Hebrew-only source sheets.
+    When lang == 'he', prefers the Hebrew ref and text.
     """
-    entry = f"**{n}. {c.ref_he or c.ref}**\n{c.text_he or c.text_en}"
+    if lang == "en":
+        ref_title = f"{c.ref} ({c.ref_he})" if (c.ref_he and c.ref_he != c.ref) else c.ref
+        body = c.text_en or c.text_he
+    else:
+        ref_title = c.ref_he or c.ref
+        body = c.text_he or c.text_en
+    entry = f"**{n}. {ref_title}**\n{body}"
     if rights.requires_attribution(c.license):
         entry += "\n\n> " + rights.attribution_line(
             ref=c.ref, version_title=c.version_title,
@@ -1031,21 +1062,39 @@ def _lesson_job_md(question: str, hits, lang: str, *, audience: str | None,
         lines += [""]
 
     # who the lesson is for
-    if audience == "school":
-        lines += ["## AUDIENCE", f"בית ספר — כיתות {_GRADE_HE.get(grade_band, grade_band or '?')}.",
-                  _BAND_PED.get(grade_band, ""), ""]
-    elif audience == "yeshiva":
-        lines += ["## AUDIENCE", "בית מדרש / ישיבה — לומדים מבוגרים; שיעור עיון.", ""]
+    if lang == "en":
+        if audience == "school":
+            lines += ["## AUDIENCE", f"School — grades {grade_band or '?'}.",
+                      _BAND_PED_EN.get(grade_band, ""), ""]
+        elif audience == "yeshiva":
+            lines += ["## AUDIENCE", "Beit Midrash / Yeshiva — adult learners; in-depth study.", ""]
 
-    mins = _length_minutes(length, audience, grade_band)
-    lines += ["## LENGTH", f"{ln['he']} — כ־{mins} סה\"כ. {ln['depth']} "
-              f"היקף היעד של השיעור המלא: **{ln.get('words','1600–2400')} מילים**. "
-              "התאם/י את הזמנים בשלבי מהלך השיעור כך שיסתכמו לטווח הזה. "
-              "שיעור קצר מהיעד אינו מקובל — כתוב במלואו ובהרחבה.", ""]
+        mins = _length_minutes(length, audience, grade_band, lang="en")
+        len_name = ln.get("en", "Medium")
+        depth = ln.get("depth_en", ln["depth"])
+        words = ln.get("words", "1600–2400")
+        lines += ["## LENGTH", f"{len_name} — approx {mins} total. {depth} "
+                  f"Target word count for the full lesson: **{words} words**. "
+                  "Calibrate stage timings in the lesson flow to sum to this duration. "
+                  "A lesson shorter than the target is unacceptable — write in full and elaborate thoroughly.", ""]
+    else:
+        if audience == "school":
+            lines += ["## AUDIENCE", f"בית ספר — כיתות {_GRADE_HE.get(grade_band, grade_band or '?')}.",
+                      _BAND_PED.get(grade_band, ""), ""]
+        elif audience == "yeshiva":
+            lines += ["## AUDIENCE", "בית מדרש / ישיבה — לומדים מבוגרים; שיעור עיון.", ""]
+
+        mins = _length_minutes(length, audience, grade_band, lang="he")
+        lines += ["## LENGTH", f"{ln['he']} — כ־{mins} סה\"כ. {ln['depth']} "
+                  f"היקף היעד של השיעור המלא: **{ln.get('words','1600–2400')} מילים**. "
+                  "התאם/י את הזמנים בשלבי מהלך השיעור כך שיסתכמו לטווח הזה. "
+                  "שיעור קצר מהיעד אינו מקובל — כתוב במלואו ובהרחבה.", ""]
 
     if tpl:
+        tpl_title = (tpl.get("title_en") if lang == "en" else None) or tpl.get("title", "")
+        tpl_struct = (tpl.get("structure_en") if lang == "en" else None) or tpl.get("structure", "")
         lines += ["## SELECTED TEMPLATE — follow THIS structure and pedagogy",
-                  f"{tpl.get('title','')} — מבנה: {tpl.get('structure','')}"]
+                  f"{tpl_title} — " + (f"Structure: {tpl_struct}" if lang == "en" else f"מבנה: {tpl_struct}")]
         skel = tpl.get("_full_lesson") or ""
         if skel:
             skel = re.sub(r"<!--.*?-->", "", skel, flags=re.S).strip()
@@ -1091,37 +1140,67 @@ def _lesson_job_md(question: str, hits, lang: str, *, audience: str | None,
     ]
 
     if audience == "school":
-        gh = _GRADE_HE.get(grade_band, grade_band or "")
-        lines += [
-            f"LESSON_FLOW — a timed CLASSROOM plan for grade band {gh}, following the TEMPLATE SKELETON's stages "
-            "(explicit-instruction arc: hook & prior-knowledge → I-Do → We-Do with a check → deepen → You-Do "
-            "with differentiation → summary + formative assessment). Give each stage a time estimate, its "
-            "guiding question, and reference the sources by [S#].",
-            f"FULL_LESSON — the full lesson WRITTEN OUT in age-appropriate prose for {gh}, following that "
-            "skeleton. Match language and cognitive load to the AUDIENCE band (young grades: simple Hebrew, "
-            "translate hard words, story/imagery, one idea; older: מחלוקת/חקירה, טיעון מנומק, ניתוח מקור). "
-            "Explain, ask checking questions, keep the pupils active. A real classroom lesson — not a summary.",
-            "SOURCE PREFERENCE — prefer the most age-appropriate SOURCES (the pasuk, רש\"י, a simple story or "
-            "midrash, the Mishnah). Use a deep/kabbalistic/chassidic/lamdanic source ONLY if you render its "
-            "idea in simple, concrete terms — never quote it verbatim to young pupils. It is fine to use only "
-            "some of the SOURCES.",
-        ]
+        if lang == "en":
+            lines += [
+                f"LESSON_FLOW — a timed CLASSROOM plan for grade band {grade_band or '?'}, following the TEMPLATE SKELETON's stages "
+                "(explicit-instruction arc: hook & prior-knowledge → I-Do → We-Do with a check → deepen → You-Do "
+                "with differentiation → summary + formative assessment). Give each stage a time estimate, its "
+                "guiding question, and reference the sources by [S#].",
+                f"FULL_LESSON — the full lesson WRITTEN OUT in age-appropriate English prose for grades {grade_band or '?'}, following that "
+                "skeleton. Match language and cognitive load to the AUDIENCE band (young grades: simple English, "
+                "explain hard terms, story/imagery, one idea; older: dispute/inquiry, reasoned argumentation, source analysis). "
+                "Explain, ask checking questions, keep the pupils active. A real classroom lesson — not a summary.",
+                "SOURCE PREFERENCE — prefer the most age-appropriate SOURCES (the biblical verse, a simple story or "
+                "midrash, the Mishnah). Use a deep/kabbalistic/chassidic/lamdanic source ONLY if you render its "
+                "idea in simple, concrete terms — never quote it verbatim to young pupils. It is fine to use only "
+                "some of the SOURCES.",
+            ]
+        else:
+            gh = _GRADE_HE.get(grade_band, grade_band or "")
+            lines += [
+                f"LESSON_FLOW — a timed CLASSROOM plan for grade band {gh}, following the TEMPLATE SKELETON's stages "
+                "(explicit-instruction arc: hook & prior-knowledge → I-Do → We-Do with a check → deepen → You-Do "
+                "with differentiation → summary + formative assessment). Give each stage a time estimate, its "
+                "guiding question, and reference the sources by [S#].",
+                f"FULL_LESSON — the full lesson WRITTEN OUT in age-appropriate prose for {gh}, following that "
+                "skeleton. Match language and cognitive load to the AUDIENCE band (young grades: simple Hebrew, "
+                "translate hard words, story/imagery, one idea; older: מחלוקת/חקירה, טיעון מנומק, ניתוח מקור). "
+                "Explain, ask checking questions, keep the pupils active. A real classroom lesson — not a summary.",
+                "SOURCE PREFERENCE — prefer the most age-appropriate SOURCES (the pasuk, רש\"י, a simple story or "
+                "midrash, the Mishnah). Use a deep/kabbalistic/chassidic/lamdanic source ONLY if you render its "
+                "idea in simple, concrete terms — never quote it verbatim to young pupils. It is fine to use only "
+                "some of the SOURCES.",
+            ]
     else:
-        lines += [
-            "LESSON_FLOW — a clear, detailed beit-midrash outline that follows the SELECTED TEMPLATE's arc for "
-            "THIS genre (the template dictates the shape — e.g. an iyun חקירה, a הלכה pesak, a מוסר arc on a "
-            "מידה, a חסידות מאמר, a פרשה פשט→דרש→רעיון, an אגדה קושי→פירוש→מסר). For each stage: the guiding "
-            "question, which source is brought, and what is asked/answered.",
-            "FULL_LESSON — a full beit-midrash shiur written out in depth, following THAT template arc — do NOT "
-            "force a gemara-iyun חקירה onto a non-iyun genre (a mussar/chassidut/parasha shiur has no "
-            "'צד א׳/צד ב׳ נפקא מינה'). WHERE the genre is a talmudic/lamdanic sugya: sharpen a central חקירה "
-            "with TWO clearly-named sides, map the ראשונים to the sides, deepen with אחרונים, give נפקא מינה, "
-            "and conclude with the יסוד. Present each שיטה, raise קושיות and answer them; progress step by step. "
-            "A real, full shiur.",
-        ]
+        if lang == "en":
+            lines += [
+                "LESSON_FLOW — a clear, detailed beit-midrash outline that follows the SELECTED TEMPLATE's arc for "
+                "THIS genre (the template dictates the shape — e.g. an iyun conceptual inquiry, a practical halacha pesak, "
+                "a mussar arc on a character trait, a chassidic discourse, a parasha peshat→derash→insight arc, an aggada difficulty→exegesis→message). "
+                "For each stage: the guiding question, which source is brought, and what is asked/answered.",
+                "FULL_LESSON — a full beit-midrash shiur written out in depth in English, following THAT template arc — do NOT "
+                "force a gemara-iyun inquiry onto a non-iyun genre. WHERE the genre is a talmudic/lamdanic sugya: sharpen a central inquiry "
+                "with TWO clearly-named sides, map the early commentators to the sides, deepen with later authorities, give practical ramifications (nafka mina), "
+                "and conclude with the foundational principle. Present each opinion, raise difficulties and resolve them; progress step by step. "
+                "A real, full shiur.",
+            ]
+        else:
+            lines += [
+                "LESSON_FLOW — a clear, detailed beit-midrash outline that follows the SELECTED TEMPLATE's arc for "
+                "THIS genre (the template dictates the shape — e.g. an iyun חקירה, a הלכה pesak, a מוסר arc on a "
+                "מידה, a חסידות מאמר, a פרשה פשט→דרש→רעיון, an אגדה קושי→פירוש→מסר). For each stage: the guiding "
+                "question, which source is brought, and what is asked/answered.",
+                "FULL_LESSON — a full beit-midrash shiur written out in depth, following THAT template arc — do NOT "
+                "force a gemara-iyun חקירה onto a non-iyun genre (a mussar/chassidut/parasha shiur has no "
+                "'צד א׳/צד ב׳ נפקא מינה'). WHERE the genre is a talmudic/lamdanic sugya: sharpen a central חקירה "
+                "with TWO clearly-named sides, map the ראשונים to the sides, deepen with אחרונים, give נפקא מינה, "
+                "and conclude with the יסוד. Present each שיטה, raise קושיות and answer them; progress step by step. "
+                "A real, full shiur.",
+            ]
 
+    len_label = ln.get("en", "Medium") if lang == "en" else ln["he"]
     lines += [
-        f"Respect the requested LENGTH ({ln['he']}).",
+        f"Respect the requested LENGTH ({len_label}).",
         "ORDER — a single line listing the source markers in the exact order they are discussed, e.g. "
         "'S3, S1, S5'. The backend orders the sources panel by this list.",
         "",
@@ -1192,7 +1271,7 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
         msg = head + "\n\n" + "\n".join(f"• {a}" for a in ask)
         return QueryResponse(answer=msg, citations=[], grounded=False, intent="lesson", files=[])
 
-    tpl = _select_template(topic, aud, band)
+    tpl = _select_template(topic, aud, band, lang=lang)
 
     ln = _LENGTHS[length]
     # School gets a wider candidate pool so the model has enough accessible sources (verse, Rashi,
@@ -1274,11 +1353,14 @@ def _generate_lesson_from_hits(topic: str, hits, lang: str, he: bool, *, audienc
             en_text = (getattr(h, "text_en", "") or "").strip()
             if not he_text and not en_text:
                 he_text = getattr(h, "text", "") or ""
-            from chavruta.corpus.refs import license_for_ref
+            from chavruta.corpus.refs import license_for_ref, talmud_english_display_ref, talmud_hebrew_display_ref
 
+            ref_he = hebrew_display_ref(h.ref) or talmud_hebrew_display_ref(h.ref) or ""
+            ref_en = talmud_english_display_ref(h.ref) or h.ref
             lic = getattr(h, "license", "") or license_for_ref(h.ref, "he" if he else "en")[0]
             ver = getattr(h, "version_title", "") or license_for_ref(h.ref, "he" if he else "en")[1]
-            used.append(CitationOut(ref=h.ref, ref_he=(hebrew_display_ref(h.ref) or "") if he else "",
+            used.append(CitationOut(ref=ref_en if not he else h.ref,
+                                    ref_he=ref_he if he else (ref_he or ""),
                                     text_he=he_text, text_en=en_text,
                                     commentator=(getattr(h, "commentator_id", "") or ""),
                                     deep_link=(getattr(h, "deep_link", "") or ""),
@@ -1297,7 +1379,7 @@ def _generate_lesson_from_hits(topic: str, hits, lang: str, he: bool, *, audienc
     # Models truncate the source texts ("…") when asked to reproduce them; the RAG already has the full
     # text, so we assemble it directly and guarantee complete, verbatim sources.
     if used:
-        ss = "\n\n".join(_source_sheet_entry(n, c) for n, c in enumerate(used, 1))
+        ss = "\n\n".join(_source_sheet_entry(n, c, lang=lang) for n, c in enumerate(used, 1))
 
     # Citation-faithfulness: flag any verbatim quote in the lesson not found in the retrieved sources.
     # Runs on the LESSON TEXT, before the licence footer is appended below — the footer names refs and
@@ -1565,8 +1647,12 @@ def _edit_lesson_file(
 def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bool = False,
                      distilled_question: str = "") -> str:
     """Bridge job: play a Socratic study-partner (chavruta) — learn WITH the user, don't lecture."""
-    lines = [f"lang: {lang}", "", "## ROLE",
-             "אתה **חברותא** לימודי — אתה לומד יחד עם המשתמש, בגובה העיניים, ולא מרצה מלמעלה.", ""]
+    role_instruction = (
+        "You are **Chavruta** — a study partner learning together with the user at eye level, not lecturing from above."
+        if (lang or "").startswith("en")
+        else "אתה **חברותא** לימודי — אתה לומד יחד עם המשתמש, בגובה העיניים, ולא מרצה מלמעלה."
+    )
+    lines = [f"lang: {lang}", "", "## ROLE", role_instruction, ""]
     prior = [h for h in (history or []) if (getattr(h, "text", "") or "").strip()]
     if prior:
         lines += ["## CONVERSATION SO FAR"]
@@ -1598,6 +1684,28 @@ def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bo
         lines += [f"### [S{i}] {h.ref}{who}", (getattr(h, "text", "") or "").strip(), ""]
     if distilled_question and distilled_question != question:
         lines += ["## FOCUSED CORE QUESTION", distilled_question.strip(), ""]
+
+    if (lang or "").startswith("en"):
+        recovery_instruction = (
+            "**ONLY WHEN THE SOURCES GENUINELY DON'T FIT** (a LAST resort — if ANY source above touches the topic, "
+            "learn with it and do NOT stall): if the sources truly do not cover what the learner asked, do NOT "
+            "invent a source. FIRST try to fetch better ones yourself — reply with ONLY a block starting with the "
+            "EXACT line '===NEED_SOURCES===' followed by 1–5 focused search queries (one per line), and STOP. ONLY "
+            "if that STILL comes back with nothing relevant, ask the learner warmly for direction — "
+            "'Hold on — I didn't find the right source, please guide me'. Do NOT ask the learner to name a daf when relevant "
+            "sources are already present above."
+        )
+    else:
+        recovery_instruction = (
+            "**ONLY WHEN THE SOURCES GENUINELY DON'T FIT** (a LAST resort — if ANY source above touches the topic, "
+            "learn with it and do NOT stall): if the sources truly do not cover what the learner asked, do NOT "
+            "invent a source. FIRST try to fetch better ones yourself — reply with ONLY a block starting with the "
+            "EXACT line '===NEED_SOURCES===' followed by 1–5 focused search queries (one per line), and STOP. ONLY "
+            "if that STILL comes back with nothing relevant, ask the learner warmly for direction — "
+            "'רגע — לא עלה לי המקור הנכון, תכוון אותי'. Do NOT ask the learner to name a daf when relevant "
+            "sources are already present above."
+        )
+
     lines += [
         "## INSTRUCTIONS FOR CLAUDE (the chavruta)",
         "Study b'chavruta — do NOT deliver a lecture or dump the whole sugya. Instead, in ONE short, warm "
@@ -1607,13 +1715,7 @@ def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bo
         "step, one question at a time.",
         "If the learner asked a direct factual question, answer it briefly and grounded, then hand the ball "
         "back with a question.",
-        "**ONLY WHEN THE SOURCES GENUINELY DON'T FIT** (a LAST resort — if ANY source above touches the topic, "
-        "learn with it and do NOT stall): if the sources truly do not cover what the learner asked, do NOT "
-        "invent a source. FIRST try to fetch better ones yourself — reply with ONLY a block starting with the "
-        "EXACT line '===NEED_SOURCES===' followed by 1–5 focused search queries (one per line), and STOP. ONLY "
-        "if that STILL comes back with nothing relevant, ask the learner warmly for direction — "
-        "'רגע — לא עלה לי המקור הנכון, תכוון אותי'. Do NOT ask the learner to name a daf when relevant "
-        "sources are already present above.",
+        recovery_instruction,
         "Ground everything ONLY in the SOURCES; cite by [S#] (stripped from display). "
         "MUST NOT invent sources, citations, or attributions that are not in the SOURCES above — this "
         "applies EVEN WHEN the learner is the one who states a 'quote' or 'pasuk'. If they hand you a phrase "
@@ -1718,7 +1820,8 @@ def _generate_chavruta_turn(question: str, hits, lang: str, he: bool, history, w
             lic = getattr(h, "license", "") or license_for_ref(h.ref, "he" if he else "en")[0]
             ver = getattr(h, "version_title", "") or license_for_ref(h.ref, "he" if he else "en")[1]
             used.append(CitationOut(ref=h.ref, ref_he=(hebrew_display_ref(h.ref) or "") if he else "",
-                                    text_he=(getattr(h, "text", "") or ""), text_en="",
+                                    text_he=(getattr(h, "text", "") or ""),
+                                    text_en=(getattr(h, "text_en", "") or ""),
                                     commentator=(getattr(h, "commentator_id", "") or ""),
                                     deep_link=(getattr(h, "deep_link", "") or ""),
                                     license=lic or "",
@@ -2007,7 +2110,7 @@ def _run_parsha(question: str, lang: str, history=None, owner_id: str = "local",
     topic = info.name_he if he else info.name_en
     raw_question = question
     if _wants_full_lesson(raw_question):
-        tpl = _select_template(topic, "yeshiva", "")
+        tpl = _select_template(topic, "yeshiva", "", lang=lang)
         return _generate_lesson_from_hits(topic, _cap_hits(hits, _LESSON_HIT_CAP, min_commentaries=15) + haftarah_hits,
                                           lang, he, audience="yeshiva", grade_band="", length="medium",
                                           tpl=tpl, history=history, owner_id=owner_id, llm=llm)
@@ -2071,7 +2174,7 @@ def _run_daf_yomi(question: str, lang: str, history=None, owner_id: str = "local
     topic = f"{info.tractate} {info.daf}"
     raw_question = question
     if _wants_full_lesson(raw_question):
-        tpl = _select_template(topic, "yeshiva", "")
+        tpl = _select_template(topic, "yeshiva", "", lang=lang)
         return _generate_lesson_from_hits(topic, _cap_hits(hits, _LESSON_HIT_CAP, min_commentaries=15), lang, he,
                                           audience="yeshiva", grade_band="", length="medium",
                                           tpl=tpl, history=history, owner_id=owner_id, llm=llm)
@@ -2252,7 +2355,7 @@ def _run_sourcesheet(
             ref="דף מקורות שהועלה",
             ref_he=f"דף המקורות: {guide.title or 'קובץ שהועלה'}",
             text_he=sheet_text,
-            text_en="",
+            text_en=(getattr(guide, "text_en", "") or ""),
             commentator="דף המקורות",
             deep_link="",
             license="user_provided",
@@ -2263,7 +2366,7 @@ def _run_sourcesheet(
             ref=s.ref or s.title or f"מקור {s.index}",
             ref_he=s.title or s.ref or f"מקור {s.index}",
             text_he=s.expanded_context or s.source_snippet or s.plain_explanation or "",
-            text_en="",
+            text_en=(getattr(s, "text_en", "") or ""),
             commentator=s.role_tag or "",
             deep_link="",
             license="user_provided" if s.status != "corpus" else "public domain",
@@ -3935,8 +4038,10 @@ def redeem_coupon(req: RedeemRequest, lang: str = "he", owner: str = Depends(cur
         else:
             message = (f"התוכנית שודרגה ל'{name}' עד {until}." if he else
                        f"Upgraded to {name} until {until}.")
+    t = plans.tier(res["plan"]) if res.get("plan") else None
+    plan_name = (t.name_en if (lang or "").startswith("en") else t.name_he) if t else ""
     return RedeemOut(kind=res["kind"], plan=res["plan"],
-                     plan_name=plans.tier(res["plan"]).name_he if res["plan"] else "",
+                     plan_name=plan_name,
                      until=res["until"], credits_added=res["credits_added"],
                      credits_balance=res["credits_balance"], message=message,
                      discount_added_ils=res.get("discount_added_ils", 0))
@@ -4044,10 +4149,12 @@ async def auth_email_hook(request: Request):
         action_type=action_type,
         redirect_to=redirect_to,
     )
+    email_lang = (user.get("user_metadata") or {}).get("lang") or email_data.get("lang") or "he"
     subject, html_body, text_body = render_auth_email(
         action_type=action_type,
         action_url=verify_link,
         token=token_otp,
+        lang=email_lang,
     )
 
     ok, provider_or_reason = pool.send(

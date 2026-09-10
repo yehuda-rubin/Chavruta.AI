@@ -112,7 +112,7 @@ export function SourcesPanel({
           className="h-9 w-9 rounded-xl glass grid place-items-center text-ink/50 hover:text-tekhelet shrink-0 transition"
           title={tr(lang, "collapse")}
         >
-          <Icon name="chevron_left" />
+          <Icon name={lang === "en" ? "chevron_right" : "chevron_left"} />
         </button>
         <h3 className="font-serif text-xl font-bold text-tekhelet">{tr(lang, "relatedSources")}</h3>
       </div>

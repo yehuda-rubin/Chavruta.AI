@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { Lang } from "@/lib/types";
 import { tr } from "@/lib/i18n";
@@ -15,6 +15,30 @@ import { Icon } from "./Icon";
 // he/en toggle.
 export function LegalPage({ doc }: { doc: "terms" | "privacy" | "accessibility" }) {
   const [lang, setLang] = useState<Lang>("he");
+
+  useEffect(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      const q = sp.get("lang");
+      if (q === "en" || q === "he") {
+        setLang(q);
+        return;
+      }
+      const saved = localStorage.getItem("chavruta-lang");
+      if (saved === "en" || saved === "he") {
+        setLang(saved);
+      }
+    } catch {}
+  }, []);
+
+  const toggleLang = () => {
+    const next = lang === "he" ? "en" : "he";
+    setLang(next);
+    try {
+      localStorage.setItem("chavruta-lang", next);
+    } catch {}
+  };
+
   const sections = doc === "terms" ? termsSections(lang)
     : doc === "privacy" ? privacySections(lang) : accessibilitySections(lang);
   const version = doc === "terms" ? TERMS_VERSION
@@ -35,8 +59,8 @@ export function LegalPage({ doc }: { doc: "terms" | "privacy" | "accessibility" 
             {tr(lang, "backToApp")}
           </Link>
           <button
-            onClick={() => setLang(lang === "he" ? "en" : "he")}
-            className="px-3 py-1.5 rounded-full glass text-ink/70 text-xs font-semibold"
+            onClick={toggleLang}
+            className="px-3 py-1.5 rounded-full glass text-ink/70 text-xs font-semibold hover:text-tekhelet transition cursor-pointer"
           >
             עברית · EN
           </button>

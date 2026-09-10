@@ -3,6 +3,8 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Icon } from "@/components/Icon";
 import { api, type OrgInvite, type OrgPanel } from "@/lib/api";
+import type { Lang } from "@/lib/types";
+import { tr } from "@/lib/i18n";
 
 // The school panel. Same Client-Component reasoning as /admin: it needs state for the fetch and the
 // actions, and there is no SEO upside to a page nobody should find.
@@ -20,14 +22,44 @@ import { api, type OrgInvite, type OrgPanel } from "@/lib/api";
 // in. 23,512 normalized tokens is the measured mean of a real turn (166 production turns, 2026-08-12).
 const TURN = 23512;
 
+const ROLE_HE: Record<string, string> = { admin: "מנהל", teacher: "מורה", student: "תלמיד" };
+const ROLE_EN: Record<string, string> = { admin: "Administrator", teacher: "Teacher", student: "Student" };
+
 export default function SchoolPanel() {
+  const [lang, setLang] = useState<Lang>("he");
   const [loading, setLoading] = useState(true);
   const [panel, setPanel] = useState<OrgPanel | null>(null);
   const [denied, setDenied] = useState(false);
   const [demo, setDemo] = useState(false);
   const [code, setCode] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const [invites, setInvites] = useState<OrgInvite[]>([]);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let initialLang: Lang = "he";
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const paramLang = urlParams.get("lang");
+      if (paramLang === "he" || paramLang === "en") {
+        initialLang = paramLang;
+      } else {
+        const saved = localStorage.getItem("chavruta-lang");
+        if (saved === "he" || saved === "en") {
+          initialLang = saved;
+        }
+      }
+    } catch {}
+    setLang(initialLang);
+  }, []);
+
+  const toggleLang = () => {
+    const next: Lang = lang === "he" ? "en" : "he";
+    setLang(next);
+    try {
+      localStorage.setItem("chavruta-lang", next);
+    } catch {}
+  };
 
   const loadInvites = useCallback(() => {
     api.orgs.invites().then((r) => setInvites(r.invites)).catch(() => setInvites([]));
@@ -77,7 +109,7 @@ export default function SchoolPanel() {
   }
 
   async function revoke(c: string) {
-    if (!window.confirm("לבטל את הקוד? מי שכבר הצטרף איתו נשאר; הקוד עצמו יפסיק לעבוד.")) return;
+    if (!window.confirm(tr(lang, "schoolConfirmRevokeCode"))) return;
     setBusy(true);
     try {
       await api.orgs.revokeInvite(c);
@@ -89,9 +121,7 @@ export default function SchoolPanel() {
   }
 
   async function closeSchool() {
-    if (!window.confirm(
-      "לסגור את המוסד? כל החברים יחזרו לחשבון חינמי משלהם — השיחות והשיעורים שלהם נשמרים. " +
-      "המנוי עצמו לא מבוטל כאן; לביטול חיוב יש לגשת להגדרות המנוי.")) return;
+    if (!window.confirm(tr(lang, "schoolConfirmClose"))) return;
     setBusy(true);
     try {
       await api.orgs.close();
@@ -102,7 +132,7 @@ export default function SchoolPanel() {
   }
 
   async function removeMember(ownerId: string) {
-    if (!window.confirm("להסיר את החבר? הוא לא יוכל לחזור עם קוד הכיתה — רק אתם תוכלו להחזיר אותו."))
+    if (!window.confirm(tr(lang, "schoolConfirmRemoveMember")))
       return;
     setBusy(true);
     try {
@@ -129,10 +159,7 @@ export default function SchoolPanel() {
     // layer down, so an admin who typed 0 to stop a disruptive student silently gave them the
     // largest allowance in the system.
     const raw = window.prompt(
-      "מכסת שאלות ליום לחבר הזה:\n" +
-        "• מספר — התקרה שתחול\n" +
-        "• 0 — ברירת המחדל של המוסד\n" +
-        "• ‎-1 — חסימה (החבר לא יוכל לשאול כלל)",
+      tr(lang, "schoolPromptSetCap"),
       String(current > 0 ? Math.round(current / TURN) : current),
     );
     if (raw === null) return;
@@ -148,17 +175,17 @@ export default function SchoolPanel() {
   }
 
   if (loading) {
-    return <div className="h-dvh grid place-items-center text-ink/50 text-sm">טוען…</div>;
+    return <div className="h-dvh grid place-items-center text-ink/50 text-sm">{tr(lang, "schoolLoading")}</div>;
   }
 
   if (denied || !panel) {
     return (
-      <div dir="rtl" className="h-dvh grid place-items-center p-4">
+      <div dir={lang === "he" ? "rtl" : "ltr"} className="h-dvh grid place-items-center p-4">
         <div className="glass rounded-[28px] p-8 max-w-sm text-center flex flex-col gap-3">
-          <h1 className="font-serif text-xl font-bold text-tekhelet">אין הרשאה</h1>
-          <p className="text-sm text-ink/60">העמוד הזה זמין למנהלי מוסד ולמורים בלבד.</p>
+          <h1 className="font-serif text-xl font-bold text-tekhelet">{tr(lang, "schoolDeniedTitle")}</h1>
+          <p className="text-sm text-ink/60">{tr(lang, "schoolDeniedBody")}</p>
           <Link href="/" className="text-xs text-tekhelet/80 hover:text-tekhelet font-semibold">
-            חזרה לאפליקציה
+            {tr(lang, "backToApp")}
           </Link>
         </div>
       </div>
@@ -171,52 +198,73 @@ export default function SchoolPanel() {
   // setting a cap here would 404. The controls stay visible, because seeing the real screen is the
   // whole point of the demo, but they are inert and say so.
   const demoReadOnly = !!panel.is_demo;
-  const demoNote = demoReadOnly ? "לא זמין בבית הספר לדוגמה — זו תצוגה בלבד" : undefined;
-  const num = (n: number) => n.toLocaleString("he-IL");
+  const demoNote = demoReadOnly ? tr(lang, "schoolDemoNote") : undefined;
+  const num = (n: number) => n.toLocaleString(lang === "he" ? "he-IL" : "en-US");
   const asTurns = (tokens: number) => Math.round(tokens / TURN);
-  const ROLE_HE: Record<string, string> = { admin: "מנהל", teacher: "מורה", student: "תלמיד" };
+  const roleName = (role: string) => (lang === "he" ? ROLE_HE[role] : ROLE_EN[role]) ?? role;
 
   return (
-    <div dir="rtl" className="min-h-dvh flex flex-col gap-4 p-4 lg:p-8">
+    <div dir={lang === "he" ? "rtl" : "ltr"} className="min-h-dvh flex flex-col gap-4 p-4 lg:p-8">
       <header className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
           <Icon name="school" className="text-tekhelet text-[28px]" />
           <div>
             <h1 className="font-serif text-xl font-bold text-tekhelet">{panel.name}</h1>
             <p className="text-xs text-ink/50">
-              {ROLE_HE[panel.role] ?? panel.role} · {panel.seats_used} מתוך {panel.seats} מושבים
+              {roleName(panel.role)} · {tr(lang, "schoolSeatsSubtitle").replace("{used}", num(panel.seats_used)).replace("{total}", num(panel.seats))}
             </p>
           </div>
         </div>
-        <Link
-          href={demoReadOnly ? "/admin" : "/"}
-          className="text-xs text-tekhelet/80 hover:text-tekhelet font-semibold"
-        >
-          {demoReadOnly ? "חזרה לפאנל הניהול" : "חזרה לאפליקציה"}
-        </Link>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={toggleLang}
+            className="px-3 py-1.5 rounded-full glass text-ink/70 text-xs font-semibold"
+          >
+            עברית · EN
+          </button>
+          <Link
+            href={demoReadOnly ? "/admin" : "/"}
+            className="text-xs text-tekhelet/80 hover:text-tekhelet font-semibold"
+          >
+            {demoReadOnly ? tr(lang, "schoolBackToAdmin") : tr(lang, "backToApp")}
+          </Link>
+        </div>
       </header>
 
       {panel.is_demo && (
         <div className="glass rounded-2xl p-3 text-xs text-ink/70 border border-gold/40">
-          <b>בית ספר לדוגמה.</b> נתונים מומצאים, לתצוגה ולבדיקה בלבד — אין כאן שום מוסד אמיתי ואף
-          חשבון של אדם אמיתי. כפתורי הפעולה מושבתים כאן בכוונה: זה המסך שמנהל מוסד רואה, לא מוסד
-          שאפשר לשנות.
+          <b>{tr(lang, "schoolDemoTitle")}</b> {tr(lang, "schoolDemoNotice")}
         </div>
       )}
 
       {panel.warn_80 && (
         <div className="glass rounded-2xl p-3 text-xs text-gold-soft border border-gold/50">
-          המוסד ניצל מעל 80% מהמכסה היומית. שווה לבדוק את התקרות האישיות למטה — אחרי שהמכסה נגמרת
-          ההתראה כבר לא עוזרת.
+          {tr(lang, "schoolWarn80")}
         </div>
       )}
 
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
-          { label: "שאלות היום", value: num(asTurns(panel.pool_used_today)), sub: `מתוך ~${num(asTurns(panel.pool_daily))}` },
-          { label: "שאלות השבוע", value: num(asTurns(panel.pool_used_week)), sub: `מתוך ~${num(asTurns(panel.pool_weekly))}` },
-          { label: "שיעורים השבוע", value: num(panel.lessons_used_week), sub: `מתוך ${num(panel.weekly_lessons)}` },
-          { label: "ניצול היום", value: `${Math.round(panel.pool_pct_today * 100)}%`, sub: "מהמכסה היומית" },
+          {
+            label: tr(lang, "schoolQuestionsToday"),
+            value: num(asTurns(panel.pool_used_today)),
+            sub: tr(lang, "schoolSubOfApprox").replace("{n}", num(asTurns(panel.pool_daily))),
+          },
+          {
+            label: tr(lang, "schoolQuestionsWeek"),
+            value: num(asTurns(panel.pool_used_week)),
+            sub: tr(lang, "schoolSubOfApprox").replace("{n}", num(asTurns(panel.pool_weekly))),
+          },
+          {
+            label: tr(lang, "schoolLessonsWeek"),
+            value: num(panel.lessons_used_week),
+            sub: tr(lang, "schoolSubOf").replace("{n}", num(panel.weekly_lessons)),
+          },
+          {
+            label: tr(lang, "schoolUsageToday"),
+            value: `${Math.round(panel.pool_pct_today * 100)}%`,
+            sub: tr(lang, "schoolSubDailyQuota"),
+          },
         ].map((c) => (
           <div key={c.label} className="glass rounded-2xl p-4">
             <div className="text-[11px] text-ink/50">{c.label}</div>
@@ -228,7 +276,7 @@ export default function SchoolPanel() {
 
       <section className="glass rounded-2xl p-4 flex flex-col gap-3">
         <div className="flex items-center justify-between gap-2 flex-wrap">
-          <h2 className="font-serif font-bold text-tekhelet">צירוף חברים</h2>
+          <h2 className="font-serif font-bold text-tekhelet">{tr(lang, "schoolAddMembers")}</h2>
           <div className="flex gap-2">
             <button
               disabled={busy || demoReadOnly}
@@ -236,7 +284,7 @@ export default function SchoolPanel() {
               onClick={() => mintCode("student")}
               className="text-xs px-3 py-2 rounded-xl glass text-tekhelet font-semibold disabled:opacity-40"
             >
-              קוד לתלמידים
+              {tr(lang, "schoolStudentCodeBtn")}
             </button>
             {isAdminRole && (
               <button
@@ -245,7 +293,7 @@ export default function SchoolPanel() {
                 onClick={() => mintCode("teacher")}
                 className="text-xs px-3 py-2 rounded-xl glass text-tekhelet font-semibold disabled:opacity-40"
               >
-                קוד למורה
+                {tr(lang, "schoolTeacherCodeBtn")}
               </button>
             )}
           </div>
@@ -256,28 +304,30 @@ export default function SchoolPanel() {
               {code}
             </code>
             <button
-              onClick={() => navigator.clipboard?.writeText(code)}
+              onClick={() => {
+                navigator.clipboard?.writeText(code);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              }}
               className="text-xs px-3 py-2 rounded-xl glass text-tekhelet"
             >
-              העתקה
+              {copied ? tr(lang, "copied") : tr(lang, "copy")}
             </button>
           </div>
         ) : null}
         <p className="text-[11px] text-ink/50 leading-relaxed">
-          החבר מזין את הקוד בהגדרות שלו ומצטרף בעצמו. אנחנו לא מצרפים חשבון לפי מזהה — כדי שאף אחד
-          לא יצורף בלי שביקש, וכדי שלא נחשוף מידע על חשבונות שאינם שלך. כל קוד פג תוקף מעצמו לאחר
-          שבועיים, וניתן לבטל אותו כאן בכל רגע.
+          {tr(lang, "schoolInviteExplainer")}
         </p>
 
         {invites.length > 0 && (
           <div className="flex flex-col gap-1 border-t border-ink/10 pt-3">
-            <div className="text-[11px] text-ink/50">קודים פעילים</div>
+            <div className="text-[11px] text-ink/50">{tr(lang, "schoolActiveCodes")}</div>
             {invites.map((inv) => (
               <div key={inv.code} className="flex items-center gap-2 flex-wrap text-xs">
                 <code className="font-mono tracking-widest text-tekhelet">{inv.code}</code>
                 <span className="text-ink/50">
-                  {ROLE_HE[inv.role] ?? inv.role} · נוצל {inv.used_count} מתוך {inv.max_uses}
-                  {inv.expires_at ? ` · עד ${inv.expires_at.slice(0, 10)}` : ""}
+                  {roleName(inv.role)} · {tr(lang, "schoolUses").replace("{used}", num(inv.used_count)).replace("{max}", num(inv.max_uses))}
+                  {inv.expires_at ? tr(lang, "schoolExpiresPrefix").replace("{date}", inv.expires_at.slice(0, 10)) : ""}
                 </span>
                 <button
                   disabled={busy || demoReadOnly}
@@ -285,7 +335,7 @@ export default function SchoolPanel() {
                   onClick={() => revoke(inv.code)}
                   className="text-[11px] px-2 py-1 rounded-lg glass text-ink/60 disabled:opacity-40"
                 >
-                  ביטול
+                  {tr(lang, "schoolRevokeCode")}
                 </button>
               </div>
             ))}
@@ -294,16 +344,16 @@ export default function SchoolPanel() {
       </section>
 
       <section className="glass rounded-2xl p-4 overflow-x-auto">
-        <h2 className="font-serif font-bold text-tekhelet mb-3">חברים</h2>
+        <h2 className="font-serif font-bold text-tekhelet mb-3">{tr(lang, "schoolMembersHeading")}</h2>
         <table className="w-full text-sm min-w-[560px]">
           <thead className="text-[11px] text-ink/50">
             <tr>
-              <th className="text-right font-normal pb-2">מזהה</th>
-              <th className="text-right font-normal pb-2">תפקיד</th>
-              <th className="text-right font-normal pb-2">שאלות היום</th>
-              <th className="text-right font-normal pb-2">שאלות השבוע</th>
-              <th className="text-right font-normal pb-2">תקרה יומית</th>
-              {isAdminRole && <th className="text-right font-normal pb-2">פעולות</th>}
+              <th className="text-start font-normal pb-2">{tr(lang, "schoolColMember")}</th>
+              <th className="text-start font-normal pb-2">{tr(lang, "schoolColRole")}</th>
+              <th className="text-start font-normal pb-2">{tr(lang, "schoolColQuestionsToday")}</th>
+              <th className="text-start font-normal pb-2">{tr(lang, "schoolColQuestionsWeek")}</th>
+              <th className="text-start font-normal pb-2">{tr(lang, "schoolColDailyCap")}</th>
+              {isAdminRole && <th className="text-start font-normal pb-2">{tr(lang, "schoolColActions")}</th>}
             </tr>
           </thead>
           <tbody>
@@ -311,18 +361,35 @@ export default function SchoolPanel() {
               <tr key={m.owner_id} className="border-t border-ink/10">
                 <td className="py-2 font-mono text-[11px] text-ink/70">{m.owner_id}</td>
                 <td className="py-2">
-                  {ROLE_HE[m.role] ?? m.role}
-                  {!m.accepted && <span className="text-ink/40 text-[11px]"> · הוסר</span>}
+                  <span className="inline-flex items-center gap-1.5">
+                    {roleName(m.role)}
+                    {!m.accepted ? (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-ink/10 text-ink/50">
+                        {tr(lang, "schoolStatusRemoved")}
+                      </span>
+                    ) : (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-tekhelet/10 text-tekhelet">
+                        {tr(lang, "schoolStatusActive")}
+                      </span>
+                    )}
+                  </span>
                 </td>
                 <td className="py-2">{num(asTurns(m.tokens_today))}</td>
                 <td className="py-2">{num(asTurns(m.tokens_week))}</td>
                 <td className="py-2 text-ink/60">
                   {m.daily_cap < 0 ? (
-                    <span className="text-gold-soft font-semibold">חסום</span>
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gold/15 text-gold-soft">
+                      {tr(lang, "schoolStatusBlocked")}
+                    </span>
                   ) : m.daily_cap > 0 ? (
-                    num(asTurns(m.daily_cap))
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-ink/10 text-ink/70">
+                        {tr(lang, "schoolStatusCustomCap")}
+                      </span>
+                      <span>{num(asTurns(m.daily_cap))}</span>
+                    </span>
                   ) : (
-                    "ברירת מחדל"
+                    <span className="text-xs text-ink/50">{tr(lang, "schoolStatusDefaultCap")}</span>
                   )}
                 </td>
                 {isAdminRole && (
@@ -335,7 +402,7 @@ export default function SchoolPanel() {
                           onClick={() => setCap(m.owner_id, m.daily_cap)}
                           className="text-[11px] px-2 py-1 rounded-lg glass text-tekhelet disabled:opacity-40"
                         >
-                          תקרה
+                          {tr(lang, "schoolActionSetCap")}
                         </button>
                         <button
                           disabled={busy || demoReadOnly || m.role === "admin"}
@@ -343,7 +410,7 @@ export default function SchoolPanel() {
                           onClick={() => removeMember(m.owner_id)}
                           className="text-[11px] px-2 py-1 rounded-lg glass text-ink/60 disabled:opacity-30"
                         >
-                          הסרה
+                          {tr(lang, "schoolActionRemove")}
                         </button>
                       </>
                     ) : (
@@ -353,7 +420,7 @@ export default function SchoolPanel() {
                         onClick={() => readmit(m.owner_id)}
                         className="text-[11px] px-2 py-1 rounded-lg glass text-tekhelet disabled:opacity-40"
                       >
-                        החזרה
+                        {tr(lang, "schoolActionReadmit")}
                       </button>
                     )}
                   </td>
@@ -366,22 +433,21 @@ export default function SchoolPanel() {
 
       {isAdminRole && (
         <section className="glass rounded-2xl p-4">
-          <h2 className="font-serif font-bold text-tekhelet mb-1">נושאי לימוד</h2>
+          <h2 className="font-serif font-bold text-tekhelet mb-1">{tr(lang, "schoolTopicsHeading")}</h2>
           <p className="text-[11px] text-ink/50 mb-3">
-            סוגי השימוש והיקפם. תוכן השיחות עצמן אינו נגיש לאף אחד במוסד — לא למנהל, לא למורה, ולא
-            בבקשה מיוחדת.
+            {tr(lang, "schoolTopicsExplainer")}
           </p>
           {panel.topics.length ? (
             <ul className="flex flex-wrap gap-2">
               {panel.topics.map((t) => (
                 <li key={t.intent} className="text-xs glass rounded-xl px-3 py-2">
                   <b className="text-tekhelet">{t.intent}</b>
-                  <span className="text-ink/50"> · {num(t.requests)} פניות</span>
+                  <span className="text-ink/50"> · {num(t.requests)} {tr(lang, "schoolTopicsRequests")}</span>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-xs text-ink/40">אין עדיין שימוש לדווח עליו.</p>
+            <p className="text-xs text-ink/40">{tr(lang, "schoolTopicsEmpty")}</p>
           )}
         </section>
       )}
@@ -390,17 +456,16 @@ export default function SchoolPanel() {
           owner cannot leave their own org and cannot delete their account while it exists. */}
       {isAdminRole && !panel.is_demo && (
         <section className="glass rounded-2xl p-4 border border-gold/30">
-          <h2 className="font-serif font-bold text-tekhelet mb-1">סגירת המוסד</h2>
+          <h2 className="font-serif font-bold text-tekhelet mb-1">{tr(lang, "schoolCloseHeading")}</h2>
           <p className="text-[11px] text-ink/50 mb-3 leading-relaxed">
-            כל החברים יחזרו לחשבון חינמי משלהם, והשיחות והשיעורים שלהם נשמרים — המוסד רכש מכסה, לא
-            את העבודה של אף אחד. החיוב עצמו לא מבוטל כאן: לביטול המנוי יש לגשת להגדרות המנוי.
+            {tr(lang, "schoolCloseExplainer")}
           </p>
           <button
             disabled={busy}
             onClick={closeSchool}
             className="text-xs px-3 py-2 rounded-xl glass text-gold-soft font-semibold disabled:opacity-40"
           >
-            סגירת המוסד
+            {tr(lang, "schoolCloseBtn")}
           </button>
         </section>
       )}

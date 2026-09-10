@@ -40,7 +40,7 @@ export function Header({
   // title says which school it is going to open.
   const canManageOrg = orgRole === "admin" || orgRole === "teacher" || !!isAdmin;
   const orgButtonTitle = orgRole ? "פאנל המוסד" : "פאנל מוסד (בית ספר לדוגמה)";
-  const userInitial = userEmail ? userEmail[0].toUpperCase() : "א";
+  const userInitial = userEmail ? userEmail[0].toUpperCase() : (lang === "en" ? "A" : "א");
   return (
     <header className="h-[70px] flex items-center justify-between px-4 lg:px-8 shrink-0">
       <div className="flex items-center gap-2 lg:gap-3">

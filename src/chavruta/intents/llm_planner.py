@@ -240,6 +240,9 @@ def classify_and_distill(
             ack = "בשמחה רבה! תמיד כאן לעזרתך לכל שאלה, לימוד סוגיה או בירור הלכתי נוסף."
         return DistillerResult(action="chitchat", answer=ack, raw="HHH")
 
+    if _is_short_and_direct(clean, history=history):
+        return DistillerResult(action="study", distilled_query=clean, raw=clean)
+
     from chavruta.llm import metering
 
     messages = [{"role": "system", "content": _DISTILL_SYSTEM}]

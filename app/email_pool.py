@@ -409,14 +409,108 @@ def verify_supabase_hook(
     return any(hmac.compare_digest(expected_v1, s.strip()) for s in signatures if s.strip())
 
 
-# --- Localized Hebrew Templates ---
+# --- Localized Templates (Hebrew & English) ---
 
 def render_auth_email(
     action_type: str,
     action_url: str,
     token: str | None = None,
+    lang: str = "he",
 ) -> tuple[str, str, str]:
-    """Render localized Hebrew HTML and text templates for Supabase Auth emails."""
+    """Render localized HTML and text templates for Supabase Auth emails."""
+    if token in ("he", "en") and lang == "he":
+        lang = token
+        token = None
+
+    is_en = (lang or "").startswith("en")
+
+    if is_en:
+        if action_type == "recovery":
+            subject = "Reset your password — Chavruta AI"
+            title = "Reset Your Password"
+            lead = "We received a request to reset your password for your Chavruta AI account."
+            action_label = "Reset Password"
+            note = "If you did not request a password reset, you can safely ignore this email."
+        elif action_type == "signup":
+            subject = "Welcome to Chavruta AI — Confirm your email"
+            title = "Welcome to Chavruta AI!"
+            lead = "Thank you for signing up for Chavruta AI. Please confirm your email address to activate your account and start learning."
+            action_label = "Confirm Email"
+            note = "If you did not create an account, you can safely ignore this email."
+        elif action_type == "magiclink":
+            subject = "Your sign-in link — Chavruta AI"
+            title = "Sign In to Chavruta AI"
+            lead = "Click the button below to sign in directly to your Chavruta AI account."
+            action_label = "Sign In"
+            note = "This link is valid for a limited time."
+        else:
+            subject = "Message from Chavruta AI"
+            title = "Verify Action"
+            lead = "Verification is required to complete the requested action on your account."
+            action_label = "Continue"
+            note = "If you did not perform this action, please contact support."
+
+        otp_block = ""
+        otp_text = ""
+        if token:
+            otp_block = f"""
+        <div style="background-color: #f1f5f9; border-radius: 8px; padding: 12px; margin: 20px 0; text-align: center;">
+            <p style="margin: 0 0 6px 0; font-size: 13px; color: #475569;">One-time verification code (OTP):</p>
+            <span style="font-family: monospace; font-size: 22px; font-weight: bold; letter-spacing: 4px; color: #1e293b;">{token}</span>
+        </div>
+            """
+            otp_text = f"\nOne-time verification code (OTP): {token}\n"
+
+        html = f"""<!DOCTYPE html>
+<html dir="ltr" lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{subject}</title>
+</head>
+<body style="font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 40px 16px; direction: ltr; text-align: left;">
+    <div style="max-width: 540px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; padding: 36px 32px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+        <div style="text-align: center; margin-bottom: 24px;">
+            <h1 style="color: #1e3a8a; font-size: 24px; font-weight: 700; margin: 0;">Chavruta AI</h1>
+            <p style="color: #64748b; font-size: 13px; margin: 4px 0 0 0;">Source-grounded AI for the Jewish bookshelf</p>
+        </div>
+        <div style="border-top: 1px solid #f1f5f9; margin-bottom: 24px;"></div>
+        
+        <h2 style="color: #0f172a; font-size: 20px; font-weight: 600; margin: 0 0 12px 0;">{title}</h2>
+        <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">{lead}</p>
+        
+        {otp_block}
+        
+        <div style="text-align: center; margin: 28px 0;">
+            <a href="{action_url}" style="display: inline-block; background-color: #2563eb; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 10px; font-weight: 600; font-size: 15px; box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);">
+                {action_label}
+            </a>
+        </div>
+        
+        <p style="color: #64748b; font-size: 13px; line-height: 1.5; margin: 24px 0 0 0; border-top: 1px solid #f1f5f9; padding-top: 16px;">
+            {note}
+            <br>
+            If the button does not work, copy and paste this link into your browser:
+            <br>
+            <a href="{action_url}" style="color: #2563eb; word-break: break-all; font-size: 12px;">{action_url}</a>
+        </p>
+    </div>
+</body>
+</html>"""
+
+        text = f"""{title}
+
+{lead}
+{otp_text}
+Action link:
+{action_url}
+
+{note}
+Chavruta AI Team
+"""
+        return subject, html, text
+
+    # Hebrew (default)
     if action_type == "recovery":
         subject = "איפוס סיסמה — חברותא.AI"
         title = "איפוס סיסמה"

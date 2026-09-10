@@ -79,7 +79,7 @@ export function SessionsPanel({
           className="h-10 w-10 rounded-2xl glass grid place-items-center text-ink/50 hover:text-tekhelet shrink-0 transition"
           title={tr(lang, "collapse")}
         >
-          <Icon name="chevron_right" />
+          <Icon name={lang === "en" ? "chevron_left" : "chevron_right"} />
         </button>
       </div>
       <p className="text-[11px] tracking-widest text-ink/40 font-bold uppercase mt-3 mb-2 px-2">

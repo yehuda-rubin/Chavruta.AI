@@ -731,7 +731,7 @@ export default function Home() {
       <div className="flex-1 min-h-0 flex gap-3 overflow-hidden">
         <div className="hidden lg:contents">
           {sessionsCollapsed ? (
-            <Rail side="start" icon="chat" title={tr(lang, "openChatsTip")} onExpand={() => setSessionsCollapsed(false)} />
+            <Rail lang={lang} side="start" icon="chat" title={tr(lang, "openChatsTip")} onExpand={() => setSessionsCollapsed(false)} />
           ) : (
             sessionsPanel(false)
           )}
@@ -760,7 +760,7 @@ export default function Home() {
 
         <div className="hidden lg:contents">
           {sourcesCollapsed ? (
-            <Rail side="end" icon="menu_book" title={tr(lang, "openSourcesTip")} onExpand={() => setSourcesCollapsed(false)} />
+            <Rail lang={lang} side="end" icon="menu_book" title={tr(lang, "openSourcesTip")} onExpand={() => setSourcesCollapsed(false)} />
           ) : (
             sourcesPanel(false)
           )}

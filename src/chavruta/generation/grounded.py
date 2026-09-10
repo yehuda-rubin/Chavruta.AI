@@ -358,24 +358,43 @@ def _protect_abbreviations(s: str) -> str:
     return _ABBREV_MARK_RE.sub("", s)  # 1-for-1 so positions still line up with the original
 
 
+def _quote_skeleton(text: str, lang: str = "he") -> str:
+    if (lang or "").startswith("en"):
+        return re.sub(r'[^a-zA-Z0-9]', '', text or '').lower()
+    return _NONHEB_RE.sub("", _NIQQUD_RE.sub("", text or ""))
+
+
 def _heb_skeleton(s: str) -> str:
-    return _NONHEB_RE.sub("", _NIQQUD_RE.sub("", s or ""))
+    return _quote_skeleton(s, "he")
 
 
-def unverified_quotes(text: str, sources, min_len: int = 14) -> list[str]:
-    """Citation-faithfulness guard: return VERBATIM Hebrew quotes in `text` (inside quote marks) whose
+def unverified_quotes(text: str, sources, min_len: int = 14, lang: str | None = None) -> list[str]:
+    """Citation-faithfulness guard: return VERBATIM quotes in `text` (inside quote marks) whose
     opening does NOT appear in any retrieved source — a strong sign the quote was fabricated or drifted
     from its source. Paraphrase is not checked; only quoted spans must actually exist in the corpus.
     Cheap (string only), so it can run on every grounded answer."""
-    corpus = _heb_skeleton(" ".join((getattr(s, "text", None) or getattr(s, "quote", "") or "")
-                                    for s in (sources or [])))
+    if lang is None:
+        he_count = sum(1 for ch in (text or "") if "\u0590" <= ch <= "\u05ff")
+        en_count = sum(1 for ch in (text or "") if "a" <= ch.lower() <= "z")
+        effective_lang = "he" if (he_count > en_count or (he_count > 0 and en_count == 0)) else "en"
+    else:
+        effective_lang = lang
+
+    source_blobs = []
+    for s in (sources or []):
+        t = getattr(s, "text", "") or getattr(s, "quote", "") or ""
+        ten = getattr(s, "text_en", "") or ""
+        the = getattr(s, "text_he", "") or ""
+        source_blobs.extend([t, ten, the])
+
+    corpus = _quote_skeleton(" ".join(b for b in source_blobs if b), lang=effective_lang)
     if not corpus:
         return []
     text = text or ""
     bad = []
     for start, end in _quoted_spans(_protect_abbreviations(text)):
         raw = text[start:end]             # same span, original characters (abbreviation marks intact)
-        q = _heb_skeleton(raw)
+        q = _quote_skeleton(raw, lang=effective_lang)
         if len(q) >= min_len and q[:min_len] not in corpus:   # opening not found in any source
             bad.append(raw.strip()[:60])
     return bad

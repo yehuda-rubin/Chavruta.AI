@@ -29,8 +29,13 @@ _guard_log = logging.getLogger("chavruta.guards")
 
 
 def _detect_lang(text: str) -> str:
-    """Hebrew if it contains Hebrew letters, else English (FR-010)."""
-    return "he" if any("֐" <= ch <= "׿" for ch in text) else "en"
+    """Hebrew if Hebrew letters dominate Latin letters, else English (FR-010)."""
+    he_count = sum(1 for ch in (text or "") if "\u0590" <= ch <= "\u05ff")
+    en_count = sum(1 for ch in (text or "") if "a" <= ch.lower() <= "z")
+    if he_count > en_count or (he_count > 0 and en_count == 0):
+        return "he"
+    return "en"
+
 
 
 # Per-intent generation budgets (user decision 2026-06-18): lessons need room for a full
@@ -261,7 +266,10 @@ class ChavrutaPipeline:
             llm.source_fetcher = self._build_source_fetcher()
 
     def _resolve_query(self, request: Query, history=None) -> Query:
-        if request.lang is None or request.lang == "":
+        passed_lang = getattr(request, "lang", None)
+        if passed_lang and str(passed_lang).strip():
+            request.lang = str(passed_lang).strip()
+        else:
             request.lang = _detect_lang(request.text)
         from chavruta.intents.llm_planner import distill_query
         distilled = distill_query(request.text, history=history, intent=request.intent)
@@ -496,7 +504,7 @@ class ChavrutaPipeline:
         # folded into marker_map/citations above) — checking against result.hits alone false-flagged
         # a faithful quote as "not found" whenever it came from a source the FIRST retrieval round
         # missed and a later agentic round supplied.
-        bad_q = grounded.unverified_quotes(text, list(result.hits) + list(fetched or []))
+        bad_q = grounded.unverified_quotes(text, list(result.hits) + list(fetched or []), lang=query.lang)
         if bad_q:
             answer.caveats.append(("הערה: ציטוט/ים שלא נמצאו במקורות שנשלפו: «" + "», «".join(bad_q[:2]) + "» — יש לאמת.")
                                   if query.lang != "en" else

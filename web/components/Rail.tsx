@@ -1,3 +1,4 @@
+import type { Lang } from "@/lib/types";
 import { Icon } from "./Icon";
 
 // A collapsed panel — a thin vertical rail with an expand button, matching the static UI's rails.
@@ -7,14 +8,17 @@ export function Rail({
   title,
   onExpand,
   extra,
+  lang = "he",
 }: {
   side: "start" | "end"; // which chevron points "open"
   icon: string;
   title: string;
   onExpand: () => void;
   extra?: React.ReactNode;
+  lang?: Lang;
 }) {
-  const chevron = side === "start" ? "chevron_left" : "chevron_right";
+  const isHe = lang === "he";
+  const chevron = side === "start" ? (isHe ? "chevron_left" : "chevron_right") : (isHe ? "chevron_right" : "chevron_left");
   return (
     <div className="w-14 shrink-0 glass rounded-[28px] p-2 flex flex-col items-center gap-3">
       <button
