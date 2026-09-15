@@ -136,6 +136,7 @@ SYSTEM_BASE_HE = (
     "אם לשון מקור מסוים כתובה בשפה שונה משפת התשובה (למשל תשובה שתורגמה לאנגלית, בתוך תשובה "
     "בעברית) — תרגם אותה לשפת התשובה במקום לצטט אותה כלשונה בשפה הזרה; סימון ה-[S#] עדיין "
     "מקשר את הקורא למקור המקורי. "
+    "שמור על לשון בית המדרש והמינוח התורני: באר מושגים מארמית ומחז\"ל לעברית תורנית מקורית ולא דרך תרגומים של שפות זרות (למשל: כהנא = כהן). "
     "אל תדרוש התאמת-מילים מילולית בין השאלה למקור: אם השאלה עוסקת במקרה מודרני או במונח שלא "
     "מופיע כלשונו במקורות (מכשיר, מצב, או פעולה עכשווית) — הסק את העיקרון העולה מן המקורות "
     "שסופקו והחל אותו על המקרה הנשאל, כפי שפוסק אמיתי מסיק מתקדים, ולא רק כשהמקרה עצמו נזכר "
@@ -259,7 +260,7 @@ def build_prompt(
 
 
 def enforce_citations(
-    text: str, marker_map: dict[str, RankedHit]
+    text: str, marker_map: dict[str, RankedHit], *, question: str = ""
 ) -> tuple[str, list[Citation], bool]:
     """Map [S#] markers to real chunks; drop fabricated markers; report grounded-ness.
 
@@ -305,6 +306,7 @@ def enforce_citations(
     ]
     grounded = len(citations) > 0
     clean = strip_mudgash_label(clean)
+    clean = sanitize_priestly_terms(clean, question=question, sources=list(marker_map.values()))
     return clean.strip(), citations, grounded
 
 
@@ -319,6 +321,67 @@ def strip_mudgash_label(text: str) -> str:
     if not text:
         return ""
     return _MUDGASH_PREFIX_RE.sub("", text).lstrip()
+
+
+_CHRISTIAN_CLERGY_CONTEXT_RE = re.compile(
+    r"(?:כומר|כמרים|כמורה|כומרא|כומרי|גלח|גלחים|נוצרי|נוצרים|נוצרית|נצרות|כנסיה|כנסייה|כנסיות)",
+    re.IGNORECASE | re.UNICODE,
+)
+
+_KEHUNA_CONTEXT_RE = re.compile(
+    r"(?:כהן|כהנא|כהנים|כהונה|כהינא|מתנות\s+כהונה|בגדי\s+כהונה|ברכת\s+כהנים|עבודת\s+המקדש|בית\s+המקדש|זרוע|לחיים|וקבה|וקיבה|חולין)",
+    re.IGNORECASE | re.UNICODE,
+)
+
+_KUMER_TO_KOHEN_REPLACEMENTS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"(?<![א-ת])([בלכמושדה]*)מתנות\s+כומר(?![א-ת])"), r"\1מתנות כהונה"),
+    (re.compile(r"(?<![א-ת])([בלכמושדה]*)מתנת\s+כומר(?![א-ת])"), r"\1מתנת כהונה"),
+    (re.compile(r"(?<![א-ת])([בלכמושדה]*)מכרי\s+כמורה(?![א-ת])"), r"\1מכרי כהונה"),
+    (re.compile(r"(?<![א-ת])([בלכמושדה]*)הכמרים(?![א-ת])"), r"\1הכהנים"),
+    (re.compile(r"(?<![א-ת])([בלכמושדה]*)כמרים(?![א-ת])"), r"\1כהנים"),
+    (re.compile(r"(?<![א-ת])([בלכמושדה]*)הכמורה(?![א-ת])"), r"\1הכהונה"),
+    (re.compile(r"(?<![א-ת])([בלכמושדה]*)כמורה(?![א-ת])"), r"\1כהונה"),
+    (re.compile(r"(?<![א-ת])([בלכמושדה]*)הכומר(?![א-ת])"), r"\1הכהן"),
+    (re.compile(r"(?<![א-ת])([בלכמושדה]*)כומר(?![א-ת])"), r"\1כהן"),
+]
+
+
+def sanitize_priestly_terms(text: str, question: str = "", sources: list | None = None) -> str:
+    """Correct cross-lingual English-pivot mistranslations where an LLM translates
+    Aramaic 'כהנא' / Hebrew 'כהן' (priest) as 'כומר' instead of 'כהן'.
+
+    SAFETY FIRST:
+    If the question or sources genuinely refer to Christian clergy or church concepts
+    (כומר, נוצרי, כנסייה, גלח), this function does nothing and returns text untouched.
+    """
+    if not text or ("כומר" not in text and "כמר" not in text):
+        return text
+
+    # 1. Did the user ask about priests/Christianity? If so, leave as is!
+    if question and _CHRISTIAN_CLERGY_CONTEXT_RE.search(question):
+        return text
+
+    # 2. Do the retrieved sources mention Christian clergy / church?
+    sources_text = ""
+    if sources:
+        sources_text = " ".join(
+            getattr(s, "text", "") or getattr(s, "text_he", "") or getattr(s, "quote", "") or str(s)
+            for s in sources
+        )
+        if _CHRISTIAN_CLERGY_CONTEXT_RE.search(sources_text):
+            return text
+
+    # 3. Only apply if Kehuna context is present (in sources, question, or generated text)
+    combined_context = f"{question} {sources_text} {text}"
+    if not _KEHUNA_CONTEXT_RE.search(combined_context):
+        return text
+
+    # Apply surgical replacements
+    cleaned = text
+    for pattern, replacement in _KUMER_TO_KOHEN_REPLACEMENTS:
+        cleaned = pattern.sub(replacement, cleaned)
+
+    return cleaned
 
 
 _NIQQUD_RE = re.compile(r"[֑-ׇ]")            # Hebrew vowels + cantillation

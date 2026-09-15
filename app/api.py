@@ -1373,6 +1373,9 @@ def _generate_lesson_from_hits(topic: str, hits, lang: str, he: bool, *, audienc
     lf, fl = _strip_instruction_echo(lf, he), _strip_instruction_echo(fl, he)
     lf = _strip_markers(_fix_bleeding_sentences(lf, he, llm), he=he)
     fl = _strip_markers(_fix_bleeding_sentences(fl, he, llm), he=he)
+    from chavruta.generation.grounded import sanitize_priestly_terms
+    lf = sanitize_priestly_terms(lf, question=topic, sources=hits)
+    fl = sanitize_priestly_terms(fl, question=topic, sources=hits)
 
     # Source sheet = the FULL retrieved source texts, in teaching order — ALWAYS built mechanically from
     # the cited sources (which carry the complete RAG text), NOT from the model's SOURCE_SHEET prose.
@@ -1580,6 +1583,8 @@ def _edit_lesson_file(
     raw, _ = llm.request(job, lang=lang, token_budget=3000)
     new_content = _strip_instruction_echo(raw.strip(), he)
     new_content = _strip_markers(new_content, he=he).strip()
+    from chavruta.generation.grounded import sanitize_priestly_terms
+    new_content = sanitize_priestly_terms(new_content, question=instruction)
 
     if not new_content:
         new_content = old_content  # safety fallback

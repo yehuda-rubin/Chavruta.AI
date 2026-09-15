@@ -342,7 +342,7 @@ class ChavrutaPipeline:
         if not fetched or is_degrade_message(raw):
             return None                                   # nothing fetched, or a timeout/no-fetch degrade
         marker_map = {f"S{i}": s for i, s in enumerate(fetched, 1)}
-        text, citations, is_grounded = grounded.enforce_citations(raw, marker_map)
+        text, citations, is_grounded = grounded.enforce_citations(raw, marker_map, question=query.text)
         if not is_grounded:
             return None                                   # model didn't actually cite a fetched source
         return Answer(text=text, citations=citations, grounded=True, no_source=False,
@@ -485,7 +485,7 @@ class ChavrutaPipeline:
             # own text scan ever over/undercounts (see agentic.py::append_sources). Falls back to
             # the old count-based guess only for a source that never went through that loop.
             marker_map.setdefault(s.marker or f"S{i}", s)
-        text, citations, is_grounded = grounded.enforce_citations(raw, marker_map)
+        text, citations, is_grounded = grounded.enforce_citations(raw, marker_map, question=query.text)
         answer = Answer(
             text=text, citations=citations, grounded=is_grounded,
             no_source=not is_grounded, intent=query.intent,
@@ -624,7 +624,7 @@ class ChavrutaPipeline:
             # own text scan ever over/undercounts (see agentic.py::append_sources). Falls back to
             # the old count-based guess only for a source that never went through that loop.
             marker_map.setdefault(s.marker or f"S{i}", s)
-        text, citations, is_grounded = grounded.enforce_citations(raw, marker_map)
+        text, citations, is_grounded = grounded.enforce_citations(raw, marker_map, question=query.text)
         if plan.sections:
             plan = grounded.prune_lesson_to_cited(plan, citations)
         answer = Answer(text=text, citations=citations, grounded=is_grounded,
@@ -652,7 +652,7 @@ class ChavrutaPipeline:
             raw, fetched = llm_out.text, getattr(llm_out, "fetched_sources", None) or []
         for i, s in enumerate(fetched or [], len(marker_map) + 1):
             marker_map.setdefault(s.marker or f"S{i}", s)
-        text, citations, is_grounded = grounded.enforce_citations(raw, marker_map)
+        text, citations, is_grounded = grounded.enforce_citations(raw, marker_map, question=query.text)
         return Answer(
             text=text, citations=citations, grounded=is_grounded,
             no_source=not is_grounded, intent=Intent.CHAVRUTA,
@@ -678,7 +678,7 @@ class ChavrutaPipeline:
             raw, fetched = llm_out.text, getattr(llm_out, "fetched_sources", None) or []
         for i, s in enumerate(fetched or [], len(marker_map) + 1):
             marker_map.setdefault(s.marker or f"S{i}", s)
-        text, citations, is_grounded = grounded.enforce_citations(raw, marker_map)
+        text, citations, is_grounded = grounded.enforce_citations(raw, marker_map, question=query.text)
         return Answer(
             text=text, citations=citations, grounded=is_grounded,
             no_source=not is_grounded, intent=Intent.SOURCESHEET,
