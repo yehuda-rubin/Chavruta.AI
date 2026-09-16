@@ -1,5 +1,6 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import type { Attachment, Citation, Lang, Message } from "@/lib/types";
 import { tr } from "@/lib/i18n";
 import { commentatorTag, isHe } from "@/lib/format";
@@ -66,6 +67,7 @@ export function SourcesPanel({
   messages,
   userSources,
   srcDefaultOpen,
+  isAdmin,
   onRemoveSource,
   onAddSource,
   onCollapse,
@@ -74,10 +76,26 @@ export function SourcesPanel({
   messages: Message[];
   userSources: Attachment[];
   srcDefaultOpen: boolean;
+  isAdmin?: boolean;
   onRemoveSource: (i: number) => void;
   onAddSource: () => void;
   onCollapse: () => void;
 }) {
+  const [isBetaTester, setIsBetaTester] = useState(false);
+  useEffect(() => {
+    try {
+      if (
+        typeof window !== "undefined" &&
+        (new URLSearchParams(window.location.search).has("beta") ||
+          localStorage.getItem("chavruta_beta_tester") === "true")
+      ) {
+        setIsBetaTester(true);
+      }
+    } catch {}
+  }, []);
+
+  const canAccessSearch = Boolean(isAdmin || isBetaTester);
+
   // When "sources open by default", membership in `toggled` means "collapsed" (inverted).
   const [toggled, setToggled] = useState<Set<string>>(new Set());
 
@@ -191,6 +209,15 @@ export function SourcesPanel({
             </div>
           );
         })}
+        {canAccessSearch && (
+          <Link
+            href="/search"
+            className="w-full py-2.5 rounded-full glass text-tekhelet font-bold text-sm text-center hover:ring-2 hover:ring-gold/30 transition flex items-center justify-center gap-2"
+          >
+            <Icon name="search" className="text-[18px]" />
+            {tr(lang, "searchLibrary")}
+          </Link>
+        )}
         <button
           onClick={onAddSource}
           className="w-full py-2.5 rounded-full grad text-white font-bold text-sm hover:opacity-95 transition shadow-lg shadow-tekhelet/20"

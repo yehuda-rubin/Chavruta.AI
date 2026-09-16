@@ -27,6 +27,8 @@ NGINX = ROOT / "docker" / "nginx.conf"
 NOT_BACKEND = {
     "feedback",     # bare /feedback is a real Next page; only /feedback/submit is the API, and both
                     # config files special-case it (see the comments there)
+    "search",       # bare /search is a real Next page; only /search/query is the API (search:8081)
+    "reader",       # dedicated search/reader microservice (:8081) endpoints, proxied separately
 }
 
 
@@ -50,7 +52,7 @@ def _nginx_prefixes() -> set[str]:
     src = NGINX.read_text(encoding="utf-8")
     out: set[str] = set()
     for m in re.finditer(r"location\s+~\s+\^/\(([^)]+)\)", src):
-        out.update(p.strip().lower() for p in m.group(1).split("|"))
+        out.update(p.split("/")[0].strip().lower() for p in m.group(1).split("|"))
     for m in re.finditer(r"location\s+~\s+\^/([a-z0-9_-]+)/", src, re.I):
         out.add(m.group(1).lower())
     return out

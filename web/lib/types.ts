@@ -96,3 +96,28 @@ export interface SavedSourceSheet {
   created_at: string;
   message_id?: number | null;
 }
+
+export interface SearchHit {
+  ref: string;
+  book: string;
+  author_he: string;
+  work_id: string;
+  snippet: string;
+  text_he: string;
+  text_en: string | null;
+  license_he: string;
+  license_en: string | null;
+  version_he: string;
+  version_en: string | null;
+  category_path: string;
+}
+
+export interface SearchResponse {
+  query: string;
+  lang: "he" | "en";
+  total: number;
+  offset: number;
+  limit: number;
+  hits: SearchHit[];
+  facets: Record<string, number>;
+}

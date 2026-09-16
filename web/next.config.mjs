@@ -30,6 +30,7 @@ const nextConfig = {
   // /query/async, which is the variant the UI actually uses.
   async rewrites() {
     const api = process.env.CHAVRUTA_API_ORIGIN || "http://127.0.0.1:8080";
+    const searchApi = process.env.CHAVRUTA_SEARCH_API_ORIGIN || "http://127.0.0.1:8081";
     const proxy = (p) => [
       { source: `/${p}`, destination: `${api}/${p}` },
       { source: `/${p}/:path*`, destination: `${api}/${p}/:path*` },
@@ -64,6 +65,11 @@ const nextConfig = {
       // exact path with nothing else — only /feedback/submit is the API route. See docker/nginx.conf
       // for why this one couldn't just be a prefix like /admin.
       { source: "/feedback/submit", destination: `${api}/feedback/submit` },
+      // Dedicated search microservice — /search is the Next.js page, /search/query is the FTS5 API
+      { source: "/search/query", destination: `${searchApi}/search/query` },
+      { source: "/search/query/:path*", destination: `${searchApi}/search/query/:path*` },
+      // Reader endpoints (/reader/unit, /reader/links) served by search microservice
+      { source: "/reader/:path*", destination: `${searchApi}/reader/:path*` },
     ];
   },
 };

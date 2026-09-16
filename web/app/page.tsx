@@ -104,6 +104,16 @@ export default function Home() {
         initialLang = paramLang;
         hasUrlOverride = true;
       }
+      const askSource = urlParams.get("ask_source");
+      if (askSource) {
+        setPendingNewSources([
+          {
+            kind: "text",
+            name: askSource,
+            content: `מקור נבחר ללימוד: ${askSource}`,
+          },
+        ]);
+      }
     } catch {}
 
     if (!hasUrlOverride) {
@@ -707,6 +717,7 @@ export default function Home() {
       messages={messages}
       userSources={userSources}
       srcDefaultOpen={srcDefaultOpen}
+      isAdmin={me?.is_admin}
       onRemoveSource={(i) => setUserSources((prev) => prev.filter((_, j) => j !== i))}
       onAddSource={() => setShowAddSource(true)}
       onCollapse={() => (mobile ? setMobileSources(false) : setSourcesCollapsed(true))}

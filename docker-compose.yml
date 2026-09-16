@@ -216,6 +216,27 @@ services:
   # container then faithfully reloads the STALE config. Caught live 2026-08-07: the routing fix for
   # /feedback/submit tested as a 500 (nginx serving its own stale config, no route matched, request
   # never reached FastAPI at all) until `--force-recreate` was used on `web` specifically.
+  # ── Search: SQLite FTS5 lexical search service ──────────────────────────────
+  search:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.search
+    container_name: chavruta-search
+    restart: unless-stopped
+    expose:
+      - "8081"
+    volumes:
+      # SQLite FTS5 database mounted read-only on disk
+      - ./data/search_index.db:/data/search_index.db:ro
+    environment:
+      SEARCH_DB_PATH: /data/search_index.db
+      SEARCH_RATE_LIMIT_PER_MINUTE: 120
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8081/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
   web:
     image: nginx:1.27-alpine
     container_name: chavruta-web
@@ -224,6 +245,7 @@ services:
       - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - ui
+      - search
     ports:
       - "5173:80"                         # open http://localhost:5173
 
