@@ -49,7 +49,7 @@ const QUICK_PROMPTS = {
 export function FloatingAskButton({
   activeSource,
   lang = "he",
-  position = "bottom-left",
+  position = "bottom-right",
   isOpen: controlledIsOpen,
   onOpenChange,
   className = "",

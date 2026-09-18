@@ -61,14 +61,15 @@ export function SearchBar({
 
       <input
         ref={inputRef}
-        type="search"
+        type="text"
+        role="searchbox"
         value={query}
         dir={inputDir}
         autoFocus={autoFocus}
         onChange={(e) => setQuery(e.target.value)}
         placeholder={tr(lang, "searchPlaceholder")}
         aria-label={tr(lang, "searchPlaceholder")}
-        className={`w-full bg-transparent border-none outline-none text-ink placeholder:text-ink/40 font-serif ${
+        className={`w-full bg-transparent border-none outline-none text-ink placeholder:text-ink/40 font-serif [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden ${
           isLarge ? "text-lg sm:text-xl py-2" : "text-base py-1"
         }`}
       />

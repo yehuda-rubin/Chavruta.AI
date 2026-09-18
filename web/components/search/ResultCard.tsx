@@ -85,11 +85,8 @@ export function ResultCard({ hit, lang }: { hit: SearchHit; lang: Lang }) {
 
       {/* Action Buttons: Read in Context & Ask Chavruta */}
       {(() => {
-        const refParts = (hit.ref || "").split(".");
-        const chapter = refParts.length > 1 ? refParts[1] : "1";
-        const readTarget = hit.book ? `${hit.book}.${chapter}` : hit.ref;
-        const readUrl = `/search/read/${encodeURIComponent(readTarget)}`;
-        const askUrl = `/?ask_source=${encodeURIComponent(hit.ref)}`;
+        const readUrl = `/search/read/${encodeURIComponent(hit.ref || "")}`;
+        const askUrl = `/?ask_source=${encodeURIComponent(hit.ref || "")}`;
 
         return (
           <div className="flex items-center justify-between gap-2.5 flex-wrap pt-2 border-t border-line/50">

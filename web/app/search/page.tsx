@@ -1,11 +1,11 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { Lang, SearchResponse } from "@/lib/types";
 import { tr } from "@/lib/i18n";
-import { fetchSearch } from "@/lib/search";
+import { fetchSearch, CANONICAL_CATEGORIES } from "@/lib/search";
 import { Icon } from "@/components/Icon";
 import { SearchBar } from "@/components/search/SearchBar";
 import { ResultCard } from "@/components/search/ResultCard";
@@ -178,24 +178,52 @@ function SearchContent() {
     updateUrlParams({ q: newQuery });
   };
 
-  const selectedWorkIds = workIdParam
-    ? workIdParam.split(",").map((s) => s.trim()).filter(Boolean)
-    : [];
+  // Canonical categories that have results in this search
+  const availableCategories: string[] = useMemo(() => {
+    if (!searchData?.facets) return [...CANONICAL_CATEGORIES];
+    const withHits = CANONICAL_CATEGORIES.filter(
+      (cat) => (searchData.facets[cat] ?? 0) > 0
+    );
+    return withHits.length > 0 ? [...withHits] : [...CANONICAL_CATEGORIES];
+  }, [searchData?.facets]);
+
+  // If workIdParam is empty (default state): all categories are checked!
+  const isAllSelected = !workIdParam;
+  const effectiveSelectedIds: string[] = useMemo(() => {
+    if (isAllSelected) {
+      return availableCategories;
+    }
+    return workIdParam === "none"
+      ? []
+      : workIdParam.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  }, [workIdParam, isAllSelected, availableCategories]);
 
   const handleToggleWorkId = (workId: string) => {
-    let nextWorkIds: string[];
-    if (selectedWorkIds.includes(workId)) {
-      nextWorkIds = selectedWorkIds.filter((id) => id !== workId);
+    const isCurrentlyChecked = effectiveSelectedIds.includes(workId);
+    let next: string[];
+    if (isCurrentlyChecked) {
+      // Uncheck it ("אפשר לכבות את הסימון וזה לא יופיע")
+      next = effectiveSelectedIds.filter((id) => id !== workId);
     } else {
-      nextWorkIds = [...selectedWorkIds, workId];
+      // Check it
+      next = [...effectiveSelectedIds, workId];
     }
-    updateUrlParams({
-      work_id: nextWorkIds.length > 0 ? nextWorkIds.join(",") : null,
-    });
+
+    if (next.length === 0) {
+      updateUrlParams({ work_id: "none" });
+    } else if (next.length >= availableCategories.length) {
+      updateUrlParams({ work_id: null });
+    } else {
+      updateUrlParams({ work_id: next.join(",") });
+    }
+  };
+
+  const handleSelectAllFacets = () => {
+    updateUrlParams({ work_id: null });
   };
 
   const handleClearAllFacets = () => {
-    updateUrlParams({ work_id: null });
+    updateUrlParams({ work_id: "none" });
   };
 
   const handlePageChange = (newPage: number) => {
@@ -365,9 +393,9 @@ function SearchContent() {
                 >
                   <Icon name="filter_list" className="text-[16px]" />
                   <span>{tr(lang, "searchFilter")}</span>
-                  {selectedWorkIds.length > 0 && (
+                  {!isAllSelected && effectiveSelectedIds.length > 0 && (
                     <span className="w-4 h-4 rounded-full bg-tekhelet text-white text-[10px] grid place-items-center font-bold">
-                      {selectedWorkIds.length}
+                      {effectiveSelectedIds.length}
                     </span>
                   )}
                 </button>
@@ -392,9 +420,11 @@ function SearchContent() {
                   </div>
                   <FacetSidebar
                     facets={searchData?.facets ?? {}}
-                    selectedWorkIds={selectedWorkIds}
+                    selectedWorkIds={effectiveSelectedIds}
+                    isAllSelected={isAllSelected}
                     onToggleWorkId={handleToggleWorkId}
                     onClearAll={handleClearAllFacets}
+                    onSelectAll={handleSelectAllFacets}
                     lang={lang}
                     className="border-none shadow-none p-0 sticky-none"
                   />
@@ -415,9 +445,11 @@ function SearchContent() {
               <div className="hidden lg:block lg:col-span-1">
                 <FacetSidebar
                   facets={searchData?.facets ?? {}}
-                  selectedWorkIds={selectedWorkIds}
+                  selectedWorkIds={effectiveSelectedIds}
+                  isAllSelected={isAllSelected}
                   onToggleWorkId={handleToggleWorkId}
                   onClearAll={handleClearAllFacets}
+                  onSelectAll={handleSelectAllFacets}
                   lang={lang}
                 />
               </div>
@@ -487,7 +519,7 @@ function SearchContent() {
                           : "Try searching with different keywords, checking spelling, or clearing active filters."}
                       </p>
                     </div>
-                    {selectedWorkIds.length > 0 && (
+                    {!isAllSelected && (
                       <button
                         type="button"
                         onClick={handleClearAllFacets}

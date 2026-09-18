@@ -10,6 +10,8 @@ export interface FacetSidebarProps {
   selectedWorkIds: string[];
   onToggleWorkId: (workId: string) => void;
   onClearAll: () => void;
+  onSelectAll?: () => void;
+  isAllSelected?: boolean;
   lang: Lang;
   className?: string;
 }
@@ -19,6 +21,8 @@ export function FacetSidebar({
   selectedWorkIds,
   onToggleWorkId,
   onClearAll,
+  onSelectAll,
+  isAllSelected = false,
   lang,
   className = "",
 }: FacetSidebarProps) {
@@ -36,8 +40,6 @@ export function FacetSidebar({
     (c) => c.count > 0 || c.isSelected
   );
 
-  const hasSelected = selectedWorkIds.length > 0;
-
   return (
     <aside
       className={`glass rounded-[28px] p-5 flex flex-col gap-4 sticky top-6 self-start shadow-sm border border-white/60 ${className}`}
@@ -48,15 +50,25 @@ export function FacetSidebar({
           <Icon name="filter_list" className="text-[20px]" />
           <span>{tr(lang, "searchFilter")}</span>
         </div>
-        {hasSelected && (
-          <button
-            type="button"
-            onClick={onClearAll}
-            className="text-xs text-indigo hover:text-tekhelet font-medium transition cursor-pointer"
-          >
-            {tr(lang, "clearAll")}
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {isAllSelected ? (
+            <button
+              type="button"
+              onClick={onClearAll}
+              className="text-xs text-indigo hover:text-tekhelet font-medium transition cursor-pointer"
+            >
+              {lang === "he" ? "בטל הכל" : "Clear all"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onSelectAll || onClearAll}
+              className="text-xs text-tekhelet hover:underline font-bold transition cursor-pointer"
+            >
+              {lang === "he" ? "בחר הכל" : "Select all"}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Categories Checklist */}

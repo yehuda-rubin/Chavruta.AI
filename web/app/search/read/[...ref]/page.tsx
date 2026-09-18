@@ -101,7 +101,7 @@ function ReaderInner() {
   // Reader Settings
   const [studyMode, setStudyMode] = useState<StudyMode>("text_only");
   const [fontSize, setFontSize] = useState<FontSizeLevel>("md");
-  const [showNikud, setShowNikud] = useState(true);
+  const [showNikud, setShowNikud] = useState(false);
 
   // Active Segment & Interaction
   const [activeSegmentRef, setActiveSegmentRef] = useState<string | null>(null);
@@ -376,8 +376,25 @@ function ReaderInner() {
       {/* Sticky Reader Navigation Header */}
       <header className="sticky top-0 z-30 glass border-b border-white/60 backdrop-blur-xl shadow-xs">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-[64px] flex items-center justify-between gap-4">
-          {/* Left / Start: Brand & Breadcrumb */}
+          {/* Left / Start: Back Button, Brand & Breadcrumb */}
           <div className="flex items-center gap-2 sm:gap-3 overflow-hidden">
+            {/* Back Button */}
+            <button
+              type="button"
+              onClick={() => {
+                if (typeof window !== "undefined" && window.history.length > 1) {
+                  router.back();
+                } else {
+                  router.push("/search");
+                }
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl glass hover:bg-tekhelet/10 text-xs sm:text-sm font-bold text-tekhelet border border-tekhelet/20 transition shrink-0 cursor-pointer shadow-xs"
+              title={lang === "he" ? "חזרה אחורה" : "Go back"}
+            >
+              <span className="text-sm font-bold">←</span>
+              <span>{lang === "he" ? "חזרה" : "Back"}</span>
+            </button>
+
             <Link
               href="/"
               className="flex items-center gap-2 shrink-0 hover:opacity-85 transition"
@@ -526,15 +543,14 @@ function ReaderInner() {
             <button
               type="button"
               onClick={() => setShowNikud(!showNikud)}
-              className={`h-9 px-2.5 rounded-xl glass text-xs font-bold transition flex items-center gap-1 cursor-pointer ${
+              className={`h-9 px-3 rounded-xl glass text-xs font-semibold transition flex items-center gap-1 cursor-pointer ${
                 showNikud
-                  ? "text-tekhelet border-tekhelet/30"
-                  : "text-ink/40 line-through opacity-70"
+                  ? "bg-tekhelet/15 text-tekhelet border-tekhelet/40 font-bold"
+                  : "text-ink/60 hover:text-tekhelet border-line/60"
               }`}
               title={showNikud ? "הסתר ניקוד" : "הצג ניקוד"}
             >
-              <span>אָ</span>
-              <span className="hidden lg:inline text-[11px]">ניקוד</span>
+              <span>{showNikud ? "אָ ניקוד פעיל" : "ללא ניקוד"}</span>
             </button>
 
             {/* Font Size Selector */}
@@ -824,7 +840,7 @@ function ReaderInner() {
       {unit && (
         <FloatingAskButton
           lang={lang}
-          position="bottom-left"
+          position="bottom-right"
           activeSource={(() => {
             const seg = unit.segments.find((s) => s.ref === activeSegmentRef) || unit.segments[0];
             return seg

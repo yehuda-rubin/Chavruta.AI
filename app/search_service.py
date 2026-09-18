@@ -262,6 +262,78 @@ def close_db() -> None:
     close_links_db()
 
 
+def strip_nikud(text: str) -> str:
+    """Remove Hebrew vowel points and cantillation marks, keeping authentic letters and punctuation."""
+    if not text:
+        return ""
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFD", text) if not unicodedata.combining(c))
+
+
+def generate_clean_snippet(
+    full_text: str,
+    raw_query: str,
+    is_he: bool = True,
+    max_words: int = 32,
+) -> str:
+    """Generate clean snippet using authentic source text without spelling distortions and WITHOUT leading/trailing dots."""
+    if not full_text:
+        return ""
+
+    # Clean text: strip nikud for display without altering letters or punctuation
+    clean_text = strip_nikud(full_text) if is_he else full_text
+    words = clean_text.split()
+    if not words:
+        return ""
+
+    # Extract query terms
+    raw_terms = [t.strip().strip('"').strip("'") for t in raw_query.split() if t.strip()]
+    terms = [strip_nikud(t) for t in raw_terms if strip_nikud(t)]
+
+    # Build regex patterns for matching words
+    patterns: list[str] = []
+    for t in terms:
+        t_esc = re.escape(t)
+        patterns.append(rf"(?:^[וכלבמשה])?{t_esc}")
+
+    combined_re = re.compile(rf"(?:{'|'.join(patterns)})", re.IGNORECASE) if patterns else None
+
+    # Find position of best match
+    best_idx = 0
+    if combined_re:
+        for i, w in enumerate(words):
+            w_strip = re.sub(r"[^\w\u0590-\u05FF]", "", w)
+            if combined_re.search(w_strip):
+                best_idx = i
+                break
+
+    # Window around best_idx
+    half = max_words // 2
+    start_idx = max(0, best_idx - half)
+    end_idx = min(len(words), start_idx + max_words)
+    if end_idx - start_idx < max_words:
+        start_idx = max(0, end_idx - max_words)
+
+    snippet_words = words[start_idx:end_idx]
+
+    # Highlight matching words with <mark>...</mark>
+    result_words = []
+    for w in snippet_words:
+        w_strip = re.sub(r"[^\w\u0590-\u05FF]", "", w)
+        if combined_re and combined_re.search(w_strip):
+            m_punct = re.match(r"^([^\w\u0590-\u05FF]*)(.*?)([^\w\u0590-\u05FF]*)$", w)
+            if m_punct:
+                pre, core, post = m_punct.groups()
+                result_words.append(f"{pre}<mark>{core}</mark>{post}")
+            else:
+                result_words.append(f"<mark>{w}</mark>")
+        else:
+            result_words.append(w)
+
+    # Join without leading or trailing dots
+    return " ".join(result_words)
+
+
 # ── Search Utilities ──────────────────────────────────────────────────────────
 def has_hebrew_majority(q: str) -> bool:
     """Determine if query is predominantly Hebrew."""
@@ -430,10 +502,8 @@ async def search_query(
 
     hits: list[SearchHit] = []
     for r in rows:
-        snip = r["snippet"]
-        if not snip:
-            base_text = r["text_he"] if is_he else (r["text_en"] or "")
-            snip = (base_text[:180] + "…") if len(base_text) > 180 else base_text
+        base_text = r["text_he"] if is_he else (r["text_en"] or "")
+        snip = generate_clean_snippet(base_text, q, is_he=is_he)
 
         hits.append(
             SearchHit(
@@ -504,6 +574,10 @@ def extract_segment_num(ref: str, fallback: int) -> int:
 
 def compute_prev_next_unit(raw_ref: str) -> tuple[str | None, str | None]:
     ref = (raw_ref or "").strip()
+    m_sub = re.match(r"^(.*?)(?::\d+)+$", ref)
+    if m_sub:
+        ref = m_sub.group(1).strip()
+
     m = re.match(r"^(.*?)([ ._])(\d+)([ab]?)$", ref, re.IGNORECASE)
     if not m:
         return None, None
@@ -531,6 +605,11 @@ def compute_prev_next_unit(raw_ref: str) -> tuple[str | None, str | None]:
 def get_unit_query_prefixes(clean_ref: str) -> list[str]:
     clean = clean_ref.strip()
     prefixes: list[str] = []
+
+    m_sub = re.match(r"^(.*?)[ ._](\d+[ab]?)(?::\d+)+$", clean, re.IGNORECASE)
+    if m_sub:
+        parent_candidate = f"{m_sub.group(1)} {m_sub.group(2)}"
+        prefixes.extend(get_unit_query_prefixes(parent_candidate))
 
     m = re.match(r"^(.*?)[ ._](\d+[ab]?)$", clean, re.IGNORECASE)
     if m:
