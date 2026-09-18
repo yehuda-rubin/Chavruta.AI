@@ -89,17 +89,17 @@ def test_normalized_tokens_survives_missing_usage():
 
 
 def test_normalized_tokens_distiller_model():
-    """Distiller models: Gemma-3-27B (0.40/1.25) and Llama-3.3-70B (0.65/2.0)."""
+    """Distiller models: Gemma-3-27B (0.50/1.50) and Llama-3.3-70B (0.65/2.0)."""
     from app import plans
 
     gemma_model = "google/gemma-3-27b-it"
-    # 1000 * 0.40 + 0 * 1.25 = 400
-    assert plans.normalized_tokens(1000, 0, model=gemma_model) == 400
-    # 0 * 0.40 + 1000 * 1.25 = 1250
-    assert plans.normalized_tokens(0, 1000, model=gemma_model) == 1250
-    # 1000 * 0.40 + 200 * 1.25 = 400 + 250 = 650
-    assert plans.normalized_tokens(1000, 200, model=gemma_model) == 650
-    assert plans.billed_tokens_for_model(1000, 200, gemma_model) == 650
+    # 1000 * 0.50 + 0 * 1.50 = 500
+    assert plans.normalized_tokens(1000, 0, model=gemma_model) == 500
+    # 0 * 0.50 + 1000 * 1.50 = 1500
+    assert plans.normalized_tokens(0, 1000, model=gemma_model) == 1500
+    # 1000 * 0.50 + 200 * 1.50 = 500 + 300 = 800
+    assert plans.normalized_tokens(1000, 200, model=gemma_model) == 800
+    assert plans.billed_tokens_for_model(1000, 200, gemma_model) == 800
 
     llama_model = "meta-llama/Llama-3.3-70B-Instruct"
     # 1000 * 0.65 + 0 * 2.0 = 650
@@ -113,7 +113,7 @@ def test_normalized_tokens_distiller_model():
     # Case insensitivity and substring matching ("llama-3.3-70b" or "70b")
     assert plans.normalized_tokens(100, 50, model="meta-llama/llama-3.3-70b-instruct") == round(100 * 0.65 + 50 * 2.0)
     assert plans.normalized_tokens(100, 50, model="deepseek-ai/DeepSeek-R1-Distill-Llama-70B") == round(100 * 0.65 + 50 * 2.0)
-    assert plans.normalized_tokens(100, 50, model="google/gemma-3-27b-it") == round(100 * 0.40 + 50 * 1.25)
+    assert plans.normalized_tokens(100, 50, model="google/gemma-3-27b-it") == round(100 * 0.50 + 50 * 1.50)
 
     # Baseline / unknown model falls back to prompt + 3 * completion
     assert plans.normalized_tokens(1000, 200, model="Qwen/Qwen3-235B-A22B-Instruct-2507") == 1600

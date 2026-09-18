@@ -61,8 +61,8 @@ def test_distill_query_long_calls_distiller_and_meters():
     assert usage["prompt_tokens"] == 60
     assert usage["completion_tokens"] == 20
     assert usage["calls"] == 1
-    # Billed tokens for distiller: round(60 * 0.40 + 20 * 1.25) = round(24.0 + 25.0) = 49
-    assert usage["billed_tokens"] == 49
+    # Billed tokens for distiller: round(60 * 0.50 + 20 * 1.50) = round(30.0 + 30.0) = 60
+    assert usage["billed_tokens"] == 60
 
 
 def test_distill_query_conversational_triggers_distillation():

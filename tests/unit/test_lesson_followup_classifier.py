@@ -87,11 +87,11 @@ def test_classify_lesson_followup_llm_call_and_metering():
     assert call_kwargs["model"] == DISTILLER_MODEL
     assert call_kwargs["temperature"] == 0.0
 
-    # Metering check for Gemma-3-27B: 120 * 0.40 + 30 * 1.25 = 48 + 37.5 = 86 billed tokens
+    # Metering check for Gemma-3-27B: 120 * 0.50 + 30 * 1.50 = 60 + 45 = 105 billed tokens
     assert usage["calls"] == 1
     assert usage["prompt_tokens"] == 120
     assert usage["completion_tokens"] == 30
-    assert usage["billed_tokens"] == 86
+    assert usage["billed_tokens"] == 105
 
 
 def test_classify_lesson_followup_fallback_on_invalid_json():
