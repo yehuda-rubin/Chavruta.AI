@@ -160,9 +160,9 @@ _QUOTE_BOOST = 0.05
 # by a limit that exists to protect a live server's shared cores.
 #
 # No thread-count cap is applied to torch/BLAS here (unlike scripts/nightly_eval.py, which pins its
-# own subprocess) — bge-m3 is free to use multiple cores per call, so this stays conservative
-# relative to the 8-core box it currently runs on rather than assuming each call is single-threaded.
-_MAX_CONCURRENT_RETRIEVALS = int(os.environ.get("CHAVRUTA_MAX_CONCURRENT_RETRIEVALS", "4"))
+# own subprocess) — bge-m3 is free to use multiple cores per call. Sized at 2 for a 4-core box
+# (measured 2026-09-18: 2 concurrent yields ~2.0s latency vs ~7-14s under 4+ concurrent).
+_MAX_CONCURRENT_RETRIEVALS = int(os.environ.get("CHAVRUTA_MAX_CONCURRENT_RETRIEVALS", "2"))
 
 
 class _PriorityGate:

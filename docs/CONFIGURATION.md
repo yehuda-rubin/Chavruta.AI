@@ -32,6 +32,7 @@ Every knob in Chavruta.AI is an environment variable. No code changes are requir
 | `CHAVRUTA_RERANK_MODEL` | Model ID for the reranker | `BAAI/bge-reranker-v2-m3` | `src/chavruta/config/profile.py:104` |
 | `CHAVRUTA_RELEVANCE_THRESHOLD` | Minimum dense cosine similarity for a source to be considered "relevant" | `0.5` | `src/chavruta/config/profile.py:105` |
 | `CHAVRUTA_LINKS_PATH` | Path to the link graph JSONL file (built by `scripts/build_links.py`) | `data/links.jsonl` | `scripts/build_links.py:27` |
+| `CHAVRUTA_MAX_CONCURRENT_RETRIEVALS` | Concurrency limit on CPU-bound retrieval (bge-m3 + Qdrant); requests queue with agentic priority | `2` | `src/chavruta/retrieval/hybrid.py:165` |
 
 ## Generation / LLM
 

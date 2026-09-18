@@ -196,8 +196,9 @@ _INDIRECT_PREFIXES = (
     "רציתי לשאול", "יש לי שאלה", "שלום רב", "שלום כבוד הרב",
     "אני רוצה לדעת", "אני רוצה", "רציתי לדעת", "אשמח לדעת", "תוכל להסביר", "תוכל לומר",
     "תוכל", "תוכלי", "אפשר לשאול", "תעזור לי", "בבקשה תסביר",
+    "מי פיתח", "מי יצר", "מי בנה", "מי אתה", "מה אתה", "איך קוראים", "מי עשה",
     "hello", "hi", "hey", "can you tell me", "i have a question", "please tell me",
-    "i want to know", "could you explain",
+    "i want to know", "could you explain", "who developed", "who made", "who are you",
 )
 
 
@@ -210,6 +211,8 @@ def _is_short_and_direct(text: str, history=None) -> bool:
     if not words or len(words) > 10:
         return False
     low = clean.lower()
+    if any(kw in low for kw in ("דף מקורות", "מהלך", "מערך", "שיעור", "חוברת", "pdf", "להדפסה")):
+        return False
     for prefix in _INDIRECT_PREFIXES:
         if low.startswith(prefix):
             return False

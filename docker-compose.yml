@@ -89,10 +89,9 @@ services:
       # ceiling (40), or requests queue invisibly one layer up instead of at this gate.
       CHAVRUTA_MAX_CONCURRENT_GENERATIONS: ${CHAVRUTA_MAX_CONCURRENT_GENERATIONS:-2}
       # The CPU-bound gate itself (src/chavruta/retrieval/hybrid.py::_retrieval_gate) — see above.
-      # Default 4 is conservative for an 8-core box: bge-m3/BLAS get no explicit thread cap here
-      # (unlike scripts/nightly_eval.py's subprocess), so a single call may already use several
-      # cores on its own.
-      CHAVRUTA_MAX_CONCURRENT_RETRIEVALS: ${CHAVRUTA_MAX_CONCURRENT_RETRIEVALS:-4}
+      # Default 2 is optimal for a 4-vCPU machine (measured 2026-09-18: 2 concurrent gives ~2s latency
+      # per query vs ~7-14s under 4+ concurrency, while mid-turn agentic requests keep priority queue jump).
+      CHAVRUTA_MAX_CONCURRENT_RETRIEVALS: ${CHAVRUTA_MAX_CONCURRENT_RETRIEVALS:-2}
 
       # What a million normalized tokens cost at the provider, so the admin panel can turn spend into
       # money. Deliberately no default: unset means the panel shows nothing rather than a plausible

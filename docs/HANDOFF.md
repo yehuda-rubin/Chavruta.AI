@@ -10,12 +10,11 @@ the point is that there is one place to read, not an archive to search.
 | | |
 |---|---|
 | Live at | `chavrutaai.org` — VM `chavruta@89.169.99.221`, repo at `~/chavruta` |
-| Branch deployed | `001-chavruta-redesign` @ `a3e0af7`; `main` merged at `f513fdd` |
-| Schema | `user_version` **30** |
+| Host specs | Nebius Non-GPU AMD Epyc Genoa, 4 vCPUs, 16 GiB RAM, 8 GiB Swap (resized 2026-09-18) |
+| Concurrency gate | `CHAVRUTA_MAX_CONCURRENT_RETRIEVALS=2` (tuned for 4 vCPUs; agentic rounds have priority) |
 | Collection | `chavruta_commercial`, 2.4M points, on-disk (`CHAVRUTA_MEM_TIER=ssd`) |
 | Generation | Nebius, `Qwen/Qwen3-235B-A22B-Instruct-2507` |
-| Data | 136 chats · 449 messages · 3 accounts · 1 org |
-| Last backup | `/app-data/backup-20260814-045441-pre-v30.db` (5.4 MB, `integrity: ok`, v29) |
+| Last backup | `/app-data/backup-pre-resize-20260918.db` (18.2 MB, local copy saved) |
 
 Background sweepers, both started at API boot and running hourly:
 
