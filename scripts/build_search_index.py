@@ -261,6 +261,8 @@ def build_index(
     batch_size: int = 50000,
     hf_namespace: str = "Yehuda-Rubin",
     hf_token: str | None = None,
+    clean_cache: bool = True,
+    upload_to_hf: str | None = None,
 ) -> int:
     """Main build function to create the search index."""
     out = Path(output_path)
@@ -314,7 +316,19 @@ def build_index(
                     repo_type="dataset",
                     token=token,
                 )
-                total_records += build_from_file(Path(local_file), conn, work_id=slug, batch_size=batch_size)
+                lp = Path(local_file)
+                total_records += build_from_file(lp, conn, work_id=slug, batch_size=batch_size)
+                if clean_cache:
+                    try:
+                        if lp.is_symlink():
+                            real_target = lp.resolve()
+                            lp.unlink(missing_ok=True)
+                            real_target.unlink(missing_ok=True)
+                        else:
+                            lp.unlink(missing_ok=True)
+                        print(f"  - Cleaned intermediate cache for {slug}")
+                    except Exception as ce:
+                        print(f"  ! Warning cleaning cache for {slug}: {ce}")
             except Exception as e:
                 print(f"  ! Error downloading {slug} from HF: {e}")
 
@@ -323,6 +337,22 @@ def build_index(
 
     elapsed = time.time() - t0
     print(f"\nDone! Indexed {total_records:,} chunks into {out} in {elapsed:.1f}s")
+
+    if upload_to_hf:
+        from huggingface_hub import HfApi
+
+        token = hf_token or os.environ.get("HF_TOKEN")
+        api = HfApi(token=token)
+        print(f"Uploading {out} to Hugging Face dataset '{upload_to_hf}'...")
+        api.create_repo(repo_id=upload_to_hf, repo_type="dataset", exist_ok=True)
+        api.upload_file(
+            path_or_fileobj=str(out),
+            path_in_repo="search_index.db",
+            repo_id=upload_to_hf,
+            repo_type="dataset",
+        )
+        print(f"Successfully uploaded {out} to Hugging Face: {upload_to_hf}")
+
     return total_records
 
 
@@ -335,6 +365,8 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=50000, help="Batch size for SQLite transactions")
     parser.add_argument("--hf-namespace", default="Yehuda-Rubin", help="Hugging Face namespace for tiers")
     parser.add_argument("--hf-token", default=None, help="Hugging Face API token")
+    parser.add_argument("--upload-to-hf", default=None, help="Hugging Face repo to upload result to (e.g. Yehuda-Rubin/chavruta-search-index)")
+    parser.add_argument("--no-clean-cache", dest="clean_cache", action="store_false", help="Do not delete intermediate downloaded JSONL files")
 
     args = parser.parse_args()
 
@@ -348,6 +380,8 @@ def main() -> None:
         batch_size=args.batch_size,
         hf_namespace=args.hf_namespace,
         hf_token=args.hf_token,
+        clean_cache=args.clean_cache,
+        upload_to_hf=args.upload_to_hf,
     )
 
 
