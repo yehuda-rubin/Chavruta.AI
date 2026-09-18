@@ -3,7 +3,7 @@
 SCHEDULE (Israel local time, decided here rather than in cron)
 --------------------------------------------------------------
     every night   23:00-07:00   on 2 CPUs   (wraps past midnight)
-    Saturday      00:00-16:00   on 6 CPUs
+    Saturday      00:00-16:00   on 2 CPUs
 
 Widened from 00:00-05:00 on 2026-08-17: at --sample 1600 (see the --sample argument below) a
 candidate measured ~87 minutes live, not the ~54 estimated, so a 5-hour window fit only 2-3 of a
@@ -58,7 +58,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ISRAEL = ZoneInfo("Asia/Jerusalem")
 
 # (last hour exclusive, cpu budget). Saturday is checked first so it wins where the two overlap.
-SATURDAY_WINDOW = (0, 16, 6)     # 00:00-16:00 on six cores
+SATURDAY_WINDOW = (0, 16, 2)     # 00:00-16:00 on two cores (fixed to 2 cores)
 NIGHTLY_WINDOW = (23, 7, 2)      # 23:00-07:00 on two cores — WRAPS past midnight; see window_for
 
 # Where GENERATED artefacts go — harvested pairs and each night's log. Deliberately separable from
