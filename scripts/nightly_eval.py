@@ -254,10 +254,22 @@ def main() -> int:
                       f"under {PAIRS_MAX_AGE_DAYS}d old)\n")
 
         remaining = max(60, int((ends_at - datetime.now(ISRAEL)).total_seconds()))
-        log.write(f"\n== tune ({remaining // 60} min left in the window)\n")
-        rc = _run([py, str(ROOT / "scripts" / "tune_retrieval.py"),
-                   "--pairs", PAIRS, "--sample", str(args.sample), "--state", STATE],
-                  cpus=cpus, deadline_s=remaining, log=log)
+        tonight_override_script = LOG_DIR / "tonight_override.py"
+        if tonight_override_script.exists():
+            log.write(f"\n== ONE-NIGHT OVERRIDE DETECTED ({tonight_override_script.name}) ==\n")
+            log.write(f"Executing custom one-night evaluation script ({remaining // 60} min left in window)...\n")
+            rc = _run([py, str(tonight_override_script)], cpus=cpus, deadline_s=remaining, log=log)
+            try:
+                done_path = LOG_DIR / f"tonight_override_done_{now:%Y-%m-%d_%H%M}.py"
+                tonight_override_script.rename(done_path)
+                log.write(f"One-night override finished (rc={rc}). Moved override script to {done_path.name}\n")
+            except Exception as e:
+                log.write(f"Warning: Could not rename override script: {e}\n")
+        else:
+            log.write(f"\n== tune ({remaining // 60} min left in the window)\n")
+            rc = _run([py, str(ROOT / "scripts" / "tune_retrieval.py"),
+                       "--pairs", PAIRS, "--sample", str(args.sample), "--state", STATE],
+                      cpus=cpus, deadline_s=remaining, log=log)
         log.write(f"\nfinished rc={rc} at {datetime.now(ISRAEL):%H:%M}\n")
 
     # The sweep's position, echoed here so "where is this up to" is one small file rather than
