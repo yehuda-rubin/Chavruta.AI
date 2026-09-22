@@ -120,6 +120,7 @@ class ReaderLinksResponse(BaseModel):
     ref: str
     commentaries: list[ReaderLinkItem]
     related: list[ReaderLinkItem]
+    parallels: list[ReaderLinkItem] = []
 
 
 # ── Rate Limiter ──────────────────────────────────────────────────────────────
@@ -930,120 +931,178 @@ async def reader_links(
             headers={"Retry-After": "60"},
         )
 
-    links_db = get_links_db()
     clean_ref = ref.strip()
-    if links_db is None:
-        return ReaderLinksResponse(ref=clean_ref, commentaries=[], related=[])
+    commentaries: list[ReaderLinkItem] = []
+    related: list[ReaderLinkItem] = []
 
-    canon = canonical_ref(clean_ref)
-    canon_keys = [canon]
-    for v in with_ref_variants([clean_ref]):
-        cv = canonical_ref(v)
-        if cv and cv not in canon_keys:
-            canon_keys.append(cv)
+    links_db = get_links_db()
+    if links_db is not None:
+        canon = canonical_ref(clean_ref)
+        canon_keys = [canon]
+        for v in with_ref_variants([clean_ref]):
+            cv = canonical_ref(v)
+            if cv and cv not in canon_keys:
+                canon_keys.append(cv)
 
-    placeholders = ",".join("?" for _ in canon_keys)
-    edge_rows = links_db.execute(
-        f"SELECT to_canon, link_type FROM edges WHERE from_canon IN ({placeholders})",
-        canon_keys,
-    ).fetchall()
+        placeholders = ",".join("?" for _ in canon_keys)
+        edge_rows = links_db.execute(
+            f"SELECT to_canon, link_type FROM edges WHERE from_canon IN ({placeholders})",
+            canon_keys,
+        ).fetchall()
 
-    commentary_items: list[dict] = []
-    related_items: list[dict] = []
-    seen_to_canon: set[str] = set()
+        if edge_rows:
+            commentary_items: list[dict] = []
+            related_items: list[dict] = []
+            seen_to_canon: set[str] = set()
 
-    for row in edge_rows:
-        to_canon = str(row["to_canon"] or "").strip()
-        link_type = str(row["link_type"] or "").strip().lower()
-        if not to_canon or to_canon in seen_to_canon:
-            continue
-        seen_to_canon.add(to_canon)
+            for row in edge_rows:
+                to_canon = str(row["to_canon"] or "").strip()
+                link_type = str(row["link_type"] or "").strip().lower()
+                if not to_canon or to_canon in seen_to_canon:
+                    continue
+                seen_to_canon.add(to_canon)
 
-        is_comm = (
-            link_type == "commentary"
-            or " on " in to_canon
-            or any(to_canon.startswith(f"{author} ") for author in KNOWN_AUTHORS_HE)
-        )
-        item = {"to_canon": to_canon, "link_type": link_type, "is_comm": is_comm}
-        if is_comm:
-            commentary_items.append(item)
-        else:
-            related_items.append(item)
+                is_comm = (
+                    link_type == "commentary"
+                    or " on " in to_canon
+                    or any(to_canon.startswith(f"{author} ") for author in KNOWN_AUTHORS_HE)
+                )
+                item = {"to_canon": to_canon, "link_type": link_type, "is_comm": is_comm}
+                if is_comm:
+                    commentary_items.append(item)
+                else:
+                    related_items.append(item)
 
-    all_items = commentary_items + related_items
-    item_keys: dict[str, list[str]] = {}
-    lookup_keys: list[str] = []
-    for item in all_items:
-        cand_keys = canon_to_candidate_keys(item["to_canon"])
-        item_keys[item["to_canon"]] = cand_keys
-        lookup_keys.extend(cand_keys)
+            all_items = commentary_items + related_items
+            item_keys: dict[str, list[str]] = {}
+            lookup_keys: list[str] = []
+            for item in all_items:
+                cand_keys = canon_to_candidate_keys(item["to_canon"])
+                item_keys[item["to_canon"]] = cand_keys
+                lookup_keys.extend(cand_keys)
 
-    # Fetch text_he from search_index.db if available
-    chunks_by_key: dict[str, Any] = {}
-    try:
-        search_db = get_db()
-        unique_keys = list(dict.fromkeys(lookup_keys))
-        for i in range(0, len(unique_keys), 200):
-            batch = unique_keys[i : i + 200]
-            batch_placeholders = ",".join("?" for _ in batch)
-            params = batch + batch
-            batch_sql = f"""
-                SELECT chunk_id, ref, book, author_he, category_path, work_id, text_he, text_en
-                FROM chunks
-                WHERE chunk_id IN ({batch_placeholders}) OR ref IN ({batch_placeholders})
-            """
-            found_rows = search_db.execute(batch_sql, params).fetchall()
-            for f in found_rows:
-                if f["chunk_id"]:
-                    chunks_by_key[f["chunk_id"]] = f
-                    chunks_by_key[canonical_ref(f["chunk_id"])] = f
-                if f["ref"]:
-                    chunks_by_key[f["ref"]] = f
-                    chunks_by_key[canonical_ref(f["ref"])] = f
-    except Exception:
-        pass
+            chunks_by_key: dict[str, Any] = {}
+            try:
+                search_db = get_db()
+                unique_keys = list(dict.fromkeys(lookup_keys))
+                for i in range(0, len(unique_keys), 200):
+                    batch = unique_keys[i : i + 200]
+                    batch_placeholders = ",".join("?" for _ in batch)
+                    params = batch + batch
+                    batch_sql = f"""
+                        SELECT chunk_id, ref, book, author_he, category_path, work_id, text_he, text_en
+                        FROM chunks
+                        WHERE chunk_id IN ({batch_placeholders}) OR ref IN ({batch_placeholders})
+                    """
+                    found_rows = search_db.execute(batch_sql, params).fetchall()
+                    for f in found_rows:
+                        if f["chunk_id"]:
+                            chunks_by_key[f["chunk_id"]] = f
+                            chunks_by_key[canonical_ref(f["chunk_id"])] = f
+                        if f["ref"]:
+                            chunks_by_key[f["ref"]] = f
+                            chunks_by_key[canonical_ref(f["ref"])] = f
+            except Exception:
+                pass
 
-    def build_reader_link(item: dict) -> ReaderLinkItem:
-        to_canon = item["to_canon"]
-        cand_keys = item_keys.get(to_canon, [to_canon])
-        chunk = None
-        for k in cand_keys:
-            if k in chunks_by_key:
-                chunk = chunks_by_key[k]
-                break
-        if chunk is None and to_canon in chunks_by_key:
-            chunk = chunks_by_key[to_canon]
+            def build_reader_link(item: dict) -> ReaderLinkItem:
+                to_canon = item["to_canon"]
+                cand_keys = item_keys.get(to_canon, [to_canon])
+                chunk = None
+                for k in cand_keys:
+                    if k in chunks_by_key:
+                        chunk = chunks_by_key[k]
+                        break
+                if chunk is None and to_canon in chunks_by_key:
+                    chunk = chunks_by_key[to_canon]
 
-        if chunk is not None:
-            return ReaderLinkItem(
-                ref=chunk["ref"] or format_canon_to_ref(to_canon),
-                source_ref=to_canon,
-                category=chunk["category_path"]
-                or chunk["work_id"]
-                or ("commentary" if item["is_comm"] else item["link_type"]),
-                type=item["link_type"],
-                author_he=chunk["author_he"] or format_author_from_canon(to_canon),
-                book=chunk["book"] or format_book_from_canon(to_canon),
-                text_he=chunk["text_he"],
-                text_en=chunk["text_en"],
-            )
-        else:
-            return ReaderLinkItem(
-                ref=format_canon_to_ref(to_canon),
-                source_ref=to_canon,
-                category="commentary" if item["is_comm"] else item["link_type"],
-                type=item["link_type"],
-                author_he=format_author_from_canon(to_canon),
-                book=format_book_from_canon(to_canon),
-                text_he=None,
-                text_en=None,
-            )
+                if chunk is not None:
+                    return ReaderLinkItem(
+                        ref=chunk["ref"] or format_canon_to_ref(to_canon),
+                        source_ref=to_canon,
+                        category=chunk["category_path"]
+                        or chunk["work_id"]
+                        or ("commentary" if item["is_comm"] else item["link_type"]),
+                        type=item["link_type"],
+                        author_he=chunk["author_he"] or format_author_from_canon(to_canon),
+                        book=chunk["book"] or format_book_from_canon(to_canon),
+                        text_he=chunk["text_he"],
+                        text_en=chunk["text_en"],
+                    )
+                else:
+                    return ReaderLinkItem(
+                        ref=format_canon_to_ref(to_canon),
+                        source_ref=to_canon,
+                        category="commentary" if item["is_comm"] else item["link_type"],
+                        type=item["link_type"],
+                        author_he=format_author_from_canon(to_canon),
+                        book=format_book_from_canon(to_canon),
+                        text_he=None,
+                        text_en=None,
+                    )
 
-    commentaries = [build_reader_link(item) for item in commentary_items]
-    related = [build_reader_link(item) for item in related_items]
+            commentaries = [build_reader_link(item) for item in commentary_items]
+            related = [build_reader_link(item) for item in related_items]
+
+    # Fallback to search_index.db if no links found in links.db
+    if not commentaries and not related:
+        try:
+            search_db = get_db()
+            m_comm = re.search(r"on\s+(.*?)\s+(\d+:\d+|\d+[ab]?)", clean_ref, re.IGNORECASE)
+            m_base = re.search(r"^([A-Za-z0-9_ ]+)[ ._](\d+:\d+|\d+[ab]?)", clean_ref, re.IGNORECASE)
+
+            book_part = None
+            cv_part = None
+            if m_comm:
+                book_part = m_comm.group(1).strip()
+                cv_part = m_comm.group(2).strip()
+            elif m_base:
+                book_part = m_base.group(1).strip()
+                cv_part = m_base.group(2).strip()
+
+            if book_part and cv_part:
+                p1 = f"%on {book_part} {cv_part}:%"
+                p2 = f"%on {book_part}.{cv_part.replace(':', '.')}.%"
+                p3 = f"{book_part} {cv_part}"
+                p4 = f"{book_part}.{cv_part}"
+                p5 = f"{book_part}_{cv_part}"
+
+                sql = """
+                    SELECT chunk_id, ref, book, author_he, category_path, work_id, text_he, text_en
+                    FROM chunks
+                    WHERE (ref LIKE ? OR ref LIKE ? OR ref = ? OR ref = ? OR ref = ?)
+                      AND ref != ?
+                    LIMIT 50
+                """
+                c_rows = search_db.execute(sql, (p1, p2, p3, p4, p5, clean_ref)).fetchall()
+                seen_books: set[str] = set()
+                for r in c_rows:
+                    b_name = r["book"] or r["author_he"] or r["ref"]
+                    if b_name in seen_books:
+                        continue
+                    seen_books.add(b_name)
+
+                    item_type = "commentary" if (" on " in (r["ref"] or "").lower() or " on " in (r["book"] or "").lower()) else "parallel"
+                    link_item = ReaderLinkItem(
+                        ref=r["ref"] or "",
+                        source_ref=r["ref"] or "",
+                        category=r["category_path"] or r["work_id"] or item_type,
+                        type=item_type,
+                        author_he=r["author_he"] or r["book"] or "",
+                        book=r["book"] or "",
+                        text_he=r["text_he"],
+                        text_en=r["text_en"],
+                    )
+                    if item_type == "commentary":
+                        commentaries.append(link_item)
+                    else:
+                        related.append(link_item)
+        except Exception:
+            pass
 
     return ReaderLinksResponse(
         ref=clean_ref,
         commentaries=commentaries,
         related=related,
+        parallels=related,
     )

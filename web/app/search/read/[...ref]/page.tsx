@@ -620,7 +620,7 @@ function ReaderInner() {
         {/* Main Text Study Area */}
         <main
           className={`flex-1 flex flex-col px-4 sm:px-8 py-8 sm:py-12 transition-all duration-300 ${
-            commentaryOpen ? "lg:mr-0 lg:ml-[460px]" : ""
+            commentaryOpen ? "lg:ml-[460px]" : ""
           }`}
         >
           {loading ? (
@@ -742,12 +742,18 @@ function ReaderInner() {
                       </p>
 
                       {/* Bilingual Translation (if mode enabled) */}
-                      {studyMode === "bilingual" && seg.text_en && (
+                      {studyMode === "bilingual" && (
                         <div
-                          dir="ltr"
+                          dir={seg.text_en ? "ltr" : "rtl"}
                           className="mt-3 pt-3 border-t border-line/40 font-sans text-sm sm:text-base text-ink/75 leading-relaxed selection:bg-indigo/20 italic"
                         >
-                          {seg.text_en}
+                          {seg.text_en ? (
+                            seg.text_en
+                          ) : (
+                            <span className="text-ink/40 text-xs font-sans not-italic">
+                              (אין תרגום לאנגלית זמין עבור מקור זה)
+                            </span>
+                          )}
                         </div>
                       )}
                     </div>

@@ -69,9 +69,9 @@ export function CommentarySidebar({
 
   if (!open) return null;
 
-  const commentaries = data?.commentaries ?? [];
-  const parallels = data?.parallels ?? [];
-  const activeList = activeTab === "commentary" ? commentaries : parallels;
+  const commentaries: CommentaryItem[] = data?.commentaries ?? [];
+  const parallels: CommentaryItem[] = data?.parallels ?? (data as any)?.related ?? [];
+  const activeList: CommentaryItem[] = activeTab === "commentary" ? commentaries : parallels;
 
   const toggleExpand = (id: string) => {
     setExpandedCards((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -91,7 +91,7 @@ export function CommentarySidebar({
       {/* Sidebar Drawer Panel */}
       <aside
         aria-label="סרגל מפרשים ומקבילות"
-        className="fixed top-0 bottom-0 left-0 lg:left-auto lg:right-0 w-full sm:w-[420px] lg:w-[460px] glass bg-cream/95 backdrop-blur-xl border-r lg:border-r-0 lg:border-l border-white/60 shadow-2xl z-50 flex flex-col transition-transform duration-300 ease-in-out select-text"
+        className="fixed top-0 bottom-0 left-0 w-full sm:w-[420px] lg:w-[460px] glass bg-cream/95 backdrop-blur-xl border-r border-white/60 shadow-2xl z-50 flex flex-col transition-transform duration-300 ease-in-out select-text"
       >
         {/* Top Header */}
         <div className="p-4 sm:p-5 border-b border-line/60 flex items-start justify-between gap-3 shrink-0 bg-white/40">
