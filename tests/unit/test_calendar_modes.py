@@ -101,9 +101,9 @@ def test_listed_owner_reaches_the_calendar_path(monkeypatch):
 
 @pytest.mark.parametrize("kind,today,expected", [
     ("daf_yomi", date(2026, 8, 5), "2026-08-05"),      # daily bucket = today's own date
-    ("parsha", date(2026, 8, 5), "2026-08-02"),        # Wednesday -> that week's Sunday
-    ("parsha", date(2026, 8, 2), "2026-08-02"),        # Sunday itself -> same day
-    ("parsha", date(2026, 8, 8), "2026-08-02"),        # Saturday -> the Sunday that started the week
+    ("parsha", date(2026, 8, 5), "2026-08-05"),        # daily bucket = today's own date
+    ("parsha", date(2026, 8, 2), "2026-08-02"),        # Sunday -> same day
+    ("parsha", date(2026, 8, 8), "2026-08-08"),        # Saturday -> same day
 ])
 def test_calendar_cache_key_buckets(kind, today, expected):
     assert api._calendar_cache_key(kind, today) == expected

@@ -1999,11 +1999,9 @@ def _run_chavruta(question: str, lang: str, history=None, llm=None) -> QueryResp
 
 
 def _calendar_cache_key(kind: str, today) -> str:
-    """The cache bucket identity: today's ISO date for daf_yomi (a new daf every day), the ISO
-    date of the most recent Sunday for parsha (the same parsha all week)."""
-    if kind == "daf_yomi":
-        return today.isoformat()
-    return (today - timedelta(days=today.isoweekday() % 7)).isoformat()
+    """The cache bucket identity: today's ISO date for both daf_yomi and parsha (checked daily to
+    account for holiday readings and mid-week calendar shifts on the first question of each day)."""
+    return today.isoformat()
 
 
 def _resolve_parsha_cached():

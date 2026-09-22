@@ -6,7 +6,32 @@
 
 # Terms of Use — Chavruta AI
 
-**Version 1.13 · Effective 2 September 2026**
+**Version 1.14 · Effective 22 September 2026**
+
+Changes in version 1.14:
+1. **Flexibility in selecting infrastructure and AI providers:** section 12 updated — the operator may
+   use, replace, remove, add, or route data between model providers (including Nebius, OpenAI,
+   Anthropic, Google Cloud, and others) and cloud and infrastructure providers at any time at its
+   discretion.
+2. **Human inspection and review:** section 6 updated — the operator and its team may review messages
+   for quality control, improvement, training, support, and security, alongside automated scanning via
+   AI tools. Routine review is performed **without proactive cross-referencing** against your identifying
+   account details, which are stored separately from message content.
+3. **Model training and opt-out toggles:** section 9 updated — data usage includes model training by
+   the operator and external AI providers; opt-out toggles apply to the operator's internal model
+   training only and do not bind third-party AI providers.
+4. **Institutional indemnity for unauthorized minor access:** section 5 updated with an explicit
+   indemnity clause where schools or teachers grant account access to pupils.
+5. **Notice and Takedown procedure for copyright (Safe Harbor):** an explicit safe-harbor mechanism was
+   added to section 8.
+6. **Jurisdiction and Rabbinical arbitration:** section 14 updated to confirm civil court jurisdiction
+   while allowing mutual written consent to arbitration or a Rabbinical court (Beit Din).
+7. **Non-retroactivity of internal review/training remains unchanged:** for the avoidance of doubt, the
+   changes in items 1–3 above do not alter **when** conversation content enters the operator's internal
+   use (section 9). The rule first established in version 1.10 continues to apply in full: this use
+   applies **only to conversations created from 10 August 2026 onward**, and does not apply to a
+   conversation created before that date, **even if a new message is received in it afterward**. See
+   section 9 and Privacy Policy sections 2, 5 and 12.
 
 Changes in version 1.13: section 10 updated for **Stop Generation** — clarified that submitting
 a question or request consumes the required quota or credits at the start of processing, and stopping
@@ -84,211 +109,172 @@ right** on a distance sale was stated (section 10). Nothing is now paid in advan
 has not been used, so no prepayment is ever left waiting to be refunded.
 
 Changes in version 1.1: added a minimum age for purchasing a subscription and a clause on
-institutional accounts (section 5), added a coupon clause (section 11), stated explicitly that listed
-prices include VAT (section 10), and stated the 90-day conversation retention window (section 6).
-Sections from 5 onward were renumbered.
+institutional accounts (section 5), added a coupon clause (section 11), and stated explicitly that
+listed prices include VAT (section 10). Sections from 5 onward were renumbered.
 
-Welcome to Chavruta AI (the "Service"). The Service is operated by Yehuda Rubin ("we"). Using the
-Service, including registering for it, constitutes acceptance of these terms. If you do not agree, do
-not use the Service.
+Welcome to Chavruta AI (the "Service"). The Service is operated by Yehuda Rubin ("operator", "we").
+Using the Service, including registering for it, constitutes full acceptance of these terms. If you do
+not agree to these terms, you may not use the Service.
 
 ## 1. The Service
 Chavruta AI is an AI-based Torah study partner that answers with cited sources (Tanakh, Mishnah,
-Gemara, Rishonim and Poskim) retrieved from a source corpus. It is intended for study, review and
-lesson preparation.
+Gemara, Rishonim and Poskim) retrieved from a dedicated source corpus. It is intended for study, review
+and lesson preparation.
 
 ## 2. Not a Halachic Ruling
-Answers are **not a halachic ruling** and are no substitute for a qualified rabbi. Verify every source
-at its origin and consult a qualified rabbi on any practical halachic question. Do not rely on the
-Service for any halachic, financial or personal decision.
+Answers and content produced by the Service are **not a halachic ruling and are no substitute for a
+qualified rabbi**. Verify every source at its origin and consult a qualified rabbi on any practical
+halachic question. Do not rely on the Service for any halachic, financial, or personal decision.
 
 ## 3. Accuracy, Warranty and Limitation of Liability
-Content is AI-generated and may be wrong, partial or inaccurate. The Service is provided "AS IS",
-**without any warranty, express or implied**, of accuracy, completeness, or fitness for a
-particular purpose. You are responsible for verifying any source at its origin before relying on
-it; use is at your own risk.
+Content is generated using artificial intelligence systems and may contain errors, inaccuracies, or
+incomplete information. The Service is provided "AS IS", **without any warranty, express or implied**,
+of accuracy, completeness, reliability, or fitness for a particular purpose. Use of the Service and
+reliance on its content is at the user's sole risk.
 
-**Separately from the above — limitation of liability:** to the extent the operator is held liable
-for any damage arising from use of the Service, the answers, or reliance on them, **the operator's
-total liability to a given user is limited to the amount that user paid for the Service in the 3
-months preceding the event** (or, on the free plan, to an amount not exceeding ₪100), **except in
-cases of willful misconduct or gross negligence by the operator**, and subject to any mandatory
-provision of law that overrides this limitation.
+**Monetary limitation of liability:**
+To the extent the operator is held liable under law for any damage arising from the use of the Service
+or reliance on its content, **the operator's total liability to a given user shall be limited to the
+amount that user actually paid for the Service in the three months preceding the damaging event** (or,
+under the free tier, to a total amount not exceeding ₪100), except in cases of willful misconduct or
+gross negligence by the operator, and subject to any overriding mandatory statutory provision.
 
 ## 4. Account and Registration, and Enforcement of a Breach
-You must provide a valid email address and keep your login credentials confidential. You are
-responsible for all activity under your account. Notify us of any unauthorized use. We may suspend or
-close an account that breaches these terms.
+You must provide a valid email address and maintain the confidentiality of your login credentials. You
+bear full responsibility for all activity under your account.
+- **Graduated enforcement:** for a non-severe breach, we will contact you and allow reasonable time to
+  rectify the conduct before taking further steps.
+- **Immediate suspension:** a severe breach (security compromise, automated scraping, uploading
+  unlawful content, deliberate overload) may lead to immediate suspension or closure without prior
+  notice. Closure for a breach does not entitle you to a refund. The operator reserves the right to
+  seek compensation for damage caused by misuse.
 
-**Graduated enforcement:** for a **non-severe or ambiguous breach**, we will contact you by email,
-identify the clause breached, and allow a reasonable time to stop the behavior before any
-suspension. A **severe breach** — an attempt to compromise the Service's security, large-scale
-automated scraping, uploading unlawful content, or deliberate overload of the Service — may result
-in **immediate suspension or closure without prior warning**; in that case the reason will be shown
-on your account page.
+## 5. Age — the Service Is for Users Aged 18 and Over, and Institutional Indemnity
+**The Service is intended for users aged 18 and over only, and is not intended for minors.**
+Registration requires an explicit age confirmation. Registering a minor constitutes a material breach
+of these terms and such an account will be closed. Responsibility for the age declaration rests solely
+with the user.
 
-**Suspension or closure for a breach does not entitle you to a refund** for the period already paid
-for (unlike the cancellation right in section 10, which does not depend on a breach), and we
-reserve **the right to seek compensation** for damage caused by misuse of the Service.
+**Institutional accounts and indemnity:**
+An account contracted for an educational institution is intended for **adult teaching staff only**.
+Pupils are not users of the Service; creating accounts for pupils or sharing access credentials with
+them is strictly prohibited.
+**An educational institution or teacher permitting a pupil access to an account in breach of these
+terms shall bear sole and exclusive responsibility for any outcome, exposure, or damage arising
+therefrom, and shall indemnify and hold harmless the operator against any claim, damage, expense, or
+third-party demand in this regard.**
 
-## 5. Age — the Service is for users aged 18 and over
-**The Service is intended for users aged 18 and over, and is not intended for minors.** At
-registration you are asked to confirm this explicitly; the confirmation is a condition of
-registration and is recorded with the account. An account found to have been opened by a minor will
-be closed.
+## 6. Content You Upload, Inspection and Content Scanning
+When uploading sources, files (PDF, Word, text), or questions, you represent that you possess all
+necessary rights to permit us and our providers to process them to provide the Service. You must not
+upload unlawful, infringing, offensive, or privacy-violating content. **Uploading confidential or
+personally identifiable information is strictly prohibited.**
 
-**This is a declaration, not verification.** Registration is by email address and we have no means of
-checking age. We say so explicitly so that you do not conclude otherwise: what exists here is a
-**clear scoping of the intended audience and a deliberate statement by the user**, not a technical
-mechanism. **Meeting the requirement is the user's responsibility**, and anyone who lets a minor use
-their account does so in breach of these terms.
+**Operator's right of inspection, monitoring and review:**
+The operator and its team reserve the full right to inspect messages, questions, and uploaded files —
+both manually and using automated systems and AI tools — for quality review, service enhancement, model
+training, technical support, information security, and defamation risk prevention.
+Routine human review is performed without proactive cross-referencing against your identifying account
+details — which are kept separate by the registration provider — unless required for legal compliance,
+support, or security investigations. However, information you enter directly in the message body itself
+is not filtered and appears as written.
 
-**Institutional accounts** (schools, yeshivot, educational institutions) are contracted by the
-institution and are intended for **adult teaching staff**. The Service builds teaching material *for*
-pupils — **but the pupil is not a user of the Service.** The person who operates it, enters the
-question and receives the lesson is the teacher.
-
-## 6. Content You Upload
-When attaching sources (text, PDF or Word) you represent that you have the right to use them, and you
-permit us to process them to generate your answer. Do not upload unlawful or offensive content, or
-content that infringes another's copyright or privacy.
-
-**Automatic content scanning.** Messages in the Service (both questions and answers) go through an
-automatic, keyword-based scan (**not** AI, and not meaning-based analysis) for content that may be
-unlawful or abusive, or that may pose a defamation risk toward a real person. The scan **does not
-block, delete, or alter** any content automatically — a flagged message is only ever passed on for
-our own manual review. See the Privacy Policy, section 1, for the full mechanism and what is
-retained.
-
-**Note — conversations are deleted after 3 months.** A conversation with no activity for 90 days is
-deleted automatically with its messages; any new message in that conversation resets the clock.
-**Lessons you create are not deleted automatically.** If content is important to you for the long term
-— download and save it yourself. See also the Privacy Policy, section 5.
+**Conversation retention:** inactive conversations are deleted automatically after 90 days in accordance
+with the Privacy Policy. Lessons you create are saved in your account. Content important to you for the
+long term should be downloaded and saved independently.
 
 ## 7. Acceptable Use
-Do not misuse the Service, including attempting to bypass rate or quota limits, automated access
-beyond what is permitted, deliberate overload, reverse engineering, or attempts to harm the
-availability or security of the Service or its users.
+Misuse of the Service is strictly prohibited, including: circumventing quota limits, unauthorized
+automated access, causing deliberate server load, reverse engineering, or harming the security or
+availability of the Service or its users.
 
-## 8. Intellectual Property and Sources
-Corpus sources are subject to their own licenses (including Creative Commons licenses and the
-attribution requirements of Sefaria and the editions); the applicable attribution is shown beside each
-source. The Service's code, design and interface belong to the operator. Generated text may be used
-for your personal purposes subject to these terms.
+## 8. Intellectual Property, Sources and Notice and Takedown Procedure
+Texts and sources from the Jewish bookshelf are subject to their original licenses (including Creative
+Commons licenses and attribution requirements of repositories such as Sefaria); applicable attribution
+is displayed beside each source.
+The code, design, interface, trademarks, and algorithms of the Service belong exclusively to the operator.
 
-## 9. Privacy
-We store your email address (via the registration provider), your conversation and lesson history, and
-usage counters. We do not sell your data to third parties. Data is used to run the Service and to
-associate your content with you, and also — subject to the Privacy Policy and its exclusion
-mechanism, and only for conversations from 10 August 2026 onward — for quality control, improving
-the Service, and developing or fine-tuning models by the operator. See the Privacy Policy for full
-detail and how to exclude a conversation.
+**Notice and Takedown procedure for copyright:**
+The operator respects the intellectual property rights of others and operates under statutory Notice and
+Takedown principles. If you believe in good faith that content appearing on the Service, uploaded to
+it, or retrieved from its sources infringes your copyright, please notify us by email at:
+**rubinyehuda8@gmail.com**.
+Your notice must include: (a) identification of the copyrighted work claimed to be infringed; (b)
+precise location and identification of the allegedly infringing content on the Service; (c) your
+contact details and evidence or a statement confirming you are the rights holder or authorized to act
+on their behalf.
+Upon receiving a detailed notice, the operator will review it promptly and act to remove or disable
+access to infringing content in accordance with applicable law.
+
+## 9. Privacy, Data Usage and Model Training
+We store account details, conversation history, lessons, and usage metrics. Data is used to operate the
+Service, and for research, quality control, and **model training and development by the operator and
+external AI providers**, as set out in full in the Privacy Policy.
+
+**Opt-Out toggles:** activating an opt-out toggle (for a single conversation or account-wide) prevents
+the conversation from being used for training the operator's internal models only. **The opt-out toggle
+does not bind external AI providers (which operate under their own terms), and does not prevent the
+operator from inspecting conversations for quality control, enhancement, support, and security.**
+
+**Non-retroactivity — scoped by conversation creation date:** use of conversation content by the
+**operator** (distinct from real-time processing of questions by external AI providers, which applies to
+every message) applies **strictly to conversations created from 10 August 2026 onward**. A conversation
+created before that date **remains permanently excluded from this use — even if a new message is
+received in it afterward**. See Privacy Policy sections 2, 5 and 12.
 
 ## 10. Quotas, Paid Plans and Cancellation
-The Service may include a free plan with a daily quota, and paid plans. We may change quotas, prices
-and features from time to time, with reasonable notice.
-**Prices listed include VAT.**
-The current limits for each plan are published on the "Current limits" page in the app; a material
-reduction in limits entitles a paying subscriber to cancel.
+The Service includes a free tier with a daily quota and paid subscription tiers. The operator may update
+quotas and prices from time to time with reasonable advance notice. Displayed prices include VAT.
 
-**All billing is monthly — including the "annual" plan.** The annual plan is a **discounted rate
-charged in twelve monthly instalments**, not a year taken up front. You never pay in advance for a
-period you have not used, so there is never a prepayment waiting to be refunded. The annual figure
-shown is the total of those twelve instalments.
-
-**Cancellation:** you may cancel a paid subscription **at any time, in one click** (Settings →
-Cancel subscription). On cancellation, **the next charge stops immediately** (no further charges) and
-**access continues to the end of the month you already paid for** — so you are neither charged for an
-unused period nor deprived of one you paid for.
-
-**14-day cancellation right:** because the transaction is made at a distance, you may also cancel it
-within 14 days of the transaction and receive a refund, less the cancellation fee permitted by law
-(5% of the transaction or ₪100 — **whichever is lower**). To do so, contact us at the address in
-section 15. **The refund is made to the payment method used for the transaction, within 14 days of
-our receiving your cancellation notice**, and a credit note is issued to you accordingly.
-
-**Cancelling a subscription (stopping billing) is not the same as deleting your account** (a separate
-mechanism — see the Privacy Policy). That said, **deleting your account also stops the subscription**:
-a deletion request halts the recurring charge immediately — with deletion at the end of a grace period
-paid access continues to the end of the period you paid for, as with an ordinary cancellation, and with
-immediate deletion you give up the remainder of that period. **Cancelling a deletion request does not
-restore the subscription** — stopping a recurring charge is not reversible at the payment provider, and
-you would need to subscribe again. The 14-day cancellation right above applies as usual, independently
-of account deletion.
-
-**Stopping an In-Progress Response (Stop Generation):** submitting a question or request consumes the
-required quota or credits at the start of processing. Stopping generation mid-stream at the user's
-initiative does not entitle the user to a refund of quota or credits.
+- **Monthly billing:** all subscriptions (including the discounted annual plan) are billed in recurring
+  monthly instalments, with no prepayment for future unused periods.
+- **Cancellation at any time:** you may cancel a subscription at any time with one click in account
+  settings. Billing ceases immediately and access continues until the end of the billed month.
+- **14-day statutory cancellation right:** on a distance contract, you may cancel within 14 days of
+  purchase for a refund, less the statutory fee (5% or ₪100, whichever is lower), refunded to the
+  payment method within 14 days of receiving notice.
+- **Account deletion stops subscriptions:** requesting account deletion halts recurring billing at once.
+- **Stop Generation:** stopping an in-progress response does not entitle you to a quota or credit
+  refund, as model processing is consumed at the initiation of the request.
 
 ## 11. Coupons
-Coupons may be offered from time to time. A coupon grants a specific benefit (a time-limited plan tier
-or credits). Coupons have an expiration date and are not transferable. A coupon has no cash value and
-cannot be redeemed for money. If a transaction that used a coupon is cancelled, the coupon-granted
-benefit is revoked.
+Coupons granted from time to time provide a specific time-limited benefit. Coupons have no cash value,
+are non-transferable, and cannot be redeemed for cash. Cancelling a transaction revokes coupon benefits.
 
 ## 11a. Development Helpers
-From time to time we invite users to help test the Service ("development helpers"). The terms, in full:
+Users invited to help test the Service participate voluntarily and without compensation. Participation
+creates no employment relationship or business entity, and grants no wages or intellectual property
+rights. Quota benefits are temporary and revocable by either party at any time. Pre-release capabilities
+are provided "AS IS".
 
-**Participation is by invitation and your explicit acceptance.** You do not become a development
-helper until you accept, and nothing about your account changes before then. You may stop at any
-time, and we may end the arrangement at any time — without reason and without prior notice.
+## 12. System Providers (Infrastructure, AI, Third Parties) and Bring Your Own Key (BYOK)
+**Flexibility in choosing providers:**
+The Service operates through a combination of third-party systems — including AI and language model
+providers (such as Nebius, OpenAI, Anthropic, Google Cloud, and similar providers), cloud infrastructure
+and server providers (such as Hetzner, AWS, Google Cloud, Azure), databases, authentication (Supabase),
+and billing providers (PayPlus, Green Invoice).
+**The operator reserves the exclusive right to replace, add, remove, or route data between providers,
+models, and infrastructure at any time at its sole discretion**, without prior notice, for service
+enhancement, availability, security, or cost efficiency.
 
-**This is not work and creates no employment relationship, partnership, agency or business
-arrangement of any kind.** Participation is voluntary and unpaid; you are not entitled to wages,
-compensation, a share of revenue, rights in the Service's intellectual property, or any other
-payment for it. There are no required hours, no binding tasks, and no obligation to report or be
-available.
-
-**What you receive is a benefit, not a purchase.** While participating, your account is allocated a
-usage allowance at the basic-plan level, and capabilities not yet released to all users may be
-opened for you. The benefit has no monetary value, is not transferable and cannot be redeemed. **If
-you already hold a paid subscription, participation does not reduce it** — the higher of the two
-allowances applies. When participation ends, the allowance returns to the plan you purchased, or to
-the free plan if you purchased none.
-
-**Unreleased capabilities are provided as is.** By their nature they may be incomplete, may change,
-may behave incorrectly or may disappear without notice, and content created with them may be lost.
-No commitment attaches to them beyond section 8, and they should not be relied on for anything other
-than testing. Sections 4, 6 and 7 apply to a development helper exactly as to any other user.
-
-**Communication.** While participating we may send you notices inside the Service, and see when they
-were read. For what is stored about a development helper, see the Privacy Policy, section 1.
-
-## 12. Your Own API Key (Bring Your Own Key)
-The Service optionally lets you enter, in Settings, your own API key and choose which provider and
-model to use — by default the provider and model this Service is configured for, but you may point
-the request at an entirely different provider and model of your choice; if you name a model that
-does not exist at that provider, we will show you the list of models actually available there to
-pick from.
-
-This is **entirely optional and at your own responsibility**: the key is yours, issued to you by the
-provider you chose and subject to its own terms; any charge, limit or usage policy the provider
-applies to your key is a matter between you and the provider alone — we are not a party to it and
-are not responsible for it. **We do not know and cannot know what any given provider or model
-charges** (this information is not exposed by providers' APIs) — checking the cost, and the
-responsibility for it, is yours alone, and we take no responsibility for charges incurred from using
-the key you chose.
-
-We store the key, base URL and model name **only in your browser**; they are sent to our servers
-only at the moment of actual use, to relay your request to the provider on your behalf, and we do
-not store them in our databases. Using your own key grants a second allowance the same size as your
-plan's own quota — **it is not unlimited**. Do not use a key that is not yours or was obtained
-unlawfully; a breach of this section is subject to the enforcement provisions in section 4 above.
+**Bring Your Own Key (BYOK):**
+You may enter your own personal API key to direct queries to a provider of your choice. Using your own
+key is at your sole responsibility and subject to your direct agreement and costs with that provider.
+The key is stored in your browser only and is not stored on our servers.
 
 ## 13. Changes to These Terms
-We may update these terms. Continued use after an update constitutes acceptance of the updated terms.
-The current version is always shown in the Service.
+We may update these terms from time to time. Continued use of the Service after publication of updated
+terms constitutes acceptance. The current version is always shown in the Service.
 
 ## 14. Intended Audience, Governing Law and Jurisdiction
-**The Service is offered to users in Israel.** It is not directed at residents of the European Union,
-the United Kingdom, or other territories with separate data-protection regimes, and we do not offer it
-there. **We do not technically block access by location** — and we do not claim to — but this scoping
-states who the Service is intended for and the law it was built against. A user connecting from
-outside Israel does so on their own initiative and responsibility, and that does not by consent make
-another body of law applicable to the Service.
-
-These terms are governed by the law of the State of Israel, and the exclusive jurisdiction shall be the
+The Service is offered and designed for users in Israel under Israeli law, and is not directed at users
+in the European Union or other separate regulatory jurisdictions.
+These terms, the Privacy Policy, and any dispute arising from the use of the Service shall be governed
+**exclusively by the laws of the State of Israel**, and exclusive jurisdiction shall lie with the
 competent courts of the State of Israel.
+Without derogating from the exclusive jurisdiction of the courts, the parties may mutually and
+expressly agree in writing to refer a specific dispute for resolution before an agreed arbitrator or a
+Rabbinical court (Beit Din).
 
 ## 15. Contact
-Questions about these terms: rubinyehuda8@gmail.com
+For questions regarding these terms: rubinyehuda8@gmail.com

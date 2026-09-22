@@ -6,7 +6,33 @@
 
 # Privacy Policy — Chavruta AI
 
-**Version 1.10 · Effective 13 August 2026**
+**Version 1.11 · Effective 22 September 2026**
+
+Changes in version 1.11:
+1. **Flexibility in selecting infrastructure and AI providers:** updated sections 3, 4 and 9 — the
+   operator may use leading infrastructure and AI providers (including Nebius, OpenAI, Anthropic,
+   Google Cloud, AWS, Azure, Hetzner, and similar providers), replace, add, or route processing
+   between them at discretion.
+2. **Model training and service improvement:** clarified that conversation content may be used for
+   training, fine-tuning and improving models by both the operator and third-party AI providers
+   (sections 2 and 3).
+3. **Right of inspection and human review:** sections 1 and 2 clarify that the operator may inspect
+   conversations and files for quality review, enhancement, training and security. It is clarified
+   that routine review is performed **without proactive cross-referencing** against your identifying
+   account details — which are stored separately by the registration provider (Supabase) and are not
+   stored alongside messages — unless cross-referencing is required for legal, security or support
+   purposes.
+4. **Opt-Out mechanism:** section 12 clarifies that the opt-out toggle applies to internal model
+   training by the operator only; it does not bind external AI providers, and does not limit the
+   operator's right of inspection and control.
+5. **Statutory access rights:** section 11 updated with a direct reference to sections 13 and 14 of the
+   Protection of Privacy Law.
+6. **Non-retroactivity of internal review/training remains unchanged:** for the avoidance of doubt,
+   the changes above do not change **when** a conversation becomes eligible for internal operator use
+   (section 2). The rule first established in version 1.8 continues to apply in full: this use
+   applies **only to conversations created from 10 August 2026 onward**, and never to a conversation
+   created before that date — **even if a new message is received in it afterward**. See sections 2, 5
+   and 12 below.
 
 Changes in version 1.10: a **development helpers** programme has been added — users the
 operator invites to help test the product. Section 1 sets out what is stored about them: the
@@ -75,236 +101,181 @@ that **there is no "no-training" path** (section 3) and that **we do not verify 
 and the Service is **scoped to an audience in Israel** (Terms of Use, section 13). The contact
 section is renumbered as section 12.
 
-Changes in version 1.1: this policy now states the 90-day conversation retention window, itemises the
-usage measurements recorded per request and the content that is deliberately not recorded, and states
-that those measurements are detached from your identity when an account is deleted.
+Changes in version 1.1: wording updates and synchronization between the language versions. The
+Hebrew content of the policy did not change — the 90-day conversation retention window, the itemised
+usage measurements, and their detachment from your identity upon account deletion already applied
+from version 1.0.
 
 This policy explains what information Chavruta AI (the "Service", operated by Yehuda Rubin)
 collects, how it is used, and your rights. Using the Service constitutes acceptance of this policy.
-**Providing your data is not a legal obligation — it is a condition for using the Service** (e.g. an
-email address for sign-in); sources you attach are provided voluntarily, at your choice.
+**Providing your data is not a legal obligation — it is a condition for using the Service**;
+sources and files you attach are provided voluntarily, at your choice.
 
-## 1. What We Collect
+## 1. What We Collect and Inspection
 - **Account details:** your email address, managed through the registration provider (Supabase). We do
-  not see or store your password — it is stored and secured by the provider. Also recorded with the account are **your
-  acceptance of the terms and your age confirmation (18+) given at registration, and their
-  timestamps** — the record that the declaration was made.
-- **Content you create:** your questions, conversation history, saved lessons, and sources you attach
-  (text / PDF / Word).
-- **Flagging messages for review — automatic and by you:** you can flag a given answer for our
-  manual review (e.g. if you believe it mischaracterizes a real person). In addition, every message
-  in the Service (question or answer) also goes through an **automatic, keyword-based scan only** —
-  not AI, not meaning-based analysis — for content that may be unlawful or abusive (e.g. violence,
-  content involving minors, self-harm), or that may pose a defamation risk toward a real person. In
-  both cases, **the flag does not block, delete, or alter** content automatically; it only forwards
-  the message for our own manual review, by reference to the existing message id (not by copying the
-  content anywhere else).
-- **Usage and measurement data:** to enforce quotas and improve the Service we record, for each
-  request, **metrics only** — timestamp (including local hour and weekday), action type (question /
-  explanation / comparison / halacha / chavruta / lesson building), language of request, tokens
-  consumed, number of model calls, processing duration, whether sources were found and how many,
-  number of files attached, and for a lesson — target audience, grade band and length. We use them to
-  understand what needs improvement, what costs more, and at which hours the Service is busy.
-  **We do not store in these records the content of the question, answer, sources or attached files**
-  — only measurements. In addition, basic technical records are kept (request id, IP address) for
-  security and rate limiting.
-- **Development helpers (only if you were invited):** **from the moment you are invited** — before
-  you answer — a record exists holding your account id, the invitation time, and a label the
-  operator writes to identify you in the list. **That label is also shown to you**, beside the
-  invitation and for as long as you are helping; there is no hidden record about you.
-  **If you accept**, we additionally store when you accepted, which capabilities were opened for
-  you, and notices the operator sends you inside the Service — including when you read them.
-  **If you decline**, the label, the capabilities and the notices are deleted, and only your account
-  id and the fact and time of the refusal remain — the minimum that stops us inviting you again
-  without knowing you already answered. No further notices are sent after a refusal.
-  **If we end the participation**, the time it ended is stored too, and the capabilities and quota
-  revert to what they were. The label and earlier notices remain until you delete the account or
-  decline a fresh invitation.
-  All of it is deleted when the account is deleted. **Anyone who was never invited has no such
-  record at all.**
-- **Local preferences:** language, theme and display settings are stored in your browser (localStorage).
-- **Your own API key (if you choose to use one — see the Terms of Use):** the API key, a custom
-  provider base URL and a custom model name are **not collected or stored by us at all** — they stay
-  only in your browser and are sent to our servers only at the moment of actual use, to relay your
-  request to the provider on your behalf.
-- **Subscription & billing data:** if you purchase a subscription — your subscription status and period
-  dates, and a reference (token) to the payment method held by the payment provider. **We do not see or
-  store your full card number** — it is handled by the payment provider.
+  not see or store your password — it is stored and secured by the provider. Also recorded with the
+  account are your acceptance of the terms and your age confirmation (18+) given at registration, and
+  their timestamps.
+- **Content you create and operator inspection:** your questions, conversation history, saved lessons,
+  and sources or files you attach (text, PDF, Word, etc.). **The operator and its team reserve the full
+  right to inspect this information and the content of conversations and requests** — both for quality
+  control, service enhancement, research, and operator model training/fine-tuning, and for technical
+  support, debugging, information security, and prevention of abuse or prohibited content.
+- **Human review conduct and raw content warning:** to the extent human review of conversations is
+  conducted (for quality control, improvement, and training), its purpose is not to identify the user,
+  and it is performed **without proactive cross-referencing** against your identifying account details
+  (such as your email address) — which are stored separately with the registration provider (Supabase)
+  from the conversation content itself, which is associated internally only with an account identifier.
+  Cross-referencing against account details will be performed only when required for legal compliance,
+  responding to your inquiry or complaint, investigating a serious security incident, or investigating
+  abuse. **In addition, the system does not automatically filter personal information written by you
+  inside the message body itself** — any detail you type into a message will appear as written, and
+  therefore you must not include personal or sensitive information in questions and attached files.
+- **Automated content scanning and monitoring:** messages and files may undergo automated scanning
+  (including via AI models and classification systems) as well as manual review, to detect prohibited
+  activity, violence, privacy violations, or defamation risks. You may also flag an answer for manual
+  review.
+- **Usage and measurement data:** to enforce quotas, ensure security, and optimize resources, technical
+  and operational metrics are recorded: request timestamps, language, token counts, processing
+  duration, error logs, IP address, and request ID.
+- **Development helpers:** for participants in the development-helpers programme, a dedicated record is
+  kept (account ID, invitation/response timestamps, opened capabilities, operator identifying label
+  shown to the helper, and internal system notices).
+- **Local preferences and Bring Your Own Key (BYOK):** interface preferences (language, theme) are
+  stored in your browser only. An API key entered by you stays in your browser and is not stored on our
+  servers.
+- **Billing data:** paid subscriptions are processed through payment and invoicing providers. We do not
+  store full credit card numbers.
 
 ## 2. How We Use It
-To operate the Service and generate answers; to associate your conversations and lessons with your
-account; to enforce quotas; and to secure the Service and prevent abuse. We do not use your content
-for advertising.
+We use the information to operate the Service, generate answers and lessons, enforce quotas, provide
+technical support, and secure the system. We do not sell your data to third parties for advertising.
 
-**In addition, and subject to the exclusion mechanism in section 12:** we may review conversation
-content and use it for internal quality review, improving the Service, and developing or
-fine-tuning models by the operator. This is **different** from section 3 (what the model provider,
-Nebius, does with the data to generate an answer in real time) — this is about our own use, as the
-operator, of content held with us. This use applies only to conversations from 10 August 2026
-onward (section 5), and you can exclude a specific conversation or all of them from it.
+**Improvement, research, and model training by the operator:**
+We may use the content of conversations, questions, answers, and uploaded files for research, quality
+review, performance testing, and for **developing, training, fine-tuning, and evaluating language
+models, algorithms, and AI systems of the operator**. This use applies by default, subject to the
+internal opt-out mechanism set out in section 12 below.
 
-## 3. Processing and Training by the Model Provider
-To generate an answer, your question (and any source you attach) is sent to our AI model provider —
-**Nebius**. **Nebius may use the data sent to it — your questions and attached sources — also to
-improve and train its AI models**, subject to its terms. Therefore **do not enter sensitive,
-confidential or personal information** you would not want processed, or used for model training, this
-way.
+**Non-retroactivity — scoped by conversation creation date:** this use by the operator applies
+**strictly to conversations created from 10 August 2026 onward**. A conversation created before that
+date **remains permanently excluded from this use — even if a new message is received in it
+afterward.** This is entirely separate from section 3 (real-time processing of questions by external
+AI providers to generate answers), which applies to **every message in every conversation**, regardless
+of creation date. See also sections 5 and 12.
 
-**There is no "no-training" path on this Service — not on a paid plan and not on an institutional
-account.** We say so explicitly so that you do not conclude otherwise: there is no setting you can
-ask us to enable, and no tier that buys one. The rule in this section — what is not entered is not
-sent — is the only protection that exists here, which is why it is written as a rule and not as a
-recommendation. If we move to a provider that offers a non-training path, we will update this section
-and give notice.
+## 3. Processing and Training by External AI Providers (Third Parties)
+To process questions and generate responses, your question and attached sources are transmitted to
+external AI and language model providers.
 
-**If you choose to use your own API key** (see the Terms of Use, including the option to point it at
-a provider and model other than the Service's default), your questions and attached sources are sent
-to that provider using your own key and account — **not through our arrangement with it**. In that
-case, that provider's own terms and privacy practices, as you accepted them directly when creating
-the key, govern that data — not the arrangement described above.
+**Model training by providers:**
+Under the terms of use and privacy policies of the respective AI providers, **these providers may
+retain transmitted data and use it for research, development, and training of their AI models**. The
+operator does not control the internal policies of external providers and does not warrant a
+no-training path from them under standard plans.
 
-## 4. Sharing
-We do not sell your data. We use sub-processors only to run the Service: the registration provider
-(Supabase), and the AI model provider **and** the hosting provider that runs the Service itself —
-**both Nebius**. **For paid subscribers — the payment
-provider (PayPlus) and the invoicing provider (Green Invoice)**, which process payment and billing
-data. Study sources are retrieved from a Sefaria-based corpus subject to their licenses. We will
-disclose information if required by law.
+**Golden rule — what is not entered is not sent:**
+**Do not enter sensitive, confidential, identifying personal information, or legally protected data
+into the Service.** Using the Service constitutes express consent to the transmission and processing
+of data with these providers.
+*(BYOK exception):* if you use your own API key, data is transmitted directly to your own account with
+the provider, governed by your direct agreement with that provider.
+
+## 4. Sharing and Sub-processors
+We do not sell your data. We engage trusted third-party service providers across all operational areas.
+The operator reserves the full right to select, replace, add, remove, or route data between providers
+at any time at its discretion:
+1. **AI and language model providers:** including Nebius, OpenAI, Anthropic, Google Cloud, and similar
+   specialized model providers.
+2. **Cloud hosting, server and infrastructure providers:** including application servers, databases,
+   vector stores, and network infrastructure (such as Hetzner, AWS, Google Cloud, Azure, Nebius).
+3. **Authentication and account management providers:** Supabase.
+4. **Payment and invoicing providers:** PayPlus and Green Invoice (for paying subscribers).
+5. **Logging, monitoring and performance analytics providers:** for stability and latency monitoring.
+6. **Support and communication providers:** for system notices and user inquiries.
+
+Study sources are retrieved from digital repositories (including a Sefaria-based corpus) subject to
+their licenses.
+
+We will disclose information if required by court order, statutory obligation, or to
+protect our legal rights and investigate complaints.
 
 ## 5. Retention
-- **Conversations: kept for up to 3 months.** A conversation with no activity for 90 days is deleted
-  automatically, with its messages. Any new message in the conversation resets the count — a
-  conversation you keep returning to will not be deleted.
-  **We recommend downloading and saving content that is important to you for the long term.**
-- **Review and use for quality control, improvement, and model development (section 2)** applies
-  **only** to conversations created from 10 August 2026 onward — not retroactively to earlier
-  conversations. You can exclude a specific conversation from this, or all of your conversations
-  with a single global toggle — see section 12.
-- **Lessons you create: not deleted automatically.** They are your work product and are kept until you
-  delete them or until the account is closed.
-- **Measurement data** (section 1) is kept for trend analysis. On account deletion it is **detached
-  from your identity** and remains as anonymous aggregate data only.
-- **Billing records:** we are required by law to keep accounting documentation of payments (about 7
-  years). This documentation is kept **without association to your identity** — amount, date and invoice
-  number only — and continues to exist even after account deletion.
-- Technical records are retained for a limited period for security.
+- **Conversations:** a conversation with no activity for 90 days is deleted automatically with its
+  messages. A new message resets the count. We recommend downloading content important to you.
+- **Lessons you create:** retained in your account until you delete them or close the account.
+- **Measurement data:** kept for trend analysis, detached from your identity upon account deletion.
+- **Billing records:** retained as required by statutory accounting obligations (approx. 7 years).
+- **Security logs:** retained for a limited period for security and audit purposes.
+- **Internal review and training (section 2) applies only to conversations created from 10 August 2026
+  onward**, not retroactively to earlier conversations, even if they receive new messages. You can
+  exclude a specific conversation or all of them via a global toggle — see section 12.
 
 ## 6. Your Rights
-- **Access and deletion:** you can view and delete your conversations and lessons at any time in the app.
-- **Account deletion:** you can request account deletion from Settings, and choose between two
-  options. **Deletion at the end of a grace period** (about 30 days) — the default, during which you
-  can cancel it; it exists so that an accidental click is reversible. **Immediate deletion** — the
-  data is erased at once, with no grace period and no way to cancel. In both cases all data
-  associated with the account is permanently erased (as is the login, where configured).
-- **A deletion request stops section 2's use immediately:** from the moment of the request — not at
-  the end of the grace period — your conversations are no longer included in quality review, service
-  improvement, or model development and fine-tuning. Cancelling the deletion brings them back in.
-- **The one case where deletion is refused:** if your account **owns an institution** (a school or
-  organisation you bought a subscription for), deletion will not proceed while that institution
-  exists. The reason is structural, not discretionary: your account is the only link between the
-  institution and the person responsible for it, and deleting it would leave a live institution whose
-  members keep drawing on it and which nobody can administer or close. The request is refused
-  **immediately and explicitly**, rather than left pending — so that you know, and can close the
-  institution or transfer ownership and then delete. There is no other refusal.
-- **Correction:** you can update details in account settings.
-- **Response times:** we will answer an access request within 30 days (extendable by a further 15 days
-  as permitted by law). Following a deletion or correction, we will also notify parties to whom the
-  data was disclosed in the preceding 3 years, where required by law.
+- **Access and self-deletion:** you can view and delete conversations and lessons within the app.
+- **Account deletion:** you can choose in Settings between **deletion at the end of a grace period**
+  (approx. 30 days, cancellable) and **immediate deletion** without recovery.
+- **Institutional accounts:** deletion of an account owning an active institution is refused until the
+  institution is closed or transferred.
+- **Access and correction:** we will respond to statutory access or correction requests as required by
+  law (within 30 days, extendable by 15 days).
 
-## 7. The Service is not intended for minors
-**The Service is for users aged 18 and over only** (Terms of Use, section 5). Registration requires an
-explicit age confirmation, which is recorded with the account. **We do not knowingly collect personal
-information from minors.** If we learn that an account was opened by a minor we will close it and
-delete the information. If you know of such a case, contact us (section 13) and we will act.
-
-**This is a declaration, not verification**, and we say so explicitly: registration is by email
-address and we have no means of checking age. What exists is a clear scoping of the intended audience
-and a deliberate statement by the user.
-
-- **Schools and institutional accounts:** the Service builds teaching material **for** pupils — and
-  **the pupil is not a user of the Service.** The person who operates it, enters the question and
-  receives the lesson is the **teacher**, who is an adult. **We neither ask for nor need pupil data of
-  any kind**, and there are no pupil accounts.
-- **Hence the rule that remains:** as described in section 3, what is entered is sent to the model
-  provider. **Do not enter identifying details of any person — pupils included.** The Service needs no
-  identifying detail in order to work: a question in learning is a question about a source, not about
-  a pupil. **Preparing a lesson for a third-grade class does not require any child's name.**
-- **Marketing:** we do not direct marketing at minors and do not use their data.
+## 7. The Service Is Not Intended for Minors
+**The Service is intended for users aged 18 and over only.** Registration requires an explicit age
+declaration recorded with the account. We do not knowingly collect information from minors; an account
+found to belong to a minor will be closed.
+- **Schools and institutional accounts:** the Service builds learning materials *for* pupils, but
+  **the pupil is not a user of the system**. The user is the adult teacher. Opening pupil accounts or
+  entering identifying pupil details is strictly prohibited.
 
 ## 8. Cookies and Local Storage
-We use browser local storage to keep your preferences and to maintain your active session (session
-token). We do not use third-party advertising or tracking cookies.
+We use browser local storage for interface preferences and active session token management. We do not
+use third-party tracking cookies for advertising.
 
 ## 9. Transfer of Data Outside Israel
-Some sub-processors (Supabase, and Nebius — both as the AI model provider and as the hosting
-provider, processing within the European Union) process data outside Israel. The transfer is
-made on the basis of **your consent** and subject to a **contractual undertaking** by the providers to
-maintain a level of protection equivalent to that required under Israeli law and not to transfer the
-data onward without authorization, in accordance with the Protection of Privacy Regulations (Transfer
-of Data to Databases Abroad), 2001.
+Our sub-processors process and store data on servers located outside Israel — including in the United
+States, European Union member states, and other jurisdictions globally. Using the Service constitutes
+**express consent to data transfer, storage, and processing in these countries**, in accordance with the
+Protection of Privacy Regulations (Transfer of Data to Databases Abroad), 2001, subject to contractual
+commitments to standard data security safeguards.
 
 ## 10. Security
-We take reasonable measures — authentication, rate limiting, and encryption in transit — to protect
-your information, in accordance with the Protection of Privacy (Data Security) Regulations, 2017. In
-the event of a serious security incident we will act to notify the Privacy Protection Authority and
-affected users as required by law. However, no method is 100% secure and we cannot guarantee absolute
-security.
+We take reasonable security measures (encryption in transit, authentication, and rate limiting) in
+accordance with the Protection of Privacy (Data Security) Regulations, 2017. However, no system is
+impenetrable and we cannot guarantee absolute security against unauthorized intrusions.
 
 ## 11. The Database, Its Purposes, and the Applicable Law
-**Database owner and manager:** Yehuda Rubin, the operator of the Service. Contact details in section 13.
+**Database owner and manager:** Yehuda Rubin, operator of the Service (contact details in section 13).
+**Purposes of the database:** operating the Service and generating answers; associating conversations
+and lessons; enforcing quotas and security; billing and accounting; quality review and research;
+automated and manual content monitoring to prevent prohibited activities and defamation; analyzing
+usage metrics; developing, training, and fine-tuning operator models (subject to section 12 and the
+non-retroactive scope in sections 2 and 5); processing via sub-processors; and running the development
+helpers programme.
 
-**Purposes of the database** — the information itemised in section 1 is collected and used for these
-purposes only:
-1. operating the Service and producing answers and lessons;
-2. associating conversations, lessons and the subscription with your account;
-3. enforcing usage quotas and preventing abuse;
-4. billing, issuing invoices and meeting accounting obligations;
-5. securing the Service;
-6. detecting unlawful, abusive, or defamation-risk content, for our own manual review (section 1);
-7. understanding aggregate usage patterns in order to improve the Service;
-8. internal quality review, improving the Service, and developing or fine-tuning models by the
-   operator — only for conversations from 10 August 2026 onward, and subject to the exclusion
-   mechanism (section 12);
-9. running the development-helpers programme and communicating with its participants — only for
-   those invited who joined voluntarily (section 1).
+This policy is drawn up under the **Protection of Privacy Law, 5741-1981 (including Amendment 13)**
+and the regulations thereunder.
+**Statutory rights of access and correction:** you are entitled to inspect information about you held in
+the database and to request its correction or deletion in accordance with sections 13 and 14 of the
+Protection of Privacy Law, as set out in section 6 above.
 
-**We do not use the information for any other purpose and we do not sell it.** Use for a new purpose
-would require an update to this policy and advance notice.
+## 12. Opt-Out Mechanism
+You may exclude a specific conversation or all of your conversations from being used for model training
+(via a toggle in the conversation or in Settings).
 
-**Applicable law.** This policy is drawn up under the **Protection of Privacy Law, 5741-1981, as
-amended by Amendment 13** (in force August 2025), and the regulations under it — the Data Security
-Regulations (2017) and the Transfer of Data to Databases Abroad Regulations (2001), referred to in
-sections 9 and 10.
-
-**Privacy Protection Officer.** Amendment 13 requires appointing an officer in certain circumstances,
-including large-scale processing of sensitive data or systematic monitoring. **In our assessment the
-obligation does not apply at the current scale:** the Service holds no sensitive data as defined in
-the Law, performs no systematic monitoring, and records measurements rather than content (section 1).
-This is our assessment, it is revisited as the scale grows, and an appointment will be made if and
-when the obligation arises.
-
-## 12. Excluding Specific Conversations from Section 2's Use
-The use described in section 2 (quality control, improvement, and developing or fine-tuning models)
-applies **only** to conversations created from **10 August 2026** onward (section 5, section 11
-purpose 8). Excluding a conversation does **not** affect how the conversation itself works — an
-excluded conversation keeps working normally; it is simply not included in this use.
-
-**Excluding a specific conversation:** every conversation has a "Don't use this conversation" toggle,
-next to the pin and rename options. The default is that a conversation is **included**, unless you
-mark it otherwise.
-
-**Global exclusion:** Settings has an additional toggle that excludes **all** of your conversations at
-once, for anyone who would rather not go conversation by conversation. This toggle overrides the
-per-conversation setting.
-
-**Requesting account deletion also excludes, with no toggle needed:** an account pending deletion
-(section 6) is excluded from this use from the moment of the request — even though the data still
-exists until the grace period ends. Cancelling the deletion cancels this exclusion too.
-
-In practice, review or use of conversation content begins **24 hours** after the effective date —
-that is, from **11 August 2026** — to give real time to mark an exclusion before anything is actually
-read.
+**Scope and limits of the exclusion — internal exclusion only:**
+1. **Applies to the operator only:** activating the toggle prevents the conversation from being included
+   in the internal training and fine-tuning datasets of the operator's AI models.
+2. **Does not prevent training or processing by external AI providers:** because queries are sent to
+   third-party providers to generate responses, **the opt-out toggle does not bind external AI
+   providers and does not prevent them from processing or training models under their own policies**.
+3. **Does not limit operator inspection:** activating the opt-out toggle does not prevent the operator
+   and its team from reviewing conversations for quality review, refinement, technical support,
+   information security, and abuse prevention.
+4. **Not required to preserve non-retroactivity:** even without toggles, conversations created before
+   10 August 2026 remain excluded from section 2's use **permanently** by virtue of their creation
+   date — see sections 2 and 5.
 
 ## 13. Changes and Contact
-We may update this policy; the current version is always shown in the Service. For privacy questions:
-rubinyehuda8@gmail.com
+We may update this policy from time to time; the current version is always displayed in the Service. For
+privacy inquiries: rubinyehuda8@gmail.com
