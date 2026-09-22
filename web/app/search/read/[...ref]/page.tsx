@@ -101,7 +101,6 @@ function ReaderInner() {
   // Reader Settings
   const [studyMode, setStudyMode] = useState<StudyMode>("text_only");
   const [fontSize, setFontSize] = useState<FontSizeLevel>("md");
-  const [showNikud, setShowNikud] = useState(false);
 
   // Active Segment & Interaction
   const [activeSegmentRef, setActiveSegmentRef] = useState<string | null>(null);
@@ -539,20 +538,6 @@ function ReaderInner() {
               </button>
             </div>
 
-            {/* Vocalization (Nikud) Toggle */}
-            <button
-              type="button"
-              onClick={() => setShowNikud(!showNikud)}
-              className={`h-9 px-3 rounded-xl glass text-xs font-semibold transition flex items-center gap-1 cursor-pointer ${
-                showNikud
-                  ? "bg-tekhelet/15 text-tekhelet border-tekhelet/40 font-bold"
-                  : "text-ink/60 hover:text-tekhelet border-line/60"
-              }`}
-              title={showNikud ? "הסתר ניקוד" : "הצג ניקוד"}
-            >
-              <span>{showNikud ? "אָ ניקוד פעיל" : "ללא ניקוד"}</span>
-            </button>
-
             {/* Font Size Selector */}
             <div className="flex items-center glass rounded-xl p-0.5 border border-line/50">
               <button
@@ -664,9 +649,7 @@ function ReaderInner() {
               <div className="flex flex-col gap-4 sm:gap-6">
                 {unit.segments.map((seg, idx) => {
                   const isActive = activeSegmentRef === seg.ref;
-                  const hebrewText = showNikud
-                    ? seg.text_he
-                    : stripHebrewVowels(seg.text_he);
+                  const hebrewText = stripHebrewVowels(seg.text_he);
 
                   return (
                     <div
