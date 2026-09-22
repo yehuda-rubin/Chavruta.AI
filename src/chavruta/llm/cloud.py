@@ -286,6 +286,7 @@ class CloudLLM:
             finish_reason=choice.finish_reason or "stop",
             prompt_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
             completion_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
+            model_used=self.model_id,
         )
 
     def stream(self, prompt: GroundedPrompt, *, lang: str, max_tokens: int,

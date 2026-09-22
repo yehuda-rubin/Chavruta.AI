@@ -93,6 +93,7 @@ class LLMResult:
     # Lets the agentic loop enforce a CUMULATIVE budget on real numbers rather than an estimate.
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    model_used: str = ""
 
 
 def render_messages(prompt: GroundedPrompt, lang: str) -> list[dict]:

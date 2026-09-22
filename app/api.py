@@ -711,6 +711,8 @@ class QueryResponse(BaseModel):
     # separately so the client can render it beside the sources rather than inside the prose.
     # Empty for everyone outside the rollout, and empty whenever the model did not emit one.
     source_note: str = ""
+    # The actual model ID that generated this answer (e.g. Gemini 3.1 Flash-Lite or Nebius Qwen)
+    model_used: str = ""
 
 
 # ── Lesson audience / grade / length ─────────────────────────────────────────
@@ -2741,6 +2743,9 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
     clean = strip_mudgash_label(clean)
     clean = strip_control_codes(clean)
 
+    used_model = getattr(answer, "model_used", "") or getattr(resolved_llm, "model_id", "")
+    _log.info("query completed: model=%s grounded=%s citations=%d", used_model, answer.grounded, len(citations_out))
+
     out = QueryResponse(
         answer=clean,
         citations=citations_out,
@@ -2750,6 +2755,7 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
         lesson_plan=lesson_plan,
         files=[],
         source_note=source_note,
+        model_used=used_model,
     )
     # Sources the model used without marking, plus a finding for anything it named that resolves to
     # nothing OR was never actually retrieved this turn — see _widen_citations_from_note.

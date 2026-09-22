@@ -89,6 +89,12 @@ PRESETS: dict[str, Preset] = {
              "key (or swap in a key from a billing-enabled project) the moment there is a first "
              "paying customer, not before",
     ),
+    "gemini-lite": Preset(
+        "https://generativelanguage.googleapis.com/v1beta/openai",
+        "gemini-3.1-flash-lite-preview",
+        min_output_tokens=2_048,
+        note="Google Gemini 3.1 Flash-Lite: free-tier eligible, ultra-low cost, high Torah accuracy",
+    ),
 }
 
 

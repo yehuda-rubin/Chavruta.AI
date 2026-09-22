@@ -43,7 +43,7 @@ def _detect_lang(text: str) -> str:
 # the profile's llm_max_tokens for any other intent.
 # Backend names that mean "an OpenAI-compatible HTTP API". 'nebius' is the historical name and is
 # kept working; 'api' and 'openai' say what it actually is.
-_API_BACKENDS = frozenset({"api", "openai", "nebius"})
+_API_BACKENDS = frozenset({"api", "openai", "nebius", "fallback"})
 
 # Raised across the board 2026-08-12 (user decision). Thorough, step-by-step answers are a
 # deliberate product choice, not a bug to trim (see the "long answers are a feature" decision), and
@@ -120,7 +120,39 @@ def build_backends(profile: Profile):
     # CloudLLM is a plain OpenAI-compatible client and the provider is just a base URL. Naming the
     # backend after one vendor made switching look like a code change when it is an env change, so
     # the capability name is now the real one and the vendor name follows it.
-    if profile.llm_backend in _API_BACKENDS:
+    if profile.llm_backend == "fallback":
+        from chavruta.llm.cloud import CloudLLM
+        from chavruta.llm.fallback import FallbackLLM
+
+        if not (profile.llm_api_key or "").strip():
+            # No primary key configured — run directly on secondary (Nebius)
+            llm = CloudLLM(
+                profile.llm_fallback_model,
+                profile.llm_fallback_base_url,
+                profile.llm_fallback_api_key,
+                timeout_s=getattr(profile, "llm_fallback_timeout_s", 180.0),
+                max_retries=profile.llm_max_retries,
+                min_output_tokens=0,
+            )
+        else:
+            primary_llm = CloudLLM(
+                profile.llm_model,
+                profile.llm_base_url,
+                profile.llm_api_key,
+                timeout_s=min(profile.llm_timeout_s, 25.0),
+                max_retries=profile.llm_max_retries,
+                min_output_tokens=getattr(profile, "llm_min_output_tokens", 0),
+            )
+            secondary_llm = CloudLLM(
+                profile.llm_fallback_model,
+                profile.llm_fallback_base_url,
+                profile.llm_fallback_api_key,
+                timeout_s=getattr(profile, "llm_fallback_timeout_s", 180.0),
+                max_retries=profile.llm_max_retries,
+                min_output_tokens=0,
+            )
+            llm = FallbackLLM(primary_llm, secondary_llm)
+    elif profile.llm_backend in _API_BACKENDS:
         from chavruta.llm.cloud import CloudLLM
 
         llm = CloudLLM(profile.llm_model, profile.llm_base_url, profile.llm_api_key,
@@ -485,11 +517,12 @@ class ChavrutaPipeline:
             # own text scan ever over/undercounts (see agentic.py::append_sources). Falls back to
             # the old count-based guess only for a source that never went through that loop.
             marker_map.setdefault(s.marker or f"S{i}", s)
-        text, citations, is_grounded = grounded.enforce_citations(raw, marker_map, question=query.text)
+        used_model = getattr(llm, "last_model_used", "") or getattr(llm, "model_id", "")
         answer = Answer(
             text=text, citations=citations, grounded=is_grounded,
             no_source=not is_grounded, intent=query.intent,
             retrieved_refs=[h.ref for h in result.hits] + [s.ref for s in (fetched or [])],
+            model_used=used_model,
         )
         if missing_note:
             answer.caveats.append(missing_note)
@@ -627,9 +660,11 @@ class ChavrutaPipeline:
         text, citations, is_grounded = grounded.enforce_citations(raw, marker_map, question=query.text)
         if plan.sections:
             plan = grounded.prune_lesson_to_cited(plan, citations)
+        used_model = getattr(llm, "last_model_used", "") or getattr(llm, "model_id", "")
         answer = Answer(text=text, citations=citations, grounded=is_grounded,
                         no_source=not is_grounded, intent=query.intent,
-                        retrieved_refs=[h.ref for h in result.hits] + [s.ref for s in (fetched or [])])
+                        retrieved_refs=[h.ref for h in result.hits] + [s.ref for s in (fetched or [])],
+                        model_used=used_model)
         answer.lesson_plan = plan
         return grounded.maybe_halacha_caveat(answer, query.lang)
 
@@ -653,10 +688,12 @@ class ChavrutaPipeline:
         for i, s in enumerate(fetched or [], len(marker_map) + 1):
             marker_map.setdefault(s.marker or f"S{i}", s)
         text, citations, is_grounded = grounded.enforce_citations(raw, marker_map, question=query.text)
+        used_model = getattr(llm, "last_model_used", "") or getattr(llm, "model_id", "")
         return Answer(
             text=text, citations=citations, grounded=is_grounded,
             no_source=not is_grounded, intent=Intent.CHAVRUTA,
             retrieved_refs=[h.ref for h in result.hits] + [s.ref for s in (fetched or [])],
+            model_used=used_model,
         )
 
     def _sourcesheet_answer(self, query: Query, result, llm=None, *, history=None) -> Answer:

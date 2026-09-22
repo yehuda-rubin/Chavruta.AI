@@ -223,3 +223,4 @@ class Answer:
     # just the ones it cited. Lets a caller tell "named a real work" apart from "named a work it was
     # actually given"; see app/api.py::_widen_citations_from_note.
     retrieved_refs: list[str] = field(default_factory=list)
+    model_used: str = ""
