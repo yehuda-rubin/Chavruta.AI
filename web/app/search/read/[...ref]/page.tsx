@@ -170,14 +170,30 @@ function ReaderInner() {
         if (isMounted) {
           setUnit(data);
           setLoading(false);
-          // Auto-select first segment or specific segment if ref had 3 parts
           if (data.segments && data.segments.length > 0) {
-            const matchSeg = data.segments.find((s) => s.ref === rawRef);
-            if (matchSeg) {
-              setActiveSegmentRef(matchSeg.ref);
-            } else {
-              setActiveSegmentRef(data.segments[0].ref);
+            const normalizeRef = (r: string) =>
+              r.replace(/[/_.\s:]/g, "").toLowerCase();
+            const targetNorm = normalizeRef(rawRef);
+            let matched = data.segments.find(
+              (s) => normalizeRef(s.ref) === targetNorm
+            );
+            if (!matched) {
+              matched = data.segments.find(
+                (s) =>
+                  normalizeRef(s.ref).includes(targetNorm) ||
+                  targetNorm.includes(normalizeRef(s.ref))
+              );
             }
+            const selectedRef = matched ? matched.ref : data.segments[0].ref;
+            setActiveSegmentRef(selectedRef);
+
+            // Auto-scroll target segment into view smoothly
+            setTimeout(() => {
+              const el = document.getElementById(selectedRef);
+              if (el) {
+                el.scrollIntoView({ behavior: "smooth", block: "center" });
+              }
+            }, 300);
           }
         }
       })
@@ -370,7 +386,7 @@ function ReaderInner() {
   return (
     <div
       dir="rtl"
-      className="min-h-dvh flex flex-col bg-cream text-ink selection:bg-gold/25"
+      className="h-dvh overflow-y-auto scroll-smooth flex flex-col bg-cream text-ink selection:bg-gold/25"
     >
       {/* Sticky Reader Navigation Header */}
       <header className="sticky top-0 z-30 glass border-b border-white/60 backdrop-blur-xl shadow-xs">
@@ -439,7 +455,7 @@ function ReaderInner() {
               )}
 
               <span className="font-bold text-tekhelet truncate">
-                {unit?.book_he || unit?.book || rawRef.split(".")[0]}
+                {(unit?.book_he || unit?.book || rawRef.split(".")[0] || "").replace(/^[•.\s]+/, "")}
               </span>
 
               {unit?.section_name && (
@@ -638,7 +654,8 @@ function ReaderInner() {
                   {unit.category_path || unit.category}
                 </span>
                 <h1 className="font-serif text-3xl sm:text-4xl lg:text-5xl font-bold text-tekhelet tracking-tight">
-                  {unit.book_he || unit.book} · {unit.section_name}
+                  {(unit.book_he || unit.book || "").replace(/^[•.\s]+/, "")}
+                  {unit.section_name ? ` · ${unit.section_name}` : ""}
                 </h1>
                 <p className="text-xs text-ink/40 font-mono">
                   {unit.ref}

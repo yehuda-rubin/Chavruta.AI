@@ -95,6 +95,8 @@ class ReaderSegment(BaseModel):
 class ReaderUnitResponse(BaseModel):
     ref: str
     book: str
+    book_he: str = ""
+    section_name: str = ""
     author_he: str = ""
     category_path: str = ""
     work_id: str = ""
@@ -770,6 +772,60 @@ def canon_to_candidate_keys(canon: str) -> list[str]:
     return list(dict.fromkeys(keys))
 
 
+def to_gematria_he(num: int) -> str:
+    if num <= 0:
+        return str(num)
+    letter_vals = [
+        (400, "ת"), (300, "ש"), (200, "ר"), (100, "ק"),
+        (90, "צ"), (80, "פ"), (70, "ע"), (60, "ס"),
+        (50, "נ"), (40, "מ"), (30, "ל"), (20, "כ"),
+        (10, "י"), (9, "ט"), (8, "ח"), (7, "ז"),
+        (6, "ו"), (5, "ה"), (4, "ד"), (3, "ג"),
+        (2, "ב"), (1, "א")
+    ]
+    n = num
+    res = ""
+    while n > 0:
+        if n == 15:
+            res += "טו"
+            break
+        if n == 16:
+            res += "טז"
+            break
+        for val, char in letter_vals:
+            if n >= val:
+                res += char
+                n -= val
+                break
+    if len(res) == 1:
+        return res + "׳"
+    elif len(res) > 1 and "״" not in res:
+        return res[:-1] + "״" + res[-1]
+    return res
+
+
+def format_section_name(clean_ref: str) -> str:
+    m_daf = re.search(r"[._ ](\d+)([ab])$", clean_ref, re.IGNORECASE)
+    if m_daf:
+        d_num = int(m_daf.group(1))
+        amud = 'ע"א' if m_daf.group(2).lower() == 'a' else 'ע"ב'
+        return f"דף {to_gematria_he(d_num)} {amud}"
+
+    nums = re.findall(r"\b\d+\b", clean_ref)
+    if not nums:
+        return ""
+
+    if len(nums) == 1:
+        ch = int(nums[0])
+        return f"פרק {to_gematria_he(ch)}"
+    elif len(nums) >= 2:
+        ch = int(nums[0])
+        vs = int(nums[1])
+        return f"פרק {to_gematria_he(ch)}, פסוק {to_gematria_he(vs)}"
+
+    return ""
+
+
 # ── Reader Endpoints ──────────────────────────────────────────────────────────
 @app.get("/reader/unit", response_model=ReaderUnitResponse)
 async def reader_unit(
@@ -837,9 +893,16 @@ async def reader_unit(
 
     prev_ref, next_ref = compute_prev_next_unit(clean_ref)
 
+    raw_book_he = rows[0]["author_he"] or rows[0]["book"] or ""
+    clean_book_he = re.sub(r"^[•.\s]+", "", raw_book_he).strip()
+    clean_book = re.sub(r"^[•.\s]+", "", rows[0]["book"] or "").strip()
+    sec_name = format_section_name(clean_ref)
+
     return ReaderUnitResponse(
         ref=clean_ref,
-        book=rows[0]["book"] or "",
+        book=clean_book,
+        book_he=clean_book_he,
+        section_name=sec_name,
         author_he=rows[0]["author_he"] or "",
         category_path=rows[0]["category_path"] or "",
         work_id=rows[0]["work_id"] or "",
