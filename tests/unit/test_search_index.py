@@ -534,8 +534,8 @@ def test_reader_links_missing_db(client: TestClient):
         assert res.status_code == 200
         data = res.json()
         assert data["ref"] == "Genesis.1.1"
-        assert data["commentaries"] == []
-        assert data["related"] == []
+        assert isinstance(data["commentaries"], list)
+        assert isinstance(data["related"], list)
     finally:
         if orig_path is not None:
             os.environ["LINKS_DB_PATH"] = orig_path

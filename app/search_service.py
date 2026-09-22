@@ -1048,33 +1048,36 @@ async def reader_links(
     if not commentaries and not related:
         try:
             search_db = get_db()
-            m_comm = re.search(r"on\s+(.*?)\s+(\d+:\d+|\d+[ab]?)", clean_ref, re.IGNORECASE)
-            m_base = re.search(r"^([A-Za-z0-9_ ]+)[ ._](\d+:\d+|\d+[ab]?)", clean_ref, re.IGNORECASE)
+            ref_space = clean_ref.replace("_", " ")
+            m_comm = re.search(r"on\s+(.*?)[._\s]+(\d+(?:[:.]\d+)?)\b", ref_space, re.IGNORECASE)
+            m_base = re.search(r"^([A-Za-z0-9_ ]+)[._\s]+(\d+(?:[:.]\d+)?)\b", ref_space, re.IGNORECASE)
 
             book_part = None
             cv_part = None
             if m_comm:
                 book_part = m_comm.group(1).strip()
-                cv_part = m_comm.group(2).strip()
+                cv_part = m_comm.group(2).strip().replace(".", ":")
             elif m_base:
                 book_part = m_base.group(1).strip()
-                cv_part = m_base.group(2).strip()
+                cv_part = m_base.group(2).strip().replace(".", ":")
 
             if book_part and cv_part:
                 p1 = f"%on {book_part} {cv_part}:%"
                 p2 = f"%on {book_part}.{cv_part.replace(':', '.')}.%"
-                p3 = f"{book_part} {cv_part}"
-                p4 = f"{book_part}.{cv_part}"
-                p5 = f"{book_part}_{cv_part}"
+                p3 = f"%on {book_part.replace(' ', '_')}.{cv_part.replace(':', '.')}.%"
+                p4 = f"%on {book_part.replace(' ', '_')}_{cv_part.replace(':', '_')}%"
+                p5 = f"{book_part} {cv_part}"
+                p6 = f"{book_part}.{cv_part.replace(':', '.')}"
+                p7 = f"{book_part.replace(' ', '_')}.{cv_part.replace(':', '.')}"
 
                 sql = """
                     SELECT chunk_id, ref, book, author_he, category_path, work_id, text_he, text_en
                     FROM chunks
-                    WHERE (ref LIKE ? OR ref LIKE ? OR ref = ? OR ref = ? OR ref = ?)
+                    WHERE (ref LIKE ? OR ref LIKE ? OR ref LIKE ? OR ref LIKE ? OR ref = ? OR ref = ? OR ref = ?)
                       AND ref != ?
                     LIMIT 50
                 """
-                c_rows = search_db.execute(sql, (p1, p2, p3, p4, p5, clean_ref)).fetchall()
+                c_rows = search_db.execute(sql, (p1, p2, p3, p4, p5, p6, p7, clean_ref)).fetchall()
                 seen_books: set[str] = set()
                 for r in c_rows:
                     b_name = r["book"] or r["author_he"] or r["ref"]
