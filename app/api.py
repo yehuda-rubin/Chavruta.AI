@@ -2703,7 +2703,7 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
         intent=intent,
         distilled_text=dist_res.distilled_query or None,
         search_text=dist_res.distilled_query or None,
-        rerank=_is_admin(owner_id),
+        rerank=True,
     )
     answer = _get_pipeline().ask(q, history=history, llm=llm)
     if is_cancelled():
@@ -3503,17 +3503,6 @@ def _resolve_llm_for_request(owner: str, lang: str, intent: str, user_key: str |
     res = _enforce_quota(owner, lang, intent, user_key=key)
     if res.used_byok:
         return res, _byok_llm(key, _hstr(base_url), _hstr(model)), db.BYOK_TOKENS
-
-    # Gated model routing: when a FallbackLLM is active, run it ONLY for admin/founder
-    # accounts (_is_admin(owner)). All other users route directly to the baseline secondary (Nebius Qwen).
-    try:
-        from chavruta.llm.fallback import FallbackLLM
-        pipe = _get_pipeline()
-        if hasattr(pipe, "llm") and isinstance(pipe.llm, FallbackLLM):
-            if not _is_admin(owner):
-                return res, pipe.llm.secondary, db.TOKENS
-    except Exception:
-        pass
 
     return res, None, db.TOKENS
 

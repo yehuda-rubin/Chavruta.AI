@@ -174,7 +174,8 @@ def build_backends(profile: Profile):
     from chavruta.retrieval.rerank import Reranker
 
     if profile.rerank:
-        reranker = Reranker(profile.rerank_model, device=profile.embedding_device)
+        backend = "api" if (profile.rerank_model or "").startswith("@cf/") else "auto"
+        reranker = Reranker(profile.rerank_model, device=profile.embedding_device, backend=backend)
     else:
         # Cloudflare Workers AI API Reranker (available for admin/user-gated queries)
         reranker = Reranker("@cf/baai/bge-reranker-base", backend="api")

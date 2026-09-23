@@ -54,7 +54,8 @@ services:
       CHAVRUTA_COLLECTION: ${CHAVRUTA_COLLECTION:-chavruta_commercial}
       CHAVRUTA_MEM_TIER: ${CHAVRUTA_MEM_TIER:-ssd}
       CHAVRUTA_HYBRID: "true"
-      CHAVRUTA_RERANK: "false"
+      CHAVRUTA_RERANK: "true"
+      CHAVRUTA_RERANK_MODEL: "@cf/baai/bge-reranker-base"
       CHAVRUTA_RELEVANCE_THRESHOLD: "0.0"
       CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-fb7545ed5add9650d7d881375fefb335}
       CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
@@ -63,13 +64,10 @@ services:
       # prompts are tuned and verified against; it is NON-thinking, so it does not hit the empty-content
       # problem the older Qwen3 "thinking" models had under a tight token budget. Keep this in sync with
       # .env.example and scripts/serve.ps1 — a different model here silently changes answer quality.
-      CHAVRUTA_LLM_BACKEND: ${CHAVRUTA_LLM_BACKEND:-fallback}
-      CHAVRUTA_LLM_MODEL: ${CHAVRUTA_LLM_MODEL:-gemini-3.8-flash}
-      CHAVRUTA_LLM_BASE_URL: ${CHAVRUTA_LLM_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai}
-      CHAVRUTA_LLM_API_KEY: ${CHAVRUTA_LLM_API_KEY:-}
-      CHAVRUTA_LLM_FALLBACK_MODEL: ${CHAVRUTA_LLM_FALLBACK_MODEL:-Qwen/Qwen3-235B-A22B-Instruct-2507}
-      CHAVRUTA_LLM_FALLBACK_BASE_URL: ${CHAVRUTA_LLM_FALLBACK_BASE_URL:-https://api.studio.nebius.ai/v1}
-      CHAVRUTA_LLM_FALLBACK_API_KEY: ${NEBIUS_API_KEY:-}
+      CHAVRUTA_LLM_BACKEND: ${CHAVRUTA_LLM_BACKEND:-nebius}
+      CHAVRUTA_LLM_MODEL: ${CHAVRUTA_LLM_MODEL:-Qwen/Qwen3-235B-A22B-Instruct-2507}
+      CHAVRUTA_LLM_BASE_URL: ${CHAVRUTA_LLM_BASE_URL:-https://api.studio.nebius.ai/v1}
+      CHAVRUTA_LLM_API_KEY: ${NEBIUS_API_KEY:-}
 
       # Exactly one trusted proxy sits in front of the API in this topology: the `web` nginx. So the
       # real client is the last X-Forwarded-For hop nginx appends — the per-IP rate limiter reads that
