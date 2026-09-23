@@ -87,5 +87,11 @@ class Reranker:
                     h.score = 1.0 / (1.0 + math.exp(neg_s))
 
         hits.sort(key=lambda h: h.score, reverse=True)
+        try:
+            from chavruta.llm import metering
+            total_chars = len(query) + sum(len(getattr(h, "text", "") or "") for h in hits)
+            metering.record(max(1, total_chars // 3), 0, model=self.model_id or "reranker")
+        except Exception:
+            pass
         return hits
 

@@ -95,8 +95,18 @@ class FallbackLLM:
             or "rate limit" in err_msg
             or "too many requests" in err_msg
         )
+        is_auth_or_config = (
+            "authentication" in err_msg
+            or "401" in err_msg
+            or "403" in err_msg
+            or "permission_denied" in err_msg
+            or "invalid_api_key" in err_msg
+            or isinstance(exc, LLMConfigError)
+        )
         if is_quota:
             self._trip_primary_circuit(self.breaker_cooldown_s, reason=f"quota/rate-limit: {exc}")
+        elif is_auth_or_config:
+            self._trip_primary_circuit(self.breaker_cooldown_s, reason=f"auth/config error: {exc}")
         elif isinstance(exc, (LLMTransientError, TimeoutError, ConnectionError)):
             _log.warning("Primary transient failure: %s", exc)
 
@@ -169,6 +179,9 @@ class FallbackLLM:
         if not self._is_primary_open():
             try:
                 ans, fetched = self.primary.request(body_md, lang=lang, token_budget=token_budget)
+                from chavruta.llm.agentic import _CONFIG_MSG
+                if ans and ans in _CONFIG_MSG.values():
+                    raise LLMConfigError(f"Primary returned configuration error message: {ans}")
                 self.last_model_used = getattr(self.primary, "model_id", "primary")
                 return ans, fetched
             except Exception as exc:

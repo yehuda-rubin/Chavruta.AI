@@ -172,12 +172,12 @@ PROFIT_TARGET = 0.30
 # was cheaper per normalized token than pro (backwards volume logic). Nothing is grandfathered: billing
 # is still off (no PAYPLUS_* keys), so none of this is charged to anyone yet.
 TIERS: tuple[Tier, ...] = (
-    Tier("free",             200_000,     525_000,   2,   1,    0.0,      0.0, "חינם",         "Free"),
-    Tier("basic",            600_000,   1_575_000,   6,   3,   75.0,    750.0, "בסיסי",        "Basic"),
-    Tier("pro",            2_000_000,   5_250_000,  20,  10,  200.0,   2000.0, "מלא",          "Pro"),
-    Tier("institution",    8_000_000,  21_000_000,  80,  40, 1000.0,  10000.0, "מוסדי 20",     "Institution 20", 20),
-    Tier("institution_50", 20_000_000,  52_500_000, 200, 100, 2000.0, 20000.0, "מוסדי 50",    "Institution 50", 50),
-    Tier("institution_100", 40_000_000, 105_000_000, 400, 200, 4000.0, 40000.0, "מוסדי 100",  "Institution 100", 100),
+    Tier("free",             150_000,     400_000,   2,   1,    0.0,      0.0, "חינם",         "Free"),
+    Tier("basic",            450_000,   1_200_000,   6,   3,   75.0,    750.0, "בסיסי",        "Basic"),
+    Tier("pro",            1_500_000,   4_000_000,  20,  10,  200.0,   2000.0, "מלא",          "Pro"),
+    Tier("institution",    6_000_000,  16_000_000,  80,  40, 1000.0,  10000.0, "מוסדי 20",     "Institution 20", 20),
+    Tier("institution_50", 15_000_000,  40_000_000, 200, 100, 2000.0, 20000.0, "מוסדי 50",    "Institution 50", 50),
+    Tier("institution_100", 30_000_000, 80_000_000, 400, 200, 4000.0, 40000.0, "מוסדי 100",  "Institution 100", 100),
 )
 
 # Output costs several times input everywhere; 3x is the round figure that holds across the models
@@ -194,17 +194,32 @@ DISTILLER_MODEL = "google/gemma-3-27b-it"
 DISTILLER_INPUT_WEIGHT = 0.50   # $0.10 / $0.20 (Gemma 3 27B on Nebius)
 DISTILLER_OUTPUT_WEIGHT = 1.50  # $0.30 / $0.20 (Gemma 3 27B on Nebius)
 
+# Gemini model pricing: $0.30 input / $3.00 output per 1M tokens vs baseline $0.20 ($0.20 / $0.60)
+GEMINI_INPUT_WEIGHT = 1.50   # $0.30 / $0.20
+GEMINI_OUTPUT_WEIGHT = 15.0  # $3.00 / $0.20
+
+# Reranker model pricing: $0.01 per 1M tokens vs baseline $0.20 per 1M tokens (0.05 ratio)
+RERANKER_WEIGHT = 0.05
+
 
 def normalized_tokens(prompt_tokens: int, completion_tokens: int, model: str = "") -> int:
-    """What one LLM call costs in the unit the quota is denominated in.
+    """What one LLM / Reranker call costs in the unit the quota is denominated in.
 
-    Baseline model (Qwen3-235B): prompt + 3 * completion.
+    Baseline model (Qwen3-235B): prompt + 3 * completion ($0.20 / $0.60 per million tokens).
+    Gemini model (Gemini Flash / Flash-Lite): round(prompt * 1.50 + completion * 15.0) ($0.30 / $3.00 per million tokens).
+    Ranking model (Reranker): round((prompt + completion) * 0.05) ($0.01 per million tokens).
     Distiller model (google/gemma-3-27b-it): round(prompt * 0.50 + completion * 1.50).
     Alternate distiller (Llama-3.3-70B): round(prompt * 0.65 + completion * 2.0).
     """
     p = max(0, int(prompt_tokens or 0))
     c = max(0, int(completion_tokens or 0))
     m = (model or "").lower()
+    if "rerank" in m:
+        # Ranking model: $0.01 / 1M tokens vs baseline $0.20 / 1M tokens
+        return round((p + c) * RERANKER_WEIGHT)
+    if "gemini" in m:
+        # Gemini: $0.30 input / $3.00 output vs baseline $0.20
+        return round(p * GEMINI_INPUT_WEIGHT + c * GEMINI_OUTPUT_WEIGHT)
     if "gemma" in m or "27b" in m:
         # Gemma 3 27B on Nebius: $0.10 / $0.30 vs baseline $0.20 / $0.60
         return round(p * DISTILLER_INPUT_WEIGHT + c * DISTILLER_OUTPUT_WEIGHT)
