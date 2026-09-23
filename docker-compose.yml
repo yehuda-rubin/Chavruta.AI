@@ -64,7 +64,7 @@ services:
       # problem the older Qwen3 "thinking" models had under a tight token budget. Keep this in sync with
       # .env.example and scripts/serve.ps1 — a different model here silently changes answer quality.
       CHAVRUTA_LLM_BACKEND: ${CHAVRUTA_LLM_BACKEND:-fallback}
-      CHAVRUTA_LLM_MODEL: ${CHAVRUTA_LLM_MODEL:-gemini-3.1-flash-lite-preview}
+      CHAVRUTA_LLM_MODEL: ${CHAVRUTA_LLM_MODEL:-gemini-3.8-flash}
       CHAVRUTA_LLM_BASE_URL: ${CHAVRUTA_LLM_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai}
       CHAVRUTA_LLM_API_KEY: ${CHAVRUTA_LLM_API_KEY:-}
       CHAVRUTA_LLM_FALLBACK_MODEL: ${CHAVRUTA_LLM_FALLBACK_MODEL:-Qwen/Qwen3-235B-A22B-Instruct-2507}

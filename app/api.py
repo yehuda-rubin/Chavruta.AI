@@ -289,6 +289,9 @@ def _strip_markers(text: str, he: bool = False) -> str:
         lambda m: (f"**{m.group(1).strip()}**" if (m.group(1) or "").strip() else ""), t
     )
     t = _MD_BLOCKQUOTE_RE.sub("", t)
+    # Clean up punctuation collisions left where citation markers were stripped (e.g. ",." -> "." or ",," -> ",")
+    t = re.sub(r",\s*\.", ".", t)
+    t = re.sub(r",\s*,+", ",", t)
     t = re.sub(r"[ \t]{2,}", " ", t)
     return t.strip()
 
