@@ -190,6 +190,7 @@ class Query:
     # even when the daf is never given.
     tractates: list[str] | None = None
     distilled_text: str = ""
+    rerank: bool = False
 
 
 @dataclass

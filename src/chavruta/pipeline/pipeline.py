@@ -171,11 +171,13 @@ def build_backends(profile: Profile):
             f"DictaLM/Ollama backend has been removed."
         )
 
-    reranker = None
-    if profile.rerank:
-        from chavruta.retrieval.rerank import Reranker
+    from chavruta.retrieval.rerank import Reranker
 
+    if profile.rerank:
         reranker = Reranker(profile.rerank_model, device=profile.embedding_device)
+    else:
+        # Cloudflare Workers AI API Reranker (available for admin/user-gated queries)
+        reranker = Reranker("@cf/baai/bge-reranker-base", backend="api")
 
     # Prefer the corpus-derived, corpus-aligned graph on disk (LinkStore + ref index — O(1) RAM);
     # fall back to the legacy in-memory links.jsonl if it isn't built yet.

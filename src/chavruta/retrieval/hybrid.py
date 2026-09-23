@@ -490,8 +490,9 @@ class HybridRetriever:
                 except Exception as exc:
                     logger.warning("quotation floor failed (%s)", exc)
 
-        # Optional reranking (heavy in cloud / optional local)
-        if self.reranker is not None and self.profile.rerank and hits:
+        # Optional reranking (heavy in cloud / optional local / user-gated)
+        do_rerank = self.profile.rerank or getattr(query, "rerank", False)
+        if self.reranker is not None and do_rerank and hits:
             with _timed(t, "rerank"):
                 hits = self.reranker.rerank(query.text, hits)
 

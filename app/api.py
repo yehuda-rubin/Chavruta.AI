@@ -2700,6 +2700,7 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
         intent=intent,
         distilled_text=dist_res.distilled_query or None,
         search_text=dist_res.distilled_query or None,
+        rerank=_is_admin(owner_id),
     )
     answer = _get_pipeline().ask(q, history=history, llm=llm)
     if is_cancelled():

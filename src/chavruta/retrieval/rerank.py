@@ -27,7 +27,7 @@ class Reranker:
         self._tokenizer = None
 
     def _ensure(self):
-        if self._model is not None:
+        if self._model is not None or self.backend == "api" or self.model_id.startswith("@cf/"):
             return
 
         is_onnx = (self.backend == "onnx") or (self.onnx_path is not None) or self.model_id.endswith(".onnx")
@@ -55,7 +55,47 @@ class Reranker:
             return hits
         self._ensure()
 
-        if self.backend == "onnx":
+        if self.backend == "api" or self.model_id.startswith("@cf/"):
+            import json
+            import logging
+            import os
+            import urllib.request
+
+            cf_account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
+            cf_token = os.environ.get("CLOUDFLARE_API_TOKEN", "")
+            if not cf_token or not cf_account:
+                return hits
+            cf_model = self.model_id if self.model_id.startswith("@cf/") else "@cf/baai/bge-reranker-base"
+            cf_url = f"https://api.cloudflare.com/client/v4/accounts/{cf_account}/ai/run/{cf_model}"
+
+            to_rank = hits[:12]
+            contexts = [
+                {"id": str(i), "text": (getattr(h, "text", "") or "")[:1000]}
+                for i, h in enumerate(to_rank)
+            ]
+            try:
+                body = json.dumps({"query": query, "contexts": contexts}).encode("utf-8")
+                req = urllib.request.Request(
+                    cf_url,
+                    data=body,
+                    headers={
+                        "Authorization": f"Bearer {cf_token}",
+                        "Content-Type": "application/json",
+                    },
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=12.0) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                response_items = data.get("result", {}).get("response", [])
+                for item in response_items:
+                    idx = int(item["id"])
+                    if 0 <= idx < len(to_rank):
+                        to_rank[idx].score = float(item["score"])
+                to_rank.sort(key=lambda h: h.score, reverse=True)
+                hits = to_rank + hits[12:]
+            except Exception as exc:
+                logging.getLogger("chavruta.retrieval.rerank").warning("Cloudflare Reranker API error: %s", exc)
+        elif self.backend == "onnx":
             import numpy as np
 
             queries = [query] * len(hits)
