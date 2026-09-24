@@ -95,6 +95,45 @@ bug more than once.
 Fully specified remediation for the security and correctness items lives in
 **[OPEN-ITEMS-PLAN.md](OPEN-ITEMS-PLAN.md)**. What follows is everything else in flight.
 
+**Security audit 2026-09-25 (quick, source-only; full report outside the repo in
+`~/security-audit-skill/Chavruta.AI/run-1/REPORT.md`)**
+
+Fixed in the working tree, **not yet committed or deployed**:
+
+- Source-sheet companion HTML: `flowchart_mermaid` is now HTML-escaped and Mermaid runs with
+  `securityLevel: 'strict'`. The preview iframe dropped `allow-same-origin`. Model output and uploaded
+  sheet headers could previously run script in the app origin.
+- `/auth/email-hook` **fails closed**: it returns 503 when `SUPABASE_AUTH_HOOK_SECRET` is empty. Local dev
+  opts out with `CHAVRUTA_EMAIL_HOOK_ALLOW_UNSIGNED=1`. Auth-email HTML is escaped, and the hook no
+  longer echoes parser errors back. **Before deploying, confirm the secret is set on the host, or
+  sign-up and reset emails stop.**
+- Sentry: a `before_send` hook plus the scrubber strip every `x-user-llm-*` header, so BYOK keys are
+  never sent. This is what the privacy policy promises.
+- PayPlus webhook is idempotent on `transaction_uid`. A replayed delivery no longer re-activates a
+  cancelled plan, issues a second receipt or double-books the ledger.
+- Search service changes:
+  - `/reader/unit` and `/reader/links` escape LIKE wildcards (`ESCAPE '\'`), and `/reader/unit` has a
+    row cap.
+  - The rate limit is keyed on the proxy IP only; the spoofable `X-User-ID`/Bearer keys are gone.
+  - `offset` is capped at 10000.
+  - Hebrew divine-name FTS tokens are quoted. That also fixes a 500 on multi-word Hebrew queries
+    containing a divine name.
+  - Hebrew searches now match the Hebrew column for every word, not just the first.
+
+Still open, because each needs a design decision:
+
+- A plan coupon redeemed during an abandoned checkout overwrites a live PayPlus subscription. After
+  that, cancel and account deletion no longer stop the mandate.
+- The LLM circuit breaker is process-global, so a failing BYOK provider trips it for every user.
+- A BYOK call has no total deadline. The async job pool has 2 workers and no per-owner cap.
+- DOCX attachments have no bound on uncompressed size. Production pins `pypdf==5.3.1`, while dev pins
+  6.x.
+- The org panel's "topics" keeps counting a departed member's usage.
+- Chained coupon boosts revert to the wrong tier.
+- The nginx `location /` `add_header` drops the server-level X-Frame-Options/nosniff, and there is no
+  CSP.
+- `/reader/unit` still full-scans because there is no index on `ref`, so this needs an index rebuild.
+
 **Waiting on other people**
 
 - **Kosher filters.** NetSpark, Rimon, Netfree and Etrog were all sent reclassification requests;

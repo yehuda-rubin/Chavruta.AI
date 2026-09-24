@@ -168,3 +168,21 @@ def test_sourcesheet_to_html_printable():
     assert "ביאור מקורות הדף" in html_content
 
 
+def test_sourcesheet_html_escapes_flowchart_markup():
+    """flowchart_mermaid comes from the model or raw sheet headers; markup
+    in it must not reach the page as live HTML."""
+    payload = "<img src=x onerror=alert(1)>"
+    raw = f"""
+    1. {payload}
+    אמר רבא: ייאוש שלא מדעת לא הוי ייאוש.
+    """
+    guide = analyze_source_sheet(parse_source_sheet(raw), topic_hint=payload)
+    assert guide.flowchart_mermaid  # deterministic fallback built a diagram
+
+    guide.flowchart_mermaid += f'\n    Z["{payload}"]'  # as if the model echoed it
+    html_content = guide.to_html_printable()
+    assert payload not in html_content
+    assert "&lt;img src=x onerror=alert(1)&gt;" in html_content
+    assert "securityLevel: 'strict'" in html_content
+
+

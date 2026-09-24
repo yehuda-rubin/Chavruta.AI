@@ -114,3 +114,66 @@ def test_charges_can_be_read_for_a_period(d):
         d.record_charge(charged_at=f"{day}T00:00:00+00:00", amount=amt)
     assert d.revenue_total(since="2026-06-01", until="2026-07-31") == 50.0
     assert len(d.list_charges(since="2026-07-01")) == 1
+
+
+# ── Replay protection ─────────────────────────────────────────────────────────
+# The webhook is signed over its body alone — no timestamp, no nonce — so the same signed delivery
+# can arrive twice (a provider retry, or a captured request replayed). Applying it again must be a
+# no-op: no second ledger row, no second receipt, and above all no reactivating a cancelled plan.
+
+def _success(txn="txn_replay_1", **extra):
+    ev = {"owner_id": "u-rp", "success": True, "recurring_uid": "rec_rp", "amount": 49.9,
+          "transaction_uid": txn, "email": "a@b.c", "name": "A"}
+    ev.update(extra)
+    return ev
+
+
+def test_the_same_charge_delivered_twice_is_applied_once(d, monkeypatch):
+    receipts = []
+    monkeypatch.setattr(service.greeninvoice, "issue_receipt",
+                        lambda **k: receipts.append(k) or {"number": "INV-1"})
+    service.handle_event(_success(), now=datetime(2026, 7, 26, tzinfo=UTC))
+    first_end = d.get_subscription("u-rp")["current_period_end"]
+
+    service.handle_event(_success(), now=datetime(2026, 8, 20, tzinfo=UTC))
+
+    assert len(d.list_charges()) == 1
+    assert len(receipts) == 1
+    assert d.get_subscription("u-rp")["current_period_end"] == first_end
+
+
+def test_a_replay_after_cancel_does_not_reactivate(d, monkeypatch):
+    monkeypatch.setattr(service.payplus, "cancel_recurring", lambda ref: {})
+    service.handle_event(_success(), now=datetime(2026, 7, 26, tzinfo=UTC))
+    service.cancel("u-rp", now=datetime(2026, 7, 27, tzinfo=UTC))
+
+    service.handle_event(_success(), now=datetime(2026, 7, 28, tzinfo=UTC))
+
+    sub = d.get_subscription("u-rp")
+    assert sub["status"] == "canceled"
+    assert sub["cancel_at_period_end"]
+    assert len(d.list_charges()) == 1
+    # The period was not pushed out, so the sweep still takes the lapsed plan away.
+    assert service.sweep_downgrades(now=datetime(2026, 9, 1, tzinfo=UTC)) == 1
+
+
+def test_a_different_transaction_is_still_applied(d):
+    """The guard keys on the payment, not the subscription: each instalment carries a new uid."""
+    service.handle_event(_success("txn_a"), now=datetime(2026, 7, 26, tzinfo=UTC))
+    service.handle_event(_success("txn_b", is_renewal=True), now=datetime(2026, 8, 26, tzinfo=UTC))
+    assert len(d.list_charges()) == 2
+
+
+def test_a_refund_row_is_not_mistaken_for_the_charge(d):
+    """Refunds and coupon rebates share the txn_uid with a negative amount; they are not the charge."""
+    d.record_charge(charged_at="2026-07-26T10:00:00+00:00", amount=-10.0, txn_uid="txn_neg")
+    assert not d.charge_exists("txn_neg")
+    service.handle_event(_success("txn_neg"), now=datetime(2026, 7, 26, tzinfo=UTC))
+    assert d.charge_exists("txn_neg")
+
+
+def test_events_without_a_transaction_uid_keep_the_old_behaviour(d):
+    ev = {"owner_id": "u-nouid", "success": True, "recurring_uid": "r", "amount": 49.9}
+    service.handle_event(dict(ev), now=datetime(2026, 7, 26, tzinfo=UTC))
+    service.handle_event(dict(ev), now=datetime(2026, 7, 27, tzinfo=UTC))
+    assert len(d.list_charges()) == 2

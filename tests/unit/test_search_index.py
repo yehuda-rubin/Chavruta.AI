@@ -385,7 +385,7 @@ def test_health_endpoint(client: TestClient):
 
 # ── 10. Query Token Escaping ─────────────────────────────────────────────────
 def test_escape_fts5_query():
-    assert escape_fts5_query('שלום "עולם"') == '"שלום" """עולם"""'
+    assert escape_fts5_query('שלום "עולם"') == '"שלום" AND """עולם"""'
     assert escape_fts5_query("  ") == ""
 
 
@@ -542,4 +542,118 @@ def test_reader_links_missing_db(client: TestClient):
         else:
             os.environ.pop("LINKS_DB_PATH", None)
         close_db()
+
+
+# ── 13. Availability hardening: LIKE wildcards, FTS5 quoting, rate-limit key ──
+@pytest.mark.parametrize("ref", ["_", "%", "%%", "_%", "\\", "_1", "%.1", "Genesis%", "Gen_sis 1"])
+def test_reader_unit_like_metacharacters_match_nothing(client: TestClient, ref: str):
+    """Caller wildcards must not expand into a whole-table LIKE match."""
+    from app.search_service import _rate_limiter
+
+    _rate_limiter.reset()
+    res = client.get("/reader/unit", params={"ref": ref})
+    assert res.status_code == 404
+
+
+def test_reader_unit_whitespace_ref_is_404(client: TestClient):
+    res = client.get("/reader/unit", params={"ref": "   "})
+    assert res.status_code == 404
+
+
+def test_like_escape_helper():
+    from app.search_service import like_escape
+
+    assert like_escape("_") == "\\_"
+    assert like_escape("%") == "\\%"
+    assert like_escape("a\\b") == "a\\\\b"
+    assert like_escape("Bava_Metzia 2a:") == "Bava\\_Metzia 2a:"
+
+
+def test_reader_unit_row_cap(client: TestClient, monkeypatch):
+    import app.search_service as svc
+
+    monkeypatch.setattr(svc, "READER_UNIT_MAX_ROWS", 1)
+    res = client.get("/reader/unit", params={"ref": "Bava Metzia 2a"})
+    assert res.status_code == 200
+    assert len(res.json()["segments"]) == 1
+
+
+def test_reader_links_fallback_ignores_caller_wildcards(client: TestClient):
+    orig_path = os.environ.get("LINKS_DB_PATH")
+    os.environ["LINKS_DB_PATH"] = "nonexistent_links_db.db"
+    close_db()
+    try:
+        # "on % 1" would previously match every "... on <anything> 1..." row.
+        res = client.get("/reader/links", params={"ref": "Rashi on % 1:1"})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["commentaries"] == [] and data["related"] == []
+    finally:
+        if orig_path is not None:
+            os.environ["LINKS_DB_PATH"] = orig_path
+        else:
+            os.environ.pop("LINKS_DB_PATH", None)
+        close_db()
+
+
+@pytest.mark.parametrize(
+    "token", ['אלוהים"', "אלוהים)", "(אלוהים", 'אלוהים"*', "אלהימ", "ואלהינו"]  # normalized (final letters folded)
+)
+def test_escape_fts5_hebrew_divine_name_tokens_are_quoted(search_db: str, token: str):
+    expr = escape_fts5_query(token, is_he=True)
+    assert " OR " in expr  # the divine-name expansion branch was taken
+    assert expr.startswith('("') and expr.endswith('")')
+    # SQLite must accept it as a valid MATCH expression, alone and combined.
+    conn = sqlite3.connect(search_db)
+    try:
+        for full in (expr, escape_fts5_query(f"בראשית {token} (", is_he=True)):
+            conn.execute(
+                "SELECT COUNT(*) FROM search_fts WHERE search_fts MATCH ?",
+                (f"search_he: ({full})",),
+            ).fetchone()
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("q", ['אלוהים" OR', "בראשית ברא אלוקים", "אלוהים) OR (", 'ברא "אלהים'])
+def test_hebrew_divine_name_queries_do_not_error(client: TestClient, q: str):
+    from app.search_service import _rate_limiter
+
+    _rate_limiter.reset()
+    res = client.get("/search/query", params={"q": q})
+    assert res.status_code == 200
+
+
+def test_multiword_divine_name_query_finds_verse(client: TestClient):
+    from app.search_service import _rate_limiter
+
+    _rate_limiter.reset()
+    res = client.get("/search/query", params={"q": "בראשית ברא אלוקים"})
+    assert res.status_code == 200
+    assert any(h["ref"] == "Genesis 1:1" for h in res.json()["hits"])
+
+
+def test_search_offset_is_capped(client: TestClient):
+    res = client.get("/search/query", params={"q": "in", "offset": 10001})
+    assert res.status_code == 422
+
+
+def test_rate_limit_key_ignores_client_identity_headers(client: TestClient):
+    """Rotating X-User-ID / Bearer must not yield a fresh rate-limit bucket."""
+    from app.search_service import _rate_limiter
+
+    _rate_limiter.reset()
+    for _ in range(120):
+        assert _rate_limiter.allow("ip:203.0.113.7") is True
+    res = client.get(
+        "/search/query",
+        params={"q": "in"},
+        headers={
+            "X-Forwarded-For": "203.0.113.7",
+            "X-User-ID": "fresh-id-123",
+            "Authorization": "Bearer fresh-token",
+        },
+    )
+    assert res.status_code == 429
+    _rate_limiter.reset()
 

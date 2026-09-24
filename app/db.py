@@ -1519,6 +1519,23 @@ def get_charge(charge_id: int) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
+def charge_exists(txn_uid: str) -> bool:
+    """Whether a successful charge for this payment is already in the ledger.
+
+    The replay guard for the PayPlus webhook: the callback is signed over its body alone, so the
+    same signed delivery can arrive again, and applying it twice would re-activate the plan, issue a
+    second receipt and book the revenue twice. Only POSITIVE rows count — refunds and coupon rebates
+    are appended with the same txn_uid and a negative amount, and they are not the charge itself.
+    """
+    if not txn_uid:
+        return False
+    with _LOCK:
+        row = get_conn().execute(
+            "SELECT 1 FROM billing_ledger WHERE txn_uid = ? AND amount > 0 LIMIT 1",
+            (txn_uid,)).fetchone()
+    return row is not None
+
+
 def refunded_total(txn_uid: str) -> float:
     """How much of a payment has ALREADY been given back, as a positive number.
 

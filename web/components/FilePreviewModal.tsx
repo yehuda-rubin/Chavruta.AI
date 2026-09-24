@@ -82,7 +82,7 @@ export function FilePreviewModal({ file, lang, onClose }: { file: FileOut | null
               srcDoc={file.content || ""}
               title={file.title || file.name}
               className="w-full h-[72vh] border border-line/60 rounded-2xl bg-white shadow-inner"
-              sandbox="allow-same-origin allow-scripts allow-modals"
+              sandbox="allow-scripts allow-modals"
             />
           </div>
         ) : isDocx ? (

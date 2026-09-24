@@ -531,6 +531,44 @@ def _configure_logging() -> None:
     root.setLevel(getattr(logging, level, logging.INFO))
 
 
+# The BYO-model headers (web/lib/api.ts) carry the user's OWN provider key, base URL and model. We
+# promise that key is never stored server-side, so no Sentry event may carry it. The SDK's default
+# EventScrubber denylist only knows generic names (authorization, x-api-key, ...), not these.
+_USER_LLM_HEADER_PREFIX = "x-user-llm-"
+_USER_LLM_HEADERS = ["x-user-llm-key", "x-user-llm-base-url", "x-user-llm-model"]
+
+
+def _strip_user_llm_headers(headers):
+    """Return `headers` (a dict, or a list of [name, value] pairs) minus every x-user-llm-* header."""
+    def _is_user_llm(name) -> bool:
+        return isinstance(name, str) and name.lower().startswith(_USER_LLM_HEADER_PREFIX)
+
+    if isinstance(headers, dict):
+        return {k: v for k, v in headers.items() if not _is_user_llm(k)}
+    if isinstance(headers, (list, tuple)):
+        return [h for h in headers
+                if not (isinstance(h, (list, tuple)) and h and _is_user_llm(h[0]))]
+    return headers
+
+
+def _scrub_sentry_event(event, hint=None):
+    """Sentry before_send / before_send_transaction hook: drop x-user-llm-* headers from the request
+    and from any breadcrumb data that recorded headers. Module-level so it is unit-testable."""
+    try:
+        request = event.get("request")
+        if isinstance(request, dict) and "headers" in request:
+            request["headers"] = _strip_user_llm_headers(request["headers"])
+        crumbs = event.get("breadcrumbs")
+        values = crumbs.get("values") if isinstance(crumbs, dict) else crumbs
+        for crumb in values or []:
+            data = crumb.get("data") if isinstance(crumb, dict) else None
+            if isinstance(data, dict) and "headers" in data:
+                data["headers"] = _strip_user_llm_headers(data["headers"])
+    except Exception:  # a scrubber must never be the reason an error goes unreported
+        pass
+    return event
+
+
 def _configure_sentry() -> None:
     """Backend error tracking — a no-op unless SENTRY_DSN is set, same "absent = inert" convention
     as the Supabase auth integration. FastAPI's integration auto-captures unhandled exceptions; the
@@ -541,12 +579,18 @@ def _configure_sentry() -> None:
         return
     import sentry_sdk
     from sentry_sdk.integrations.fastapi import FastApiIntegration
+    from sentry_sdk.scrubber import DEFAULT_DENYLIST, EventScrubber
 
     sentry_sdk.init(
         dsn=dsn,
         integrations=[FastApiIntegration()],
         send_default_pii=False,   # nothing here forwards user content to a third party by default
         environment=os.environ.get("CHAVRUTA_ENV", "production"),
+        # Belt and braces: the scrubber masks the BYO-key headers by name wherever they appear,
+        # before_send drops them (any x-user-llm-* name) from request headers and breadcrumbs.
+        event_scrubber=EventScrubber(denylist=DEFAULT_DENYLIST + _USER_LLM_HEADERS),
+        before_send=_scrub_sentry_event,
+        before_send_transaction=_scrub_sentry_event,
     )
 
 
@@ -4113,7 +4157,11 @@ async def auth_email_hook(request: Request):
     """Supabase Auth 'Send Email' Hook callback.
 
     Public (no bearer token) but verified via Standard Webhooks HMAC-SHA256 signature
-    when SUPABASE_AUTH_HOOK_SECRET is configured. Exempt from the bearer auth gate.
+    against SUPABASE_AUTH_HOOK_SECRET. Exempt from the bearer auth gate.
+
+    Fails CLOSED: with no secret configured it answers 503 and sends nothing; otherwise any
+    anonymous caller could make the server mail a caller-chosen recipient a caller-chosen link.
+    Local dev can opt into the unsigned path with CHAVRUTA_EMAIL_HOOK_ALLOW_UNSIGNED=1.
 
     Dispatches transactional authentication emails (sign-up verification, password recovery,
     magic link) through the multi-provider EmailPool (Brevo -> Amazon SES hybrid).
@@ -4129,14 +4177,25 @@ async def auth_email_hook(request: Request):
                 status_code=401,
                 content={"error": {"http_code": 401, "message": "Invalid webhook signature"}},
             )
+    elif os.environ.get("CHAVRUTA_EMAIL_HOOK_ALLOW_UNSIGNED", "").strip() == "1":
+        _log.warning("Auth email hook accepted UNSIGNED (CHAVRUTA_EMAIL_HOOK_ALLOW_UNSIGNED=1), dev only")
+    else:
+        # Fail closed, like the PayPlus webhook: no secret means nothing here can be authentic.
+        return JSONResponse(
+            status_code=503,
+            content={"error": {"http_code": 503, "message": "email hook not configured"}},
+        )
 
     import json
     try:
         payload = json.loads(raw or b"{}")
-    except Exception as exc:
+        if not isinstance(payload, dict):
+            raise ValueError("payload is not a JSON object")
+    except ValueError:  # JSONDecodeError / UnicodeDecodeError are ValueErrors
+        # Generic message: never echo parser internals back to the caller.
         return JSONResponse(
             status_code=400,
-            content={"error": {"http_code": 400, "message": f"Malformed payload: {exc}"}},
+            content={"error": {"http_code": 400, "message": "Malformed payload"}},
         )
 
     user = payload.get("user") or {}

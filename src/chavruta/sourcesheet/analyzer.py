@@ -641,7 +641,9 @@ class CompanionGuide:
         diagram_block = ""
         mermaid_script = ""
         if self.flowchart_mermaid:
-            mermaid_raw = self.flowchart_mermaid.strip()
+            # Escaped: the source is model output or raw sheet headers, and
+            # Mermaid reads the div's textContent, so entities decode back.
+            mermaid_raw = html.escape(self.flowchart_mermaid.strip())
             diagram_block = f"""
         <h2 class="sec-heading avoid-break">מפת מהלך הסוגיה</h2>
         <div class="diagram-container avoid-break">
@@ -658,7 +660,7 @@ class CompanionGuide:
         mermaid.initialize({
           startOnLoad: true,
           theme: 'neutral',
-          securityLevel: 'loose',
+          securityLevel: 'strict',
           fontFamily: 'Assistant, Frank Ruhl Libre, sans-serif'
         });
       }

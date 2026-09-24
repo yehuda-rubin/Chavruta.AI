@@ -95,7 +95,8 @@ Optional; unset means off. Used for:
 | `AWS_SES_SMTP_PASSWORD` | Amazon SES SMTP password | `""` (off) | `app/email_pool.py` |
 | `AWS_SES_FROM` | Sender address for Amazon SES | `EMAIL_FROM` | `app/email_pool.py` |
 | `EMAIL_FROM` | Default sender address across all email providers | `Chavruta.AI <auth@chavrutaai.org>` | `app/email_pool.py` |
-| `SUPABASE_AUTH_HOOK_SECRET` | Standard Webhooks HMAC-SHA256 secret (from Supabase dashboard) to authenticate incoming Send Email hooks | `""` (unverified in local dev) | `app/api.py` |
+| `SUPABASE_AUTH_HOOK_SECRET` | Standard Webhooks HMAC-SHA256 secret (from Supabase dashboard) to authenticate incoming Send Email hooks. **Required**: when empty, `/auth/email-hook` and `/account/email-hook` fail closed (503, no email sent) | `""` (hook disabled) | `app/api.py` |
+| `CHAVRUTA_EMAIL_HOOK_ALLOW_UNSIGNED` | Dev-only escape hatch: `1` lets the Send Email hook accept **unsigned** requests while `SUPABASE_AUTH_HOOK_SECRET` is empty. Never set in production (anyone could make the server send auth emails to any address with any link) | `""` (off) | `app/api.py` |
 | `RESEND_API_KEY` | Resend API key — get one at https://resend.com (free tier: 100 emails/day) | `""` (off) | `app/email.py`, `app/email_pool.py` |
 | `RESEND_FROM` | Sender email address for Resend | `""` (off) | `app/email.py`, `app/email_pool.py` |
 

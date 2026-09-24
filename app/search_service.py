@@ -169,20 +169,12 @@ _rate_limiter = SlidingWindowRateLimiter(SEARCH_RATE_LIMIT_PER_MINUTE, 60.0)
 
 
 def _get_client_key(request: Request) -> str:
-    """Identify the caller via authenticated user ID if provided, else real client IP."""
-    # 1. Check explicit user header or Bearer auth
-    user_id = request.headers.get("x-user-id")
-    if user_id:
-        return f"u:{user_id.strip()}"
+    """Identify the caller by proxy-derived client IP only.
 
-    auth = request.headers.get("authorization", "")
-    if auth.lower().startswith("bearer "):
-        token = auth[7:].strip()
-        if token:
-            # Use token prefix as bucket key if present
-            return f"t:{token[:32]}"
-
-    # 2. Extract IP respecting proxy hops
+    This service has no auth, so client-supplied identity headers (X-User-ID,
+    a Bearer token) are NOT used: a caller could rotate them freely to get a
+    fresh rate-limit bucket per request.
+    """
     peer = request.client.host if request.client else "127.0.0.1"
     if TRUSTED_PROXY_HOPS <= 0:
         return f"ip:{peer}"
@@ -363,19 +355,23 @@ def escape_fts5_query(term: str, is_he: bool = False) -> str:
 
     parts: list[str] = []
     for t in tokens:
+        # ``t`` already has embedded quotes doubled; every emitted token is
+        # wrapped in double quotes so FTS5 treats it as a literal string.
         if is_he:
             if "אלוה" in t:
                 alt = t.replace("אלוה", "אלה")
-                parts.append(f"({t} OR {alt})")
+                parts.append(f'("{t}" OR "{alt}")')
                 continue
             elif "אלה" in t and any(t.startswith(p + "אלה") for p in ("", "ב", "כ", "ל", "מ", "ש", "ה", "ו", "ד")):
                 if any(t.endswith(suf) for suf in ("ימ", "י", "ינו", "יכמ", "יהמ", "יכ")):
                     alt = t.replace("אלה", "אלוה", 1)
-                    parts.append(f"({t} OR {alt})")
+                    parts.append(f'("{t}" OR "{alt}")')
                     continue
         parts.append(f'"{t}"')
 
-    return " ".join(parts)
+    # Explicit AND: FTS5 rejects implicit AND next to a parenthesised group,
+    # so `("a" OR "b") "c"` is a syntax error while `("a" OR "b") AND "c"` is not.
+    return " AND ".join(parts)
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -393,7 +389,7 @@ async def health():
 async def search_query(
     request: Request,
     q: str = Query(..., min_length=1, description="Search query string"),
-    offset: int = Query(0, ge=0, description="Offset for pagination"),
+    offset: int = Query(0, ge=0, le=10000, description="Offset for pagination"),
     limit: int = Query(20, ge=1, le=100, description="Number of results per page"),
     work_id: str | None = Query(None, description="Optional work_id filter, comma-separated"),
 ):
@@ -444,7 +440,8 @@ async def search_query(
             facets={},
         )
 
-    match_expr = f"{fts_col}: {escaped_tokens}"
+    # Parenthesised so the column filter covers every token, not just the first.
+    match_expr = f"{fts_col}: ({escaped_tokens})"
 
     # 4. Filter clause for work_id
     work_ids: list[str] = []
@@ -605,7 +602,24 @@ def compute_prev_next_unit(raw_ref: str) -> tuple[str | None, str | None]:
         return prev_ref, next_ref
 
 
+# Hard cap on rows a single /reader/unit call may return. A real unit (a
+# chapter, an amud, a siman) is at most a few hundred segments; the cap only
+# bites on a pathological ref and keeps one request from materialising a
+# large slice of the 2.4M-row table on a blocking worker.
+READER_UNIT_MAX_ROWS = 5000
+
+
+def like_escape(value: str) -> str:
+    """Escape LIKE metacharacters so ``value`` matches literally.
+
+    Use with ``LIKE ? ESCAPE '\\'``. Caller text such as ``_`` or ``%``
+    would otherwise act as a wildcard and match the whole table.
+    """
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def get_unit_query_prefixes(clean_ref: str) -> list[str]:
+    """Literal (unescaped) ref prefixes for a unit; callers must ``like_escape`` them."""
     clean = clean_ref.strip()
     prefixes: list[str] = []
 
@@ -846,17 +860,20 @@ async def reader_unit(
             headers={"Retry-After": "60"},
         )
 
-    db = get_db()
     clean_ref = ref.strip()
+    if not clean_ref:
+        raise HTTPException(status_code=404, detail="Unit not found")
+    db = get_db()
     prefixes = get_unit_query_prefixes(clean_ref)
 
     clauses: list[str] = []
     params: list[Any] = []
     for p in prefixes:
-        clauses.append("ref LIKE ?")
-        params.append(f"{p}%")
-        clauses.append("chunk_id LIKE ?")
-        params.append(f"{p}%")
+        pattern = f"{like_escape(p)}%"
+        clauses.append("ref LIKE ? ESCAPE '\\'")
+        params.append(pattern)
+        clauses.append("chunk_id LIKE ? ESCAPE '\\'")
+        params.append(pattern)
 
     clauses.append("ref = ?")
     params.append(clean_ref)
@@ -870,7 +887,9 @@ async def reader_unit(
         FROM chunks
         WHERE {where_sql}
         ORDER BY rowid ASC
+        LIMIT ?
     """
+    params.append(READER_UNIT_MAX_ROWS)
     rows = db.execute(query_sql, params).fetchall()
     if not rows:
         raise HTTPException(status_code=404, detail=f"Unit not found: {clean_ref}")
@@ -1062,10 +1081,13 @@ async def reader_links(
                 cv_part = m_base.group(2).strip().replace(".", ":")
 
             if book_part and cv_part:
-                p1 = f"%on {book_part} {cv_part}:%"
-                p2 = f"%on {book_part}.{cv_part.replace(':', '.')}.%"
-                p3 = f"%on {book_part.replace(' ', '_')}.{cv_part.replace(':', '.')}.%"
-                p4 = f"%on {book_part.replace(' ', '_')}_{cv_part.replace(':', '_')}%"
+                # book_part/cv_part come from caller text: escape LIKE
+                # metacharacters so only the template's own '%' are wildcards.
+                e = like_escape
+                p1 = f"%on {e(f'{book_part} {cv_part}:')}%"
+                p2 = f"%on {e(f'{book_part}.' + cv_part.replace(':', '.') + '.')}%"
+                p3 = f"%on {e(book_part.replace(' ', '_') + '.' + cv_part.replace(':', '.') + '.')}%"
+                p4 = f"%on {e(book_part.replace(' ', '_') + '_' + cv_part.replace(':', '_'))}%"
                 p5 = f"{book_part} {cv_part}"
                 p6 = f"{book_part}.{cv_part.replace(':', '.')}"
                 p7 = f"{book_part.replace(' ', '_')}.{cv_part.replace(':', '.')}"
@@ -1073,7 +1095,9 @@ async def reader_links(
                 sql = """
                     SELECT chunk_id, ref, book, author_he, category_path, work_id, text_he, text_en
                     FROM chunks
-                    WHERE (ref LIKE ? OR ref LIKE ? OR ref LIKE ? OR ref LIKE ? OR ref = ? OR ref = ? OR ref = ?)
+                    WHERE (ref LIKE ? ESCAPE '\\' OR ref LIKE ? ESCAPE '\\'
+                           OR ref LIKE ? ESCAPE '\\' OR ref LIKE ? ESCAPE '\\'
+                           OR ref = ? OR ref = ? OR ref = ?)
                       AND ref != ?
                     LIMIT 50
                 """

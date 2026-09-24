@@ -18,6 +18,7 @@ import base64
 import email.message
 import hashlib
 import hmac
+import html as _html
 import json
 import logging
 import os
@@ -424,6 +425,11 @@ def render_auth_email(
 
     is_en = (lang or "").startswith("en")
 
+    # Everything interpolated into the HTML below that is not a literal of this function is
+    # escaped (the link and OTP arrive from the hook payload). The plain-text part stays raw.
+    url_h = _html.escape(action_url or "", quote=True)
+    token_h = _html.escape(str(token), quote=True) if token else ""
+
     if is_en:
         if action_type == "recovery":
             subject = "Reset your password — Chavruta AI"
@@ -456,7 +462,7 @@ def render_auth_email(
             otp_block = f"""
         <div style="background-color: #f1f5f9; border-radius: 8px; padding: 12px; margin: 20px 0; text-align: center;">
             <p style="margin: 0 0 6px 0; font-size: 13px; color: #475569;">One-time verification code (OTP):</p>
-            <span style="font-family: monospace; font-size: 22px; font-weight: bold; letter-spacing: 4px; color: #1e293b;">{token}</span>
+            <span style="font-family: monospace; font-size: 22px; font-weight: bold; letter-spacing: 4px; color: #1e293b;">{token_h}</span>
         </div>
             """
             otp_text = f"\nOne-time verification code (OTP): {token}\n"
@@ -482,7 +488,7 @@ def render_auth_email(
         {otp_block}
         
         <div style="text-align: center; margin: 28px 0;">
-            <a href="{action_url}" style="display: inline-block; background-color: #2563eb; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 10px; font-weight: 600; font-size: 15px; box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);">
+            <a href="{url_h}" style="display: inline-block; background-color: #2563eb; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 10px; font-weight: 600; font-size: 15px; box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);">
                 {action_label}
             </a>
         </div>
@@ -492,7 +498,7 @@ def render_auth_email(
             <br>
             If the button does not work, copy and paste this link into your browser:
             <br>
-            <a href="{action_url}" style="color: #2563eb; word-break: break-all; font-size: 12px;">{action_url}</a>
+            <a href="{url_h}" style="color: #2563eb; word-break: break-all; font-size: 12px;">{url_h}</a>
         </p>
     </div>
 </body>
@@ -542,7 +548,7 @@ Chavruta AI Team
         otp_block = f"""
         <div style="background-color: #f1f5f9; border-radius: 8px; padding: 12px; margin: 20px 0; text-align: center;">
             <p style="margin: 0 0 6px 0; font-size: 13px; color: #475569;">קוד אימות חד-פעמי (OTP):</p>
-            <span style="font-family: monospace; font-size: 22px; font-weight: bold; letter-spacing: 4px; color: #1e293b;">{token}</span>
+            <span style="font-family: monospace; font-size: 22px; font-weight: bold; letter-spacing: 4px; color: #1e293b;">{token_h}</span>
         </div>
         """
         otp_text = f"\nקוד אימות חד-פעמי (OTP): {token}\n"
@@ -568,7 +574,7 @@ Chavruta AI Team
         {otp_block}
         
         <div style="text-align: center; margin: 28px 0;">
-            <a href="{action_url}" style="display: inline-block; background-color: #2563eb; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 10px; font-weight: 600; font-size: 15px; box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);">
+            <a href="{url_h}" style="display: inline-block; background-color: #2563eb; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 10px; font-weight: 600; font-size: 15px; box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);">
                 {action_label}
             </a>
         </div>
@@ -578,7 +584,7 @@ Chavruta AI Team
             <br>
             אם הכפתור לא עובד, ניתן להעתיק ולהדביק את הקישור הבא בדפדפן:
             <br>
-            <a href="{action_url}" style="color: #2563eb; word-break: break-all; font-size: 12px;">{action_url}</a>
+            <a href="{url_h}" style="color: #2563eb; word-break: break-all; font-size: 12px;">{url_h}</a>
         </p>
     </div>
 </body>
