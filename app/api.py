@@ -4207,6 +4207,7 @@ def _format_referral_link(code: str) -> str:
 
 @app.get("/api/referral/status", response_model=ReferralStatusOut)
 @app.get("/referral/status", response_model=ReferralStatusOut)
+@app.get("/referrals/status", response_model=ReferralStatusOut)
 def referral_status(owner: str = Depends(current_owner)):
     """Return referral partner status, discount/reward rates, stats, and referral link."""
     if owner == "local":
@@ -4246,6 +4247,7 @@ def referral_status(owner: str = Depends(current_owner)):
 
 @app.post("/api/referral/settings", response_model=ReferralSettingsOut)
 @app.post("/referral/settings", response_model=ReferralSettingsOut)
+@app.post("/referrals/settings", response_model=ReferralSettingsOut)
 def update_referral_settings(body: ReferralSettingsIn, owner: str = Depends(current_owner)):
     """Update settings for referral partner program, such as auto-conversion to credits."""
     if owner != "local":
@@ -4255,6 +4257,7 @@ def update_referral_settings(body: ReferralSettingsIn, owner: str = Depends(curr
 
 @app.post("/api/referral/generate", response_model=ReferralGenerateOut)
 @app.post("/referral/generate", response_model=ReferralGenerateOut)
+@app.post("/referrals/generate", response_model=ReferralGenerateOut)
 def referral_generate(owner: str = Depends(current_owner)):
     """Generate a unique referral code and partner link for an eligible account."""
     if owner == "local":
@@ -4298,6 +4301,7 @@ def referral_generate(owner: str = Depends(current_owner)):
 
 @app.get("/api/referral/validate", response_model=ReferralValidateOut)
 @app.get("/referral/validate", response_model=ReferralValidateOut)
+@app.get("/referrals/validate", response_model=ReferralValidateOut)
 def referral_validate(code: str = ""):
     """Validate a referral code and return its discount percentage."""
     norm_code = (code or "").strip().upper()
@@ -4311,6 +4315,7 @@ def referral_validate(code: str = ""):
 
 @app.post("/api/referral/claim", response_model=ReferralClaimOut)
 @app.post("/referral/claim", response_model=ReferralClaimOut)
+@app.post("/referrals/claim", response_model=ReferralClaimOut)
 def referral_claim(req: ReferralClaimRequest, owner: str = Depends(current_owner)):
     """Claim/redeem a referral code for the current authenticated user."""
     if owner == "local":

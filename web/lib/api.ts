@@ -257,7 +257,7 @@ export const api = {
   claimReferralCode: (code: string) =>
     req<{ ok: boolean }>("/referrals/claim", { method: "POST", body: JSON.stringify({ code }) }),
   updateReferralSettings: (settings: { auto_convert_credits: boolean }) =>
-    req<{ ok: boolean; auto_convert_credits: boolean }>("/api/referral/settings", {
+    req<{ ok: boolean; auto_convert_credits: boolean }>("/referrals/settings", {
       method: "POST",
       body: JSON.stringify(settings),
     }),
@@ -271,7 +271,7 @@ export const api = {
     claim: (code: string) =>
       req<{ ok: boolean }>("/referrals/claim", { method: "POST", body: JSON.stringify({ code }) }),
     updateSettings: (settings: { auto_convert_credits: boolean }) =>
-      req<{ ok: boolean; auto_convert_credits: boolean }>("/api/referral/settings", {
+      req<{ ok: boolean; auto_convert_credits: boolean }>("/referrals/settings", {
         method: "POST",
         body: JSON.stringify(settings),
       }),
