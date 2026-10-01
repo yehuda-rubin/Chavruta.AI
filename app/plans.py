@@ -172,13 +172,13 @@ PROFIT_TARGET = 0.30
 # was cheaper per normalized token than pro (backwards volume logic). Nothing is grandfathered: billing
 # is still off (no PAYPLUS_* keys), so none of this is charged to anyone yet.
 TIERS: tuple[Tier, ...] = (
-    Tier("free",             100_000,     270_000,   2,   1,    0.0,      0.0, "חינם",         "Free"),
-    Tier("basic",            300_000,     810_000,   6,   3,   75.0,    750.0, "בסיסי",        "Basic"),
-    Tier("plus",             500_000,   1_350_000,  10,   5,  129.0,   1290.0, "מתקדם",       "Plus"),
-    Tier("pro",            1_000_000,   2_700_000,  20,  10,  200.0,   2000.0, "מלא",          "Pro"),
-    Tier("institution",    4_000_000,  10_800_000,  80,  40, 1000.0,  10000.0, "מוסדי 20",     "Institution 20", 20),
-    Tier("institution_50", 10_000_000,  27_000_000, 200, 100, 2000.0, 20000.0, "מוסדי 50",    "Institution 50", 50),
-    Tier("institution_100", 20_000_000, 54_000_000, 400, 200, 4000.0, 40000.0, "מוסדי 100",  "Institution 100", 100),
+    Tier("free",             100_000,     270_000,   1,   1,    0.0,      0.0, "חינם",         "Free"),
+    Tier("basic",            300_000,     810_000,   3,   3,   75.0,    750.0, "בסיסי",        "Basic"),
+    Tier("plus",             500_000,   1_350_000,   5,   5,  129.0,   1290.0, "מתקדם",       "Plus"),
+    Tier("pro",            1_000_000,   2_700_000,  10,  10,  200.0,   2000.0, "מלא",          "Pro"),
+    Tier("institution",    4_000_000,  10_800_000,  40,  40, 1000.0,  10000.0, "מוסדי 20",     "Institution 20", 20),
+    Tier("institution_50", 10_000_000,  27_000_000, 100, 100, 2000.0, 20000.0, "מוסדי 50",    "Institution 50", 50),
+    Tier("institution_100", 20_000_000, 54_000_000, 200, 200, 4000.0, 40000.0, "מוסדי 100",  "Institution 100", 100),
 )
 
 # Output costs several times input everywhere; 3x is the round figure that holds across the models
