@@ -172,12 +172,13 @@ PROFIT_TARGET = 0.30
 # was cheaper per normalized token than pro (backwards volume logic). Nothing is grandfathered: billing
 # is still off (no PAYPLUS_* keys), so none of this is charged to anyone yet.
 TIERS: tuple[Tier, ...] = (
-    Tier("free",             150_000,     400_000,   2,   1,    0.0,      0.0, "חינם",         "Free"),
-    Tier("basic",            450_000,   1_200_000,   6,   3,   75.0,    750.0, "בסיסי",        "Basic"),
-    Tier("pro",            1_500_000,   4_000_000,  20,  10,  200.0,   2000.0, "מלא",          "Pro"),
-    Tier("institution",    6_000_000,  16_000_000,  80,  40, 1000.0,  10000.0, "מוסדי 20",     "Institution 20", 20),
-    Tier("institution_50", 15_000_000,  40_000_000, 200, 100, 2000.0, 20000.0, "מוסדי 50",    "Institution 50", 50),
-    Tier("institution_100", 30_000_000, 80_000_000, 400, 200, 4000.0, 40000.0, "מוסדי 100",  "Institution 100", 100),
+    Tier("free",             100_000,     270_000,   2,   1,    0.0,      0.0, "חינם",         "Free"),
+    Tier("basic",            300_000,     810_000,   6,   3,   75.0,    750.0, "בסיסי",        "Basic"),
+    Tier("plus",             500_000,   1_350_000,  10,   5,  129.0,   1290.0, "מתקדם",       "Plus"),
+    Tier("pro",            1_000_000,   2_700_000,  20,  10,  200.0,   2000.0, "מלא",          "Pro"),
+    Tier("institution",    4_000_000,  10_800_000,  80,  40, 1000.0,  10000.0, "מוסדי 20",     "Institution 20", 20),
+    Tier("institution_50", 10_000_000,  27_000_000, 200, 100, 2000.0, 20000.0, "מוסדי 50",    "Institution 50", 50),
+    Tier("institution_100", 20_000_000, 54_000_000, 400, 200, 4000.0, 40000.0, "מוסדי 100",  "Institution 100", 100),
 )
 
 # Output costs several times input everywhere; 3x is the round figure that holds across the models
@@ -477,15 +478,16 @@ def refund_quote(amount: float, *, days_used: int = 0, cycle: str | None = MONTH
 # (Recomputed for the 2026-08-21 reprice — price ÷ (weekly_tokens x 4.3 / 23,512). Institution figures
 # use the internal negotiation anchor, not a published price; see the note above TIERS.)
 #
-# So a credit priced below ~₪0.20 is not an overflow valve, it is a cheaper subscription with extra
+# So a credit priced below ~₪0.30 is not an overflow valve, it is a cheaper subscription with extra
 # steps — anyone doing arithmetic buys credits instead of a plan, and the recurring revenue that
-# actually funds the server evaporates. ₪0.50 sits ~2.4x above the cheapest subscription rate and ~29x
+# actually funds the server evaporates. With DeepSeek-V4-Pro (marginal cost ~₪0.143/turn, Pro implied
+# subscription rate ~₪0.275/turn), ₪1.20 sits ~4.4x above the cheapest subscription rate and ~8.4x
 # marginal cost, which is what makes it worth topping up in a pinch and never worth living on.
 #
 # Not yet sold: credits are granted by coupon today (db.add_credits), and a pack purchase would
 # write the same column. This constant is here so the first person to build that flow inherits the
 # reasoning rather than picking a round number.
-CREDIT_PRICE_ILS = 0.50
+CREDIT_PRICE_ILS = 1.20
 
 # A credit costs more for the expensive intents. Measured: a lesson averages ~58,000 normalized
 # tokens against ~23,512 for a question — 2.5x. It is charged 5x, deliberately above the measured

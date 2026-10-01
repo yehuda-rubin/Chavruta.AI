@@ -81,6 +81,7 @@ def get_conn() -> sqlite3.Connection:
 # What was actually missing is below: WHAT each bump added. When a migration goes wrong the question
 # is never "was that major or minor", it is "what changed at 28". Reconstructed from git history.
 #
+#   33  referral_partners, referral_redemptions, referral_rewards 2026-10-01
 #   32  saved_source_sheets (Source Sheet Companion)              2026-09-01
 #   31  messages.source_note                                      2026-08-14
 #   30  dev_helpers, helper_messages                              2026-08-13
@@ -98,7 +99,7 @@ def get_conn() -> sqlite3.Connection:
 #   18  billing_ledger                                            2026-07-26
 #   17  coupons                                                   2026-07-26
 #   ≤16 subscriptions, bans, deletion scheduling, per-owner scoping — see git log -G'^SCHEMA_VERSION'
-SCHEMA_VERSION = 32
+SCHEMA_VERSION = 34
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -317,7 +318,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
             plan                   TEXT NOT NULL DEFAULT 'free',  -- see app/plans.py; flipped by billing
             -- Prepaid generations, spent only once the day's plan quota is used up. Granted by coupon
             -- today; a credit pack purchase would write the same column.
-            credits                INTEGER NOT NULL DEFAULT 0
+            credits                INTEGER NOT NULL DEFAULT 0,
+            -- Whether exhaustion of credits triggers automatic conversion from unexpired referral rewards (default 1 = on)
+            auto_convert_credits   INTEGER NOT NULL DEFAULT 1
         );
 
         -- Coupons — operator-issued codes granting either a time-boxed plan or a pile of credits.
@@ -503,6 +506,37 @@ def _migrate(conn: sqlite3.Connection) -> None:
             coupon_revert_plan   TEXT,                     -- plan to revert to when a coupon boost expires
             coupon_revert_at     TEXT                      -- UTC ISO timestamp when the boost must be reverted
         );
+
+        -- Referral partner program
+        CREATE TABLE IF NOT EXISTS referral_partners (
+            owner_id     TEXT PRIMARY KEY,
+            code         TEXT UNIQUE NOT NULL,
+            discount_pct REAL NOT NULL DEFAULT 10.0,
+            reward_pct   REAL NOT NULL DEFAULT 10.0,
+            created_at           TEXT NOT NULL,
+            is_active            INTEGER NOT NULL DEFAULT 1,
+            auto_convert_credits INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_referral_partners_code ON referral_partners(code);
+
+        CREATE TABLE IF NOT EXISTS referral_redemptions (
+            referred_owner_id TEXT PRIMARY KEY,
+            referrer_owner_id TEXT NOT NULL,
+            code              TEXT NOT NULL,
+            created_at        TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_referral_redemptions_referrer ON referral_redemptions(referrer_owner_id);
+
+        CREATE TABLE IF NOT EXISTS referral_rewards (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            referrer_owner_id TEXT NOT NULL,
+            referred_owner_id TEXT NOT NULL,
+            charge_amount_ils REAL NOT NULL,
+            reward_ils        REAL NOT NULL,
+            status            TEXT NOT NULL DEFAULT 'open',
+            created_at        TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_referral_rewards_referrer ON referral_rewards(referrer_owner_id, status);
     """)
 
     # Forward migrations for databases created by an older schema version.
@@ -695,6 +729,47 @@ def _migrate(conn: sqlite3.Connection) -> None:
                 ON saved_source_sheets(owner_id, created_at DESC);
         """)
 
+    if version < 33:
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS referral_partners (
+                owner_id     TEXT PRIMARY KEY,
+                code         TEXT UNIQUE NOT NULL,
+                discount_pct REAL NOT NULL DEFAULT 10.0,
+                reward_pct   REAL NOT NULL DEFAULT 10.0,
+                created_at   TEXT NOT NULL,
+                is_active    INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_referral_partners_code ON referral_partners(code);
+
+            CREATE TABLE IF NOT EXISTS referral_redemptions (
+                referred_owner_id TEXT PRIMARY KEY,
+                referrer_owner_id TEXT NOT NULL,
+                code              TEXT NOT NULL,
+                created_at        TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_referral_redemptions_referrer ON referral_redemptions(referrer_owner_id);
+
+            CREATE TABLE IF NOT EXISTS referral_rewards (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                referrer_owner_id TEXT NOT NULL,
+                referred_owner_id TEXT NOT NULL,
+                charge_amount_ils REAL NOT NULL,
+                reward_ils        REAL NOT NULL,
+                status            TEXT NOT NULL DEFAULT 'open',
+                created_at        TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_referral_rewards_referrer ON referral_rewards(referrer_owner_id, status);
+        """)
+
+    if version < 34:
+        acols = {r[1] for r in conn.execute("PRAGMA table_info(accounts)")}
+        if "auto_convert_credits" not in acols:
+            conn.execute("ALTER TABLE accounts ADD COLUMN auto_convert_credits INTEGER NOT NULL DEFAULT 1")
+        if _table_exists(conn, "referral_partners"):
+            pcols = {r[1] for r in conn.execute("PRAGMA table_info(referral_partners)")}
+            if "auto_convert_credits" not in pcols:
+                conn.execute("ALTER TABLE referral_partners ADD COLUMN auto_convert_credits INTEGER NOT NULL DEFAULT 1")
+
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
 
@@ -703,6 +778,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # (used only for screenshots/demos); they are still seeded at most once.
     if fresh_db and os.environ.get("CHAVRUTA_SEED_DEMO", "0") == "1":
         _seed_demo(conn)
+
+
+def init_db(conn: sqlite3.Connection | None = None) -> None:
+    """Initialize database schema, tables, and forward migrations."""
+    c = conn or get_conn()
+    _migrate(c)
 
 
 def _seed_demo(conn: sqlite3.Connection) -> None:
@@ -1952,11 +2033,126 @@ def add_credits(owner_id: str, amount: int) -> int:
     return int(row["credits"]) if row else 0
 
 
+REFERRAL_REWARD_VALIDITY_DAYS = 90
+CREDIT_PRICE_ILS = 1.20
+
+
+def get_auto_convert_credits(owner_id: str) -> bool:
+    """Return whether the account has automatic conversion of referral credits enabled."""
+    if not owner_id:
+        return True
+    conn = get_conn()
+    with _LOCK:
+        row = conn.execute("SELECT auto_convert_credits FROM accounts WHERE owner_id=?", (owner_id,)).fetchone()
+        if row and row["auto_convert_credits"] is not None:
+            return bool(row["auto_convert_credits"])
+        if _table_exists(conn, "referral_partners"):
+            p_row = conn.execute("SELECT auto_convert_credits FROM referral_partners WHERE owner_id=?", (owner_id,)).fetchone()
+            if p_row and p_row["auto_convert_credits"] is not None:
+                return bool(p_row["auto_convert_credits"])
+    return True
+
+
+def set_auto_convert_credits(owner_id: str, enabled: bool) -> bool:
+    """Toggle the automatic conversion of referral credits for an account."""
+    if not owner_id:
+        return False
+    val = 1 if enabled else 0
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        conn.execute(
+            "INSERT INTO accounts (owner_id, auto_convert_credits) VALUES (?, ?) "
+            "ON CONFLICT(owner_id) DO UPDATE SET auto_convert_credits = excluded.auto_convert_credits",
+            (owner_id, val)
+        )
+        if _table_exists(conn, "referral_partners"):
+            conn.execute(
+                "UPDATE referral_partners SET auto_convert_credits = ? WHERE owner_id = ?",
+                (val, owner_id)
+            )
+    return True
+
+
+def _try_auto_convert_referral_credit(conn: sqlite3.Connection, owner_id: str, needed_credits: int) -> int:
+    """If auto_convert_credits is enabled, automatically convert unexpired (within 90 days)
+    open referral rewards to cover shortfall in credits at CREDIT_PRICE_ILS.
+    Returns the number of credits converted and added. Runs under _LOCK and _tx."""
+    if needed_credits <= 0 or not owner_id:
+        return 0
+    if not _table_exists(conn, "referral_rewards"):
+        return 0
+
+    row_acc = conn.execute("SELECT auto_convert_credits FROM accounts WHERE owner_id=?", (owner_id,)).fetchone()
+    if row_acc and row_acc["auto_convert_credits"] == 0:
+        return 0
+    if _table_exists(conn, "referral_partners"):
+        row_p = conn.execute("SELECT auto_convert_credits FROM referral_partners WHERE owner_id=?", (owner_id,)).fetchone()
+        if row_p and row_p["auto_convert_credits"] == 0:
+            return 0
+
+    now_dt = datetime.now(UTC)
+    cutoff = (now_dt - timedelta(days=REFERRAL_REWARD_VALIDITY_DAYS)).isoformat()
+    now_iso = _now()
+
+    # Expire rewards older than 90 days (3 months)
+    conn.execute(
+        "UPDATE referral_rewards SET status='expired' WHERE status='open' AND created_at < ?",
+        (cutoff,)
+    )
+
+    open_rows = conn.execute(
+        "SELECT id, reward_ils, referred_owner_id, charge_amount_ils FROM referral_rewards "
+        "WHERE referrer_owner_id=? AND status='open' AND created_at >= ? "
+        "ORDER BY created_at ASC",
+        (owner_id, cutoff)
+    ).fetchall()
+
+    if not open_rows:
+        return 0
+
+    total_avail = sum(float(r["reward_ils"]) for r in open_rows)
+    credits_possible = int(total_avail // CREDIT_PRICE_ILS)
+    if credits_possible <= 0:
+        return 0
+
+    credits_to_grant = min(needed_credits, credits_possible)
+    cost_to_deduct = round(credits_to_grant * CREDIT_PRICE_ILS, 2)
+    remaining_cost = cost_to_deduct
+
+    for r in open_rows:
+        if remaining_cost <= 0:
+            break
+        rew_id = r["id"]
+        rew_amt = float(r["reward_ils"])
+        if rew_amt <= remaining_cost + 1e-6:
+            conn.execute("UPDATE referral_rewards SET status='used_for_credits' WHERE id=?", (rew_id,))
+            remaining_cost = round(remaining_cost - rew_amt, 2)
+        else:
+            left = round(rew_amt - remaining_cost, 2)
+            used = round(remaining_cost, 2)
+            conn.execute("UPDATE referral_rewards SET reward_ils=? WHERE id=?", (left, rew_id))
+            conn.execute(
+                "INSERT INTO referral_rewards (referrer_owner_id, referred_owner_id, charge_amount_ils, reward_ils, status, created_at) "
+                "VALUES (?, ?, ?, ?, 'used_for_credits', ?)",
+                (owner_id, r["referred_owner_id"], float(r["charge_amount_ils"]), used, now_iso)
+            )
+            remaining_cost = 0.0
+
+    conn.execute(
+        "INSERT INTO accounts (owner_id, credits) VALUES (?, ?) "
+        "ON CONFLICT(owner_id) DO UPDATE SET credits = credits + excluded.credits",
+        (owner_id, credits_to_grant)
+    )
+    return credits_to_grant
+
+
 def spend_credits(owner_id: str, amount: int) -> tuple[bool, int]:
     """Atomically spend `amount` credits. Returns (spent, balance_after).
 
     The balance check and the decrement are one transaction under the shared lock, so two concurrent
     generations cannot both pass on the same last credit. A caller that gets False must not generate.
+    If credits run out, automatically pulls and converts from unexpired referral rewards (valid for 3 months),
+    unless the user turned off auto_convert_credits in settings.
     """
     amount = max(0, int(amount))
     conn = get_conn()
@@ -1965,6 +2161,10 @@ def spend_credits(owner_id: str, amount: int) -> tuple[bool, int]:
         have = int(row["credits"]) if row else 0
         if amount == 0:
             return True, have
+        if have < amount:
+            shortfall = amount - have
+            converted = _try_auto_convert_referral_credit(conn, owner_id, shortfall)
+            have += converted
         if have < amount:
             return False, have
         conn.execute("UPDATE accounts SET credits = credits - ? WHERE owner_id=?", (amount, owner_id))
@@ -2439,3 +2639,218 @@ def set_calendar_cache(kind: str, date_key: str, payload: str) -> None:
             "ON CONFLICT(kind, date_key) DO UPDATE SET payload=excluded.payload, "
             "resolved_at=excluded.resolved_at",
             (kind, date_key, payload, _now()))
+
+
+# ── Referral partner system ───────────────────────────────────────────────
+
+def has_active_payment_method(owner_id: str) -> bool:
+    """Check if user has an active or pending subscription row in subscriptions,
+    or provider_ref, or a paid plan != 'free', or entries in charges."""
+    if not owner_id or owner_id == "local":
+        return False
+    conn = get_conn()
+    with _LOCK:
+        sub = conn.execute(
+            "SELECT status, provider_ref, plan FROM subscriptions WHERE owner_id=?",
+            (owner_id,)
+        ).fetchone()
+        if sub:
+            status = (sub["status"] or "").lower()
+            if status in ("active", "pending"):
+                return True
+            if sub["provider_ref"] and str(sub["provider_ref"]).strip():
+                return True
+            if sub["plan"] and str(sub["plan"]).strip().lower() != "free":
+                return True
+
+        acc = conn.execute("SELECT plan FROM accounts WHERE owner_id=?", (owner_id,)).fetchone()
+        if acc and acc["plan"] and str(acc["plan"]).strip().lower() != "free":
+            return True
+
+        if _table_exists(conn, "charges"):
+            row = conn.execute("SELECT 1 FROM charges WHERE owner_id=?", (owner_id,)).fetchone()
+            if row:
+                return True
+
+        if sub and sub["provider_ref"]:
+            chg = conn.execute(
+                "SELECT 1 FROM billing_ledger WHERE provider_ref=?",
+                (sub["provider_ref"],)
+            ).fetchone()
+            if chg:
+                return True
+
+    return False
+
+
+def get_referral_partner(owner_id: str) -> dict[str, Any] | None:
+    """Return referral partner record for an owner, or None."""
+    if not owner_id:
+        return None
+    conn = get_conn()
+    with _LOCK:
+        row = conn.execute(
+            "SELECT owner_id, code, discount_pct, reward_pct, created_at, is_active "
+            "FROM referral_partners WHERE owner_id=?",
+            (owner_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_referral_partner_by_code(code: str) -> dict[str, Any] | None:
+    """Look up a referral partner by their referral code."""
+    if not code:
+        return None
+    norm_code = code.strip().upper()
+    conn = get_conn()
+    with _LOCK:
+        row = conn.execute(
+            "SELECT owner_id, code, discount_pct, reward_pct, created_at, is_active "
+            "FROM referral_partners WHERE UPPER(code)=?",
+            (norm_code,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def create_referral_partner(owner_id: str, code: str, discount_pct: float = 10.0,
+                            reward_pct: float = 10.0) -> bool:
+    """Register a user as a referral partner with a unique code."""
+    if not owner_id or not code:
+        return False
+    norm_code = code.strip().upper()
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        try:
+            conn.execute(
+                "INSERT INTO referral_partners (owner_id, code, discount_pct, reward_pct, created_at, is_active) "
+                "VALUES (?, ?, ?, ?, ?, 1)",
+                (owner_id, norm_code, float(discount_pct), float(reward_pct), _now())
+            )
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+
+def record_referral_redemption(referred_owner_id: str, code: str) -> bool:
+    """Record that a user redeemed a referral code. Only one redemption per user is allowed."""
+    if not referred_owner_id or not code:
+        return False
+    partner = get_referral_partner_by_code(code)
+    if not partner or not partner.get("is_active"):
+        return False
+    if partner["owner_id"] == referred_owner_id:
+        return False
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        try:
+            conn.execute(
+                "INSERT INTO referral_redemptions (referred_owner_id, referrer_owner_id, code, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (referred_owner_id, partner["owner_id"], partner["code"], _now())
+            )
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+
+def get_referral_redemption(referred_owner_id: str) -> dict[str, Any] | None:
+    """Get referral redemption record for a user, or None."""
+    if not referred_owner_id:
+        return None
+    conn = get_conn()
+    with _LOCK:
+        row = conn.execute(
+            "SELECT referred_owner_id, referrer_owner_id, code, created_at "
+            "FROM referral_redemptions WHERE referred_owner_id=?",
+            (referred_owner_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_referral_stats(owner_id: str) -> dict[str, Any]:
+    """Return referral stats for an owner: count of referred users and open credit in ILS.
+    Accumulated open rewards are valid for exactly 3 months (90 days) from accrual."""
+    if not owner_id:
+        return {
+            "referred_count": 0,
+            "open_credit_ils": 0.0,
+            "applied_credit_ils": 0.0,
+            "used_credit_ils": 0.0,
+            "auto_convert_credits": True,
+            "validity_days": REFERRAL_REWARD_VALIDITY_DAYS,
+        }
+    conn = get_conn()
+    now_dt = datetime.now(UTC)
+    cutoff = (now_dt - timedelta(days=REFERRAL_REWARD_VALIDITY_DAYS)).isoformat()
+    with _LOCK, _tx(conn):
+        # Auto-expire open rewards older than 90 days (3 months)
+        conn.execute(
+            "UPDATE referral_rewards SET status='expired' WHERE status='open' AND created_at < ?",
+            (cutoff,)
+        )
+        row_cnt = conn.execute(
+            "SELECT COUNT(*) as cnt FROM referral_redemptions WHERE referrer_owner_id=?",
+            (owner_id,)
+        ).fetchone()
+        row_rew = conn.execute(
+            "SELECT COALESCE(SUM(reward_ils), 0.0) as open_credit FROM referral_rewards "
+            "WHERE referrer_owner_id=? AND status='open'",
+            (owner_id,)
+        ).fetchone()
+        row_app = conn.execute(
+            "SELECT COALESCE(SUM(reward_ils), 0.0) as applied_credit FROM referral_rewards "
+            "WHERE referrer_owner_id=? AND status='applied_to_subscription'",
+            (owner_id,)
+        ).fetchone()
+        row_used = conn.execute(
+            "SELECT COALESCE(SUM(reward_ils), 0.0) as used_credit FROM referral_rewards "
+            "WHERE referrer_owner_id=? AND status='used_for_credits'",
+            (owner_id,)
+        ).fetchone()
+    cnt = int(row_cnt["cnt"]) if row_cnt else 0
+    open_credit = round(float(row_rew["open_credit"]), 2) if row_rew else 0.0
+    applied_credit = round(float(row_app["applied_credit"]), 2) if row_app else 0.0
+    used_credit = round(float(row_used["used_credit"]), 2) if row_used else 0.0
+    auto_convert = get_auto_convert_credits(owner_id)
+    return {
+        "referred_count": cnt,
+        "open_credit_ils": open_credit,
+        "applied_credit_ils": applied_credit,
+        "used_credit_ils": used_credit,
+        "auto_convert_credits": auto_convert,
+        "validity_days": REFERRAL_REWARD_VALIDITY_DAYS,
+    }
+
+
+def record_referral_reward(referrer_owner_id: str, referred_owner_id: str,
+                           amount: float, reward_pct: float = 10.0) -> bool:
+    """Record an accumulated reward when a referred user is charged.
+    If the referrer has an active subscription, add the reward to their coupon_discount_ils
+    balance so their next subscription charge is automatically subsidized, and set status='applied_to_subscription'
+    (otherwise status='open')."""
+    if not referrer_owner_id or not referred_owner_id or amount <= 0:
+        return False
+    reward_ils = round(float(amount) * (float(reward_pct) / 100.0), 2)
+    conn = get_conn()
+    now_iso = _now()
+    with _LOCK, _tx(conn):
+        sub = conn.execute(
+            "SELECT status FROM subscriptions WHERE owner_id=?",
+            (referrer_owner_id,)
+        ).fetchone()
+        status = "open"
+        if sub and (sub["status"] or "").lower() == "active":
+            status = "applied_to_subscription"
+            conn.execute(
+                "UPDATE subscriptions SET coupon_discount_ils = round(coupon_discount_ils + ?, 2), "
+                "updated_at = ? WHERE owner_id = ?",
+                (reward_ils, now_iso, referrer_owner_id)
+            )
+
+        conn.execute(
+            "INSERT INTO referral_rewards (referrer_owner_id, referred_owner_id, charge_amount_ils, reward_ils, status, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (referrer_owner_id, referred_owner_id, float(amount), reward_ils, status, now_iso)
+        )
+    return True
+

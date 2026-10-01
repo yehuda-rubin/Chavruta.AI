@@ -66,6 +66,10 @@ data/
 # Keep the versioned evaluation datasets (Principle V — trustworthiness is measured)
 !eval/
 !eval/**/*.jsonl
+eval/nightly/
+eval/reranker_training_dataset.jsonl
+out/
+scripts/run_*_benchmark.py
 
 # ---- Vector DB / embeddings / indexes ----
 *.faiss

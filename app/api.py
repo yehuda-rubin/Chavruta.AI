@@ -4151,6 +4151,192 @@ async def billing_webhook(request: Request):
     return {"ok": True}
 
 
+# ── Referral Partner Program ──────────────────────────────────────────────────
+
+class ReferralClaimRequest(BaseModel):
+    code: str = Field(..., max_length=64)
+
+
+class ReferralStatusOut(BaseModel):
+    ok: bool = True
+    has_payment_method: bool = False
+    code: str | None = None
+    referral_link: str | None = None
+    discount_pct: float = 10.0
+    reward_pct: float = 10.0
+    referred_count: int = 0
+    open_credit_ils: float = 0.0
+    applied_credit_ils: float = 0.0
+    used_credit_ils: float = 0.0
+    auto_convert_credits: bool = True
+    validity_days: int = 90
+
+
+class ReferralSettingsIn(BaseModel):
+    auto_convert_credits: bool
+
+
+class ReferralSettingsOut(BaseModel):
+    ok: bool = True
+    auto_convert_credits: bool
+
+
+class ReferralGenerateOut(BaseModel):
+    ok: bool = True
+    code: str
+    referral_link: str
+    discount_pct: float = 10.0
+    reward_pct: float = 10.0
+
+
+class ReferralValidateOut(BaseModel):
+    valid: bool
+    discount_pct: float = 0.0
+
+
+class ReferralClaimOut(BaseModel):
+    ok: bool = True
+    code: str
+    discount_pct: float
+
+
+def _format_referral_link(code: str) -> str:
+    base_url = os.environ.get("CHAVRUTA_BASE_URL", "https://chavrutaai.org").rstrip("/")
+    return f"{base_url}/?ref={code}"
+
+
+@app.get("/api/referral/status", response_model=ReferralStatusOut)
+@app.get("/referral/status", response_model=ReferralStatusOut)
+def referral_status(owner: str = Depends(current_owner)):
+    """Return referral partner status, discount/reward rates, stats, and referral link."""
+    if owner == "local":
+        return ReferralStatusOut(
+            ok=True,
+            has_payment_method=False,
+            code=None,
+            referral_link=None,
+            discount_pct=10.0,
+            reward_pct=10.0,
+            referred_count=0,
+            open_credit_ils=0.0,
+            applied_credit_ils=0.0,
+            used_credit_ils=0.0,
+            auto_convert_credits=True,
+            validity_days=90,
+        )
+    has_pm = db.has_active_payment_method(owner)
+    partner = db.get_referral_partner(owner)
+    stats = db.get_referral_stats(owner)
+    code = partner["code"] if partner and partner.get("is_active") else None
+    return ReferralStatusOut(
+        ok=True,
+        has_payment_method=has_pm,
+        code=code,
+        referral_link=_format_referral_link(code) if code else None,
+        discount_pct=float(partner["discount_pct"]) if partner else 10.0,
+        reward_pct=float(partner["reward_pct"]) if partner else 10.0,
+        referred_count=stats.get("referred_count", 0),
+        open_credit_ils=stats.get("open_credit_ils", 0.0),
+        applied_credit_ils=stats.get("applied_credit_ils", 0.0),
+        used_credit_ils=stats.get("used_credit_ils", 0.0),
+        auto_convert_credits=stats.get("auto_convert_credits", True),
+        validity_days=stats.get("validity_days", 90),
+    )
+
+
+@app.post("/api/referral/settings", response_model=ReferralSettingsOut)
+@app.post("/referral/settings", response_model=ReferralSettingsOut)
+def update_referral_settings(body: ReferralSettingsIn, owner: str = Depends(current_owner)):
+    """Update settings for referral partner program, such as auto-conversion to credits."""
+    if owner != "local":
+        db.set_auto_convert_credits(owner, body.auto_convert_credits)
+    return ReferralSettingsOut(ok=True, auto_convert_credits=body.auto_convert_credits)
+
+
+@app.post("/api/referral/generate", response_model=ReferralGenerateOut)
+@app.post("/referral/generate", response_model=ReferralGenerateOut)
+def referral_generate(owner: str = Depends(current_owner)):
+    """Generate a unique referral code and partner link for an eligible account."""
+    if owner == "local":
+        raise HTTPException(
+            status_code=403,
+            detail="יצירת קישור שותפים זמינה רק למשתמשים בעלי כרטיס אשראי או מנוי פעיל"
+        )
+    if not db.has_active_payment_method(owner):
+        raise HTTPException(
+            status_code=403,
+            detail="יצירת קישור שותפים זמינה רק למשתמשים בעלי כרטיס אשראי או מנוי פעיל"
+        )
+
+    partner = db.get_referral_partner(owner)
+    if partner and partner.get("is_active"):
+        code = partner["code"]
+        discount_pct = float(partner["discount_pct"])
+        reward_pct = float(partner["reward_pct"])
+    else:
+        chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        code = None
+        import secrets
+        for _ in range(10):
+            candidate = "".join(secrets.choice(chars) for _ in range(8))
+            if db.create_referral_partner(owner, candidate):
+                code = candidate
+                break
+        if not code:
+            raise HTTPException(status_code=500, detail="Could not generate unique referral code")
+        discount_pct = 10.0
+        reward_pct = 10.0
+
+    return ReferralGenerateOut(
+        ok=True,
+        code=code,
+        referral_link=_format_referral_link(code),
+        discount_pct=discount_pct,
+        reward_pct=reward_pct,
+    )
+
+
+@app.get("/api/referral/validate", response_model=ReferralValidateOut)
+@app.get("/referral/validate", response_model=ReferralValidateOut)
+def referral_validate(code: str = ""):
+    """Validate a referral code and return its discount percentage."""
+    norm_code = (code or "").strip().upper()
+    if not norm_code:
+        return ReferralValidateOut(valid=False, discount_pct=0.0)
+    partner = db.get_referral_partner_by_code(norm_code)
+    if partner and partner.get("is_active"):
+        return ReferralValidateOut(valid=True, discount_pct=float(partner.get("discount_pct", 10.0)))
+    return ReferralValidateOut(valid=False, discount_pct=0.0)
+
+
+@app.post("/api/referral/claim", response_model=ReferralClaimOut)
+@app.post("/referral/claim", response_model=ReferralClaimOut)
+def referral_claim(req: ReferralClaimRequest, owner: str = Depends(current_owner)):
+    """Claim/redeem a referral code for the current authenticated user."""
+    if owner == "local":
+        raise HTTPException(status_code=400, detail="יש להתחבר כדי לממש קוד הפניה")
+    norm_code = (req.code or "").strip().upper()
+    if not norm_code:
+        raise HTTPException(status_code=400, detail="קוד הפניה לא יכול להיות ריק")
+    partner = db.get_referral_partner_by_code(norm_code)
+    if not partner or not partner.get("is_active"):
+        raise HTTPException(status_code=404, detail="קוד הפניה לא תקין או לא קיים")
+    if partner["owner_id"] == owner:
+        raise HTTPException(status_code=400, detail="לא ניתן לממש קוד הפניה של עצמך")
+    if db.get_referral_redemption(owner):
+        raise HTTPException(status_code=400, detail="כבר מומש קוד הפניה בעבר עבור חשבון זה")
+
+    ok = db.record_referral_redemption(owner, norm_code)
+    if not ok:
+        raise HTTPException(status_code=400, detail="שגיאה במימוש קוד ההפניה")
+
+    return ReferralClaimOut(
+        ok=True,
+        code=partner["code"],
+        discount_pct=float(partner.get("discount_pct", 10.0)),
+    )
+
+
 @app.post("/auth/email-hook")
 @app.post("/account/email-hook")
 async def auth_email_hook(request: Request):

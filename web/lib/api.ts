@@ -248,6 +248,35 @@ export const api = {
     }),
   cancelSubscription: () => req<{ ok: boolean }>("/billing/cancel", { method: "POST" }),
 
+  // Referral partner program
+  getReferralStatus: () => req<ReferralStatus>("/referrals/status"),
+  generateReferralCode: () =>
+    req<{ ok: boolean; code: string; referral_link: string }>("/referrals/generate", { method: "POST" }),
+  validateReferralCode: (code: string) =>
+    req<{ valid: boolean; discount_pct: number }>(`/referrals/validate?code=${encodeURIComponent(code)}`),
+  claimReferralCode: (code: string) =>
+    req<{ ok: boolean }>("/referrals/claim", { method: "POST", body: JSON.stringify({ code }) }),
+  updateReferralSettings: (settings: { auto_convert_credits: boolean }) =>
+    req<{ ok: boolean; auto_convert_credits: boolean }>("/api/referral/settings", {
+      method: "POST",
+      body: JSON.stringify(settings),
+    }),
+
+  referral: {
+    status: () => req<ReferralStatus>("/referrals/status"),
+    generate: () =>
+      req<{ ok: boolean; code: string; referral_link: string }>("/referrals/generate", { method: "POST" }),
+    validate: (code: string) =>
+      req<{ valid: boolean; discount_pct: number }>(`/referrals/validate?code=${encodeURIComponent(code)}`),
+    claim: (code: string) =>
+      req<{ ok: boolean }>("/referrals/claim", { method: "POST", body: JSON.stringify({ code }) }),
+    updateSettings: (settings: { auto_convert_credits: boolean }) =>
+      req<{ ok: boolean; auto_convert_credits: boolean }>("/api/referral/settings", {
+        method: "POST",
+        body: JSON.stringify(settings),
+      }),
+  },
+
   // Flag a specific answer for operator review — the self-serve half of the defamation/quality
   // safety net (grounding reduces but doesn't eliminate the risk of a mischaracterizing answer).
   reportMessage: (messageId: number, reason: string) =>
@@ -670,3 +699,24 @@ export interface FeedbackItem {
   reviewed_at: string | null;
   created_at: string;
 }
+
+export interface ReferralStatus {
+  authenticated: boolean;
+  has_payment_method: boolean;
+  code: string | null;
+  referral_link: string | null;
+  referred_count: number;
+  open_credit_ils: number;
+  applied_credit_ils?: number;
+  used_credit_ils?: number;
+  auto_convert_credits?: boolean;
+  validity_days?: number;
+  discount_pct: number;
+  commission_pct: number;
+}
+
+export const getReferralStatus = api.getReferralStatus;
+export const generateReferralCode = api.generateReferralCode;
+export const validateReferralCode = api.validateReferralCode;
+export const claimReferralCode = api.claimReferralCode;
+export const updateReferralSettings = api.updateReferralSettings;

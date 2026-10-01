@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { Lang } from "@/lib/types";
 import { IntentId, tr, StringKey } from "@/lib/i18n";
 import { Modal } from "./Modal";
+import { Icon } from "./Icon";
 import { useAuth } from "@/lib/auth";
 import {
   api, getUserLLMKey, setUserLLMKey,
@@ -677,6 +678,28 @@ export function SettingsModal({
                 {typeof lessonsLeft === "number" && (
                   <Gauge label={tr(lang, "lessonsLeft")} value={lessonsLeft} caption={resetsIn("week", lang)} />
                 )}
+              </div>
+            )}
+
+            {/* Referral / Partner program — shown only when billing is active */}
+            {billingEnabled && (
+              <div className="mt-2.5 p-3 rounded-2xl glass border border-tekhelet/20 bg-tekhelet/[0.03] flex items-center justify-between gap-3">
+                <div className="min-w-0 flex flex-col gap-0.5">
+                  <div className="flex items-center gap-1.5 font-semibold text-xs text-tekhelet">
+                    <Icon name="groups" className="text-base shrink-0" />
+                    <span>{tr(lang, "partnerProgramTitle")}</span>
+                  </div>
+                  <p className="text-[11px] text-ink/65 leading-snug">
+                    {tr(lang, "partnerProgramSettingsDesc")}
+                  </p>
+                </div>
+                <a
+                  href="/partner"
+                  className="px-3.5 py-1.5 rounded-xl grad text-white font-semibold text-xs hover:opacity-95 transition shrink-0 inline-flex items-center gap-1"
+                >
+                  <span>{tr(lang, "partnerProgramAction")}</span>
+                  <Icon name="arrow_forward" className="text-xs rtl:rotate-180" />
+                </a>
               </div>
             )}
 

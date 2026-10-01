@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { Lang } from "@/lib/types";
 import { tr, type StringKey } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
+import { api } from "@/lib/api";
 import { TERMS_VERSION } from "@/lib/legal";
 import { Icon } from "./Icon";
 
@@ -53,6 +54,20 @@ export function SignIn({ lang }: { lang: Lang }) {
   const [resendCooldown, setResendCooldown] = useState(60);
   const [resendBusy, setResendBusy] = useState(false);
   const [resendSuccess, setResendSuccess] = useState(false);
+  const [billingEnabled, setBillingEnabled] = useState(false);
+
+  useEffect(() => {
+    api.billingConfig().then((c) => setBillingEnabled(Boolean(c?.enabled))).catch(() => setBillingEnabled(false));
+  }, []);
+
+  useEffect(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      if (sp.get("ref") || sp.get("mode") === "up" || sp.get("mode") === "signup") {
+        setMode("up");
+      }
+    } catch {}
+  }, []);
 
   useEffect(() => {
     if (!confirmPendingEmail || resendCooldown <= 0) return;
@@ -337,6 +352,16 @@ export function SignIn({ lang }: { lang: Lang }) {
           </button>
         </form>
 
+        {mode === "up" && billingEnabled && (
+          <a
+            href="/partner"
+            className="flex items-center gap-2 p-2.5 rounded-2xl bg-tekhelet/5 border border-tekhelet/15 text-tekhelet hover:bg-tekhelet/10 transition justify-center text-xs font-semibold text-center"
+          >
+            <Icon name="groups" className="text-base shrink-0" />
+            <span>{tr(lang, "partnerSignUpBadge")}</span>
+          </a>
+        )}
+
         {mode === "in" && (
           <button
             onClick={requestReset}
@@ -359,7 +384,7 @@ export function SignIn({ lang }: { lang: Lang }) {
         </button>
 
         <p className="text-[11px] text-ink/40 text-center">{tr(lang, "footer")}</p>
-        <p className="text-[11px] text-ink/40 text-center flex justify-center gap-1.5">
+        <p className="text-[11px] text-ink/40 text-center flex flex-wrap justify-center gap-1.5">
           <a href="/terms" target="_blank" rel="noopener noreferrer" className="hover:text-tekhelet hover:underline">
             {tr(lang, "termsLink")}
           </a>
@@ -371,6 +396,14 @@ export function SignIn({ lang }: { lang: Lang }) {
           <a href="/accessibility" target="_blank" rel="noopener noreferrer" className="hover:text-tekhelet hover:underline">
             {tr(lang, "accessibilityLink")}
           </a>
+          {billingEnabled && (
+            <>
+              <span>·</span>
+              <a href="/partner" className="hover:text-tekhelet hover:underline">
+                {tr(lang, "partnerProgramLink")}
+              </a>
+            </>
+          )}
         </p>
       </div>
 

@@ -10,7 +10,7 @@ import base64
 import hashlib
 import hmac
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import app.db as db
 import pytest
@@ -261,7 +261,7 @@ def test_cancelling_an_annual_plan_stops_the_instalments(fresh_db, monkeypatch):
 def test_the_annual_rate_is_a_real_discount_on_the_monthly_one():
     from app import plans
 
-    for tid in ("basic", "pro", "institution"):
+    for tid in ("basic", "plus", "pro", "institution"):
         # Both figures are per-month now, so they compare directly.
         assert plans.price_ils(tid, "annual") < plans.price_ils(tid, "monthly")
         assert plans.annual_saving_pct(tid) >= 15
@@ -403,3 +403,65 @@ def test_an_underpaid_upgrade_never_takes_away_the_tier_already_held(fresh_db):
     _charge("u-w", 5.0)        # a new charge, nowhere near anything
 
     assert fresh_db.get_plan("u-w") == "pro"
+
+
+def test_referral_rewards_expire_after_90_days(fresh_db):
+    """Rewards expire after exactly 3 months (90 days). Older rewards become status='expired'."""
+    referrer = "u-ref-exp"
+    referred = "u-stu-exp"
+    conn = db.get_conn()
+    old_ts = (datetime.now(UTC) - timedelta(days=91)).isoformat()
+    conn.execute(
+        "INSERT INTO referral_rewards (referrer_owner_id, referred_owner_id, charge_amount_ils, reward_ils, status, created_at) "
+        "VALUES (?, ?, 100.0, 10.0, 'open', ?)",
+        (referrer, referred, old_ts)
+    )
+    conn.commit()
+
+    stats = db.get_referral_stats(referrer)
+    assert stats["open_credit_ils"] == 0.0
+
+    recent_ts = (datetime.now(UTC) - timedelta(days=5)).isoformat()
+    conn.execute(
+        "INSERT INTO referral_rewards (referrer_owner_id, referred_owner_id, charge_amount_ils, reward_ils, status, created_at) "
+        "VALUES (?, ?, 100.0, 10.0, 'open', ?)",
+        (referrer, referred, recent_ts)
+    )
+    conn.commit()
+    stats2 = db.get_referral_stats(referrer)
+    assert stats2["open_credit_ils"] == 10.0
+
+
+def test_auto_pull_credits_from_open_referral_reward_when_credits_exhausted(fresh_db):
+    """When a user runs out of credits, spend_credits auto-converts from valid open referral balance
+    unless auto_convert_credits is toggled off."""
+    user = "u-autopull"
+    db.create_referral_partner(user, "AUTOPULL123")
+    conn = db.get_conn()
+    conn.execute(
+        "INSERT INTO referral_rewards (referrer_owner_id, referred_owner_id, charge_amount_ils, reward_ils, status, created_at) "
+        "VALUES (?, 'stu-1', 80.0, 12.0, 'open', ?)",
+        (user, db._now())
+    )
+    conn.commit()
+
+    assert db.get_credits(user) == 0
+    stats = db.get_referral_stats(user)
+    assert stats["open_credit_ils"] == 12.0
+    assert stats["auto_convert_credits"] is True
+
+    # User needs 2 credits (2 * 1.20 = 2.40 ILS). Auto-pull converts 2 credits and spends them
+    spent, balance = db.spend_credits(user, 2)
+    assert spent is True
+    assert balance == 0
+
+    stats_after = db.get_referral_stats(user)
+    assert stats_after["open_credit_ils"] == 9.60
+    assert stats_after["used_credit_ils"] == 2.40
+
+    # Now toggle OFF auto-conversion
+    db.set_auto_convert_credits(user, False)
+    assert db.get_auto_convert_credits(user) is False
+
+    spent_off, _ = db.spend_credits(user, 10)
+    assert spent_off is False

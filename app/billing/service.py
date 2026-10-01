@@ -250,6 +250,16 @@ def _apply_charge(owner: str, normalized: dict, *, now: datetime | None = None) 
     except Exception:               # noqa: BLE001 — a failed rebate must not fail the whole webhook
         _log.exception("coupon discount rebate failed for %s", owner)
 
+    try:
+        redemption = db.get_referral_redemption(owner)
+        if redemption and amount > 0:
+            referrer_id = redemption["referrer_owner_id"]
+            db.record_referral_reward(referrer_id, owner, amount, reward_pct=10.0)
+            _log.info("referral reward recorded for referrer %s from %s (amount=₪%.2f)",
+                      referrer_id, owner, amount)
+    except Exception:               # noqa: BLE001 — referral reward recording must not fail billing
+        _log.exception("referral reward recording failed for %s", owner)
+
 
 def _apply_coupon_discount(owner: str, amount: float, txn_uid: str | None, tier: str, cycle: str,
                            now: datetime, *, email: str = "", name: str = "") -> None:

@@ -120,6 +120,8 @@ _AUTH_EXEMPT = (
     "/billing/webhook",
     "/auth/email-hook",
     "/account/email-hook",
+    "/api/referral/validate",
+    "/referral/validate",
 )
 
 

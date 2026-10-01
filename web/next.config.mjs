@@ -46,6 +46,7 @@ const nextConfig = {
       ...proxy("auth"),       // /auth/email-hook
       ...proxy("billing"),    // /billing/config, /checkout, /cancel
       ...proxy("coupons"),    // /coupons/redeem
+      ...proxy("referrals"),  // /referrals/status, /referrals/generate, /referrals/claim, etc.
       // These three were all missing, and none failed loudly — each feature reported the 404 HTML
       // in its own words instead. tests/unit/test_api_proxy_coverage.py derives this list from
       // web/lib/api.ts so the next one cannot go unnoticed; it found the last two on its first run.
