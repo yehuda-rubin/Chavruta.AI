@@ -1159,10 +1159,16 @@ def _lesson_job_md(question: str, hits, lang: str, *, audience: str | None,
         who = f" ({h.commentator_id})" if getattr(h, "commentator_id", None) else ""
         ref_str = getattr(h, "ref", "") or ""
         if lang == "he":
-            title = talmud_hebrew_display_ref(ref_str) or hebrew_display_ref(ref_str) or ref_str
+            try:
+                title = talmud_hebrew_display_ref(ref_str) or hebrew_display_ref(ref_str) or ref_str
+            except Exception:
+                title = ref_str
             header = f"### [S{i}] {title} (מזהה מקור: {ref_str}){who}"
         else:
-            title = talmud_english_display_ref(ref_str) or ref_str
+            try:
+                title = talmud_english_display_ref(ref_str) or ref_str
+            except Exception:
+                title = ref_str
             header = f"### [S{i}] {title} (source ID: {ref_str}){who}"
         clean_text = source_body(getattr(h, "text", "") or "").strip()
         lines += [header, clean_text, ""]
@@ -2127,13 +2133,44 @@ def _fetch_ranked_hits(targets: list[str], *, filters=None, limit: int | None = 
     return [_to_hit(h) for h in raw]
 
 
+def _dedup_hits(hits: list) -> list:
+    seen = set()
+    out = []
+    for h in hits:
+        key = getattr(h, "chunk_id", None) or getattr(h, "ref", None)
+        if key and key not in seen:
+            seen.add(key)
+            out.append(h)
+    return out
+
+
+_GENERIC_CALENDAR_QUERY_RE = re.compile(
+    r"^(?:"
+    r"(?:מה|איזה|איזו|ספר\s+לי\s+על|מהי|מי|תספר\s+לי\s+על|על\s+מה\s+(?:מדבר(?:ת)?|הם\s+מדברים)|תסכם|סכם|מה\s+הנושא\s+של)\s+"
+    r")?"
+    r"(?:פרשת\s+השבוע|הפרשה(?:\s+השבוע)?|הדף\s+היומי|הדף(?:\s+היומי)?|דף\s+יומי|פרשה|פרשתנו)"
+    r"[\s?!.]*$"
+    r"|^(?:what(?:\s+is)?\s+)?(?:the\s+)?(?:parsha|parashat\s+hashavua|torah\s+portion|daf\s+yomi|daily\s+daf)[\s?!.]*$",
+    re.IGNORECASE,
+)
+
+
+def _is_generic_calendar_query(text: str) -> bool:
+    clean = " ".join((text or "").split()).strip()
+    if not clean:
+        return True
+    if is_pure_greeting(clean):
+        return True
+    return bool(_GENERIC_CALENDAR_QUERY_RE.match(clean))
+
+
 def _run_parsha(question: str, lang: str, history=None, owner_id: str = "local",
                 llm=None) -> QueryResponse:
     """Parshat HaShavua: resolve this week's range from Sefaria's calendar (cached — see
-    _resolve_parsha_cached), fetch its verses + commentaries, then default to a direct Q&A turn
-    scoped to those sources — or a full lesson if the model judges the user actually asked for one
-    (see _wants_full_lesson). No local parsha-name table: Sefaria's own ref range is authoritative,
-    including on a combined-parsha week."""
+    _resolve_parsha_cached). Upfront, provide the bounding scope (תיחום): boundary verses of the parsha
+    plus Haftarah opening/closing. When the user asks a substantive question, retrieve targeted sources
+    matching the question, with agentic ===NEED_SOURCES=== on demand. Default to direct Q&A, or full
+    lesson if requested."""
     pipeline = _get_pipeline()
     llm = llm or pipeline.llm
     lang = lang or "he"
@@ -2143,30 +2180,43 @@ def _run_parsha(question: str, lang: str, history=None, owner_id: str = "local",
         msg = ("לא הצלחנו לזהות את פרשת השבוע כרגע — נסו שוב בעוד רגע." if he
                else "Couldn't resolve this week's parsha right now — please try again shortly.")
         return QueryResponse(answer=msg, citations=[], grounded=False, intent="parsha", files=[])
+
     verse_refs = expand_range(info.ref_range)
-    ref_variants = with_ref_variants(verse_refs)
-    targets = ref_variants + commentary_refs(ref_variants, list(COMMENTATOR_HE))
-    hits = _fetch_ranked_hits(targets, limit=max(len(targets) * 4, 400))
-    # The Haftarah (a separate Nevi'im reading) gets only its OPENING and CLOSING pasuk up front —
-    # not the full range, and no commentaries at all. It's a secondary reading relative to the
-    # parsha itself (whose full text + commentary IS preloaded above), so the model is given just
-    # enough to know what it is and where it starts/ends; if the turn actually needs the intervening
-    # verses or a commentary on them, the agentic ===NEED_SOURCES=== loop can pull them on demand
-    # (same self-fetch mechanism every other thin-retrieval turn already relies on).
+    # ── Boundary scope (תיחום): opening and closing verses of the parsha ──
+    boundary_refs = {verse_refs[0], verse_refs[1], verse_refs[-1]} if len(verse_refs) >= 3 else set(verse_refs)
+    boundary_hits = _fetch_ranked_hits(with_ref_variants(list(boundary_refs)), limit=10)
+
     haftarah_hits: list = []
     if info.haftarah_ref:
         haftarah_verse_refs = expand_range(info.haftarah_ref)
         if haftarah_verse_refs:
-            boundary_refs = {haftarah_verse_refs[0], haftarah_verse_refs[-1]}
-            haftarah_hits = _fetch_ranked_hits(with_ref_variants(list(boundary_refs)), limit=20)
+            h_bounds = {haftarah_verse_refs[0], haftarah_verse_refs[-1]}
+            haftarah_hits = _fetch_ranked_hits(with_ref_variants(list(h_bounds)), limit=20)
+
     topic = info.name_he if he else info.name_en
     raw_question = question
+    clean_q = " ".join((raw_question or "").split()).strip()
+
+    # ── Substantive question: retrieve targeted sources matching user's question ──
+    specific_hits: list = []
+    if clean_q and not _is_generic_calendar_query(clean_q) and hasattr(pipeline, "retriever"):
+        try:
+            q = Query(text=f"{topic} {clean_q}", lang=lang, intent=Intent.QA)
+            rq = pipeline._resolve_query(q, history=history) if hasattr(pipeline, "_resolve_query") else q
+            res = pipeline.retriever.retrieve(rq, top_k=15)
+            specific_hits = list(res.hits)
+        except Exception:
+            _log.warning("retrieval for parsha specific question failed; falling back to boundary hits", exc_info=True)
+
+    all_hits = _dedup_hits(specific_hits + boundary_hits + haftarah_hits)
+
     if _wants_full_lesson(raw_question):
         tpl = _select_template(topic, "yeshiva", "", lang=lang)
-        return _generate_lesson_from_hits(topic, _cap_hits(hits, _LESSON_HIT_CAP, min_commentaries=15) + haftarah_hits,
+        return _generate_lesson_from_hits(topic, _cap_hits(all_hits, _LESSON_HIT_CAP, min_commentaries=15),
                                           lang, he, audience="yeshiva", grade_band="", length="medium",
                                           tpl=tpl, history=history, owner_id=owner_id, llm=llm)
-    hits = _cap_hits(hits, _CHAVRUTA_HIT_CAP, min_commentaries=15) + haftarah_hits
+
+    hits = _cap_hits(all_hits, _CHAVRUTA_HIT_CAP, min_commentaries=15)
     prompt = f"{_parsha_context_note(info, he)}\n{raw_question}"
     return _generate_qa_turn_from_hits(prompt, hits, lang, he, history, llm=llm)
 
@@ -2177,30 +2227,30 @@ def _parsha_context_note(info, he: bool) -> str:
     then reads the Haftarah) from the Haftarah (a SEPARATE reading from Nevi'im/Prophets). Left to
     infer this from the source refs alone, the model has no reason to keep them apart."""
     if he:
-        note = f"(לעיונך: פרשת השבוע היא {info.ref_range}. המפטיר הוא הפסוקים האחרונים של קריאת התורה עצמה — חלק מהפרשה, לא קריאה נפרדת."
+        note = f"(לעיונך: פרשת השבוע היא {info.name_he} ({info.ref_range}). קיבלת את תיחום הפסוקים (פתיחה וסיום) ומקורות ממוקדים לשאלת המשתמש. המפטיר הוא הפסוקים האחרונים של קריאת התורה עצמה — חלק מהפרשה, לא קריאה נפרדת."
         if info.haftarah_ref:
             note += (f" ההפטרה, לעומת זאת, היא קריאה נפרדת לגמרי מהנביאים: {info.haftarah_ref}. "
-                     f"אל תבלבל בין השניים. קיבלת רק את הפסוק הראשון והאחרון של ההפטרה — אם את/ה "
-                     f"צריך/ה את הפסוקים שביניהם, או פירוש עליהם, בקש/י אותם דרך ===NEED_SOURCES===.")
+                     f"אל תבלבל בין השניים. קיבלת את הפסוק הראשון והאחרון של ההפטרה — אם את/ה "
+                     f"צריך/ה פסוקים נוספים או פירוש עליהם, בקש/י אותם דרך ===NEED_SOURCES===.")
         return note + ")"
-    note = (f"(For reference: this week's Torah portion is {info.ref_range}. The Maftir is the final "
+    note = (f"(For reference: this week's Torah portion is {info.name_en} ({info.ref_range}). You were given the boundary verses and sources focused on the user's question. The Maftir is the final "
            f"verses of the Torah reading itself — part of the parsha, not a separate reading.")
     if info.haftarah_ref:
         note += (f" The Haftarah, by contrast, is an entirely separate reading from Nevi'im/Prophets: "
-                 f"{info.haftarah_ref}. Do not conflate the two. You were given only the Haftarah's "
-                 f"opening and closing verse — if you need the verses in between, or a commentary on "
-                 f"them, request them via ===NEED_SOURCES===.")
+                 f"{info.haftarah_ref}. Do not conflate the two. You were given the Haftarah's "
+                 f"opening and closing verse — if you need additional verses or commentaries, "
+                 f"request them via ===NEED_SOURCES===.")
     return note + ")"
 
 
 def _run_daf_yomi(question: str, lang: str, history=None, owner_id: str = "local",
                   llm=None) -> QueryResponse:
-    """Daf Yomi: resolve today's daf from Sefaria's calendar (cached), fetch BOTH amudim (Daf Yomi
-    covers a whole daf per day) across all segments plus their commentaries, sort so Gemara/Rashi lead and Tosafot
-    follows (daf_yomi_sort_key), then default to a chavruta-style turn — or a full lesson if the
-    model judges the user actually asked for one."""
+    """Daf Yomi: resolve today's daf from Sefaria's calendar (cached). Upfront, provide the bounding
+    scope (תיחום): opening boundary segments of amud a and amud b + Rashi. When the user asks a
+    substantive question, retrieve targeted sources matching the question, with agentic
+    ===NEED_SOURCES=== on demand. Mirrors Parshat HaShavua: defaults to direct Q&A, or full lesson if
+    requested."""
     from chavruta.corpus.refs import daf_amud_to_corpus_n
-    from chavruta.lessons.builder import daf_yomi_sort_key
 
     pipeline = _get_pipeline()
     llm = llm or pipeline.llm
@@ -2211,28 +2261,43 @@ def _run_daf_yomi(question: str, lang: str, history=None, owner_id: str = "local
         msg = ("לא הצלחנו לזהות את הדף היומי כרגע — נסו שוב בעוד רגע." if he
                else "Couldn't resolve today's daf yomi right now — please try again shortly.")
         return QueryResponse(answer=msg, citations=[], grounded=False, intent="dafyomi", files=[])
+
     n_a = daf_amud_to_corpus_n(info.daf, "a")
     n_b = daf_amud_to_corpus_n(info.daf, "b")
     t_clean = info.tractate.replace(" ", "_")
-    # Enumerate all segments for both amudim (amud a and amud b) plus legacy/high-level variants
-    daf_refs = [f"{t_clean}.{n_a}.{i}" for i in range(1, 36)] + [f"{t_clean}.{n_b}.{i}" for i in range(1, 36)]
-    daf_refs.extend([f"{info.tractate} {info.daf}a", f"{info.tractate} {info.daf}b"])
-    ref_variants = with_ref_variants(daf_refs)
-    # Preload only Gemara base segments + Rashi up front; secondary commentaries (Tosafot, etc.)
-    # can be requested on-demand via ===NEED_SOURCES===
+
+    # ── Boundary scope (תיחום): opening boundary segments of amud a and amud b + Rashi ──
+    boundary_refs = [f"{t_clean}.{n_a}.1", f"{t_clean}.{n_a}.2", f"{t_clean}.{n_b}.1"]
+    ref_variants = with_ref_variants(boundary_refs)
     targets = ref_variants + commentary_refs(ref_variants, ["rashi"])
-    hits = _fetch_ranked_hits(targets, limit=max(len(targets) * 4, 400))
-    hits.sort(key=daf_yomi_sort_key)
+    boundary_hits = _fetch_ranked_hits(targets, limit=20)
+
     topic = f"{info.tractate} {info.daf}"
     raw_question = question
+    clean_q = " ".join((raw_question or "").split()).strip()
+
+    # ── Substantive question: retrieve targeted sources matching user's question ──
+    specific_hits: list = []
+    if clean_q and not _is_generic_calendar_query(clean_q) and hasattr(pipeline, "retriever"):
+        try:
+            q = Query(text=f"{topic} {clean_q}", lang=lang, intent=Intent.QA, tractates=[info.tractate])
+            rq = pipeline._resolve_query(q, history=history) if hasattr(pipeline, "_resolve_query") else q
+            res = pipeline.retriever.retrieve(rq, top_k=15)
+            specific_hits = list(res.hits)
+        except Exception:
+            _log.warning("retrieval for daf yomi specific question failed; falling back to boundary hits", exc_info=True)
+
+    all_hits = _dedup_hits(specific_hits + boundary_hits)
+
     if _wants_full_lesson(raw_question):
         tpl = _select_template(topic, "yeshiva", "", lang=lang)
-        return _generate_lesson_from_hits(topic, _cap_hits(hits, _LESSON_HIT_CAP, min_commentaries=15), lang, he,
-                                          audience="yeshiva", grade_band="", length="medium",
+        return _generate_lesson_from_hits(topic, _cap_hits(all_hits, _LESSON_HIT_CAP, min_commentaries=15),
+                                          lang, he, audience="yeshiva", grade_band="", length="medium",
                                           tpl=tpl, history=history, owner_id=owner_id, llm=llm)
-    hits = _cap_hits(hits, _CHAVRUTA_HIT_CAP, min_commentaries=15)
+
+    hits = _cap_hits(all_hits, _CHAVRUTA_HIT_CAP, min_commentaries=15)
     prompt = f"{_daf_yomi_context_note(info.tractate, info.daf, he)}\n{raw_question}"
-    return _generate_chavruta_turn(prompt, hits, lang, he, history, weak=(not hits), llm=llm)
+    return _generate_qa_turn_from_hits(prompt, hits, lang, he, history, llm=llm)
 
 
 def _daf_yomi_context_note(tractate: str, daf: int, he: bool) -> str:
@@ -2243,12 +2308,12 @@ def _daf_yomi_context_note(tractate: str, daf: int, he: bool) -> str:
     We already know the real daf from Sefaria, so just tell the model directly rather than making
     it infer a fact it structurally cannot get right from what it's shown."""
     if he:
-        return (f"(לעיונך: הדף האמיתי של היום הוא {tractate} דף {daf}. קיבלת את גוף הגמרא ופירוש רש\"י בלבד — "
-               f"אם את/ה צריך/ה פירוש תוספות או מפרשים נוספים, בקש/י אותם דרך ===NEED_SOURCES===. "
+        return (f"(לעיונך: הדף האמיתי של היום הוא {tractate} דף {daf}. קיבלת את תיחום פתיחת הדף ומקורות ממוקדים לשאלת המשתמש — "
+               f"אם את/ה צריך/ה מקטעים נוספים, פירוש רש\"י, תוספות או מפרשים נוספים, בקש/י אותם דרך ===NEED_SOURCES===. "
                f"אם המשתמש שואל על מספר הדף, ענה {daf} ולא מספר אחר — המספרים שמופיעים ברפרנסים של "
                f"המקורות למטה הם מספור פנימי של מסד הנתונים, לא מספר הדף האמיתי.)")
-    return (f"(For reference: today's real daf is {tractate} {daf}. You were given the Gemara text and Rashi only — "
-           f"if you need Tosafot or other commentaries, request them via ===NEED_SOURCES===. "
+    return (f"(For reference: today's real daf is {tractate} {daf}. You were given the daf boundary and sources focused on the user's question — "
+           f"if you need additional segments, Rashi, Tosafot or other commentaries, request them via ===NEED_SOURCES===. "
            f"If asked which daf this is, answer {daf} — the numbers in the source refs below are the "
            f"database's internal numbering, not the real daf number.)")
 

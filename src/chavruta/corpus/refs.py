@@ -597,12 +597,20 @@ def hebrew_display_ref(ref: str | None) -> str | None:
         the corpus's amud-linear→daf conversion."""
         tail, prefix = ref, ""
         if cid and name:
-            tail = ref.split(_ON, 1)[1]
-            # Drop the trailing comment-index segment ('<base-ref>.<k>') → the base ref.
-            head, _dot, last = tail.rpartition(".")
-            if head and last.isdigit():
-                tail = head
-            prefix = f"{name} על "
+            if _ON in ref:
+                tail = ref.split(_ON, 1)[1]
+                # Drop the trailing comment-index segment ('<base-ref>.<k>') → the base ref.
+                head, _dot, last = tail.rpartition(".")
+                if head and last.isdigit():
+                    tail = head
+                prefix = f"{name} על "
+            elif cid in _TARGUM_PREFIXED:
+                pref = commentator_title(cid) + "_"
+                if ref.startswith(pref):
+                    tail = ref[len(pref):]
+                prefix = f"{name} על "
+            else:
+                return None
         he_book, rest = _split_book(tail.replace("_", " "))
         return f"{prefix}{he_book} {rest}" if he_book is not None else None
 

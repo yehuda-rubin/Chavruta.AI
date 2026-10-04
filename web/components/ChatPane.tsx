@@ -512,9 +512,6 @@ export function ChatPane({
             rows={1}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) submit(e);
-            }}
             className="flex-1 bg-transparent outline-none font-serif text-[16px] placeholder:text-ink/35 resize-none leading-snug sm:leading-relaxed max-h-32 py-1"
             placeholder={tr(lang, "askPlaceholder")}
           />

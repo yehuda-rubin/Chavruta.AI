@@ -244,3 +244,9 @@ def test_english_prompt_source_header_formatting():
     assert '[S1] Tractate Berakhot daf 49b (source ID: Berakhot.98.12):\nBerakhot text' in user_content
     assert '[S2] Genesis.1.1:\nGenesis text' in user_content
 
+
+def test_onkelos_display_ref():
+    assert hebrew_display_ref("Onkelos_Genesis.1.1") == "אונקלוס על בראשית 1:1"
+    assert hebrew_display_ref("Onkelos_Exodus.20.2") == "אונקלוס על שמות 20:2"
+
+

@@ -179,12 +179,6 @@ export function FloatingAskButton({
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
 
   const resetChat = () => {
     setMessages([]);
@@ -473,7 +467,6 @@ export function FloatingAskButton({
                 ref={textareaRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
                 rows={1}
                 placeholder={
                   lang === "he"

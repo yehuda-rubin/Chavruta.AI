@@ -242,14 +242,38 @@ def test_cap_hits_preserves_min_commentaries_when_base_exceeds_cap():
     assert sum(1 for h in out if h.commentator_id) == 5
 
 
-def test_run_daf_yomi_fetches_multiple_segments_across_both_amudim(monkeypatch):
+def test_run_daf_yomi_defaults_to_qa_turn_like_parsha(monkeypatch):
     info = cal.DafYomiInfo(tractate="Chullin", daf=123)
     monkeypatch.setattr(api, "_get_pipeline", lambda: __import__("types").SimpleNamespace(llm="llm"))
     monkeypatch.setattr(api, "_resolve_daf_yomi_cached", lambda: info)
     monkeypatch.setattr(api, "_wants_full_lesson", lambda *a, **k: False)
-    monkeypatch.setattr(api, "_generate_chavruta_turn",
+
+    def _boom_chavruta(*a, **k):
+        raise AssertionError("daf yomi default turn must now go through _generate_qa_turn_from_hits like parsha")
+
+    called = {}
+
+    def _fake_qa_turn(question, hits, lang, he, history, llm):
+        called["hit"] = True
+        return api.QueryResponse(answer="ok", citations=[], grounded=True, intent="qa", files=[])
+
+    monkeypatch.setattr(api, "_generate_chavruta_turn", _boom_chavruta)
+    monkeypatch.setattr(api, "_generate_qa_turn_from_hits", _fake_qa_turn)
+    monkeypatch.setattr(api, "_fetch_ranked_hits", lambda targets, **k: [_hit(t) for t in targets])
+
+    res = api._run_daf_yomi("שאלה על הדף", "he")
+    assert called.get("hit") is True
+    assert res.answer == "ok"
+
+
+def test_run_daf_yomi_fetches_boundary_segments_and_rashi(monkeypatch):
+    info = cal.DafYomiInfo(tractate="Chullin", daf=123)
+    monkeypatch.setattr(api, "_get_pipeline", lambda: __import__("types").SimpleNamespace(llm="llm"))
+    monkeypatch.setattr(api, "_resolve_daf_yomi_cached", lambda: info)
+    monkeypatch.setattr(api, "_wants_full_lesson", lambda *a, **k: False)
+    monkeypatch.setattr(api, "_generate_qa_turn_from_hits",
                         lambda *a, **k: api.QueryResponse(answer="ok", citations=[], grounded=True,
-                                                          intent="chavruta", files=[]))
+                                                          intent="qa", files=[]))
 
     fetch_calls = []
 
@@ -259,16 +283,14 @@ def test_run_daf_yomi_fetches_multiple_segments_across_both_amudim(monkeypatch):
 
     monkeypatch.setattr(api, "_fetch_ranked_hits", _fake_fetch)
 
-    api._run_daf_yomi("שאלה על הדף", "he")
+    api._run_daf_yomi("מה הדף היום?", "he")
 
     assert len(fetch_calls) == 1
     targets = fetch_calls[0]
-    # Verify segments beyond .1 are included for both amud a (245) and amud b (246)
-    assert any("Chullin.245.2" in t or "Chullin 245.2" in t for t in targets)
-    assert any("Chullin.245.10" in t or "Chullin 245.10" in t for t in targets)
-    assert any("Chullin.246.2" in t or "Chullin 246.2" in t for t in targets)
-    assert any("Chullin.246.10" in t or "Chullin 246.10" in t for t in targets)
-    # Verify Rashi is preloaded on segments beyond .1, while secondary commentaries like Tosafot are not
-    assert any("Rashi_on_Chullin.245.2" in t for t in targets)
-    assert any("Rashi_on_Chullin.246.2" in t for t in targets)
+    # Verify boundary segments for both amud a (245) and amud b (246) are included
+    assert any("Chullin.245.1" in t or "Chullin 245.1" in t for t in targets)
+    assert any("Chullin.246.1" in t or "Chullin 246.1" in t for t in targets)
+    # Verify Rashi is preloaded on boundary segments, while secondary commentaries are not
+    assert any("Rashi_on_Chullin.245.1" in t for t in targets)
     assert not any("Tosafot_on_Chullin" in t for t in targets)
+

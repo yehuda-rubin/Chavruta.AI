@@ -50,6 +50,7 @@ export function IntentBar({
   return (
     <div className="relative shrink-0">
       <button
+        type="button"
         onClick={(e) => {
           e.stopPropagation();
           if (!locked) setOpen((o) => !o);
@@ -76,6 +77,7 @@ export function IntentBar({
             const active = i === intent;
             return (
               <button
+                type="button"
                 key={i}
                 onClick={() => {
                   onPick(i);

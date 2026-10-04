@@ -112,12 +112,6 @@ export function AskChavrutaModal({
             placeholder="שאל את החברותא כל שאלה על לשון המקור, הסבר, השוואה או הלכה…"
             rows={3}
             className="w-full rounded-xl bg-white/70 border border-line/70 p-3 text-sm text-ink placeholder:text-ink/40 focus:outline-none focus:ring-2 focus:ring-tekhelet/30 font-sans resize-none"
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                if (customPrompt.trim()) handleSubmit();
-              }
-            }}
           />
         </div>
 
