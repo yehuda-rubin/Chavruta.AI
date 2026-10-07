@@ -697,6 +697,14 @@ export default function Home() {
     return <Blocked lang={lang} until={me.blocked_until} reason={me.blocked_reason} />;
   }
 
+  const hasSources =
+    userSources.length > 0 ||
+    messages.some((m) => m.role === "assistant" && (m.citations || []).some((c) => c && c.ref));
+  const openSources = () => {
+    setSourcesCollapsed(false);
+    if (typeof window !== "undefined" && window.matchMedia("(max-width: 1023px)").matches) setMobileSources(true);
+  };
+
   // Panels shared by the desktop-inline layout and the mobile drawers. `mobile` closes the drawer on
   // select/new/collapse so the user lands back on the chat.
   const sessionsPanel = (mobile: boolean) => (
@@ -777,10 +785,15 @@ export default function Home() {
           userEmail={auth.user?.email}
           userSources={userSources}
           onAddSource={() => setShowAddSource(true)}
+          onOpenSources={openSources}
         />
 
+        {/* The sources column exists only once there is something in it (a cited answer or a source the
+            user added). Before that it was a tall empty card saying "sources will appear here", and the
+            chat — the thing people came for — got the narrower half of the screen. Adding a source is a
+            "+" in the composer, so nothing is lost by hiding the column. */}
         <div className="hidden lg:contents">
-          {sourcesCollapsed ? (
+          {!hasSources ? null : sourcesCollapsed ? (
             <Rail lang={lang} side="end" icon="menu_book" title={tr(lang, "openSourcesTip")} onExpand={() => setSourcesCollapsed(false)} />
           ) : (
             sourcesPanel(false)

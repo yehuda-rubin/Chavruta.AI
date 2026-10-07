@@ -69,6 +69,7 @@ body.theme-dark [class*="bg-cream"] { background-color: rgba(48, 41, 90, 0.55) !
 body.theme-dark [class*="bg-white"] { background-color: rgba(48, 41, 90, 0.55) !important; }
 body.theme-dark [class*="border-white"],
 body.theme-dark [class*="border-line"] { border-color: rgba(255, 255, 255, 0.1) !important; }
+body.theme-dark ::placeholder { color: rgba(235, 232, 250, 0.42); }
 body.theme-dark .menu-surface { background: #1f1a40; }
 body.theme-dark ::-webkit-scrollbar-thumb { background: #3b3470; }
 

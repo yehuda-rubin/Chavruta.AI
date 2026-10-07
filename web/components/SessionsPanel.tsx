@@ -66,26 +66,26 @@ export function SessionsPanel({
   };
 
   return (
-    <aside className="w-72 shrink-0 glass rounded-[28px] p-4 flex flex-col">
+    <aside className="w-64 shrink-0 glass rounded-[28px] p-3 flex flex-col">
       <div className="flex items-center gap-2 mb-3">
         <button
           onClick={onNew}
-          className="flex-1 grad text-white py-3 rounded-2xl font-serif text-lg font-bold hover:opacity-95 transition shadow-lg shadow-tekhelet/20"
+          className="flex-1 grad text-white min-h-11 rounded-full text-base font-semibold hover:opacity-95 transition inline-flex items-center justify-center gap-1.5"
         >
           {tr(lang, "newChat")}
         </button>
         <button
           onClick={onCollapse}
-          className="h-10 w-10 rounded-2xl glass grid place-items-center text-ink/50 hover:text-tekhelet shrink-0 transition"
+          className="h-11 w-11 rounded-full grid place-items-center text-ink/45 hover:bg-cream-2 hover:text-indigo shrink-0 transition"
           title={tr(lang, "collapse")}
         >
           <Icon name={lang === "en" ? "chevron_left" : "chevron_right"} />
         </button>
       </div>
-      <p className="text-[11px] tracking-widest text-ink/40 font-bold uppercase mt-3 mb-2 px-2">
+      <p className="text-xs text-ink/45 font-semibold mt-4 mb-1.5 px-3">
         {tr(lang, "recentChats")}
       </p>
-      <nav className="flex flex-col gap-1.5 overflow-y-auto flex-1">
+      <nav className="flex flex-col gap-0.5 overflow-y-auto flex-1">
         {sessions.map((s) => {
           const active = s.id === activeId;
           const pinned = !!s.pinned_at;
@@ -97,8 +97,8 @@ export function SessionsPanel({
               key={s.id}
               onClick={() => !editing && onSelect(s.id)}
               className={
-                "group flex items-center gap-1 rounded-2xl px-3 py-2.5 cursor-pointer transition " +
-                (active ? "bg-white/80 ring-2 ring-tekhelet/15" : "hover:bg-white/50")
+                "group flex items-center gap-1 rounded-2xl px-3 min-h-11 cursor-pointer transition-colors " +
+                (active ? "bg-cream-2 text-indigo" : "hover:bg-cream")
               }
             >
               {editing ? (
@@ -121,7 +121,7 @@ export function SessionsPanel({
                     e.stopPropagation();
                     startRename(s);
                   }}
-                  className="min-w-0 flex-1 truncate text-[15px] text-ink/80 font-serif"
+                  className={"min-w-0 flex-1 truncate text-[15px] " + (active ? "font-semibold text-indigo" : "text-ink/80")}
                 >
                   {pinned && <Icon name="push_pin" className="text-[13px] align-middle me-1 text-gold" />}
                   {s.title || s.first_q || tr(lang, "newChatShort")}
@@ -209,26 +209,26 @@ export function SessionsPanel({
           );
         })}
       </nav>
-      <div className="mt-auto pt-3 flex flex-col gap-2">
+      <div className="mt-2 pt-2 border-t border-line flex flex-col gap-0.5">
         <button
           onClick={onOpenLessons}
-          className="w-full px-4 py-2.5 rounded-2xl glass text-ink/70 font-semibold text-sm hover:bg-white/60 hover:text-tekhelet transition flex items-center gap-2 cursor-pointer"
+          className="w-full px-3 min-h-11 rounded-2xl text-ink/70 font-medium text-[15px] hover:bg-cream hover:text-indigo transition-colors flex items-center gap-3 cursor-pointer"
         >
-          <Icon name="auto_stories" className="text-[19px]" />
+          <Icon name="auto_stories" className="text-[21px] text-ink/50" />
           <span>{tr(lang, "myShiurim")}</span>
         </button>
         <button
           onClick={onOpenSettings}
-          className="w-full px-4 py-2.5 rounded-2xl glass text-ink/70 font-semibold text-sm hover:bg-white/60 hover:text-tekhelet transition flex items-center gap-2 cursor-pointer"
+          className="w-full px-3 min-h-11 rounded-2xl text-ink/70 font-medium text-[15px] hover:bg-cream hover:text-indigo transition-colors flex items-center gap-3 cursor-pointer"
         >
-          <Icon name="settings" className="text-[19px]" />
+          <Icon name="settings" className="text-[21px] text-ink/50" />
           <span>{tr(lang, "settingsTitle")}</span>
         </button>
         <button
           onClick={onOpenSupport}
-          className="w-full px-4 py-2.5 rounded-2xl glass text-ink/70 font-semibold text-sm hover:bg-white/60 hover:text-tekhelet transition flex items-center gap-2 cursor-pointer"
+          className="w-full px-3 min-h-11 rounded-2xl text-ink/70 font-medium text-[15px] hover:bg-cream hover:text-indigo transition-colors flex items-center gap-3 cursor-pointer"
         >
-          <Icon name="help" className="text-[19px]" />
+          <Icon name="help" className="text-[21px] text-ink/50" />
           <span>{tr(lang, "supportTitle")}</span>
         </button>
       </div>
