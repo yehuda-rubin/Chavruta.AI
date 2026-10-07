@@ -8,6 +8,8 @@
   so Qdrant streams it from disk. Run it when the machine is idle.
 
   Idempotent: copies the snapshot into the container only if missing, recovers, then verifies count.
+  AFTER A RESTORE: the snapshot still contains the books in src/chavruta/corpus/data/excluded_works.json.
+  Re-run scripts/purge_excluded_books.py --apply (see docs/CORPUS.md section 6.1).
   ASCII-only on purpose (Windows PowerShell 5.1 mis-parses UTF-8 dashes/quotes without a BOM).
 
   Usage:

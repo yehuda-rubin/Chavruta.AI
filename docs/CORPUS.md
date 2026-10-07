@@ -167,6 +167,24 @@
 **מאגר המקור (chunks גולמיים — `gemara_chunks.jsonl`, `yerushalmi_chunks.jsonl`, … + דאטה לאימון LoRA):**
 [🤗 chavruta-torah-mixed](https://huggingface.co/datasets/Yehuda-Rubin/chavruta-torah-mixed).
 
+### 6.1 ספרים שהוסרו בכוונה — למחוק שוב אחרי כל שחזור מ-HF
+
+שלושה ספרים הוסרו מהקורפוס ב-**2026-10-07** כי אינם מקובלים על אף אחת מהקהילות (חרדים ודתיים):
+**ספר היובלים** (1,758 קטעים), **צוואות השבטים** (1,002) ו**מלחמות השם** של הרב יחיא קאפח (254).
+הרשימה, עם הסיבה לכל ספר, ב-`src/chavruta/corpus/data/excluded_works.json`.
+
+**המאגרים ב-HF לא נערכו**: ה-snapshot של `chavruta-commercial-index` הוא קובץ בינארי של Qdrant
+שאי אפשר לערוך במקום, ולכן הוא ומאגרי `chavruta-index-*` עדיין מכילים את שלושת הספרים. כלומר:
+
+> **כל טעינה, שחזור או העלאה מחדש מ-HF מחזירה אותם. אחרי כל שחזור הרץ שוב, על המארח:**
+> ```
+> cd ~/chavruta && python3 scripts/purge_excluded_books.py            # ספירה בלבד
+> python3 scripts/purge_excluded_books.py --apply                     # מחיקה מ-Qdrant ומ-search_index.db
+> docker compose restart search web
+> ```
+> הסקריפט מוחק לפי הרשימה ב-`excluded_works.json` משני המקומות (Qdrant ו-`data/search_index.db`).
+> ספר חדש שמוסיפים לרשימה נמחק באותה דרך; ספריית הספרים (`scripts/build_catalog.py`) מדלגת על הרשימה.
+
 ## 7. Serving prerequisites — payload indexes & ref format
 
 After loading the collection into a Qdrant **server** (the full-scale hybrid mode), two things are

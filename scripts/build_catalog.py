@@ -62,6 +62,8 @@ def main() -> None:
     live = bool(args.works)
 
     reader = json.loads(Path(args.reader_refs).read_text(encoding="utf-8")) if args.reader_refs else {}
+    excluded = {w["title_en"] for w in json.loads((DATA / "excluded_works.json").read_text(encoding="utf-8"))}
+    works = [w for w in works if w["title"] not in excluded]     # deliberately removed books (see excluded_works.json)
     books, dropped_lic, dropped_other = [], [], []
     he_mismatch = 0
     for w in works:
