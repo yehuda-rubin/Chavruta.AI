@@ -946,9 +946,10 @@ def _book_units(db: sqlite3.Connection, title_en: str) -> dict:
     is_bavli = title_en in HE_TRACTATES.values()
     ranges = [(stem + ".", stem + "/"), (stem + ",", stem + "-")]
     units: dict[tuple[str, int, str], int] = {}
+    first_row: dict[str, int] = {}     # section → first rowid: rows were loaded in canonical order
     for lo, hi in ranges:
-        for chunk_id, work_id in db.execute(
-                "SELECT chunk_id, work_id FROM chunks WHERE chunk_id >= ? AND chunk_id < ? LIMIT ?",
+        for rowid, chunk_id, work_id in db.execute(
+                "SELECT rowid, chunk_id, work_id FROM chunks WHERE chunk_id >= ? AND chunk_id < ? LIMIT ?",
                 (lo, hi, _TOC_MAX_ROWS)):
             suffix = "_" + (work_id or "")
             ref = chunk_id[: -len(suffix)] if suffix != "_" and chunk_id.endswith(suffix) else chunk_id
@@ -965,8 +966,9 @@ def _book_units(db: sqlite3.Connection, title_en: str) -> dict:
                     n, side = (n + 1) // 2, "a" if n % 2 else "b"
             key = (head, n, side)
             units[key] = units.get(key, 0) + 1
+            first_row[head] = min(first_row.get(head, rowid), rowid)
     out = []
-    for (head, n, side), count in sorted(units.items(), key=lambda kv: (kv[0][0], kv[0][1], kv[0][2])):
+    for (head, n, side), count in sorted(units.items(), key=lambda kv: (first_row[kv[0][0]], kv[0][1], kv[0][2])):
         section = head[len(stem) + 1:] if head.startswith(stem + ",") else ""
         out.append({"ref": f"{head}.{n}{side}", "section": section.lstrip("_").replace("_", " "),
                     "n": n, "side": side, "count": count})

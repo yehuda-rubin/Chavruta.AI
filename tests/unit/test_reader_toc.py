@@ -65,8 +65,9 @@ def test_bavli_amud_linear_refs_become_dapim(client):
 
 def test_sections_recorded_before_the_number(client):
     d = units(client, "Chizkuni")
-    assert [(u["section"], u["ref"]) for u in d["units"]] == [("Exodus", "Chizkuni,_Exodus.2"),
-                                                              ("Genesis", "Chizkuni,_Genesis.1")]
+    # canonical (load) order, not alphabetical: Genesis was loaded before Exodus here
+    assert [(u["section"], u["ref"]) for u in d["units"]] == [("Genesis", "Chizkuni,_Genesis.1"),
+                                                              ("Exodus", "Chizkuni,_Exodus.2")]
 
 
 def test_unknown_book_is_404(client):
