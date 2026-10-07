@@ -2,6 +2,8 @@ import type { Lang } from "./types";
 
 export interface ReaderSegment {
   ref: string;                 // e.g. "Genesis.1.1" or "Berakhot.2a.1"
+  ref_he?: string;             // citation in Hebrew, e.g. "בראשית א׳, א׳"
+  ref_en?: string;             // citation in English, e.g. "Genesis 1:1"
   label: string;               // e.g. "א", "1", "פסוק א"
   text_he: string;             // Hebrew text (vocalized or plain)
   text_en?: string | null;     // English translation if available
@@ -29,6 +31,7 @@ export interface CommentaryItem {
   commentator: string;         // e.g. "רש\"י", "רמב\"ן", "אבן עזרא", "ספורנו", "תוספות"
   commentator_en?: string;
   ref: string;                 // e.g. "Rashi on Genesis 1:1:1"
+  ref_he?: string;             // e.g. "רש\"י על בראשית א׳, א׳, א׳"
   type: "commentary" | "parallel" | "halacha" | "midrash" | "other";
   text_he: string;
   text_en?: string | null;

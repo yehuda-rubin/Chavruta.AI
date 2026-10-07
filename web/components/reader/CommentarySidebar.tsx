@@ -77,7 +77,7 @@ export function CommentarySidebar({
     setExpandedCards((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const segmentLabel = activeSegment ? formatHebrewRef(activeSegment.ref) : "";
+  const segmentLabel = activeSegment ? activeSegment.ref_he || formatHebrewRef(activeSegment.ref) : "";
 
   return (
     <>
@@ -202,9 +202,9 @@ export function CommentarySidebar({
                       <h3 className="font-serif text-base sm:text-lg font-bold text-tekhelet">
                         {item.commentator}
                       </h3>
-                      {item.ref && (
-                        <span className="text-[11px] text-ink/50 font-mono">
-                          {item.ref}
+                      {(item.ref_he || item.ref) && (
+                        <span className="text-[11px] text-ink/50" title={item.ref}>
+                          {item.ref_he || item.ref}
                         </span>
                       )}
                     </div>
@@ -265,7 +265,7 @@ export function CommentarySidebar({
                           type="button"
                           onClick={() =>
                             onCopy(
-                              `${item.text_he}\n(${item.commentator}, ${item.ref})`,
+                              `${item.text_he}\n(${item.commentator}, ${item.ref_he || item.ref})`,
                               item.commentator
                             )
                           }

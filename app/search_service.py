@@ -84,6 +84,8 @@ class SearchResponse(BaseModel):
 
 class ReaderSegment(BaseModel):
     ref: str
+    ref_he: str = ""      # 'בראשית א, א' — the citation in Hebrew, next to the Hebrew text
+    ref_en: str = ""      # 'Genesis 1:1' — the citation in English, next to the English text
     text_he: str = ""
     text_en: str | None = None
     segment_num: int
@@ -109,6 +111,7 @@ class ReaderUnitResponse(BaseModel):
 
 class ReaderLinkItem(BaseModel):
     ref: str
+    ref_he: str = ""
     source_ref: str = ""
     category: str = ""
     type: str = ""
@@ -878,6 +881,50 @@ def format_section_name(clean_ref: str) -> str:
 # ── Reader Endpoints ──────────────────────────────────────────────────────────
 _CATALOG_PATH = Path(__file__).resolve().parent.parent / "src" / "chavruta" / "corpus" / "data" / "catalog.json"
 _catalog_cache: bytes | None = None
+_title_index: dict[str, tuple[str, str]] | None = None   # English title -> (Hebrew title, category path)
+_REF_PARTS = re.compile(r"^(?P<title>.+?) (?P<nums>\d+(?::\d+)*)$")
+
+
+def _titles() -> dict[str, tuple[str, str]]:
+    global _title_index
+    if _title_index is None:
+        import json
+        try:
+            books = json.loads(_CATALOG_PATH.read_text(encoding="utf-8"))["books"]
+        except (OSError, ValueError, KeyError):
+            books = []
+        _title_index = {b["title_en"]: (b.get("title_he") or "", b.get("path") or "") for b in books}
+    return _title_index
+
+
+def _is_bavli_title(title: str) -> bool:
+    """A Bavli tractate or a commentary on one: their reader refs count amudim linearly (N = 2*daf -/+ 1)."""
+    t = _titles()
+    he_path = t.get(title, ("", ""))[1]
+    if he_path.startswith("Talmud/Bavli"):
+        return True
+    if " on " in title and not he_path.startswith(("Tosefta", "Talmud/Yerushalmi", "Mishnah")):
+        base = title.split(" on ", 1)[1]
+        return t.get(base, ("", ""))[1].startswith("Talmud/Bavli")
+    return False
+
+
+def ref_labels(ref: str) -> tuple[str, str]:
+    """(Hebrew, English) citation for a corpus display ref: 'Genesis 1:1' -> ('בראשית א, א', 'Genesis 1:1'),
+    'Berakhot 3:1' -> ('ברכות ב ע״א, א', 'Berakhot 2a:1'). Falls back to the ref itself for titles the
+    catalogue does not know, so a label is never empty."""
+    m = _REF_PARTS.match((ref or "").strip())
+    if not m:
+        return ref or "", ref or ""
+    title, nums = m.group("title"), [int(n) for n in m.group("nums").split(":")]
+    title_he = _titles().get(title, ("", ""))[0] or title
+    en_parts = [str(n) for n in nums]
+    he_parts = [to_gematria_he(n) for n in nums]
+    if _is_bavli_title(title):
+        daf, amud = (nums[0] + 1) // 2, ("a" if nums[0] % 2 else "b")
+        en_parts[0] = f"{daf}{amud}"
+        he_parts[0] = f"{to_gematria_he(daf)} {'ע״א' if amud == 'a' else 'ע״ב'}"
+    return f"{title_he} {', '.join(he_parts)}", f"{title} {':'.join(en_parts)}"
 
 
 @app.get("/reader/catalog")
@@ -1055,9 +1102,12 @@ async def reader_unit(
     segments: list[ReaderSegment] = []
     for idx, r in enumerate(rows):
         seg_num = extract_segment_num(r["ref"] or "", idx + 1)
+        ref_he, ref_en = ref_labels(r["ref"] or "")
         segments.append(
             ReaderSegment(
                 ref=r["ref"] or "",
+                ref_he=ref_he,
+                ref_en=ref_en,
                 text_he=r["text_he"] or "",
                 text_en=r["text_en"],
                 segment_num=seg_num,
@@ -1238,6 +1288,8 @@ async def reader_links(
                 book_part = m_base.group(1).strip()
                 cv_part = m_base.group(2).strip().replace(".", ":")
 
+            if book_part and book_part.startswith("Tosefta"):
+                book_part = None      # the corpus holds no commentary keyed to the Vilna Tosefta's numbering
             if book_part and cv_part:
                 # book_part/cv_part come from caller text: escape LIKE
                 # metacharacters so only the template's own '%' are wildcards.
@@ -1262,6 +1314,8 @@ async def reader_links(
                 c_rows = search_db.execute(sql, (p1, p2, p3, p4, p5, p6, p7, clean_ref)).fetchall()
                 seen_books: set[str] = set()
                 for r in c_rows:
+                    if (r["category_path"] or "").startswith("Tosefta"):
+                        continue      # Lieberman's Tosefta commentary is numbered differently; never match it to Gemara
                     b_name = r["book"] or r["author_he"] or r["ref"]
                     if b_name in seen_books:
                         continue
@@ -1284,6 +1338,9 @@ async def reader_links(
                         related.append(link_item)
         except Exception:
             pass
+
+    for item in commentaries + related:
+        item.ref_he = ref_labels(item.ref)[0]
 
     return ReaderLinksResponse(
         ref=clean_ref,

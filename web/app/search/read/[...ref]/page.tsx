@@ -295,7 +295,7 @@ function ReaderInner() {
     selectedText?: string
   ) => {
     const textToCopy = selectedText || segment.text_he;
-    const citation = `${textToCopy}\n(${formatHebrewRef(segment.ref)})`;
+    const citation = `${textToCopy}\n(${segment.ref_he || formatHebrewRef(segment.ref)})`;
 
     if (navigator.clipboard) {
       navigator.clipboard
@@ -699,7 +699,7 @@ function ReaderInner() {
                           </span>
 
                           <span className="text-xs font-serif text-ink/40 font-medium">
-                            {formatHebrewRef(seg.ref)}
+                            {seg.ref_he || formatHebrewRef(seg.ref)}
                           </span>
                         </div>
 
@@ -748,7 +748,12 @@ function ReaderInner() {
                           className="mt-3 pt-3 border-t border-line/40 font-sans text-sm sm:text-base text-ink/75 leading-relaxed selection:bg-indigo/20 italic"
                         >
                           {seg.text_en ? (
-                            seg.text_en
+                            <>
+                              <span className="block not-italic text-[11px] text-ink/40 font-medium mb-1">
+                                {seg.ref_en || seg.ref}
+                              </span>
+                              {seg.text_en}
+                            </>
                           ) : (
                             <span className="text-ink/40 text-xs font-sans not-italic">
                               (אין תרגום לאנגלית זמין עבור מקור זה)
