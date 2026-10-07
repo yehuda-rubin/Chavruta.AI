@@ -780,8 +780,8 @@ export default function Home() {
           onSend={send}
           onStop={stopGeneration}
           onPreviewFile={setPreviewFile}
-          calendarModesEnabled={me?.calendar_modes_enabled}
-          sourcesheetModesEnabled={me?.sourcesheet_enabled}
+          calendarModesEnabled={!!me?.is_admin && !!me?.calendar_modes_enabled}
+          sourcesheetModesEnabled={!!me?.is_admin && !!me?.sourcesheet_enabled}
           userEmail={auth.user?.email}
           userSources={userSources}
           onAddSource={() => setShowAddSource(true)}

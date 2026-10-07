@@ -26,7 +26,6 @@ const COPY = {
     t3h: "רישיון נקי", t3p: "כל המקורות מותרים לשימוש מסחרי.",
     t4h: "דרכים ללמוד", t4p: "בוחרים מצב ושואלים.",
     modes: ["שיעור", "הסבר", "שאלה ותשובה", "הלכה ושו״ת", "חברותא"],
-    betaModes: ["פרשת השבוע", "דף יומי", "דף מקורות"], beta: "בטא",
     stepsTitle: "שלושה צעדים",
     steps: [["שואלים", "בעברית או באנגלית, בניסוח חופשי."], ["חברותא מחפשת", "במאגר המקורות, כולל המפרשים."], ["מקבלים ובודקים", "תשובה עם הפניות שאפשר ללחוץ עליהן."]],
     priceTitle: "מתחילים בחינם", priceSub: "משדרגים רק כשצריך עוד.",
@@ -59,7 +58,6 @@ const COPY = {
     t3h: "Clean licensing", t3p: "Every source is cleared for commercial use.",
     t4h: "Ways to learn", t4p: "Pick a mode and ask.",
     modes: ["Lesson", "Explain", "Q&A", "Halakha & Responsa", "Chavruta"],
-    betaModes: ["Weekly Parsha", "Daf Yomi", "Source sheet"], beta: "beta",
     stepsTitle: "Three steps",
     steps: [["Ask", "In Hebrew or English, in your own words."], ["Chavruta searches", "Across the source library, commentaries included."], ["Read and check", "An answer with references you can click."]],
     priceTitle: "Start free", priceSub: "Upgrade only when you need more.",
@@ -160,7 +158,6 @@ export function Landing() {
               <h3>{c.t4h}</h3><p>{c.t4p}</p>
               <div className="chips">
                 {c.modes.map((m) => <span key={m}>{m}</span>)}
-                {c.betaModes.map((m) => <span className="beta" key={m}>{m} · {c.beta}</span>)}
               </div>
             </div>
           </div>
