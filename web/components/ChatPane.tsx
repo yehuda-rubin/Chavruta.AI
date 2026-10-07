@@ -534,64 +534,65 @@ export function ChatPane({
       </div>
 
       <div className="p-3 sm:p-5">
+        {/* One row, like the composer people already know from other chat apps: "+" at the start, the text
+            in the middle, the mode picker and send at the end. It grows into a rounded card when the
+            question runs to several lines; the buttons stay pinned to the bottom edge. `relative` is
+            deliberate — the mode menu positions itself against this form, not against its own chip. */}
         <form
           onSubmit={submit}
-          className="max-w-3xl mx-auto bg-white border border-line rounded-[28px] shadow-[0_18px_44px_-24px_rgba(91,61,245,0.5)] transition focus-within:border-indigo focus-within:ring-4 focus-within:ring-indigo/15"
+          className="relative max-w-3xl mx-auto bg-white border border-line rounded-[30px] p-2 flex items-end gap-1 shadow-[0_18px_44px_-24px_rgba(91,61,245,0.5)] transition focus-within:border-indigo/60 focus-within:ring-4 focus-within:ring-indigo/10"
         >
+          {onAddSource && (
+            <button
+              type="button"
+              onClick={onAddSource}
+              title={tr(lang, "addSource")}
+              aria-label={tr(lang, "addSource")}
+              className="relative h-11 w-11 rounded-full grid place-items-center text-ink/60 hover:bg-cream-2 hover:text-indigo transition shrink-0"
+            >
+              <Icon name="add" className="text-[26px]" />
+              {userSources.length > 0 && (
+                <span className="absolute top-0.5 end-0.5 min-w-4 h-4 px-1 rounded-full bg-indigo text-white text-[10px] font-bold grid place-items-center tabular-nums">
+                  {userSources.length}
+                </span>
+              )}
+            </button>
+          )}
           <textarea
             ref={taRef}
             rows={1}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            className="w-full bg-transparent outline-none text-[17px] placeholder:text-ink/35 resize-none leading-relaxed max-h-40 px-5 pt-4 pb-1"
+            className="flex-1 min-w-0 bg-transparent outline-none focus:outline-none text-[17px] placeholder:text-ink/35 resize-none leading-relaxed max-h-40 px-2 py-[9px]"
             placeholder={tr(lang, "askPlaceholder")}
           />
-          <div className="flex items-center gap-2 px-3 pb-3 pt-1">
-            {onAddSource && (
-              <button
-                type="button"
-                onClick={onAddSource}
-                title={tr(lang, "addSource")}
-                aria-label={tr(lang, "addSource")}
-                className="relative h-10 w-10 rounded-full grid place-items-center text-ink/55 hover:bg-cream-2 hover:text-indigo transition shrink-0"
-              >
-                <Icon name="add" className="text-[24px]" />
-                {userSources.length > 0 && (
-                  <span className="absolute -top-0.5 -end-0.5 min-w-4 h-4 px-1 rounded-full bg-indigo text-white text-[10px] font-bold grid place-items-center tabular-nums">
-                    {userSources.length}
-                  </span>
-                )}
-              </button>
-            )}
-            <IntentBar
-              lang={lang}
-              intent={intent}
-              locked={locked}
-              onPick={onPickIntent}
-              calendarModesEnabled={calendarModesEnabled}
-              sourcesheetModesEnabled={sourcesheetModesEnabled}
-            />
-            <span className="flex-1" />
-            {loading || thinkingHere ? (
-              <button
-                type="button"
-                onClick={onStop}
-                className="h-11 w-11 rounded-full bg-red-600 hover:bg-red-700 active:scale-95 text-white grid place-items-center shadow-lg shadow-red-900/30 transition-all cursor-pointer shrink-0"
-                title={lang === "he" ? "עצור מענה" : "Stop generation"}
-              >
-                <span className="w-3.5 h-3.5 rounded-[2px] bg-white block shadow-sm" />
-              </button>
-            ) : (
-              <button
-                type="submit"
-                disabled={loading || !input.trim()}
-                className="h-11 w-11 rounded-full grad text-white grid place-items-center hover:opacity-95 disabled:opacity-40 disabled:shadow-none shrink-0"
-                title={tr(lang, "send")}
-              >
-                <Icon name="arrow_upward" className="text-[22px]" />
-              </button>
-            )}
-          </div>
+          <IntentBar
+            lang={lang}
+            intent={intent}
+            locked={locked}
+            onPick={onPickIntent}
+            calendarModesEnabled={calendarModesEnabled}
+            sourcesheetModesEnabled={sourcesheetModesEnabled}
+          />
+          {loading || thinkingHere ? (
+            <button
+              type="button"
+              onClick={onStop}
+              className="h-11 w-11 rounded-full bg-red-600 hover:bg-red-700 active:scale-95 text-white grid place-items-center shadow-lg shadow-red-900/30 transition-all cursor-pointer shrink-0"
+              title={lang === "he" ? "עצור מענה" : "Stop generation"}
+            >
+              <span className="w-3.5 h-3.5 rounded-[2px] bg-white block shadow-sm" />
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={loading || !input.trim()}
+              className="h-11 w-11 rounded-full grad text-white grid place-items-center hover:opacity-95 disabled:opacity-35 disabled:shadow-none shrink-0"
+              title={tr(lang, "send")}
+            >
+              <Icon name="arrow_upward" className="text-[22px]" />
+            </button>
+          )}
         </form>
         <p className="text-center text-[10px] text-ink/35 mt-2.5">{tr(lang, "footer")}</p>
       </div>

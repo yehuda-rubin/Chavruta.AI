@@ -140,7 +140,7 @@ export function IntentBar({
   };
 
   return (
-    <div className="relative shrink-0" ref={rootRef}>
+    <div className="shrink-0 self-end" ref={rootRef}>
       <button
         ref={btnRef}
         type="button"
@@ -150,15 +150,14 @@ export function IntentBar({
         aria-expanded={open}
         title={locked ? "" : tr(lang, "chooseMode")}
         className={
-          "inline-flex items-center gap-1.5 min-h-10 px-3.5 rounded-full font-semibold text-sm whitespace-nowrap border " +
+          "inline-flex items-center gap-1 min-h-11 ps-3 pe-2.5 rounded-full font-semibold text-[15px] whitespace-nowrap transition-colors " +
           (locked
-            ? "bg-cream text-ink/40 border-line cursor-not-allowed"
+            ? "text-ink/40 cursor-not-allowed"
             : open
-              ? "bg-indigo text-white border-indigo"
-              : "bg-white text-indigo border-line hover:bg-cream-2 cursor-pointer")
+              ? "bg-cream-2 text-indigo cursor-pointer"
+              : "text-ink/70 hover:bg-cream-2 hover:text-indigo cursor-pointer")
         }
       >
-        <Icon name={ICON[intent]} className="text-[18px]" />
         <span>{tr(lang, LABEL_KEY[intent])}</span>
         {!locked && (
           <Icon name="expand_less" className={"text-[18px] transition-transform " + (open ? "" : "rotate-180")} />
@@ -168,7 +167,7 @@ export function IntentBar({
         <div
           role="menu"
           aria-label={tr(lang, "chooseMode")}
-          className="absolute start-0 bottom-full mb-3 z-20 w-[min(340px,86vw)] max-h-[60vh] overflow-y-auto glass menu-surface rounded-[28px] p-2 shadow-xl"
+          className="absolute start-2 bottom-full mb-3 z-20 w-[min(340px,86vw)] max-h-[60vh] overflow-y-auto glass menu-surface rounded-[28px] p-2 shadow-xl"
         >
           {stable.map(row)}
           {beta.length > 0 && (
