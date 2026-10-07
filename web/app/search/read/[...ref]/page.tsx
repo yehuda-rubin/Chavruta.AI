@@ -35,50 +35,8 @@ function ReaderInner() {
   const searchParams = useSearchParams();
   const { user, loading: authLoading } = useAuth();
 
-  // ── Access Gate: Admin or Private Beta Check ──────────────────────────────
-  const [accessAllowed, setAccessAllowed] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    // 1. Check URL query parameter `?beta=true`
-    if (searchParams.get("beta") === "true") {
-      try {
-        localStorage.setItem("chavruta_beta_tester", "true");
-      } catch {}
-      setAccessAllowed(true);
-      return;
-    }
-
-    // 2. Check localStorage flag
-    try {
-      if (localStorage.getItem("chavruta_beta_tester") === "true") {
-        setAccessAllowed(true);
-        return;
-      }
-    } catch {}
-
-    // 3. Check user admin status from /me API
-    let isMounted = true;
-    api
-      .me()
-      .then((me) => {
-        if (isMounted) {
-          if (me.is_admin) {
-            setAccessAllowed(true);
-          } else {
-            setAccessAllowed(false);
-          }
-        }
-      })
-      .catch(() => {
-        if (isMounted) {
-          setAccessAllowed(false);
-        }
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [searchParams]);
+  // The reader is open to everyone (it was admin / private-beta only until 2026-10-07).
+  const accessAllowed = true as boolean | null;
 
   // ── URL & Ref Resolution ──────────────────────────────────────────────────
   const refParts = Array.isArray(params?.ref)

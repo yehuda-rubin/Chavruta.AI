@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { Lang, SearchResponse } from "@/lib/types";
-import { api } from "@/lib/api";
 import { Icon } from "@/components/Icon";
 import { ResultCard } from "@/components/search/ResultCard";
 import { Pagination } from "@/components/search/Pagination";
@@ -270,7 +269,8 @@ function SourceRows({ sources, lang, label }: { sources: SourceMatch[]; lang: La
 
 export default function LibraryPage() {
   const [lang, setLang] = useState<Lang>("he");
-  const [admin, setAdmin] = useState<boolean | null>(null);
+  // open to everyone (admin-only beta until 2026-10-07); the flag stays so the effects below keep their shape
+  const admin = true;
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [failed, setFailed] = useState(false);
   const [mode, setMode] = useState<Mode>("book");
@@ -306,7 +306,6 @@ export default function LibraryPage() {
       setPage(Number.isNaN(p) || p < 1 ? 1 : p);
     } catch {}
     booted.current = true;
-    api.me().then((m) => setAdmin(!!m.is_admin)).catch(() => setAdmin(false));
   }, []);
 
   useEffect(() => {
@@ -422,9 +421,6 @@ export default function LibraryPage() {
             {t.back}
           </Link>
         </div>
-
-        {admin === null && <p className="text-ink/60">{t.loading}</p>}
-        {admin === false && <p className="text-ink/70">{t.denied}</p>}
 
         {admin && (
           <>
