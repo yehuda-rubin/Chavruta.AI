@@ -4,24 +4,42 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── Ported verbatim from the static UI's <style> so the look is identical ── */
+/* ── "Conversation" redesign: lavender canvas, soft violet + mint light, white surfaces ── */
 body {
   background:
-    radial-gradient(120% 80% at 85% -10%, #e7eefc 0%, transparent 45%),
-    radial-gradient(100% 70% at 0% 110%, #faf2dd 0%, transparent 50%),
-    #fdfbf6;
+    radial-gradient(60% 50% at 92% -8%, rgba(139, 107, 255, 0.28) 0%, transparent 60%),
+    radial-gradient(50% 45% at -4% 100%, rgba(25, 201, 160, 0.18) 0%, transparent 60%),
+    #f6f4ff;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
+h1, h2, h3 { text-wrap: balance; }
+p { text-wrap: pretty; }
+:focus-visible { outline: 2px solid #5b3df5; outline-offset: 2px; }
+button:active:not(:disabled), a.btn-press:active { scale: 0.97; }
+button { transition-property: background-color, color, border-color, opacity, box-shadow, scale; transition-duration: 150ms; }
 ::-webkit-scrollbar { width: 8px; }
-::-webkit-scrollbar-thumb { background: #e3d8c2; border-radius: 8px; }
+::-webkit-scrollbar-thumb { background: #d6cff5; border-radius: 8px; }
 
 .glass {
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.86);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, 0.7);
-  box-shadow: 0 1px 2px rgba(28, 26, 23, 0.04), 0 16px 40px -24px rgba(26, 54, 93, 0.35);
+  border: 1px solid #e6e2fa;
+  box-shadow: 0 1px 2px rgba(26, 22, 51, 0.04), 0 18px 44px -26px rgba(91, 61, 245, 0.35);
 }
-.grad { background: linear-gradient(135deg, #002045, #3a5ba0); }
+.menu-surface { background: #fff; }
+.grad { background: #5b3df5; box-shadow: 0 10px 22px -10px rgba(91, 61, 245, 0.7); }
+mark {
+  background-color: #ffe9a8;
+  color: inherit;
+  padding: 0 2px;
+  border-radius: 3px;
+}
+body.theme-dark mark {
+  background-color: #5a4a14;
+  color: #fff;
+}
 .material-symbols-outlined {
   font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 20;
   vertical-align: middle;
@@ -29,26 +47,31 @@ body {
 .he { direction: rtl; }
 .en { direction: ltr; }
 
-/* Dark theme (Settings → Theme). Curated overrides over the light "Modern Glass" palette. */
+/* Dark theme (Settings → Theme). Curated overrides over the light "Conversation" palette. */
 body.theme-dark {
   background:
-    radial-gradient(120% 80% at 85% -10%, #1b2740 0%, transparent 45%),
-    radial-gradient(100% 70% at 0% 110%, #2a2418 0%, transparent 50%),
-    #12151b;
-  color: #e6e4df;
+    radial-gradient(60% 50% at 92% -8%, rgba(91, 61, 245, 0.30) 0%, transparent 60%),
+    radial-gradient(50% 45% at -4% 100%, rgba(25, 201, 160, 0.10) 0%, transparent 60%),
+    #0f0d1f;
+  color: #ebe8fa;
 }
 body.theme-dark .glass {
-  background: rgba(28, 33, 43, 0.62);
-  border-color: rgba(255, 255, 255, 0.08);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 16px 40px -24px rgba(0, 0, 0, 0.7);
+  background: rgba(27, 23, 52, 0.82);
+  border-color: rgba(255, 255, 255, 0.09);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 18px 44px -26px rgba(0, 0, 0, 0.8);
 }
-body.theme-dark .text-tekhelet { color: #a9c2f0 !important; }
-body.theme-dark [class*="text-ink"] { color: #e6e4df !important; }
-body.theme-dark [class*="text-gold"] { color: #d9b45a !important; }
-body.theme-dark [class*="bg-white"] { background-color: rgba(44, 50, 63, 0.5) !important; }
+body.theme-dark .text-tekhelet { color: #c9bcff !important; }
+body.theme-dark [class*="text-tekhelet/"],
+body.theme-dark [class*="text-indigo"] { color: #c9bcff !important; }
+body.theme-dark [class*="text-ink"] { color: #ebe8fa !important; }
+body.theme-dark [class*="text-gold"] { color: #4fe0bd !important; }
+body.theme-dark [class*="bg-cream"] { background-color: rgba(48, 41, 90, 0.55) !important; }
+body.theme-dark [class*="bg-white"] { background-color: rgba(48, 41, 90, 0.55) !important; }
 body.theme-dark [class*="border-white"],
 body.theme-dark [class*="border-line"] { border-color: rgba(255, 255, 255, 0.1) !important; }
-body.theme-dark ::-webkit-scrollbar-thumb { background: #3a4150; }
+body.theme-dark ::placeholder { color: rgba(235, 232, 250, 0.42); }
+body.theme-dark .menu-surface { background: #1f1a40; }
+body.theme-dark ::-webkit-scrollbar-thumb { background: #3b3470; }
 
 /* Accessibility widget (components/AccessibilityWidget.tsx) — persisted per-visitor overrides.
    Text size itself is applied as an inline font-size on <html> so every rem-based size (Tailwind

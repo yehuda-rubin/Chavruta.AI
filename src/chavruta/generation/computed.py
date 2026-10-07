@@ -272,9 +272,7 @@ def _today(now: datetime | None = None) -> date:
 
 def cache_key(kind: str, today: date) -> str:
     """Must stay identical to app/api.py::_calendar_cache_key — this reads the buckets that writes."""
-    if kind == "daf_yomi":
-        return today.isoformat()
-    return (today - timedelta(days=today.isoweekday() % 7)).isoformat()
+    return today.isoformat()
 
 
 def _bounded(fn: Callable[[], object], seconds: float):

@@ -376,11 +376,26 @@ def work_title_for_ref(ref: str | None) -> str | None:
     if not ref:
         return None
     _load_licenses()
-    flat = ref.replace("_", " ")
+    s = ref.strip()
+    # Commentary chunks in the corpus store 'רש"י on Rashi on Chullin 11.3.1' — drop the Hebrew
+    # display label prefix so the clean English work title can match.
+    if _HEB.search(s):
+        i = s.find(" on ")
+        if i != -1:
+            s = s[i + 4:]
+    flat = s.replace("_", " ")
     for title in _titles_by_len:
         if flat == title or flat.startswith(title + ".") or flat.startswith(title + ",") \
                 or flat.startswith(title + " "):
             return title
+    # Normalize common transliteration drifts (Shitah/Shittah -> Shita, Chiddushei -> Chidushei)
+    norm = re.sub(r"\bShitt?ah\b", "Shita", flat, flags=re.I)
+    norm = re.sub(r"\bChiddushei\b", "Chidushei", norm, flags=re.I)
+    if norm != flat:
+        for title in _titles_by_len:
+            if norm == title or norm.startswith(title + ".") or norm.startswith(title + ",") \
+                    or norm.startswith(title + " "):
+                return title
     return None
 
 
@@ -582,12 +597,20 @@ def hebrew_display_ref(ref: str | None) -> str | None:
         the corpus's amud-linear→daf conversion."""
         tail, prefix = ref, ""
         if cid and name:
-            tail = ref.split(_ON, 1)[1]
-            # Drop the trailing comment-index segment ('<base-ref>.<k>') → the base ref.
-            head, _dot, last = tail.rpartition(".")
-            if head and last.isdigit():
-                tail = head
-            prefix = f"{name} על "
+            if _ON in ref:
+                tail = ref.split(_ON, 1)[1]
+                # Drop the trailing comment-index segment ('<base-ref>.<k>') → the base ref.
+                head, _dot, last = tail.rpartition(".")
+                if head and last.isdigit():
+                    tail = head
+                prefix = f"{name} על "
+            elif cid in _TARGUM_PREFIXED:
+                pref = commentator_title(cid) + "_"
+                if ref.startswith(pref):
+                    tail = ref[len(pref):]
+                prefix = f"{name} על "
+            else:
+                return None
         he_book, rest = _split_book(tail.replace("_", " "))
         return f"{prefix}{he_book} {rest}" if he_book is not None else None
 
@@ -641,3 +664,94 @@ def hebrew_display_ref(ref: str | None) -> str | None:
     if cid and entry and _is_bavli(entry):
         return _curated(cid, _commentator_he(cid))
     return None
+
+
+def talmud_hebrew_display_ref(ref: str | None) -> str | None:
+    """Format a Talmud Bavli tractate ref into a clean, human-readable Hebrew title with daf:
+    e.g. 'Berakhot.98.12' -> 'מסכת ברכות דף מ"ט ע"ב'
+         'Bava_Metzia.3.1' -> 'מסכת בבא מציעא דף ב\' ע"א'
+         'Rashi_on_Berakhot.98.12.1' -> 'רש"י על מסכת ברכות דף מ"ט ע"ב'
+    Returns None if ref is not a Talmud Bavli ref.
+    """
+    if not ref:
+        return None
+    ref_clean = ref.strip()
+    prefix = ""
+    tail = ref_clean
+    cid = commentator_from_ref(ref_clean)
+    if cid and _ON in ref_clean:
+        cmt_name = _commentator_he(cid)
+        if cmt_name:
+            prefix = f"{cmt_name} על "
+        tail = ref_clean.split(_ON, 1)[1]
+        head, _dot, last = tail.rpartition(".")
+        if head and last.isdigit():
+            tail = head
+
+    if tail.startswith(("Mishnah_", "Mishnah ", "Jerusalem_Talmud_", "Jerusalem_Talmud ", "Tosefta_", "Tosefta ")):
+        return None
+
+    tail_flat = tail.replace("_", " ").strip()
+    for en_name, he_name in sorted(_TRACTATE_HE.items(), key=lambda pair: len(pair[0]), reverse=True):
+        if tail_flat == en_name or tail_flat.startswith(en_name):
+            rest = tail_flat[len(en_name):]
+            if rest and rest[0] not in " ._:":
+                continue
+            rest = rest.lstrip(" ._:")
+            nums = re.split(r"[ .:]+", rest)
+            if nums and nums[0].isdigit():
+                n = int(nums[0])
+                try:
+                    daf, amud = corpus_n_to_daf_amud(n)
+                except Exception:
+                    return None
+                if 2 <= daf <= 180:
+                    he_daf = hebrew_numeral(daf)
+                    amud_label = 'ע"א' if amud == "a" else 'ע"ב'
+                    return f"{prefix}מסכת {he_name} דף {he_daf} {amud_label}"
+    return None
+
+
+def talmud_english_display_ref(ref: str | None) -> str | None:
+    """Format a Talmud Bavli tractate ref into a clean, human-readable English title with daf:
+    e.g. 'Berakhot.98.12' -> 'Tractate Berakhot daf 49b'
+         'Bava_Metzia.3.1' -> 'Tractate Bava Metzia daf 2a'
+         'Rashi_on_Berakhot.98.12.1' -> 'Rashi on Tractate Berakhot daf 49b'
+         'Tosafot_on_Berakhot.98.12.1' -> 'Tosafot on Tractate Berakhot daf 49b'
+    Returns None if ref is not a Talmud Bavli ref.
+    """
+    if not ref:
+        return None
+    ref_clean = ref.strip()
+    prefix = ""
+    tail = ref_clean
+    cid = commentator_from_ref(ref_clean)
+    if cid and _ON in ref_clean:
+        cmt_title = commentator_title(cid).replace("_", " ")
+        prefix = f"{cmt_title} on "
+        tail = ref_clean.split(_ON, 1)[1]
+        head, _dot, last = tail.rpartition(".")
+        if head and last.isdigit():
+            tail = head
+
+    if tail.startswith(("Mishnah_", "Mishnah ", "Jerusalem_Talmud_", "Jerusalem_Talmud ", "Tosefta_", "Tosefta ")):
+        return None
+
+    tail_flat = tail.replace("_", " ").strip()
+    for en_name in sorted(_TRACTATE_HE.keys(), key=len, reverse=True):
+        if tail_flat == en_name or tail_flat.startswith(en_name):
+            rest = tail_flat[len(en_name):]
+            if rest and rest[0] not in " ._:":
+                continue
+            rest = rest.lstrip(" ._:")
+            nums = re.split(r"[ .:]+", rest)
+            if nums and nums[0].isdigit():
+                n = int(nums[0])
+                try:
+                    daf, amud = corpus_n_to_daf_amud(n)
+                except Exception:
+                    return None
+                if 2 <= daf <= 180:
+                    return f"{prefix}Tractate {en_name} daf {daf}{amud}"
+    return None
+

@@ -386,7 +386,7 @@ def _monthly_cost_ils(tier) -> float:
     return (tokens + lessons) / 1e6 * _USD_PER_M_NORMALIZED * _ILS_PER_USD
 
 
-@pytest.mark.parametrize("tier_id", ["basic", "pro", "institution"])
+@pytest.mark.parametrize("tier_id", ["basic", "plus", "pro", "institution"])
 def test_every_paid_tier_covers_itself_its_free_users_and_a_margin(tier_id):
     """The pricing rule, pinned. A tier must pay for its own worst case, for the free accounts it
     carries, AND leave PROFIT_TARGET on top — all at FULL utilisation, because a price that only

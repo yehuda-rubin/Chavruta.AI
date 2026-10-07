@@ -44,10 +44,11 @@ def source_body(text: str) -> str:
     """Drop the internal "[label] Ref daf:seg" header line a stored document carries, leaving
     the source's actual text. The header is prompt scaffolding (and may hold a pre-correction
     daf label) — never the thing to quote back to the user."""
-    if text.startswith("["):
-        nl = text.find("\n")
-        if nl != -1:
-            return text[nl + 1:]
+    if not text:
+        return ""
+    m = re.match(r"^\s*\[[^\]\n]+\][^\n]*(?:\r?\n|$)", text)
+    if m:
+        return text[m.end():]
     return text
 
 
@@ -122,15 +123,20 @@ SYSTEM_BASE_HE = (
     "כל טענה חייבת ציון מקור בסוגריים, לדוגמה [S1]. צטט את לשון המקור העברית כשרלוונטי. "
     "אסור להמציא מקורות, ציטוטים או ייחוסים שאינם במקורות שסופקו. "
     "אם המקורות אינם עונים על השאלה — אמור זאת בפשטות. ייחס כל דבר לפרשן הנכון. "
+    "אם המקורות שסופקו אינם עוסקים במישרין בשאלה שנשאלה (כגון מנהג, פיוט או מקרה ספציפי שאינו מוזכר במקורות) — "
+    "אמור זאת ביושר ובבירור. אל תבנה פסיקה, חיוב או איסור חדש (כגון חיוב עשרה או איסור אמירה ביחיד) מתוך "
+    "היקש מאולץ על מקורות שאינם מדברים על כך. ענה תמיד מתוך מה שנאמר במפורש במקורות שסופקו. "
     "כשטענה מתארת דמות מזוהה וממשית (דמות היסטורית, פוסק, רב חי או שנפטר לאחרונה) — במיוחד "
     "לגבי התנהגותו, כוונותיו או אופיו — הישאר קרוב ללשון המקור עצמו ולא לניסוח חופשי משלך, "
     "ואל תוסיף הערכה או שיפוט שאינם עולים מן המקור עצמו. "
-    "הממשק מציג טקסט רגיל ועוד **מודגש** וירידות שורה בלבד — לעולם אל תשתמש בכותרות Markdown "
-    "(#, ##, ###) או בשורת ציטוט שמתחילה ב-'>'; הם מוצגים כתווים גולמיים ומכוערים. השתמש "
-    "בביטוי **מודגש** במקום כותרת, והבא ציטוטים בתוך הטקסט במרכאות רגילות, לא בשורת '>' נפרדת. "
+    "עיצוב התשובה: השתמש בטקסט רגיל, ירידות שורה, והדגשות בעזרת כוכביות כפולות (לדוגמה: **טקסט מודגש**) בלבד. "
+    "לעולם אל תשתמש בכותרות Markdown (#, ##, ###) או בשורת ציטוט שמתחילה ב-'>'. "
+    "לעולם אל תכתוב את המילה \"מודגש\" ככותרת, כפתיח או כתווית בתחילת התשובה! "
+    "הבא ציטוטים בתוך הטקסט במרכאות רגילות, לא בשורת '>' נפרדת. "
     "אם לשון מקור מסוים כתובה בשפה שונה משפת התשובה (למשל תשובה שתורגמה לאנגלית, בתוך תשובה "
     "בעברית) — תרגם אותה לשפת התשובה במקום לצטט אותה כלשונה בשפה הזרה; סימון ה-[S#] עדיין "
     "מקשר את הקורא למקור המקורי. "
+    "שמור על לשון בית המדרש והמינוח התורני: באר מושגים מארמית ומחז\"ל לעברית תורנית מקורית ולא דרך תרגומים של שפות זרות (למשל: כהנא = כהן). "
     "אל תדרוש התאמת-מילים מילולית בין השאלה למקור: אם השאלה עוסקת במקרה מודרני או במונח שלא "
     "מופיע כלשונו במקורות (מכשיר, מצב, או פעולה עכשווית) — הסק את העיקרון העולה מן המקורות "
     "שסופקו והחל אותו על המקרה הנשאל, כפי שפוסק אמיתי מסיק מתקדים, ולא רק כשהמקרה עצמו נזכר "
@@ -225,7 +231,7 @@ MAX_SOURCE_CHARS = 1500  # Talmud/Rishonim/responsa segments often exceed 600 an
 
 def build_prompt(
     question: str, hits: list[RankedHit], *, intent: Intent = Intent.QA, history=None,
-    lang: str = "en",
+    lang: str = "en", distilled_question: str = "",
 ) -> tuple[GroundedPrompt, dict[str, RankedHit]]:
     """Build a grounded prompt and the marker→hit map used to enforce citations."""
     sources: list[SourceBlock] = []
@@ -233,20 +239,28 @@ def build_prompt(
     for i, h in enumerate(hits, start=1):
         marker = f"S{i}"
         marker_map[marker] = h
-        text = h.text if len(h.text) <= MAX_SOURCE_CHARS else h.text[:MAX_SOURCE_CHARS] + "…"
+        raw_text = source_body(getattr(h, "text", "") or "")
+        text = raw_text if len(raw_text) <= MAX_SOURCE_CHARS else raw_text[:MAX_SOURCE_CHARS] + "…"
+        raw_he = source_body(getattr(h, "text_he", "") or getattr(h, "text", "") or "")
+        text_he = raw_he if len(raw_he) <= MAX_SOURCE_CHARS else raw_he[:MAX_SOURCE_CHARS] + "…"
         sources.append(SourceBlock(
-            marker=marker, ref=h.ref, commentator_id=h.commentator_id, text=text
+            marker=marker, ref=h.ref, commentator_id=h.commentator_id, text=text,
+            text_he=text_he,
+            text_en=getattr(h, "text_en", "") or "",
+            deep_link=getattr(h, "deep_link", "") or "",
+            license=getattr(h, "license", "") or "",
+            version_title=getattr(h, "version_title", "") or "",
         ))
     llm_history = [LLMTurn(role=t.role, text=t.text) for t in (history or [])]
     prompt = GroundedPrompt(
         system=_system_for(intent, lang), sources=sources, question=question,
-        history=llm_history,
+        history=llm_history, distilled_question=distilled_question,
     )
     return prompt, marker_map
 
 
 def enforce_citations(
-    text: str, marker_map: dict[str, RankedHit]
+    text: str, marker_map: dict[str, RankedHit], *, question: str = ""
 ) -> tuple[str, list[Citation], bool]:
     """Map [S#] markers to real chunks; drop fabricated markers; report grounded-ness.
 
@@ -291,7 +305,83 @@ def enforce_citations(
         for h in used.values()
     ]
     grounded = len(citations) > 0
+    clean = strip_mudgash_label(clean)
+    clean = sanitize_priestly_terms(clean, question=question, sources=list(marker_map.values()))
     return clean.strip(), citations, grounded
+
+
+_MUDGASH_PREFIX_RE = re.compile(
+    r"^\s*(?:(?:\*\*|\*|__)?\s*מודגש\s*(?:\*\*|\*|__)?[:\s\-\.]*)+",
+    re.IGNORECASE | re.UNICODE,
+)
+
+
+def strip_mudgash_label(text: str) -> str:
+    """Strip an accidental/hallucinated 'מודגש' or '**מודגש**:' prefix emitted at the start of an answer."""
+    if not text:
+        return ""
+    return _MUDGASH_PREFIX_RE.sub("", text).lstrip()
+
+
+_CHRISTIAN_CLERGY_CONTEXT_RE = re.compile(
+    r"(?:כומר|כמרים|כמורה|כומרא|כומרי|גלח|גלחים|נוצרי|נוצרים|נוצרית|נצרות|כנסיה|כנסייה|כנסיות)",
+    re.IGNORECASE | re.UNICODE,
+)
+
+_KEHUNA_CONTEXT_RE = re.compile(
+    r"(?:כהן|כהנא|כהנים|כהונה|כהינא|מתנות\s+כהונה|בגדי\s+כהונה|ברכת\s+כהנים|עבודת\s+המקדש|בית\s+המקדש|זרוע|לחיים|וקבה|וקיבה|חולין)",
+    re.IGNORECASE | re.UNICODE,
+)
+
+_KUMER_TO_KOHEN_REPLACEMENTS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"(?<![א-ת])([בלכמושדה]*)מתנות\s+כומר(?![א-ת])"), r"\1מתנות כהונה"),
+    (re.compile(r"(?<![א-ת])([בלכמושדה]*)מתנת\s+כומר(?![א-ת])"), r"\1מתנת כהונה"),
+    (re.compile(r"(?<![א-ת])([בלכמושדה]*)מכרי\s+כמורה(?![א-ת])"), r"\1מכרי כהונה"),
+    (re.compile(r"(?<![א-ת])([בלכמושדה]*)הכמרים(?![א-ת])"), r"\1הכהנים"),
+    (re.compile(r"(?<![א-ת])([בלכמושדה]*)כמרים(?![א-ת])"), r"\1כהנים"),
+    (re.compile(r"(?<![א-ת])([בלכמושדה]*)הכמורה(?![א-ת])"), r"\1הכהונה"),
+    (re.compile(r"(?<![א-ת])([בלכמושדה]*)כמורה(?![א-ת])"), r"\1כהונה"),
+    (re.compile(r"(?<![א-ת])([בלכמושדה]*)הכומר(?![א-ת])"), r"\1הכהן"),
+    (re.compile(r"(?<![א-ת])([בלכמושדה]*)כומר(?![א-ת])"), r"\1כהן"),
+]
+
+
+def sanitize_priestly_terms(text: str, question: str = "", sources: list | None = None) -> str:
+    """Correct cross-lingual English-pivot mistranslations where an LLM translates
+    Aramaic 'כהנא' / Hebrew 'כהן' (priest) as 'כומר' instead of 'כהן'.
+
+    SAFETY FIRST:
+    If the question or sources genuinely refer to Christian clergy or church concepts
+    (כומר, נוצרי, כנסייה, גלח), this function does nothing and returns text untouched.
+    """
+    if not text or ("כומר" not in text and "כמר" not in text):
+        return text
+
+    # 1. Did the user ask about priests/Christianity? If so, leave as is!
+    if question and _CHRISTIAN_CLERGY_CONTEXT_RE.search(question):
+        return text
+
+    # 2. Do the retrieved sources mention Christian clergy / church?
+    sources_text = ""
+    if sources:
+        sources_text = " ".join(
+            getattr(s, "text", "") or getattr(s, "text_he", "") or getattr(s, "quote", "") or str(s)
+            for s in sources
+        )
+        if _CHRISTIAN_CLERGY_CONTEXT_RE.search(sources_text):
+            return text
+
+    # 3. Only apply if Kehuna context is present (in sources, question, or generated text)
+    combined_context = f"{question} {sources_text} {text}"
+    if not _KEHUNA_CONTEXT_RE.search(combined_context):
+        return text
+
+    # Apply surgical replacements
+    cleaned = text
+    for pattern, replacement in _KUMER_TO_KOHEN_REPLACEMENTS:
+        cleaned = pattern.sub(replacement, cleaned)
+
+    return cleaned
 
 
 _NIQQUD_RE = re.compile(r"[֑-ׇ]")            # Hebrew vowels + cantillation
@@ -331,24 +421,43 @@ def _protect_abbreviations(s: str) -> str:
     return _ABBREV_MARK_RE.sub("", s)  # 1-for-1 so positions still line up with the original
 
 
+def _quote_skeleton(text: str, lang: str = "he") -> str:
+    if (lang or "").startswith("en"):
+        return re.sub(r'[^a-zA-Z0-9]', '', text or '').lower()
+    return _NONHEB_RE.sub("", _NIQQUD_RE.sub("", text or ""))
+
+
 def _heb_skeleton(s: str) -> str:
-    return _NONHEB_RE.sub("", _NIQQUD_RE.sub("", s or ""))
+    return _quote_skeleton(s, "he")
 
 
-def unverified_quotes(text: str, sources, min_len: int = 14) -> list[str]:
-    """Citation-faithfulness guard: return VERBATIM Hebrew quotes in `text` (inside quote marks) whose
+def unverified_quotes(text: str, sources, min_len: int = 14, lang: str | None = None) -> list[str]:
+    """Citation-faithfulness guard: return VERBATIM quotes in `text` (inside quote marks) whose
     opening does NOT appear in any retrieved source — a strong sign the quote was fabricated or drifted
     from its source. Paraphrase is not checked; only quoted spans must actually exist in the corpus.
     Cheap (string only), so it can run on every grounded answer."""
-    corpus = _heb_skeleton(" ".join((getattr(s, "text", None) or getattr(s, "quote", "") or "")
-                                    for s in (sources or [])))
+    if lang is None:
+        he_count = sum(1 for ch in (text or "") if "\u0590" <= ch <= "\u05ff")
+        en_count = sum(1 for ch in (text or "") if "a" <= ch.lower() <= "z")
+        effective_lang = "he" if (he_count > en_count or (he_count > 0 and en_count == 0)) else "en"
+    else:
+        effective_lang = lang
+
+    source_blobs = []
+    for s in (sources or []):
+        t = getattr(s, "text", "") or getattr(s, "quote", "") or ""
+        ten = getattr(s, "text_en", "") or ""
+        the = getattr(s, "text_he", "") or ""
+        source_blobs.extend([t, ten, the])
+
+    corpus = _quote_skeleton(" ".join(b for b in source_blobs if b), lang=effective_lang)
     if not corpus:
         return []
     text = text or ""
     bad = []
     for start, end in _quoted_spans(_protect_abbreviations(text)):
         raw = text[start:end]             # same span, original characters (abbreviation marks intact)
-        q = _heb_skeleton(raw)
+        q = _quote_skeleton(raw, lang=effective_lang)
         if len(q) >= min_len and q[:min_len] not in corpus:   # opening not found in any source
             bad.append(raw.strip()[:60])
     return bad
@@ -792,7 +901,7 @@ def no_source_answer(lang: str, intent: Intent = Intent.QA) -> Answer:
 
 
 def build_lesson_walkthrough_prompt(plan: LessonPlan, question: str, lang: str = "he",
-                                    shut: bool = False, history=None):
+                                    shut: bool = False, history=None, distilled_question: str = ""):
     """Prompt the model to deliver the lesson — or responsa (`shut=True`) — as a flowing
     walkthrough (the "מהלך"), laying out the arc's stages in order with sources as [S#].
 
@@ -814,30 +923,41 @@ def build_lesson_walkthrough_prompt(plan: LessonPlan, question: str, lang: str =
                 m = f"S{len(seen) + 1}"
                 seen[cit.chunk_id] = m
                 marker_map[m] = cit
-                text = cit.quote or ""
-                if len(text) > MAX_SOURCE_CHARS:
-                    text = text[:MAX_SOURCE_CHARS] + "…"
-                sources.append(SourceBlock(marker=m, ref=cit.ref,
-                                           commentator_id=cit.commentator_id, text=text))
+                raw_text = source_body(getattr(cit, "quote", "") or getattr(cit, "text", "") or "")
+                text = raw_text if len(raw_text) <= MAX_SOURCE_CHARS else raw_text[:MAX_SOURCE_CHARS] + "…"
+                raw_he = source_body(getattr(cit, "text_he", "") or getattr(cit, "quote", "") or "")
+                text_he = raw_he if len(raw_he) <= MAX_SOURCE_CHARS else raw_he[:MAX_SOURCE_CHARS] + "…"
+                sources.append(SourceBlock(
+                    marker=m, ref=cit.ref, commentator_id=cit.commentator_id, text=text,
+                    text_he=text_he,
+                    text_en=getattr(cit, "text_en", ""),
+                    deep_link=getattr(cit, "deep_link", "") or "",
+                    license=getattr(cit, "license", "") or "",
+                    version_title=getattr(cit, "version_title", "") or "",
+                ))
             markers.append(m)
         stages.append((sec.heading, markers))
 
     if lang == "he":
-        lines = [f"(הקשר בלבד — אל תחזור על זה) הנושא שנשאל: {question}",
-                 "", "שלבי המהלך, לפי הסדר:"]
+        q_line = f"(הקשר בלבד — אל תחזור על זה) הנושא שנשאל: {question}"
+        if distilled_question and distilled_question != question:
+            q_line += f"\nשאלת המיקוד: {distilled_question}"
+        lines = [q_line, "", "שלבי המהלך, לפי הסדר:"]
         lines += [f"• {h} — מקורות: {', '.join(ms) if ms else '—'}" for h, ms in stages]
         lines += ["", "כתוב כעת את המהלך המלא לפי השלבים — פתח ישר מן המקור, בלי לחזור על השאלה."]
         system = SYSTEM_SHUT_WALKTHROUGH_HE if shut else SYSTEM_LESSON_WALKTHROUGH_HE
     else:
-        lines = [f"(context only — do not restate it) The question asked: {question}",
-                 "", "Arc, in order:"]
+        q_line = f"(context only — do not restate it) The question asked: {question}"
+        if distilled_question and distilled_question != question:
+            q_line += f"\nFocused question: {distilled_question}"
+        lines = [q_line, "", "Arc, in order:"]
         lines += [f"• {h} — sources: {', '.join(ms) if ms else '—'}" for h, ms in stages]
         lines += ["", "Now write the full walkthrough following these stages — open straight "
                   "from the source, without restating the question."]
         system = SYSTEM_SHUT_WALKTHROUGH if shut else SYSTEM_LESSON_WALKTHROUGH
     llm_history = [LLMTurn(role=t.role, text=t.text) for t in (history or [])]
     prompt = GroundedPrompt(system=system, sources=sources, question="\n".join(lines),
-                            history=llm_history)
+                            history=llm_history, distilled_question=distilled_question)
     return prompt, marker_map
 
 
@@ -884,7 +1004,9 @@ def build_lesson_plan(topic: str, hits: list[RankedHit]) -> LessonPlan:
             source_refs=[h.ref for h in group_sorted],
             citations=[
                 Citation(chunk_id=h.chunk_id, ref=h.ref, deep_link=h.deep_link,
-                         quote=h.text[:280], commentator_id=h.commentator_id)
+                         quote=h.text[:280], commentator_id=h.commentator_id,
+                         license=getattr(h, "license", "") or "",
+                         version_title=getattr(h, "version_title", "") or "")
                 for h in group_sorted
             ],
         ))

@@ -271,7 +271,8 @@ class CloudLLM:
         )
         # The single metering point for this backend: every provider call passes through here, so the
         # agentic loop's extra rounds are counted without any caller having to know they happened.
-        metering.record(getattr(usage, "prompt_tokens", 0), getattr(usage, "completion_tokens", 0))
+        metering.record(getattr(usage, "prompt_tokens", 0), getattr(usage, "completion_tokens", 0),
+                        model=self.model_id)
         return choice, usage
 
     def generate(self, prompt: GroundedPrompt, *, lang: str, max_tokens: int,
@@ -285,6 +286,7 @@ class CloudLLM:
             finish_reason=choice.finish_reason or "stop",
             prompt_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
             completion_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
+            model_used=self.model_id,
         )
 
     def stream(self, prompt: GroundedPrompt, *, lang: str, max_tokens: int,

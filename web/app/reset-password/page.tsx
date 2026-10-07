@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import type { Lang } from "@/lib/types";
 import { tr } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
@@ -11,13 +12,36 @@ import { Icon } from "@/components/Icon";
 // this ever renders meaningfully — so by the time the user submits, updatePassword() is just an
 // ordinary authenticated call, not a special recovery-flow one.
 export default function ResetPassword() {
-  const [lang] = useState<Lang>("he");
+  const [lang, setLang] = useState<Lang>("he");
   const { user, loading, updatePassword } = useAuth();
   const router = useRouter();
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
+
+  useEffect(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      const q = sp.get("lang");
+      if (q === "en" || q === "he") {
+        setLang(q);
+        return;
+      }
+      const saved = localStorage.getItem("chavruta-lang");
+      if (saved === "en" || saved === "he") {
+        setLang(saved);
+      }
+    } catch {}
+  }, []);
+
+  const toggleLang = () => {
+    const next = lang === "he" ? "en" : "he";
+    setLang(next);
+    try {
+      localStorage.setItem("chavruta-lang", next);
+    } catch {}
+  };
 
   useEffect(() => {
     if (done) {
@@ -41,8 +65,22 @@ export default function ResetPassword() {
   };
 
   return (
-    <div dir="rtl" className="min-h-dvh grid place-items-center p-4">
+    <div dir={lang === "he" ? "rtl" : "ltr"} className="min-h-dvh grid place-items-center p-4">
       <div className="glass rounded-[28px] p-8 w-full max-w-sm flex flex-col gap-5">
+        <div className="flex items-center justify-between gap-3">
+          <Link href="/" className="text-xs text-tekhelet/80 hover:text-tekhelet font-semibold inline-flex items-center gap-1">
+            <Icon name={lang === "he" ? "chevron_right" : "chevron_left"} className="text-[16px]" />
+            {tr(lang, "backToApp")}
+          </Link>
+          <button
+            type="button"
+            onClick={toggleLang}
+            className="px-3 py-1.5 rounded-full glass text-ink/70 text-xs font-semibold hover:text-tekhelet transition cursor-pointer"
+          >
+            עברית · EN
+          </button>
+        </div>
+
         <div className="flex flex-col items-center gap-2 text-center">
           <div className="h-14 w-14 rounded-2xl grad grid place-items-center text-white">
             <Icon name="lock_reset" className="text-[26px]" />

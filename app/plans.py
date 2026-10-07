@@ -172,12 +172,13 @@ PROFIT_TARGET = 0.30
 # was cheaper per normalized token than pro (backwards volume logic). Nothing is grandfathered: billing
 # is still off (no PAYPLUS_* keys), so none of this is charged to anyone yet.
 TIERS: tuple[Tier, ...] = (
-    Tier("free",             200_000,     525_000,   2,   1,    0.0,      0.0, "חינם",         "Free"),
-    Tier("basic",            600_000,   1_575_000,   6,   3,   75.0,    750.0, "בסיסי",        "Basic"),
-    Tier("pro",            2_000_000,   5_250_000,  20,  10,  200.0,   2000.0, "מלא",          "Pro"),
-    Tier("institution",    8_000_000,  21_000_000,  80,  40, 1000.0,  10000.0, "מוסדי 20",     "Institution 20", 20),
-    Tier("institution_50", 20_000_000,  52_500_000, 200, 100, 2000.0, 20000.0, "מוסדי 50",    "Institution 50", 50),
-    Tier("institution_100", 40_000_000, 105_000_000, 400, 200, 4000.0, 40000.0, "מוסדי 100",  "Institution 100", 100),
+    Tier("free",             100_000,     270_000,   1,   1,    0.0,      0.0, "חינם",         "Free"),
+    Tier("basic",            300_000,     810_000,   3,   3,   75.0,    750.0, "בסיסי",        "Basic"),
+    Tier("plus",             500_000,   1_350_000,   5,   5,  129.0,   1290.0, "מתקדם",       "Plus"),
+    Tier("pro",            1_000_000,   2_700_000,  10,  10,  200.0,   2000.0, "מלא",          "Pro"),
+    Tier("institution",    4_000_000,  10_800_000,  40,  40, 1000.0,  10000.0, "מוסדי 20",     "Institution 20", 20),
+    Tier("institution_50", 10_000_000,  27_000_000, 100, 100, 2000.0, 20000.0, "מוסדי 50",    "Institution 50", 50),
+    Tier("institution_100", 20_000_000, 54_000_000, 200, 200, 4000.0, 40000.0, "מוסדי 100",  "Institution 100", 100),
 )
 
 # Output costs several times input everywhere; 3x is the round figure that holds across the models
@@ -188,13 +189,49 @@ TIERS: tuple[Tier, ...] = (
 # cost unit — `billed_tokens * $0.20 / 1e6` is the real dollar figure for any account, tier or turn,
 # with no conversion factor to get wrong. Measured 2026-08-12 over 166 production turns: 19,566
 # prompt + 1,315 completion per turn = 23,512 normalized ≈ $0.0047. If the provider or its pricing
-# ratio ever changes, this constant is where that shows up.
 COMPLETION_WEIGHT = 3
 
+DISTILLER_MODEL = "google/gemma-3-27b-it"
+DISTILLER_INPUT_WEIGHT = 0.50   # $0.10 / $0.20 (Gemma 3 27B on Nebius)
+DISTILLER_OUTPUT_WEIGHT = 1.50  # $0.30 / $0.20 (Gemma 3 27B on Nebius)
 
-def normalized_tokens(prompt_tokens: int, completion_tokens: int) -> int:
-    """What one LLM call costs in the unit the quota is denominated in."""
-    return max(0, int(prompt_tokens or 0)) + COMPLETION_WEIGHT * max(0, int(completion_tokens or 0))
+# Gemini model pricing: $0.30 input / $3.00 output per 1M tokens vs baseline $0.20 ($0.20 / $0.60)
+GEMINI_INPUT_WEIGHT = 1.50   # $0.30 / $0.20
+GEMINI_OUTPUT_WEIGHT = 15.0  # $3.00 / $0.20
+
+# Reranker model pricing: $0.01 per 1M tokens vs baseline $0.20 per 1M tokens (0.05 ratio)
+RERANKER_WEIGHT = 0.05
+
+
+def normalized_tokens(prompt_tokens: int, completion_tokens: int, model: str = "") -> int:
+    """What one LLM / Reranker call costs in the unit the quota is denominated in.
+
+    Baseline model (Qwen3-235B): prompt + 3 * completion ($0.20 / $0.60 per million tokens).
+    Gemini model (Gemini Flash / Flash-Lite): round(prompt * 1.50 + completion * 15.0) ($0.30 / $3.00 per million tokens).
+    Ranking model (Reranker): round((prompt + completion) * 0.05) ($0.01 per million tokens).
+    Distiller model (google/gemma-3-27b-it): round(prompt * 0.50 + completion * 1.50).
+    Alternate distiller (Llama-3.3-70B): round(prompt * 0.65 + completion * 2.0).
+    """
+    p = max(0, int(prompt_tokens or 0))
+    c = max(0, int(completion_tokens or 0))
+    m = (model or "").lower()
+    if "rerank" in m:
+        # Ranking model: $0.01 / 1M tokens vs baseline $0.20 / 1M tokens
+        return round((p + c) * RERANKER_WEIGHT)
+    if "gemini" in m:
+        # Gemini: $0.30 input / $3.00 output vs baseline $0.20
+        return round(p * GEMINI_INPUT_WEIGHT + c * GEMINI_OUTPUT_WEIGHT)
+    if "gemma" in m or "27b" in m:
+        # Gemma 3 27B on Nebius: $0.10 / $0.30 vs baseline $0.20 / $0.60
+        return round(p * DISTILLER_INPUT_WEIGHT + c * DISTILLER_OUTPUT_WEIGHT)
+    if "llama-3.3-70b" in m or "70b" in m:
+        return round(p * 0.65 + c * 2.0)
+    return p + COMPLETION_WEIGHT * c
+
+
+def billed_tokens_for_model(prompt_tokens: int, completion_tokens: int, model: str) -> int:
+    """Unified token billing calculation supporting different models."""
+    return normalized_tokens(prompt_tokens, completion_tokens, model=model)
 
 _BY_ID = {t.id: t for t in TIERS}
 _ALIASES = {"paid": "pro"}          # pre-tier billing wrote 'paid'; it means the standard paid tier
@@ -441,15 +478,16 @@ def refund_quote(amount: float, *, days_used: int = 0, cycle: str | None = MONTH
 # (Recomputed for the 2026-08-21 reprice — price ÷ (weekly_tokens x 4.3 / 23,512). Institution figures
 # use the internal negotiation anchor, not a published price; see the note above TIERS.)
 #
-# So a credit priced below ~₪0.20 is not an overflow valve, it is a cheaper subscription with extra
+# So a credit priced below ~₪0.30 is not an overflow valve, it is a cheaper subscription with extra
 # steps — anyone doing arithmetic buys credits instead of a plan, and the recurring revenue that
-# actually funds the server evaporates. ₪0.50 sits ~2.4x above the cheapest subscription rate and ~29x
+# actually funds the server evaporates. With DeepSeek-V4-Pro (marginal cost ~₪0.143/turn, Pro implied
+# subscription rate ~₪0.275/turn), ₪1.20 sits ~4.4x above the cheapest subscription rate and ~8.4x
 # marginal cost, which is what makes it worth topping up in a pinch and never worth living on.
 #
 # Not yet sold: credits are granted by coupon today (db.add_credits), and a pack purchase would
 # write the same column. This constant is here so the first person to build that flow inherits the
 # reasoning rather than picking a round number.
-CREDIT_PRICE_ILS = 0.50
+CREDIT_PRICE_ILS = 1.20
 
 # A credit costs more for the expensive intents. Measured: a lesson averages ~58,000 normalized
 # tokens against ~23,512 for a question — 2.5x. It is charged 5x, deliberately above the measured

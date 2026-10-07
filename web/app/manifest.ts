@@ -7,13 +7,13 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "חברותא AI",
     short_name: "חברותא",
     description:
-      "שותפה ללימוד תורה — שאלה, הסבר ובניית שיעורים מעל המדף היהודי, עם מקורות מצוטטים.",
+      "שותף ללימוד תורה — שאלה, הסבר ובניית שיעורים מעל המדף היהודי, עם מקורות מצוטטים.",
     lang: "he",
     dir: "rtl",
     start_url: "/",
     display: "standalone",
-    background_color: "#faf7ef",
-    theme_color: "#002045",
+    background_color: "#f6f4ff",
+    theme_color: "#5b3df5",
     icons: [
       { src: "/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
     ],

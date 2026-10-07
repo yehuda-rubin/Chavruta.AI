@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Attachment, FileOut, Lang, Message, SavedLesson, Session } from "@/lib/types";
 import { api, LessonExtras, Me, Tier } from "@/lib/api";
 import { IntentId } from "@/lib/i18n";
@@ -17,13 +17,37 @@ import { PlansModal } from "@/components/PlansModal";
 import { SupportModal } from "@/components/SupportModal";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
 import { SignIn } from "@/components/SignIn";
+import { Landing } from "@/components/Landing";
 import { Blocked } from "@/components/Blocked";
 import { ConfirmConsent } from "@/components/ConfirmConsent";
 import { useAuth } from "@/lib/auth";
 
+function isPageReload(): boolean {
+  if (typeof window === "undefined" || !window.performance) return false;
+  try {
+    const navEntries = window.performance.getEntriesByType?.("navigation") as
+      | PerformanceNavigationTiming[]
+      | undefined;
+    if (navEntries && navEntries.length > 0) {
+      return navEntries[0].type === "reload";
+    }
+    const legacy = (window.performance as unknown as { navigation?: { type: number } }).navigation;
+    return legacy?.type === 1;
+  } catch {
+    return false;
+  }
+}
+
 export default function Home() {
   const auth = useAuth();
   const [lang, setLang] = useState<Lang>("he");
+  const [directToSignIn, setDirectToSignIn] = useState(false);
+  useEffect(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      setDirectToSignIn(!!(sp.get("ref") || sp.get("mode")));
+    } catch {}
+  }, []);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -34,7 +58,8 @@ export default function Home() {
   const [loadingTarget, setLoadingTarget] = useState<string | null>(null);
   const [intent, setIntent] = useState<IntentId>("qa");
   const [lessonFields, setLessonFields] = useState<LessonFields>({ audience: "", gradeBand: "", length: "" });
-  const [userSources, setUserSources] = useState<Attachment[]>([]);
+  const [sessionSources, setSessionSources] = useState<Record<string, Attachment[]>>({});
+  const [pendingNewSources, setPendingNewSources] = useState<Attachment[]>([]);
   const [subtitle, setSubtitle] = useState("");
   const [previewFile, setPreviewFile] = useState<FileOut | null>(null);
   const [me, setMe] = useState<Me | null>(null);
@@ -78,8 +103,37 @@ export default function Home() {
     setDefaultIntent(di);
     setIntent(di);
     setSrcDefaultOpen(g("chavruta-src-open") === "1");
-    const saveLang = g("chavruta-lang") as Lang | null;
-    if (saveLang) setLang(saveLang);
+    let initialLang: Lang = "en";
+    let hasUrlOverride = false;
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const paramLang = urlParams.get("lang");
+      if (paramLang === "he" || paramLang === "en") {
+        initialLang = paramLang;
+        hasUrlOverride = true;
+      }
+      const askSource = urlParams.get("ask_source");
+      if (askSource) {
+        setPendingNewSources([
+          {
+            kind: "text",
+            name: askSource,
+            content: `מקור נבחר ללימוד: ${askSource}`,
+          },
+        ]);
+      }
+    } catch {}
+
+    if (!hasUrlOverride) {
+      const saveLang = g("chavruta-lang") as Lang | null;
+      if (saveLang === "he" || saveLang === "en") {
+        initialLang = saveLang;
+      } else {
+        const browserLang = (navigator.language || "").toLowerCase();
+        initialLang = browserLang.startsWith("he") ? "he" : "en";
+      }
+    }
+    setLang(initialLang);
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     setSystemDark(mq.matches);
     const onMq = (e: MediaQueryListEvent) => setSystemDark(e.matches);
@@ -102,6 +156,39 @@ export default function Home() {
   useEffect(() => {
     localStorage.setItem("chavruta-src-open", srcDefaultOpen ? "1" : "0");
   }, [srcDefaultOpen]);
+
+  // Restore per-session uploaded sources from localStorage
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("chavruta-session-sources");
+      if (raw) setSessionSources(JSON.parse(raw));
+    } catch {}
+  }, []);
+
+  const userSources = useMemo(() => {
+    return activeId ? (sessionSources[activeId] || []) : pendingNewSources;
+  }, [activeId, sessionSources, pendingNewSources]);
+
+  const setUserSources = useCallback(
+    (action: Attachment[] | ((prev: Attachment[]) => Attachment[])) => {
+      if (activeId) {
+        setSessionSources((prev) => {
+          const current = prev[activeId] || [];
+          const next = typeof action === "function" ? action(current) : action;
+          const updated = { ...prev, [activeId]: next };
+          try {
+            localStorage.setItem("chavruta-session-sources", JSON.stringify(updated));
+          } catch {}
+          return updated;
+        });
+      } else {
+        setPendingNewSources((prev) => {
+          return typeof action === "function" ? action(prev) : action;
+        });
+      }
+    },
+    [activeId],
+  );
 
   const refreshSessions = useCallback(async () => {
     try {
@@ -131,33 +218,156 @@ export default function Home() {
   // Clear the open chat whenever the signed-in account changes (sign-out, or a different account
   // signing in on the same tab) — otherwise the previous account's messages stay on screen until the
   // new user happens to click something, briefly leaking one account's chat into another's session.
+  const [activeJobs, setActiveJobs] = useState<Record<string, string>>({}); // sessionId -> jobId
+
+  const appendCancelledMessage = useCallback(() => {
+    const cancelText = lang === "he" ? "המענה נעצר לבקשתך." : "Generation stopped.";
+    setMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (last && last.role === "assistant" && last.text === cancelText) {
+        return prev;
+      }
+      return [...prev, { role: "assistant", text: cancelText, citations: [], caveats: [] }];
+    });
+  }, [lang]);
+
+  const setSessionJob = useCallback((sid: string, jid: string) => {
+    setActiveJobs((prev) => {
+      const next = { ...prev, [sid]: jid };
+      try { localStorage.setItem("chavruta_active_jobs", JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, []);
+
+  const clearSessionJob = useCallback((sid: string) => {
+    setActiveJobs((prev) => {
+      const next = { ...prev };
+      delete next[sid];
+      try { localStorage.setItem("chavruta_active_jobs", JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, []);
+
+  // Restore active background jobs from localStorage on initial page load
   useEffect(() => {
-    setActiveId(null);
-    setMessages([]);
-    setSubtitle("");
-    setUserSources([]);
-  }, [auth.user?.id]);
+    try {
+      const saved = localStorage.getItem("chavruta_active_jobs");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === "object") {
+          setActiveJobs(parsed);
+        }
+      }
+    } catch {}
+  }, []);
+
+  // Background polling worker: polls all in-flight jobs regardless of which session is open
+  useEffect(() => {
+    const entries = Object.entries(activeJobs);
+    if (!entries.length) return;
+
+    let unmounted = false;
+    for (const [sid, jid] of entries) {
+      (async () => {
+        try {
+          await api.pollJob(jid);
+          if (unmounted) return;
+          clearSessionJob(sid);
+          refreshSessions();
+          refreshMe();
+          if (activeIdRef.current === sid) {
+            const msgs = await api.sessionMessages(sid);
+            if (activeIdRef.current === sid) {
+              setMessages(msgs);
+              setLoading(false);
+              setLoadingTarget(null);
+            }
+          }
+        } catch (err: unknown) {
+          if (unmounted) return;
+          clearSessionJob(sid);
+          refreshSessions();
+          refreshMe();
+          if (activeIdRef.current === sid) {
+            setLoading(false);
+            setLoadingTarget(null);
+            const msg = (err as Error)?.message || "";
+            if (msg.includes("cancelled")) {
+              appendCancelledMessage();
+            } else {
+              const msgs = await api.sessionMessages(sid).catch(() => []);
+              if (msgs.length) setMessages(msgs);
+            }
+          }
+        }
+      })();
+    }
+    return () => { unmounted = true; };
+  }, [activeJobs, refreshSessions, refreshMe, lang, clearSessionJob, appendCancelledMessage]);
 
   const selectSession = useCallback(async (s: Session) => {
     setActiveId(s.id);
+    setUserSources([]); // Clear pending attachment when switching chats
+    try {
+      sessionStorage.setItem("chavruta-active-session", s.id);
+      localStorage.setItem("chavruta-active-session", s.id);
+    } catch {}
     setSubtitle(s.title || s.first_q || "");
     if (s.mode) setIntent(s.mode as IntentId);
-    // A fast click on session A then B can have A's fetch resolve after B's — activeIdRef is the
-    // always-current id (see its declaration above), so a stale response is dropped instead of
-    // overwriting the session the user actually has open now.
+    if (activeJobs[s.id]) {
+      setLoading(true);
+      setLoadingTarget(s.id);
+    } else {
+      setLoading(false);
+      setLoadingTarget(null);
+    }
     try {
       const msgs = await api.sessionMessages(s.id);
       if (activeIdRef.current === s.id) setMessages(msgs);
     } catch {
       if (activeIdRef.current === s.id) setMessages([]);
     }
-  }, []);
+  }, [activeJobs]);
+
+  // Restore active session across page refreshes (F5) once sessions load.
+  // When opening afresh (new tab / direct visit), always start in a new chat.
+  const initialSessionRestoredRef = useRef(false);
+  useEffect(() => {
+    if (!initialSessionRestoredRef.current && sessions.length > 0) {
+      initialSessionRestoredRef.current = true;
+      if (!isPageReload()) {
+        try {
+          sessionStorage.removeItem("chavruta-active-session");
+          localStorage.removeItem("chavruta-active-session");
+        } catch {}
+        return;
+      }
+      try {
+        const savedId =
+          sessionStorage.getItem("chavruta-active-session") ||
+          localStorage.getItem("chavruta-active-session");
+        if (savedId) {
+          const target = sessions.find((s) => s.id === savedId);
+          if (target) {
+            selectSession(target);
+          }
+        }
+      } catch {}
+    }
+  }, [sessions, selectSession]);
 
   const newDiscussion = useCallback(() => {
     setActiveId(null);
+    try {
+      sessionStorage.removeItem("chavruta-active-session");
+      localStorage.removeItem("chavruta-active-session");
+    } catch {}
     setMessages([]);
+    setUserSources([]);
     setSubtitle("");
     setIntent(defaultIntent);
+    setLoading(false);
+    setLoadingTarget(null);
   }, [defaultIntent]);
 
   const deleteSession = useCallback(
@@ -167,7 +377,13 @@ export default function Home() {
       } catch {
         /* ignore */
       }
-      if (id === activeId) newDiscussion();
+      if (id === activeId) {
+        try {
+          sessionStorage.removeItem("chavruta-active-session");
+          localStorage.removeItem("chavruta-active-session");
+        } catch {}
+        newDiscussion();
+      }
       refreshSessions();
     },
     [activeId, newDiscussion, refreshSessions],
@@ -306,6 +522,7 @@ export default function Home() {
   const openLesson = useCallback(async (l: SavedLesson) => {
     setShowLessons(false);
     setActiveId(null);
+    setUserSources([]);
     setIntent("lesson");
     setSubtitle(l.topic);
     // GET /lessons deliberately omits `files` and `citations` — the Word documents are large and
@@ -337,6 +554,30 @@ export default function Home() {
     }
   }, [lang]);
 
+  const stopGeneration = useCallback(async () => {
+    const targetSid = loadingTarget || activeId;
+    if (!targetSid) {
+      setLoading(false);
+      setLoadingTarget(null);
+      return;
+    }
+    const jid = activeJobs[targetSid];
+    clearSessionJob(targetSid);
+    setLoading(false);
+    setLoadingTarget(null);
+    try {
+      if (jid) {
+        await api.cancelJob(jid);
+      } else {
+        await api.cancelSession(targetSid);
+      }
+    } catch {
+      /* ignore */
+    }
+    refreshMe();
+    appendCancelledMessage();
+  }, [loadingTarget, activeId, activeJobs, clearSessionJob, refreshMe, appendCancelledMessage]);
+
   const send = useCallback(
     async (text: string) => {
       const extras: LessonExtras | undefined =
@@ -344,6 +585,7 @@ export default function Home() {
           ? { audience: lessonFields.audience, grade_band: lessonFields.gradeBand, length: lessonFields.length }
           : undefined;
       const att = userSources.length ? userSources : undefined;
+      if (userSources.length) setUserSources([]);
       // The conversation this turn belongs to. For a follow-up it's the current chat; for a brand-new
       // chat it becomes known when onSession fires. Answers are only shown if this is still on screen.
       let target = activeId;
@@ -351,45 +593,86 @@ export default function Home() {
       setLoadingTarget(target);
       setMessages((prev) => [...prev, { role: "user", text, citations: [], caveats: [] }]);
       const appendIfCurrent = (msg: Message) =>
-        setMessages((prev) => (activeIdRef.current === target ? [...prev, msg] : prev));
+        setMessages((prev) => {
+          if (activeIdRef.current !== target) return prev;
+          const last = prev[prev.length - 1];
+          if (
+            last &&
+            last.role === "assistant" &&
+            (last.text === msg.text || (msg.text && last.text.trim() === msg.text.trim()))
+          ) {
+            return prev;
+          }
+          return [...prev, msg];
+        });
       const push = (r: { answer: string; citations?: Message["citations"]; caveats?: string[]; grounded?: boolean; files?: Message["files"]; source_note?: string }) =>
         appendIfCurrent({ role: "assistant", text: r.answer, citations: r.citations || [], caveats: r.caveats || [], grounded: r.grounded, files: r.files, source_note: r.source_note });
       try {
         if (activeId) {
-          push(await api.sessionQueryAsync(activeId, text, intent, lang, extras, att));
+          await api.sessionQueryAsync(activeId, text, intent, lang, extras, att, (jid) => {
+            setSessionJob(activeId, jid);
+          });
+          clearSessionJob(activeId);
+          try {
+            const msgs = await api.sessionMessages(activeId);
+            if (activeIdRef.current === activeId) setMessages(msgs);
+          } catch {
+            /* ignore */
+          }
         } else {
           // Async create: the session id comes back immediately (onSession) so the new chat attaches
           // to the UI while the (possibly minutes-long) first lesson generates on the job queue.
-          const s = await api.createSessionAsync(text, intent, lang, extras, att, (id) => {
+          let createdId = "";
+          await api.createSessionAsync(text, intent, lang, extras, att, (id, jid) => {
+            createdId = id;
             target = id;
             setLoadingTarget(id);
             setActiveId(id);
+            try {
+              sessionStorage.setItem("chavruta-active-session", id);
+              localStorage.setItem("chavruta-active-session", id);
+            } catch {}
             setSubtitle(text);
+            setSessionJob(id, jid);
             refreshSessions();
           });
-          push(s.result);
+          const finalId = createdId || target;
+          if (finalId) {
+            clearSessionJob(finalId);
+            try {
+              const msgs = await api.sessionMessages(finalId);
+              if (activeIdRef.current === finalId) setMessages(msgs);
+            } catch {
+              /* ignore */
+            }
+          }
           refreshSessions();
         }
-        setUserSources([]); // consumed by this turn
       } catch (e) {
+        if (target) clearSessionJob(target);
         // Friendly errors: a network failure → connection message; a 4xx with a clean server detail
         // (e.g. the bilingual quota/429 message) → show it; 5xx / job failure / timeout → generic
         // (never surface a raw exception or stack to the user).
         const err = e as Error & { status?: number };
-        const msg =
-          err?.name === "TypeError"
-            ? tr(lang, "errNetwork")
-            : err?.status && err.status < 500 && err.message
-              ? err.message
-              : tr(lang, "errGeneric");
-        appendIfCurrent({ role: "assistant", text: msg, citations: [], caveats: [] });
+        const isCancelled = err?.message?.includes("cancelled");
+        if (isCancelled) {
+          appendCancelledMessage();
+        } else {
+          const msg =
+            err?.name === "TypeError"
+              ? tr(lang, "errNetwork")
+              : err?.status && err.status < 500 && err.message
+                ? err.message
+                : tr(lang, "errGeneric");
+          appendIfCurrent({ role: "assistant", text: msg, citations: [], caveats: [] });
+        }
       } finally {
         setLoading(false);
         setLoadingTarget(null);
         refreshMe(); // update the remaining-quota pill (incl. after a 429)
       }
     },
-    [activeId, intent, lang, lessonFields, userSources, refreshSessions, refreshMe],
+    [activeId, intent, lang, lessonFields, userSources, refreshSessions, refreshMe, setSessionJob, clearSessionJob, appendCancelledMessage],
   );
 
   // Auth gate (Supabase mode only). While the initial session check runs, show a minimal splash;
@@ -398,7 +681,9 @@ export default function Home() {
     return <div className="min-h-dvh grid place-items-center text-ink/50">{tr(lang, "authWorking")}</div>;
   }
   if (auth.enabled && !auth.user) {
-    return <SignIn lang={lang} />;
+    // A link that already says what it wants (?ref= from a partner, ?mode=up) goes straight to the
+    // form; everyone else lands on the front page, which sends them to /signup.
+    return directToSignIn ? <SignIn lang={lang} /> : <Landing />;
   }
   // An account with no recorded terms/age consent — e.g. created by calling Supabase's own signup
   // API directly, bypassing SignIn.tsx's checkboxes entirely. The backend already 403s every route
@@ -412,6 +697,14 @@ export default function Home() {
     return <Blocked lang={lang} until={me.blocked_until} reason={me.blocked_reason} />;
   }
 
+  const hasSources =
+    userSources.length > 0 ||
+    messages.some((m) => m.role === "assistant" && (m.citations || []).some((c) => c && c.ref));
+  const openSources = () => {
+    setSourcesCollapsed(false);
+    if (typeof window !== "undefined" && window.matchMedia("(max-width: 1023px)").matches) setMobileSources(true);
+  };
+
   // Panels shared by the desktop-inline layout and the mobile drawers. `mobile` closes the drawer on
   // select/new/collapse so the user lands back on the chat.
   const sessionsPanel = (mobile: boolean) => (
@@ -419,6 +712,7 @@ export default function Home() {
       lang={lang}
       sessions={sessions}
       activeId={activeId}
+      generatingIds={Object.keys(activeJobs)}
       onNew={() => { newDiscussion(); if (mobile) setMobileSessions(false); }}
       onSelect={(id) => {
         const s = sessions.find((x) => x.id === id);
@@ -441,6 +735,7 @@ export default function Home() {
       messages={messages}
       userSources={userSources}
       srcDefaultOpen={srcDefaultOpen}
+      isAdmin={me?.is_admin}
       onRemoveSource={(i) => setUserSources((prev) => prev.filter((_, j) => j !== i))}
       onAddSource={() => setShowAddSource(true)}
       onCollapse={() => (mobile ? setMobileSources(false) : setSourcesCollapsed(true))}
@@ -459,27 +754,13 @@ export default function Home() {
         onNewChat={newDiscussion}
         isAdmin={me?.is_admin}
         orgRole={me?.org_role}
+        userEmail={auth.user?.email}
       />
-      <div className="flex flex-1 overflow-hidden px-4 pb-4 gap-4">
-        {/* Sessions — desktop inline only (hidden on mobile, opened as a drawer). lg:contents keeps
-            the desktop flex row exactly as before. */}
+
+      <div className="flex-1 min-h-0 flex gap-3 overflow-hidden">
         <div className="hidden lg:contents">
           {sessionsCollapsed ? (
-            <Rail
-              side="start"
-              icon="forum"
-              title={tr(lang, "openChatsTip")}
-              onExpand={() => setSessionsCollapsed(false)}
-              extra={
-                <button
-                  onClick={newDiscussion}
-                  className="h-10 w-10 rounded-2xl grad text-white grid place-items-center hover:opacity-95 transition"
-                  title={tr(lang, "newChatShort")}
-                >
-                  <span className="material-symbols-outlined">add</span>
-                </button>
-              }
-            />
+            <Rail lang={lang} side="start" icon="chat" title={tr(lang, "openChatsTip")} onExpand={() => setSessionsCollapsed(false)} />
           ) : (
             sessionsPanel(false)
           )}
@@ -497,14 +778,23 @@ export default function Home() {
           onPickIntent={setIntent}
           onLessonChange={setLessonFields}
           onSend={send}
+          onStop={stopGeneration}
           onPreviewFile={setPreviewFile}
           calendarModesEnabled={me?.calendar_modes_enabled}
+          sourcesheetModesEnabled={me?.sourcesheet_enabled}
           userEmail={auth.user?.email}
+          userSources={userSources}
+          onAddSource={() => setShowAddSource(true)}
+          onOpenSources={openSources}
         />
 
+        {/* The sources column exists only once there is something in it (a cited answer or a source the
+            user added). Before that it was a tall empty card saying "sources will appear here", and the
+            chat — the thing people came for — got the narrower half of the screen. Adding a source is a
+            "+" in the composer, so nothing is lost by hiding the column. */}
         <div className="hidden lg:contents">
-          {sourcesCollapsed ? (
-            <Rail side="end" icon="menu_book" title={tr(lang, "openSourcesTip")} onExpand={() => setSourcesCollapsed(false)} />
+          {!hasSources ? null : sourcesCollapsed ? (
+            <Rail lang={lang} side="end" icon="menu_book" title={tr(lang, "openSourcesTip")} onExpand={() => setSourcesCollapsed(false)} />
           ) : (
             sourcesPanel(false)
           )}

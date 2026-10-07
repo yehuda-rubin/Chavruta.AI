@@ -142,13 +142,48 @@ def _tier_actually_paid_for(owner: str, sub: dict, *, amount: float, cycle: str,
     return granted
 
 
+# transaction_uids whose success callback is being applied right now. Together with the ledger check
+# in handle_event this makes a charge apply at most once per process: the ledger answers "already
+# applied", this set answers "being applied by another thread at this moment" (a duplicate delivery
+# racing the first, before its ledger row exists). A set rather than one lock held across the whole
+# handler, so the GreenInvoice call never serialises unrelated webhooks — and never holds db._LOCK.
+_inflight: set[str] = set()
+_inflight_lock = threading.Lock()
+
+
 def handle_event(normalized: dict, *, now: datetime | None = None) -> None:
     """Apply a verified PayPlus callback: activate/renew the paid plan and issue an invoice. Ignores
-    events with no owner id or a non-success status (logged, not raised)."""
+    events with no owner id or a non-success status (logged, not raised).
+
+    Idempotent on `transaction_uid`: the webhook signature covers the body only (no timestamp or
+    nonce), so a captured or retried delivery can arrive again. A success whose transaction_uid is
+    already in the ledger is logged and dropped — otherwise it would recompute the period from now,
+    force the subscription back to active (undoing a cancellation), issue a second receipt and book
+    the revenue twice. Events with no transaction_uid keep the old behaviour; there is nothing to
+    key them on."""
     owner = normalized.get("owner_id")
     if not owner or not normalized.get("success"):
         _log.info("billing event ignored (owner=%s success=%s)", owner, normalized.get("success"))
         return
+    txn_uid = str(normalized.get("transaction_uid") or "").strip()
+    if not txn_uid:
+        _apply_charge(owner, normalized, now=now)
+        return
+    with _inflight_lock:
+        if txn_uid in _inflight or db.charge_exists(txn_uid):
+            _log.warning("billing: duplicate delivery of transaction %s for %s ignored",
+                         txn_uid, owner)
+            return
+        _inflight.add(txn_uid)
+    try:
+        _apply_charge(owner, normalized, now=now)
+    finally:
+        with _inflight_lock:
+            _inflight.discard(txn_uid)
+
+
+def _apply_charge(owner: str, normalized: dict, *, now: datetime | None = None) -> None:
+    """The body of handle_event for a success that is not a replay."""
     now = now or datetime.now(UTC)
     # What was bought was decided at checkout, not here — the callback carries a charge, not a
     # basket. A renewal reads the same stored row — and on either cycle that grants another MONTH,
@@ -214,6 +249,16 @@ def handle_event(normalized: dict, *, now: datetime | None = None) -> None:
                                name=normalized.get("name", "") or "")
     except Exception:               # noqa: BLE001 — a failed rebate must not fail the whole webhook
         _log.exception("coupon discount rebate failed for %s", owner)
+
+    try:
+        redemption = db.get_referral_redemption(owner)
+        if redemption and amount > 0:
+            referrer_id = redemption["referrer_owner_id"]
+            db.record_referral_reward(referrer_id, owner, amount, reward_pct=10.0)
+            _log.info("referral reward recorded for referrer %s from %s (amount=₪%.2f)",
+                      referrer_id, owner, amount)
+    except Exception:               # noqa: BLE001 — referral reward recording must not fail billing
+        _log.exception("referral reward recording failed for %s", owner)
 
 
 def _apply_coupon_discount(owner: str, amount: float, txn_uid: str | None, tier: str, cycle: str,

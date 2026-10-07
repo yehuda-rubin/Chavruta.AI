@@ -32,6 +32,7 @@ Every knob in Chavruta.AI is an environment variable. No code changes are requir
 | `CHAVRUTA_RERANK_MODEL` | Model ID for the reranker | `BAAI/bge-reranker-v2-m3` | `src/chavruta/config/profile.py:104` |
 | `CHAVRUTA_RELEVANCE_THRESHOLD` | Minimum dense cosine similarity for a source to be considered "relevant" | `0.5` | `src/chavruta/config/profile.py:105` |
 | `CHAVRUTA_LINKS_PATH` | Path to the link graph JSONL file (built by `scripts/build_links.py`) | `data/links.jsonl` | `scripts/build_links.py:27` |
+| `CHAVRUTA_MAX_CONCURRENT_RETRIEVALS` | Concurrency limit on CPU-bound retrieval (bge-m3 + Qdrant); requests queue with agentic priority | `2` | `src/chavruta/retrieval/hybrid.py:165` |
 
 ## Generation / LLM
 
@@ -58,7 +59,7 @@ Every knob in Chavruta.AI is an environment variable. No code changes are requir
 | Variable | Purpose | Default | Where read | Production risk if left at default |
 |----------|---------|---------|------------|-----------------------------------|
 | `CHAVRUTA_API_KEYS` | Comma-separated list of allowed API keys (empty = disabled) | `""` | `app/security.py:41` | **No authentication** – anyone can call the API |
-| `CHAVRUTA_CORS_ORIGINS` | Comma-separated list of allowed CORS origins (browser policy) | `http://localhost:5173,http://localhost:4173` | `app/api.py:186` | **Blocks legitimate requests** from your production domain |
+| `CHAVRUTA_CORS_ORIGINS` | Comma-separated list of allowed CORS origins (browser policy) | `http://localhost:3000,http://localhost:5173,http://localhost:4173` | `app/api.py:650` | **Blocks legitimate requests** from your production domain |
 | `CHAVRUTA_RATE_PER_MIN` | Requests per minute per IP (rate limiting) | `20` | `app/security.py:160` | **Too permissive** – allows abuse of expensive LLM calls |
 | `CHAVRUTA_RATE_PER_HOUR` | Requests per hour per IP (rate limiting) | `200` | `app/security.py:161` | **Too permissive** – allows sustained abuse |
 | `CHAVRUTA_TRUSTED_PROXY_HOPS` | Number of trusted reverse proxies in front of the app (for X-Forwarded-For parsing) | `0` | `app/security.py:176` | **IP spoofing** – attackers can rotate X-Forwarded-For to bypass rate limits |
@@ -78,14 +79,26 @@ Both optional; unset means off. `CHAVRUTA_ADMIN_OWNERS` is a dedicated allowlist
 | `CHAVRUTA_COST_PER_M_TOKENS` | Price per MILLION normalized tokens (prompt + 3x completion). Unset ⇒ the admin panel's spend view reports tokens only and no money, on purpose — a guessed rate renders an authoritative-looking figure that is not | `0` (tokens only) | `app/api.py::admin_usage_over_time` |
 | `SENTRY_DSN` | Backend error tracking (sentry.io, free tier) — sign up, create a Python/FastAPI project, paste its DSN | `""` (off) | `app/api.py::_configure_sentry` |
 
-## Email sending (Resend)
+## Email sending (Broadcasts & Auth Multi-Provider Pool)
 
-Optional; unset means off. Used for operator-initiated broadcasts (e.g. policy updates), not auth/transactional emails (those go through Supabase). Recipients are sent via BCC for privacy — no recipient sees another recipient's address. The module follows the project's "no value = inert" convention: if not configured, `send_email()` returns `False` and logs a warning rather than raising an exception.
+Optional; unset means off. Used for:
+1. Operator broadcasts (`app/email.py`, Resend).
+2. Transactional Auth emails via Supabase Send Email Hook (`app/email_pool.py`, Waterfall hybrid: Brevo free tier -> Amazon SES overflow).
 
 | Variable | Purpose | Default | Where read |
-|----------|---------|---------|------------|
-| `RESEND_API_KEY` | Resend API key — get one at https://resend.com (free tier: 100 emails/day) | `""` (off) | `app/email.py` |
-| `RESEND_FROM` | Sender email address — use `@resend.dev` for initial testing without a verified domain | `""` (off) | `app/email.py` |
+| :--- | :--- | :--- | :--- |
+| `BREVO_API_KEY` | Brevo API key — free tier gives 300 emails/day | `""` (off) | `app/email_pool.py` |
+| `BREVO_FROM` | Sender address for Brevo (e.g. `Chavruta.AI <auth@chavrutaai.org>`) | `EMAIL_FROM` | `app/email_pool.py` |
+| `AWS_SES_SMTP_HOST` | Amazon SES SMTP endpoint (e.g. `email-smtp.eu-central-1.amazonaws.com`) | `""` (off) | `app/email_pool.py` |
+| `AWS_SES_SMTP_PORT` | Amazon SES SMTP port | `587` | `app/email_pool.py` |
+| `AWS_SES_SMTP_USER` | Amazon SES SMTP username | `""` (off) | `app/email_pool.py` |
+| `AWS_SES_SMTP_PASSWORD` | Amazon SES SMTP password | `""` (off) | `app/email_pool.py` |
+| `AWS_SES_FROM` | Sender address for Amazon SES | `EMAIL_FROM` | `app/email_pool.py` |
+| `EMAIL_FROM` | Default sender address across all email providers | `Chavruta.AI <auth@chavrutaai.org>` | `app/email_pool.py` |
+| `SUPABASE_AUTH_HOOK_SECRET` | Standard Webhooks HMAC-SHA256 secret (from Supabase dashboard) to authenticate incoming Send Email hooks. **Required**: when empty, `/auth/email-hook` and `/account/email-hook` fail closed (503, no email sent) | `""` (hook disabled) | `app/api.py` |
+| `CHAVRUTA_EMAIL_HOOK_ALLOW_UNSIGNED` | Dev-only escape hatch: `1` lets the Send Email hook accept **unsigned** requests while `SUPABASE_AUTH_HOOK_SECRET` is empty. Never set in production (anyone could make the server send auth emails to any address with any link) | `""` (off) | `app/api.py` |
+| `RESEND_API_KEY` | Resend API key — get one at https://resend.com (free tier: 100 emails/day) | `""` (off) | `app/email.py`, `app/email_pool.py` |
+| `RESEND_FROM` | Sender email address for Resend | `""` (off) | `app/email.py`, `app/email_pool.py` |
 
 ## Plans, quotas & billing
 
@@ -110,7 +123,7 @@ These variables override the default subscription tiers and credit costs defined
 | `CHAVRUTA_SUB_PRICE_ILS` | Legacy single-price knob (pro tier monthly, superseded by tier-specific prices) | `49.9` | `app/plans.py:214` |
 | `CHAVRUTA_SUB_DESCRIPTION` | Invoice line description (empty = auto-generated Hebrew description) | `""` | `app/billing/service.py:30` |
 | `CHAVRUTA_BILLING_SWEEP_INTERVAL_S` | Interval for the billing downgrade sweeper (seconds) | `3600` | `app/billing/service.py:155` |
-| `CHAVRUTA_PUBLIC_URL` | Public base URL for payment provider callbacks | `http://localhost:5173` | `app/billing/payplus.py:55` |
+| `CHAVRUTA_PUBLIC_URL` | Public base URL for payment provider callbacks and web links | `http://localhost:3000` | `app/billing/payplus.py:55` |
 
 ### Credits & coupons
 

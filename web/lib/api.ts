@@ -1,7 +1,7 @@
 // API client. Uses the SAME bare paths the active static UI calls (/query, /sessions, /lessons);
 // next.config.mjs rewrites them to the FastAPI backend, so there is no hardcoded host and no CORS.
 
-import type { Attachment, Message, QueryResponse, SavedLesson, Session } from "./types";
+import type { Attachment, Message, QueryResponse, SavedLesson, SavedSourceSheet, Session } from "./types";
 
 // The current Supabase access token, kept in sync by the auth provider (setAuthToken). When set, it's
 // attached as `Authorization: Bearer <token>` so the backend can verify the user and scope their data;
@@ -141,7 +141,7 @@ interface JobAccepted {
   session_id?: string;
 }
 interface JobStatus<T> {
-  status: "pending" | "running" | "done" | "error";
+  status: "pending" | "running" | "done" | "error" | "cancelled";
   result?: T;
   error?: string;
 }
@@ -167,6 +167,7 @@ async function pollJob<T>(jobId: string, intervalMs = 1400, timeoutMs = 10 * 60 
       continue;
     }
     if (s.status === "done") return s.result as T;
+    if (s.status === "cancelled") throw new Error("cancelled by user");
     if (s.status === "error") throw new Error(s.error || "generation failed");
     if (Date.now() - start > timeoutMs) throw new Error("timed out waiting for generation");
     await new Promise((r) => setTimeout(r, intervalMs));
@@ -195,24 +196,35 @@ export const api = {
   // is polled off the job queue so a long lesson never trips a gateway timeout.
   createSessionAsync: async (
     q: string, intent: string, lang: string, extras?: LessonExtras, att?: Attachment[],
-    onSession?: (id: string) => void,
+    onSession?: (id: string, jobId: string) => void,
   ) => {
     const acc = await req<JobAccepted>("/sessions/async", { method: "POST", body: body(q, intent, lang, extras, att) });
-    if (acc.session_id && onSession) onSession(acc.session_id);
+    if (acc.session_id && onSession) onSession(acc.session_id, acc.job_id);
     return pollJob<CreatedSession>(acc.job_id);
   },
 
   sessionQueryAsync: async (
     id: string, q: string, intent: string, lang: string, extras?: LessonExtras, att?: Attachment[],
+    onJob?: (jobId: string) => void,
   ) => {
     const acc = await req<JobAccepted>(`/sessions/${id}/query/async`, { method: "POST", body: body(q, intent, lang, extras, att) });
+    if (onJob) onJob(acc.job_id);
     return pollJob<QueryResponse>(acc.job_id);
   },
+
+  pollJob: <T>(jobId: string) => pollJob<T>(jobId),
+  cancelJob: (jobId: string) => req<{ cancelled: boolean; job_id: string }>(`/jobs/${jobId}/cancel`, { method: "POST" }),
+  cancelSession: (sessionId: string) => req<{ cancelled: boolean; job_id?: string; session_id: string }>(`/sessions/${sessionId}/cancel`, { method: "POST" }),
 
   // My Shiurim — saved lessons.
   listLessons: () => req<SavedLesson[]>("/lessons"),
   getLesson: (id: string) => req<SavedLesson>(`/lessons/${id}`),
   deleteLesson: (id: string) => req<void>(`/lessons/${id}`, { method: "DELETE" }),
+
+  // Source Sheet Companion — saved source sheets.
+  listSourceSheets: () => req<SavedSourceSheet[]>("/sourcesheets"),
+  getSourceSheet: (id: string) => req<SavedSourceSheet>(`/sourcesheets/${id}`),
+  deleteSourceSheet: (id: string) => req<{ deleted: boolean; id: string }>(`/sourcesheets/${id}`, { method: "DELETE" }),
 
   ready: () => req<{ status: string; points?: number; reason?: string }>("/ready"),
   me: () => req<Me>("/me"),
@@ -235,6 +247,35 @@ export const api = {
       body: JSON.stringify({ email, name, plan, cycle }),
     }),
   cancelSubscription: () => req<{ ok: boolean }>("/billing/cancel", { method: "POST" }),
+
+  // Referral partner program
+  getReferralStatus: () => req<ReferralStatus>("/referrals/status"),
+  generateReferralCode: () =>
+    req<{ ok: boolean; code: string; referral_link: string }>("/referrals/generate", { method: "POST" }),
+  validateReferralCode: (code: string) =>
+    req<{ valid: boolean; discount_pct: number }>(`/referrals/validate?code=${encodeURIComponent(code)}`),
+  claimReferralCode: (code: string) =>
+    req<{ ok: boolean }>("/referrals/claim", { method: "POST", body: JSON.stringify({ code }) }),
+  updateReferralSettings: (settings: { auto_convert_credits: boolean }) =>
+    req<{ ok: boolean; auto_convert_credits: boolean }>("/referrals/settings", {
+      method: "POST",
+      body: JSON.stringify(settings),
+    }),
+
+  referral: {
+    status: () => req<ReferralStatus>("/referrals/status"),
+    generate: () =>
+      req<{ ok: boolean; code: string; referral_link: string }>("/referrals/generate", { method: "POST" }),
+    validate: (code: string) =>
+      req<{ valid: boolean; discount_pct: number }>(`/referrals/validate?code=${encodeURIComponent(code)}`),
+    claim: (code: string) =>
+      req<{ ok: boolean }>("/referrals/claim", { method: "POST", body: JSON.stringify({ code }) }),
+    updateSettings: (settings: { auto_convert_credits: boolean }) =>
+      req<{ ok: boolean; auto_convert_credits: boolean }>("/referrals/settings", {
+        method: "POST",
+        body: JSON.stringify(settings),
+      }),
+  },
 
   // Flag a specific answer for operator review — the self-serve half of the defamation/quality
   // safety net (grounding reduces but doesn't eliminate the risk of a mischaracterizing answer).
@@ -451,6 +492,7 @@ export interface Me {
   // Parshat HaShavua / Daf Yomi — beta-gated to a hand-picked allowlist (app/api.py::
   // _calendar_modes_enabled). false for everyone not on it; the picker hides both modes entirely.
   calendar_modes_enabled: boolean;
+  sourcesheet_enabled: boolean;
   // Admin dashboard link — see app/api.py::_is_admin. UI convenience only; the real gate is the
   // 404 every /admin/* route raises for a non-admin owner.
   is_admin: boolean;
@@ -657,3 +699,24 @@ export interface FeedbackItem {
   reviewed_at: string | null;
   created_at: string;
 }
+
+export interface ReferralStatus {
+  authenticated: boolean;
+  has_payment_method: boolean;
+  code: string | null;
+  referral_link: string | null;
+  referred_count: number;
+  open_credit_ils: number;
+  applied_credit_ils?: number;
+  used_credit_ils?: number;
+  auto_convert_credits?: boolean;
+  validity_days?: number;
+  discount_pct: number;
+  commission_pct: number;
+}
+
+export const getReferralStatus = api.getReferralStatus;
+export const generateReferralCode = api.generateReferralCode;
+export const validateReferralCode = api.validateReferralCode;
+export const claimReferralCode = api.claimReferralCode;
+export const updateReferralSettings = api.updateReferralSettings;

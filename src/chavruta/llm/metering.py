@@ -58,7 +58,7 @@ def meter() -> Iterator[dict]:
         _usage.reset(token)
 
 
-def record(prompt_tokens: int, completion_tokens: int) -> None:
+def record(prompt_tokens: int, completion_tokens: int, model: str = "") -> None:
     """Add one provider call's usage to the active tally, if any. Never raises: metering must not be
     able to break a request that is otherwise fine."""
     tally = _usage.get()
@@ -67,9 +67,21 @@ def record(prompt_tokens: int, completion_tokens: int) -> None:
     # Locked because run_in_context lets several worker threads share one tally, and `+=` on a
     # dict entry is a read-modify-write. Contention is negligible; a lost update is money.
     with _LOCK:
-        tally["prompt_tokens"] += max(0, int(prompt_tokens or 0))
-        tally["completion_tokens"] += max(0, int(completion_tokens or 0))
+        p = max(0, int(prompt_tokens or 0))
+        c = max(0, int(completion_tokens or 0))
+        tally["prompt_tokens"] += p
+        tally["completion_tokens"] += c
         tally["calls"] += 1
+        if model or "billed_tokens" in tally:
+            try:
+                from app.plans import normalized_tokens
+                if "billed_tokens" not in tally:
+                    prev_p = tally["prompt_tokens"] - p
+                    prev_c = tally["completion_tokens"] - c
+                    tally["billed_tokens"] = normalized_tokens(prev_p, prev_c)
+                tally["billed_tokens"] += normalized_tokens(p, c, model=model)
+            except Exception:
+                pass
 
 
 def current() -> dict | None:

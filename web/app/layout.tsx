@@ -6,7 +6,24 @@ import { AccessibilityWidget } from "@/components/AccessibilityWidget";
 const SITE_URL = "https://chavrutaai.org";
 const SITE_TITLE = "חברותא AI · בית מדרש";
 const SITE_DESCRIPTION =
-  "שותפה ללימוד תורה — שאלה, הסבר ובניית שיעורים מעל המדף היהודי, עם מקורות מצוטטים.";
+  "שותף ללימוד תורה — שאלה, הסבר ובניית שיעורים מעל המדף היהודי, עם מקורות מצוטטים.";
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  name: "חברותא AI",
+  alternateName: "Chavruta.AI",
+  url: SITE_URL,
+  description: SITE_DESCRIPTION,
+  applicationCategory: "EducationalApplication",
+  operatingSystem: "All",
+  inLanguage: ["he", "en"],
+  offers: {
+    "@type": "Offer",
+    price: "0",
+    priceCurrency: "ILS",
+  },
+};
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -17,6 +34,16 @@ export const metadata: Metadata = {
   formatDetection: { telephone: false },
   robots: { index: true, follow: true },
   alternates: { canonical: "/" },
+  icons: {
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/icon.png", type: "image/png", sizes: "512x512" },
+    ],
+    apple: [
+      { url: "/icon.png", sizes: "180x180", type: "image/png" },
+    ],
+  },
   openGraph: {
     type: "website",
     locale: "he_IL",
@@ -37,8 +64,8 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,      // prevent iOS zoom-on-input-focus jank in the chat composer
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#faf7ef" },
-    { media: "(prefers-color-scheme: dark)", color: "#0f1626" },
+    { media: "(prefers-color-scheme: light)", color: "#f6f4ff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0f0d1f" },
   ],
 };
 
@@ -46,11 +73,64 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   // lang/dir default to Hebrew-first RTL, matching the static UI. The client toggles them at runtime.
   return (
     <html lang="he" dir="rtl">
+      <head>
+        <link
+          rel="preload"
+          href="/fonts/bgnksruwt8ohrdqw4oeldpieeii9v6ofsi_woff2.woff2"
+          as="font"
+          type="font/woff2"
+          crossOrigin="anonymous"
+        />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        />
+      </head>
       {/* h-dvh (dynamic viewport height), not h-screen (100vh): on mobile Chrome, 100vh assumes the
           address bar is hidden, so whenever it's actually showing (very common right after
           navigating between chats), content anchored to a 100vh container overflows past the real
           visible area and gets clipped — caught live 2026-08-07 as the header vanishing on mobile. */}
       <body className="font-sans text-ink h-dvh overflow-hidden">
+        <section className="sr-only" aria-label="אודות חברותא AI">
+          <h1>חברותא AI · בית מדרש</h1>
+          <p>שותף ללימוד תורה — שאלה, הסבר ובניית שיעורים מעל המדף היהודי, עם מקורות מצוטטים.</p>
+          <p>
+            Chavruta.AI is an AI-powered study partner for Torah, Talmud, and Halachic literature,
+            grounded strictly in retrieved Jewish bookshelf sources: Tanakh, Mishnah, Talmud Bavli,
+            Talmud Yerushalmi, Rambam, Shulchan Arukh, Midrash, and commentaries.
+          </p>
+          <h2>יכולות מרכזיות / Core Capabilities</h2>
+          <ul>
+            <li>שאילתא (Q&A): מענה לשאלות לימודיות והלכתיות עם ציטוט מקורות מדויק.</li>
+            <li>הסבר מעמיק (In-depth Explanation): ביאור סוגיות, מושגים ומפרשים.</li>
+            <li>בניית שיעור (Lesson Builder): יצירת מערכי שיעור ודפי מקורות מותאמים לפי גיל וקהל יעד.</li>
+            <li>עיון במקורות (Source Explorer): עיון ישיר בטקסטים המצוטטים.</li>
+          </ul>
+          <nav aria-label="קישורים שימושיים">
+            <a href="/llms.txt">מידע מורחב למודלי שפה (llms.txt)</a>
+            <a href="/terms">תנאי שימוש (Terms)</a>
+            <a href="/privacy">מדיניות פרטיות (Privacy)</a>
+            <a href="/accessibility">הצהרת נגישות (Accessibility)</a>
+            <a href="/limits">מכסות ותוכניות (Limits)</a>
+            <a href="/school">חברותא למוסדות חינוך (Schools)</a>
+            <a href="/feedback">משוב (Feedback)</a>
+          </nav>
+        </section>
+        <noscript>
+          <div style={{ padding: "2rem", fontFamily: "sans-serif", maxWidth: "800px", margin: "0 auto" }}>
+            <h1>חברותא AI · בית מדרש</h1>
+            <p>שותף ללימוד תורה — שאלה, הסבר ובניית שיעורים מעל המדף היהודי, עם מקורות מצוטטים.</p>
+            <p>מערכת חברותא AI מאפשרת לימוד מבוסס מקורות אותנטיים: תנ״ך, תלמוד בבלי וירושלמי, רמב״ם, שולחן ערוך, מפרשים וספרי הלכה.</p>
+            <ul>
+              <li><strong>שאילתא:</strong> מענה לשאלות לימודיות והלכתיות עם מראה מקום מדויק.</li>
+              <li><strong>הסבר מעמיק:</strong> ביאור מהלכים וסוגיות שלב אחרי שלב.</li>
+              <li><strong>בניית שיעור:</strong> עריכת מערכי שיעור ודפי מקורות מותאמים.</li>
+            </ul>
+            <p>
+              <a href="/llms.txt">מידע מורחב למודלי שפה (llms.txt)</a> | <a href="/terms">תנאי שימוש</a> | <a href="/privacy">מדיניות פרטיות</a> | <a href="/limits">מכסות ותוכניות</a>
+            </p>
+          </div>
+        </noscript>
         {/* Inert unless Supabase env is set — then it gates the app behind sign-in. */}
         <AuthProvider>{children}</AuthProvider>
         <AccessibilityWidget />

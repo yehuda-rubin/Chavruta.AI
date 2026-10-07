@@ -1,0 +1,42 @@
+# Chavruta.AI — Dedicated Search Service (SQLite FTS5)
+#
+# Ultra-lightweight microservice (~50MB RAM) for high-speed lexical search
+# over the 2.4M-chunk Jewish bookshelf database using SQLite FTS5.
+#
+# Build:
+#   docker build -f docker/Dockerfile.search -t chavruta-search:latest .
+#
+# Run:
+#   docker run -p 8081:8081 -v ./data/search_index.db:/data/search_index.db:ro chavruta-search:latest
+
+FROM python:3.13-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    SEARCH_DB_PATH=/data/search_index.db \
+    SEARCH_RATE_LIMIT_PER_MINUTE=120
+
+WORKDIR /app
+
+# Run as non-root user
+RUN useradd --create-home --uid 10001 app
+
+RUN pip install --upgrade pip \
+    && pip install fastapi==0.115.6 uvicorn[standard]==0.34.0 pydantic==2.10.4
+
+# Copy application source code
+COPY src/ ./src/
+COPY app/search_service.py ./app/search_service.py
+
+# Create mount directory for SQLite database
+RUN mkdir -p /data && chown -R app:app /app /data
+
+USER app
+
+EXPOSE 8081
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD python3 -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8081/health').status==200 else 1)" || exit 1
+
+CMD ["uvicorn", "app.search_service:app", "--host", "0.0.0.0", "--port", "8081", "--workers", "1", "--proxy-headers"]

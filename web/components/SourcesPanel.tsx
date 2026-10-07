@@ -1,5 +1,6 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import type { Attachment, Citation, Lang, Message } from "@/lib/types";
 import { tr } from "@/lib/i18n";
 import { commentatorTag, isHe } from "@/lib/format";
@@ -66,6 +67,7 @@ export function SourcesPanel({
   messages,
   userSources,
   srcDefaultOpen,
+  isAdmin,
   onRemoveSource,
   onAddSource,
   onCollapse,
@@ -74,10 +76,26 @@ export function SourcesPanel({
   messages: Message[];
   userSources: Attachment[];
   srcDefaultOpen: boolean;
+  isAdmin?: boolean;
   onRemoveSource: (i: number) => void;
   onAddSource: () => void;
   onCollapse: () => void;
 }) {
+  const [isBetaTester, setIsBetaTester] = useState(false);
+  useEffect(() => {
+    try {
+      if (
+        typeof window !== "undefined" &&
+        (new URLSearchParams(window.location.search).has("beta") ||
+          localStorage.getItem("chavruta_beta_tester") === "true")
+      ) {
+        setIsBetaTester(true);
+      }
+    } catch {}
+  }, []);
+
+  const canAccessSearch = Boolean(isAdmin || isBetaTester);
+
   // When "sources open by default", membership in `toggled` means "collapsed" (inverted).
   const [toggled, setToggled] = useState<Set<string>>(new Set());
 
@@ -96,6 +114,20 @@ export function SourcesPanel({
     }
   }
 
+  // Show the evidence, not just a list of titles: when a new source arrives, its card opens (the
+  // panel only exists because there is something to read). Keyed on the newest ref so a re-render
+  // doesn't undo a card the reader has since opened or closed.
+  const newest = order[order.length - 1];
+  useEffect(() => {
+    if (!newest) return;
+    setToggled((prev) => {
+      const next = new Set(prev);
+      if (srcDefaultOpen) next.delete(newest);
+      else next.add(newest);
+      return next;
+    });
+  }, [newest, srcDefaultOpen]);
+
   const toggle = (ref: string) =>
     setToggled((prev) => {
       const next = new Set(prev);
@@ -105,16 +137,16 @@ export function SourcesPanel({
   const isOpen = (ref: string) => (srcDefaultOpen ? !toggled.has(ref) : toggled.has(ref));
 
   return (
-    <aside className="w-80 shrink-0 glass rounded-[28px] flex flex-col overflow-hidden">
+    <aside className="w-[22rem] shrink-0 glass rounded-[28px] flex flex-col overflow-hidden">
       <div className="flex items-center gap-2 p-4 pb-3">
         <button
           onClick={onCollapse}
-          className="h-9 w-9 rounded-xl glass grid place-items-center text-ink/50 hover:text-tekhelet shrink-0 transition"
+          className="h-10 w-10 rounded-full grid place-items-center text-ink/45 hover:bg-cream-2 hover:text-indigo shrink-0 transition"
           title={tr(lang, "collapse")}
         >
-          <Icon name="chevron_left" />
+          <Icon name={lang === "en" ? "chevron_right" : "chevron_left"} />
         </button>
-        <h3 className="font-serif text-xl font-bold text-tekhelet">{tr(lang, "relatedSources")}</h3>
+        <h3 className="text-lg font-bold text-ink">{tr(lang, "relatedSources")}</h3>
       </div>
       <div className="flex-1 overflow-y-auto p-4 pt-0 flex flex-col gap-3">
         {/* The model's own source list used to render here and was removed on sight (2026-08-14):
@@ -138,28 +170,28 @@ export function SourcesPanel({
                   key={c.ref}
                   onClick={() => toggle(c.ref)}
                   className={
-                    "block rounded-2xl p-4 shadow-sm transition cursor-pointer " +
-                    (open ? "bg-white/85 ring-2 ring-gold/40" : "bg-white/60 hover:ring-2 hover:ring-gold/30")
+                    "block rounded-3xl p-4 border transition cursor-pointer " +
+                    (open ? "bg-white border-indigo/40 shadow-lg shadow-indigo/10" : "bg-cream border-transparent hover:border-indigo/30")
                   }
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="text-[10px] font-black tracking-widest text-gold uppercase flex items-center gap-1.5">
-                        <span className="inline-grid place-items-center h-4 w-4 rounded-full bg-gold/15 text-gold text-[9px] shrink-0">
+                      <p className="text-xs font-semibold text-gold flex items-center gap-2">
+                        <span className="inline-grid place-items-center h-5 w-5 rounded-full bg-indigo text-white text-[11px] font-bold tabular-nums shrink-0">
                           {n}
                         </span>
                         {commentatorTag(c)}
                       </p>
-                      <h4 className="font-serif text-lg font-bold text-tekhelet mt-1 leading-tight break-words">
+                      <h4 className="text-[17px] font-bold text-ink mt-1.5 leading-tight break-words">
                         {(lang !== "en" && c.ref_he) || c.ref}
                       </h4>
                     </div>
                     <Icon name={open ? "expand_less" : "expand_more"} className="text-ink/40 shrink-0" />
                   </div>
                   {open && (
-                    <div className="mt-3 pt-3 border-t border-line/60">
+                    <div className="mt-3 pt-3 border-t border-line">
                       <p
-                        className="text-[15px] text-ink/85 font-serif leading-relaxed break-words"
+                        className="text-[17px] text-ink/90 font-quote leading-[1.9] break-words"
                         style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
                         dir={isHe(full || "") ? "rtl" : "ltr"}
                       >
@@ -175,7 +207,7 @@ export function SourcesPanel({
       </div>
 
       {/* User-added sources + the add button (sent with the next question). */}
-      <div className="p-4 pt-2 border-t border-white/40 flex flex-col gap-2">
+      <div className="p-4 pt-3 border-t border-line flex flex-col gap-2">
         {userSources.map((s, i) => {
           const k = s.kind === "text" ? { icon: "notes", label: tr(lang, "kindText") } : fileKind(s.name, lang);
           return (
@@ -191,9 +223,18 @@ export function SourcesPanel({
             </div>
           );
         })}
+        {canAccessSearch && (
+          <Link
+            href="/search"
+            className="w-full py-2.5 rounded-full glass text-tekhelet font-bold text-sm text-center hover:ring-2 hover:ring-gold/30 transition flex items-center justify-center gap-2"
+          >
+            <Icon name="search" className="text-[18px]" />
+            {tr(lang, "searchLibrary")}
+          </Link>
+        )}
         <button
           onClick={onAddSource}
-          className="w-full py-2.5 rounded-full grad text-white font-bold text-sm hover:opacity-95 transition shadow-lg shadow-tekhelet/20"
+          className="w-full min-h-11 rounded-full bg-cream-2 text-indigo font-semibold text-sm hover:bg-indigo hover:text-white transition-colors"
         >
           {tr(lang, "addSource")}
           {userSources.length ? ` (${userSources.length})` : ""}

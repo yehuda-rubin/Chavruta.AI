@@ -89,6 +89,20 @@ PRESETS: dict[str, Preset] = {
              "key (or swap in a key from a billing-enabled project) the moment there is a first "
              "paying customer, not before",
     ),
+    "gemini-lite": Preset(
+        "https://generativelanguage.googleapis.com/v1beta/openai",
+        "gemini-3.1-flash-lite-preview",
+        min_output_tokens=2_048,
+        note="Google Gemini 3.1 Flash-Lite: free-tier eligible, ultra-low cost, high Torah accuracy",
+    ),
+    # DeepSeek-V4-Pro on Nebius AI Studio (Finland, eu-north1).
+    # $1.75 / 1M prompt, $3.50 / 1M completion. Measured 5.3s total latency, 100% Torah accuracy.
+    "deepseek-v4-pro": Preset(
+        "https://api.studio.nebius.ai/v1",
+        "deepseek-ai/DeepSeek-V4-Pro",
+        min_output_tokens=3_072,
+        note="DeepSeek-V4-Pro on Nebius: $1.75/$3.50 per 1M tokens, 5.3s total latency, 100% Torah accuracy",
+    ),
 }
 
 

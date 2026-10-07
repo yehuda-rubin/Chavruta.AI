@@ -13,8 +13,9 @@ from datetime import date
 import app.api as api
 import app.db as db
 import app.devhelpers as devhelpers
-import chavruta.calendar.sefaria_calendar as cal
 import pytest
+
+import chavruta.calendar.sefaria_calendar as cal
 from chavruta.retrieval.base import RankedHit
 
 
@@ -100,9 +101,9 @@ def test_listed_owner_reaches_the_calendar_path(monkeypatch):
 
 @pytest.mark.parametrize("kind,today,expected", [
     ("daf_yomi", date(2026, 8, 5), "2026-08-05"),      # daily bucket = today's own date
-    ("parsha", date(2026, 8, 5), "2026-08-02"),        # Wednesday -> that week's Sunday
-    ("parsha", date(2026, 8, 2), "2026-08-02"),        # Sunday itself -> same day
-    ("parsha", date(2026, 8, 8), "2026-08-02"),        # Saturday -> the Sunday that started the week
+    ("parsha", date(2026, 8, 5), "2026-08-05"),        # daily bucket = today's own date
+    ("parsha", date(2026, 8, 2), "2026-08-02"),        # Sunday -> same day
+    ("parsha", date(2026, 8, 8), "2026-08-08"),        # Saturday -> same day
 ])
 def test_calendar_cache_key_buckets(kind, today, expected):
     assert api._calendar_cache_key(kind, today) == expected
@@ -230,3 +231,66 @@ def test_run_parsha_haftarah_gets_only_boundary_verses_no_commentary(monkeypatch
     assert not any(" on " in t for t in haftarah_targets)
     assert any("54.11" in t or "54:11" in t for t in haftarah_targets)   # opening verse
     assert any("55.5" in t or "55:5" in t for t in haftarah_targets)     # closing verse
+
+
+def test_cap_hits_preserves_min_commentaries_when_base_exceeds_cap():
+    base = [_hit(f"base{i}") for i in range(15)]
+    commentary = [_hit(f"c{i}", comm="rashi") for i in range(10)]
+    out = api._cap_hits(base + commentary, max_total=10, min_commentaries=5)
+    assert len(out) == 20  # 15 base + 5 commentary
+    assert sum(1 for h in out if not h.commentator_id) == 15
+    assert sum(1 for h in out if h.commentator_id) == 5
+
+
+def test_run_daf_yomi_defaults_to_qa_turn_like_parsha(monkeypatch):
+    info = cal.DafYomiInfo(tractate="Chullin", daf=123)
+    monkeypatch.setattr(api, "_get_pipeline", lambda: __import__("types").SimpleNamespace(llm="llm"))
+    monkeypatch.setattr(api, "_resolve_daf_yomi_cached", lambda: info)
+    monkeypatch.setattr(api, "_wants_full_lesson", lambda *a, **k: False)
+
+    def _boom_chavruta(*a, **k):
+        raise AssertionError("daf yomi default turn must now go through _generate_qa_turn_from_hits like parsha")
+
+    called = {}
+
+    def _fake_qa_turn(question, hits, lang, he, history, llm):
+        called["hit"] = True
+        return api.QueryResponse(answer="ok", citations=[], grounded=True, intent="qa", files=[])
+
+    monkeypatch.setattr(api, "_generate_chavruta_turn", _boom_chavruta)
+    monkeypatch.setattr(api, "_generate_qa_turn_from_hits", _fake_qa_turn)
+    monkeypatch.setattr(api, "_fetch_ranked_hits", lambda targets, **k: [_hit(t) for t in targets])
+
+    res = api._run_daf_yomi("שאלה על הדף", "he")
+    assert called.get("hit") is True
+    assert res.answer == "ok"
+
+
+def test_run_daf_yomi_fetches_boundary_segments_and_rashi(monkeypatch):
+    info = cal.DafYomiInfo(tractate="Chullin", daf=123)
+    monkeypatch.setattr(api, "_get_pipeline", lambda: __import__("types").SimpleNamespace(llm="llm"))
+    monkeypatch.setattr(api, "_resolve_daf_yomi_cached", lambda: info)
+    monkeypatch.setattr(api, "_wants_full_lesson", lambda *a, **k: False)
+    monkeypatch.setattr(api, "_generate_qa_turn_from_hits",
+                        lambda *a, **k: api.QueryResponse(answer="ok", citations=[], grounded=True,
+                                                          intent="qa", files=[]))
+
+    fetch_calls = []
+
+    def _fake_fetch(targets, **k):
+        fetch_calls.append(list(targets))
+        return [_hit(t) for t in targets]
+
+    monkeypatch.setattr(api, "_fetch_ranked_hits", _fake_fetch)
+
+    api._run_daf_yomi("מה הדף היום?", "he")
+
+    assert len(fetch_calls) == 1
+    targets = fetch_calls[0]
+    # Verify boundary segments for both amud a (245) and amud b (246) are included
+    assert any("Chullin.245.1" in t or "Chullin 245.1" in t for t in targets)
+    assert any("Chullin.246.1" in t or "Chullin 246.1" in t for t in targets)
+    # Verify Rashi is preloaded on boundary segments, while secondary commentaries are not
+    assert any("Rashi_on_Chullin.245.1" in t for t in targets)
+    assert not any("Tosafot_on_Chullin" in t for t in targets)
+

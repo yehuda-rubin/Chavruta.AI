@@ -30,6 +30,7 @@ const nextConfig = {
   // /query/async, which is the variant the UI actually uses.
   async rewrites() {
     const api = process.env.CHAVRUTA_API_ORIGIN || "http://127.0.0.1:8080";
+    const searchApi = process.env.CHAVRUTA_SEARCH_API_ORIGIN || "http://127.0.0.1:8081";
     const proxy = (p) => [
       { source: `/${p}`, destination: `${api}/${p}` },
       { source: `/${p}/:path*`, destination: `${api}/${p}/:path*` },
@@ -39,10 +40,13 @@ const nextConfig = {
       ...proxy("sessions"),   // incl. /sessions/async, /sessions/{id}/query[/async], /messages
       ...proxy("jobs"),       // async polling — the UI's main generation path
       ...proxy("lessons"),
+      ...proxy("sourcesheets"),
       ...proxy("me"),
       ...proxy("account"),    // /account/delete, /account/delete/cancel
+      ...proxy("auth"),       // /auth/email-hook
       ...proxy("billing"),    // /billing/config, /checkout, /cancel
       ...proxy("coupons"),    // /coupons/redeem
+      ...proxy("referrals"),  // /referrals/status, /referrals/generate, /referrals/claim, etc.
       // These three were all missing, and none failed loudly — each feature reported the 404 HTML
       // in its own words instead. tests/unit/test_api_proxy_coverage.py derives this list from
       // web/lib/api.ts so the next one cannot go unnoticed; it found the last two on its first run.
@@ -62,6 +66,11 @@ const nextConfig = {
       // exact path with nothing else — only /feedback/submit is the API route. See docker/nginx.conf
       // for why this one couldn't just be a prefix like /admin.
       { source: "/feedback/submit", destination: `${api}/feedback/submit` },
+      // Dedicated search microservice — /search is the Next.js page, /search/query is the FTS5 API
+      { source: "/search/query", destination: `${searchApi}/search/query` },
+      { source: "/search/query/:path*", destination: `${searchApi}/search/query/:path*` },
+      // Reader endpoints (/reader/unit, /reader/links) served by search microservice
+      { source: "/reader/:path*", destination: `${searchApi}/reader/:path*` },
     ];
   },
 };

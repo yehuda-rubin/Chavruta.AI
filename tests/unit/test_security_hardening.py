@@ -228,3 +228,138 @@ def test_the_byok_routes_are_rate_limited():
     from app.security import _METERED_PREFIXES
 
     assert "/byok".startswith(_METERED_PREFIXES)
+
+
+# ── 2026-09-25: Supabase Send Email hook accepted unsigned calls when its secret was empty ────────
+# /auth/email-hook and /account/email-hook are public by design. The signature check ran only
+# `if secret:`, and docker-compose defaults SUPABASE_AUTH_HOOK_SECRET to "", so anyone could make the
+# server send an auth email to any address, with a link host (site_url) and OTP of their choosing.
+def _hook_request(body: bytes, headers: dict | None = None):
+    from starlette.requests import Request
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/auth/email-hook",
+        "query_string": b"",
+        "headers": [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()],
+    }
+
+    async def receive():
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return Request(scope, receive)
+
+
+def _call_hook(body: bytes, headers: dict | None = None):
+    import asyncio
+
+    import app.api as api
+
+    return asyncio.run(api.auth_email_hook(_hook_request(body, headers)))
+
+
+_HOOK_BODY = json.dumps({
+    "user": {"email": "victim@example.com"},
+    "email_data": {
+        "email_action_type": "recovery",
+        "token_hash": "h",
+        "token": "<b>123456</b>",
+        "site_url": "https://attacker.example",
+    },
+}).encode()
+
+
+@pytest.fixture
+def _sent(monkeypatch):
+    """Record every pool.send instead of sending."""
+    import app.email_pool as ep
+
+    calls: list[dict] = []
+
+    def fake_send(**kw):
+        calls.append(kw)
+        return True, "fake"
+
+    monkeypatch.setattr(ep.pool, "send", fake_send)
+    return calls
+
+
+def test_email_hook_fails_closed_without_secret(monkeypatch, _sent):
+    monkeypatch.delenv("SUPABASE_AUTH_HOOK_SECRET", raising=False)
+    monkeypatch.delenv("CHAVRUTA_EMAIL_HOOK_ALLOW_UNSIGNED", raising=False)
+
+    r = _call_hook(_HOOK_BODY)
+
+    assert r.status_code == 503
+    assert _sent == [], "an unconfigured hook must not send anything"
+
+
+def test_email_hook_blank_secret_is_not_configured(monkeypatch, _sent):
+    monkeypatch.setenv("SUPABASE_AUTH_HOOK_SECRET", "   ")
+    monkeypatch.delenv("CHAVRUTA_EMAIL_HOOK_ALLOW_UNSIGNED", raising=False)
+
+    assert _call_hook(_HOOK_BODY).status_code == 503
+    assert _sent == []
+
+
+def test_email_hook_rejects_unsigned_when_secret_set(monkeypatch, _sent):
+    monkeypatch.setenv("SUPABASE_AUTH_HOOK_SECRET", "whsec_" + base64.b64encode(b"k" * 32).decode())
+    monkeypatch.setenv("CHAVRUTA_EMAIL_HOOK_ALLOW_UNSIGNED", "1")   # opt-in never bypasses a secret
+
+    assert _call_hook(_HOOK_BODY).status_code == 401
+    assert _sent == []
+
+
+def test_email_hook_signed_request_still_sends(monkeypatch, _sent):
+    import time
+
+    key = b"k" * 32
+    monkeypatch.setenv("SUPABASE_AUTH_HOOK_SECRET", "whsec_" + base64.b64encode(key).decode())
+    monkeypatch.delenv("CHAVRUTA_EMAIL_HOOK_ALLOW_UNSIGNED", raising=False)
+    msg_id, ts = "msg_1", str(int(time.time()))
+    sig = base64.b64encode(
+        hmac.new(key, f"{msg_id}.{ts}.".encode() + _HOOK_BODY, hashlib.sha256).digest()).decode()
+
+    r = _call_hook(_HOOK_BODY, {
+        "webhook-id": msg_id, "webhook-timestamp": ts, "webhook-signature": f"v1,{sig}"})
+
+    assert r.status_code == 200
+    assert len(_sent) == 1 and _sent[0]["to"] == "victim@example.com"
+    assert "<b>123456</b>" not in _sent[0]["html"]
+    assert "&lt;b&gt;123456&lt;/b&gt;" in _sent[0]["html"]
+
+
+def test_email_hook_unsigned_dev_opt_in(monkeypatch, _sent):
+    monkeypatch.delenv("SUPABASE_AUTH_HOOK_SECRET", raising=False)
+    monkeypatch.setenv("CHAVRUTA_EMAIL_HOOK_ALLOW_UNSIGNED", "1")
+
+    assert _call_hook(_HOOK_BODY).status_code == 200
+    assert len(_sent) == 1
+
+
+def test_email_hook_malformed_payload_is_generic(monkeypatch, _sent):
+    monkeypatch.delenv("SUPABASE_AUTH_HOOK_SECRET", raising=False)
+    monkeypatch.setenv("CHAVRUTA_EMAIL_HOOK_ALLOW_UNSIGNED", "1")
+
+    for bad in (b"{not json", b"[1, 2]", b"\xff\xfe"):
+        r = _call_hook(bad)
+        assert r.status_code == 400
+        assert json.loads(r.body)["error"]["message"] == "Malformed payload"
+    assert _sent == []
+
+
+@pytest.mark.parametrize("lang", ["he", "en"])
+def test_render_auth_email_escapes_link_and_token(lang):
+    from app.email_pool import render_auth_email
+
+    url = 'https://x.example/v?a=1&b="><script>alert(1)</script>'
+    token = '<img src=x onerror=alert(1)>'
+    _subject, html_body, text = render_auth_email("signup", url, token=token, lang=lang)
+
+    assert "<script>" not in html_body and "<img" not in html_body
+    assert 'b="><' not in html_body   # the quote can't close the href attribute
+    assert "&lt;img src=x onerror=alert(1)&gt;" in html_body
+    assert "a=1&amp;b=&quot;&gt;&lt;script&gt;" in html_body
+    # the plain-text part is not HTML: it keeps the values verbatim
+    assert url in text and token in text

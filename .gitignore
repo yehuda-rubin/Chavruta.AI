@@ -66,6 +66,10 @@ data/
 # Keep the versioned evaluation datasets (Principle V — trustworthiness is measured)
 !eval/
 !eval/**/*.jsonl
+eval/nightly/
+eval/reranker_training_dataset.jsonl
+out/
+scripts/run_*_benchmark.py
 
 # ---- Vector DB / embeddings / indexes ----
 *.faiss
@@ -143,6 +147,9 @@ sample_lessons/
 # ---- Claude Code local settings (permission allowlist may capture secrets) ----
 .claude/settings.json
 .claude/settings.local.json
+.claude/worktrees/
+.claude/todos/
+.claude/backups/
 
 # ---- Vendored third-party tooling (cc10x plugin: local dev aid, not part of the product) ----
 .claude/cc10x/
@@ -162,3 +169,12 @@ design/poster/
 # from scratch, describing the RETRIEVAL PATTERN that failed — never a user's sentence.
 harvested_failures*.jsonl
 eval/harvested*.jsonl
+tests/unit/test_real_user_queries.py
+tests/real/
+.system_generated/
+
+# ---- Faith variants / independent forks (planning & code) ----
+variants/
+temp_*/
+temp_corpora_staging/
+

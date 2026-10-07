@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>חברותא · סגנון ג׳ — שיחה</title>
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f6f4ff;--card:#fff;--ink:#1a1633;--mute:#6b6788;--violet:#5b3df5;--violet2:#8b6bff;--mint:#19c9a0;--coral:#ff6b5e;--sun:#ffc83d;--line:#e6e2fa;--r:26px;
+ --sans:"Rubik",system-ui,sans-serif}
+*{box-sizing:border-box;margin:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.65;font-size:18px;overflow-x:hidden}
+a{color:inherit;text-decoration:none}button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
+.wrap{max-width:1180px;margin:0 auto;padding:0 24px}
+.view{display:none}.view.on{display:block}
+.logo{display:inline-flex;align-items:center;gap:10px;font-weight:800;font-size:25px;letter-spacing:-.01em}
+.logo svg{width:40px;height:40px}
+nav.top{position:sticky;top:14px;z-index:10;margin:14px auto 0;max-width:1100px;padding:0 10px}
+nav.top .in{display:flex;align-items:center;justify-content:space-between;background:rgba(255,255,255,.82);backdrop-filter:blur(14px);border:1px solid var(--line);border-radius:999px;padding:10px 14px 10px 22px;box-shadow:0 10px 30px -14px rgba(91,61,245,.3)}
+nav.top ul{display:flex;gap:26px;list-style:none;padding:0;font-weight:500;font-size:16px;color:var(--mute)}
+nav.top ul a:hover{color:var(--violet)}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 24px;border-radius:999px;font-weight:600;font-size:16px;transition:transform .15s,box-shadow .2s,background-color .2s}
+.btn:hover{transform:translateY(-2px)}.btn:active{transform:scale(.96)}
+.btn.v{background:var(--violet);color:#fff;box-shadow:0 10px 24px -8px rgba(91,61,245,.6)}
+.btn.w{background:#fff;border:1px solid var(--line)}
+.btn.big{padding:17px 34px;font-size:18px}
+/* hero */
+.hero{position:relative;text-align:center;padding:90px 0 40px}
+.hero::before,.hero::after{content:"";position:absolute;border-radius:50%;filter:blur(70px);z-index:-1}
+.hero::before{width:420px;height:420px;background:#c9bcff;top:-60px;right:6%}
+.hero::after{width:340px;height:340px;background:#b6f3e2;top:140px;left:6%}
+.tag{display:inline-flex;gap:8px;align-items:center;background:#fff;border:1px solid var(--line);border-radius:999px;padding:6px 16px 6px 8px;font-size:15px;font-weight:500;margin-bottom:26px}
+.tag i{background:var(--mint);color:#fff;border-radius:999px;font-style:normal;font-size:12px;padding:2px 10px;font-weight:700}
+h1{font-weight:800;font-size:clamp(44px,7.4vw,92px);line-height:1.04;letter-spacing:-.025em}
+h1 u{text-decoration:none;background:linear-gradient(100deg,var(--violet),var(--coral));-webkit-background-clip:text;background-clip:text;color:transparent}
+.lead{max-width:620px;margin:24px auto 34px;color:var(--mute);font-size:21px}
+.cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+/* chat demo */
+.chatdemo{max-width:760px;margin:64px auto 0;background:var(--card);border-radius:40px;padding:16px;border:1px solid var(--line);box-shadow:0 40px 80px -40px rgba(91,61,245,.45);text-align:right;display:grid;gap:16px}
+.b{max-width:86%;padding:14px 20px;border-radius:24px;font-size:18px}
+.b.me{background:var(--violet);color:#fff;border-end-end-radius:6px;justify-self:start}
+.b.ai{background:#f1eeff;border-end-start-radius:6px;justify-self:end;max-width:92%}
+.ref{display:inline-flex;align-items:center;gap:5px;background:#fff;border:1px solid #d8d0ff;color:var(--violet);font-size:13px;font-weight:600;border-radius:999px;padding:1px 10px;margin:0 3px}
+.ref::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--mint)}
+.srcrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+/* bento */
+section{padding:84px 0}
+h2{font-weight:800;font-size:clamp(34px,4.8vw,58px);line-height:1.08;letter-spacing:-.02em;text-align:center}
+.sub{color:var(--mute);text-align:center;font-size:20px;margin:14px auto 0;max-width:560px}
+.bento{display:grid;grid-template-columns:repeat(6,1fr);gap:18px;margin-top:54px}
+.tile{border-radius:var(--r);padding:30px;background:var(--card);border:1px solid var(--line);overflow:hidden;position:relative;transition:transform .2s}
+.tile:hover{transform:translateY(-4px)}
+.tile h3{font-size:25px;font-weight:700;line-height:1.2;margin-bottom:8px}
+.tile p{color:var(--mute);font-size:17px}
+.t1{grid-column:span 3;background:var(--violet);color:#fff;border:0}.t1 p{color:#e0d9ff}
+.t2{grid-column:span 3;background:#d9fbf1;border:0}.t2 p{color:#2d6a5b}
+.t3{grid-column:span 2;background:#fff1c9;border:0}.t3 p{color:#7a6320}
+.t4{grid-column:span 4}
+.big-n{font-size:78px;font-weight:800;line-height:1;letter-spacing:-.03em;margin-bottom:10px}
+.t1 .big-n{color:var(--sun)}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.chips span{background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:6px 16px;font-size:15px;font-weight:500}
+.chips span.b2{background:#fff1c9;border-color:#f3dc92}
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:50px}
+.step{text-align:center;padding:10px 20px}
+.step .dot{width:68px;height:68px;border-radius:24px;display:grid;place-items:center;font-size:28px;font-weight:800;margin:0 auto 16px;color:#fff}
+.step:nth-child(1) .dot{background:var(--violet)}.step:nth-child(2) .dot{background:var(--mint)}.step:nth-child(3) .dot{background:var(--coral)}
+.step h3{font-size:23px;font-weight:700}.step p{color:var(--mute);font-size:17px}
+.price{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:50px;align-items:center}
+.plan{background:var(--card);border:1px solid var(--line);border-radius:30px;padding:34px 30px;display:flex;flex-direction:column}
+.plan.hot{background:var(--ink);color:#fff;padding:44px 32px;border:0;box-shadow:0 40px 70px -30px rgba(26,22,51,.6)}
+.plan h3{font-size:22px;font-weight:700}
+.plan .p{font-size:62px;font-weight:800;letter-spacing:-.03em;margin:8px 0;font-variant-numeric:tabular-nums}
+.plan .p small{font-size:16px;font-weight:400;opacity:.65;letter-spacing:0}
+.plan ul{list-style:none;padding:0;margin:12px 0 26px;display:grid;gap:10px;flex:1;color:var(--mute)}
+.plan.hot ul{color:#cfcbe6}
+.plan li::before{content:"✓";color:var(--mint);font-weight:800;margin-inline-end:10px}
+.inst{text-align:center;margin-top:26px;color:var(--mute)}.inst a{color:var(--violet);font-weight:600}
+details{background:var(--card);border:1px solid var(--line);border-radius:22px;padding:20px 26px;margin-bottom:12px}
+summary{cursor:pointer;font-weight:600;font-size:20px;list-style:none;display:flex;justify-content:space-between}
+summary::after{content:"+";color:var(--violet);font-size:26px;line-height:1}
+details[open] summary::after{content:"−"}
+details p{margin-top:10px;color:var(--mute)}
+.final{margin:0 24px 60px;border-radius:44px;background:var(--violet);color:#fff;text-align:center;padding:90px 20px}
+.final h2{color:#fff}.final .btn{margin-top:30px;background:#fff;color:var(--violet)}
+footer{padding:0 0 40px;color:var(--mute);font-size:15px}
+footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:16px;align-items:center}
+footer nav{display:flex;gap:22px}
+/* auth */
+.auth{min-height:100vh;display:grid;grid-template-columns:1fr 1fr;gap:20px;padding:20px}
+.auth .art{border-radius:36px;background:linear-gradient(150deg,var(--violet),#8d5cff 60%,var(--coral));color:#fff;padding:40px;display:flex;flex-direction:column;justify-content:space-between;position:relative;overflow:hidden}
+.auth .art .logo{color:#fff}
+.auth .art .b{background:rgba(255,255,255,.18);backdrop-filter:blur(8px);font-size:20px;max-width:90%}
+.auth .art .b.me2{background:#fff;color:var(--ink);justify-self:end}
+.auth .stack{display:grid;gap:14px}
+.auth form{max-width:430px;margin:auto;width:100%;padding:20px}
+.auth h2{text-align:right;font-size:44px}
+label{display:block;font-size:15px;font-weight:600;margin:20px 0 6px}
+input{width:100%;padding:15px 20px;border-radius:999px;border:1.5px solid var(--line);background:#fff;font:inherit;outline:0;transition:border-color .2s,box-shadow .2s}
+input:focus{border-color:var(--violet);box-shadow:0 0 0 5px rgba(91,61,245,.14)}
+.auth .btn{width:100%;justify-content:center}
+.or{text-align:center;color:var(--mute);margin:18px 0;font-size:15px}
+.sw{margin-top:22px;text-align:center;color:var(--mute)}.sw a{color:var(--violet);font-weight:600}
+/* app */
+.app{display:grid;grid-template-columns:290px 1fr 330px;gap:14px;height:100vh;padding:14px}
+.pane{background:var(--card);border-radius:28px;border:1px solid var(--line);overflow:hidden;display:flex;flex-direction:column;min-height:0}
+.sb{padding:12px;gap:6px;overflow:auto}
+.sb .btn{justify-content:center}
+.sb h4{font-size:13px;color:var(--mute);font-weight:500;margin:16px 8px 4px}
+.sb a{padding:10px 14px;border-radius:16px;font-size:16px}
+.sb a.on{background:#efeaff;color:var(--violet);font-weight:600}
+.sb a:hover{background:var(--bg)}
+.top2{display:flex;justify-content:space-between;align-items:center;padding:16px 24px;border-bottom:1px solid var(--line);font-weight:500}
+.msgs{flex:1;overflow:auto;padding:28px 6%;display:grid;gap:16px;align-content:start}
+.top2 span{font-variant-numeric:tabular-nums}
+.msgs .b{font-size:19px;line-height:1.8}
+.cw{position:relative;margin:14px 18px 18px}
+.comp{display:flex;align-items:center;gap:8px;background:var(--bg);border-radius:999px;padding:7px 7px 7px 10px;border:1.5px solid transparent}
+.comp:focus-within{border-color:var(--violet);background:#fff}
+.comp input{border:0;background:none;box-shadow:none!important;flex:1;min-width:0}
+.modebtn{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 16px;border-radius:999px;background:#fff;border:1px solid var(--line);font-weight:600;font-size:15px;color:var(--violet);white-space:nowrap;transition:background-color .15s,transform .15s}
+.modebtn:hover{background:#efeaff}.modebtn:active{transform:scale(.96)}
+.modebtn[aria-expanded=true]{background:var(--violet);color:#fff;border-color:var(--violet)}
+.ic2{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.chev{transition:transform .2s}.modebtn[aria-expanded=true] .chev{transform:rotate(180deg)}
+.menu{position:absolute;inset-inline-start:0;bottom:calc(100% + 10px);width:min(340px,100%);background:#fff;border:1px solid var(--line);border-radius:28px;padding:8px;box-shadow:0 24px 60px -20px rgba(91,61,245,.45),0 4px 14px -6px rgba(26,22,51,.18);opacity:0;visibility:hidden;transform:translateY(8px) scale(.98);transform-origin:bottom right;transition:opacity .16s,transform .16s,visibility 0s .16s;z-index:20;max-height:60vh;overflow:auto}
+.menu.open{opacity:1;visibility:visible;transform:none;transition:opacity .16s,transform .16s}
+.menu h5{font-size:12px;color:var(--mute);font-weight:500;padding:10px 14px 4px}
+.menu button{display:flex;align-items:center;gap:12px;width:100%;text-align:start;padding:10px 14px;border-radius:20px;min-height:48px;transition:background-color .12s}
+.menu button:hover,.menu button:focus-visible{background:var(--bg)}
+.menu button[aria-checked=true]{background:#efeaff}
+.menu .t{flex:1;font-weight:600;font-size:16px;line-height:1.25}
+.menu .t small{display:block;font-weight:400;font-size:13px;color:var(--mute)}
+.menu .ck{width:18px;height:18px;stroke:var(--violet);fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;opacity:0}
+.menu button[aria-checked=true] .ck{opacity:1}
+.menu .bt{font-size:12px;background:#fff1c9;color:#7a6320;border-radius:999px;padding:1px 10px;font-weight:600}
+.menu .ico{width:36px;height:36px;border-radius:14px;display:grid;place-items:center;background:var(--bg);color:var(--violet);flex:none}
+.menu button[aria-checked=true] .ico{background:#fff}
+.srcp{padding:20px;overflow:auto}
+.srcp h4{font-size:15px;font-weight:700;margin-bottom:14px}
+.sc{border-radius:20px;padding:16px;margin-bottom:12px;background:var(--bg)}
+.sc:nth-child(2){background:#d9fbf1}.sc:nth-child(3){background:#fff1c9}
+.sc b{display:block;font-size:13px;font-weight:700;color:var(--violet);margin-bottom:4px}
+.sc:nth-child(2) b{color:#0c8a6c}.sc:nth-child(3) b{color:#9a7600}
+.sc p{font-size:15.5px;line-height:1.7}
+@media(max-width:980px){
+ nav.top ul{display:none}.bento>*,.t4{grid-column:span 6!important}.steps,.price{grid-template-columns:1fr}
+ .auth{grid-template-columns:1fr}.auth .art{display:none}
+ .app{grid-template-columns:1fr;padding:8px}.sb,.srcp{display:none}.msgs{padding:18px}
+}
+.back{position:fixed;bottom:16px;left:16px;z-index:50;font-size:13px;background:#fff;border:1px solid var(--line);padding:8px 14px;border-radius:999px;box-shadow:0 8px 20px -10px rgba(0,0,0,.3)}
+.view.on#v-app~.back{display:none}
+h1,h2,h3{text-wrap:balance}p,.lead,.sub,details p{text-wrap:pretty}
+:focus-visible{outline:3px solid var(--violet);outline-offset:3px}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute"><defs>
+<symbol id="mark" viewBox="0 0 64 64">
+ <path d="M8 14a10 10 0 0 1 10-10h22a10 10 0 0 1 10 10v16a10 10 0 0 1-10 10H26L14 50V40a10 10 0 0 1-6-9Z" fill="#5b3df5"/>
+ <path d="M56 28a8 8 0 0 0-8-8H34a10 10 0 0 0-10 10v10a10 10 0 0 0 10 10h8l10 8v-8a8 8 0 0 0 4-8Z" fill="#19c9a0" fill-opacity=".92"/>
+ <path d="M24 30a10 10 0 0 1 10-10h6a10 10 0 0 1 10 10v6a8 8 0 0 1-8 8h-4a10 10 0 0 1-14-10Z" fill="#ffc83d" style="mix-blend-mode:multiply" opacity="0"/>
+ <circle cx="31" cy="28" r="2.6" fill="#fff"/><circle cx="39" cy="28" r="2.6" fill="#fff"/>
+</symbol></defs></svg>
+
+<div class="view on" id="v-landing">
+<nav class="top"><div class="in">
+ <a class="logo" href="#/"><svg><use href="#mark"/></svg>חברותא</a>
+ <ul><li><a href="#how">למה חברותא</a></li><li><a href="#steps">איך זה עובד</a></li><li><a href="#pricing">מחירים</a></li><li><a href="#faq">שאלות</a></li></ul>
+ <div style="display:flex;gap:8px"><a class="btn w" href="#/signup">כניסה</a><a class="btn v" href="#/signup">התחילו חינם</a></div>
+</div></nav>
+
+<header class="hero"><div class="wrap">
+ <h1>החברותא שתמיד מוכנה ללמוד איתך</h1>
+ <p class="lead">שואלים בחופשיות על כל ספר ביהדות. מקבלים תשובה ברורה, וכל משפט בה מפנה למקור שאפשר לפתוח.</p>
+ <div class="cta"><a class="btn v big" href="#/signup">להתחיל ללמוד</a><a class="btn w big" href="#/app">הצצה למוצר</a></div>
+ <div class="chatdemo">
+  <div class="b me">למה התורה מתחילה ב״בראשית״ ולא במצווה הראשונה?</div>
+  <div class="b ai">רש״י פותח בדיוק בשאלה הזו. לפי רבי יצחק, היה ראוי להתחיל את התורה מ״החדש הזה לכם״, שהיא המצווה הראשונה שנצטוו בה ישראל.
+   <div class="srcrow"><span class="ref">רש״י על בראשית א׳:א׳</span><span class="ref">בראשית א׳:א׳</span></div></div>
+ </div>
+</div></header>
+
+<section id="how"><div class="wrap">
+ <h2>לא עוד תשובה בלי כתובת</h2>
+ <p class="sub">שלושה דברים שמבדילים את חברותא מכל צ׳אט אחר.</p>
+ <div class="bento">
+  <div class="tile t1"><h3 style="font-size:32px">2.4 מיליון קטעי מקור במאגר</h3><p>תנ״ך, משנה, תלמוד, הלכה, שו״ת ומפרשים, ב־15 קטגוריות.</p></div>
+  <div class="tile t2"><h3>״לא מצאתי״ זו תשובה</h3><p>כשאין מקור, חברותא אומרת את זה. בלי המצאות, בלי ניחושים.</p>
+   <div class="chips"><span>אמינות</span><span>שקיפות</span></div></div>
+  <div class="tile t3"><h3>רישיון נקי</h3><p>כל המקורות מותרים לשימוש מסחרי.</p></div>
+  <div class="tile t4"><h3>שמונה דרכים ללמוד</h3><p>בוחרים מצב ושואלים.</p>
+   <div class="chips"><span>שיעור</span><span>הסבר</span><span>שאלה ותשובה</span><span>הלכה ושו״ת</span><span>חברותא</span><span class="b2">פרשת השבוע · בטא</span><span class="b2">דף יומי · בטא</span><span class="b2">דף מקורות · בטא</span></div></div>
+ </div>
+</div></section>
+
+<section id="steps" style="padding-top:20px"><div class="wrap">
+ <h2>שלושה צעדים</h2>
+ <div class="steps">
+  <div class="step"><div class="dot">1</div><h3>שואלים</h3><p>בעברית או באנגלית, בניסוח חופשי.</p></div>
+  <div class="step"><div class="dot">2</div><h3>חברותא מחפשת</h3><p>במאגר המקורות, כולל המפרשים.</p></div>
+  <div class="step"><div class="dot">3</div><h3>מקבלים ובודקים</h3><p>תשובה עם הפניות שאפשר ללחוץ עליהן.</p></div>
+ </div>
+</div></section>
+
+<section id="pricing"><div class="wrap">
+ <h2>מתחילים בחינם</h2><p class="sub">משדרגים רק כשצריך עוד.</p>
+ <div class="price">
+  <div class="plan"><h3>חינם</h3><div class="p">₪0</div><ul><li>לימוד יומי מוגבל</li><li>כל המקורות והציטוטים</li><li>היסטוריית שיחות</li></ul><a class="btn w" href="#/signup" style="justify-content:center">להתחיל</a></div>
+  <div class="plan hot"><h3>בסיסי</h3><div class="p">₪75<small> / חודש</small></div><ul><li>הרבה יותר שאלות ביום</li><li>מערכי שיעור</li><li>שמירת שיעורים</li></ul><a class="btn v" href="#/signup" style="justify-content:center">לבחור בסיסי</a></div>
+  <div class="plan"><h3>מקצועי</h3><div class="p">₪200<small> / חודש</small></div><ul><li>מכסה גבוהה למורים</li><li>כל המצבים כולל בטא</li><li>עדיפות בעומס</li></ul><a class="btn w" href="#/signup" style="justify-content:center">לבחור מקצועי</a></div>
+ </div>
+ <p class="inst">מוסד לימוד או ישיבה? <a href="#/signup">דברו איתנו</a>.</p>
+</div></section>
+
+<section id="faq" style="padding-top:0"><div class="wrap" style="max-width:780px"><h2 style="margin-bottom:40px">שאלות נפוצות</h2>
+ <details><summary>האם חברותא מחליפה רב?</summary><p>לא. היא כלי לימוד שמראה מקורות. לשאלות הלכה למעשה, פונים לרב.</p></details>
+ <details><summary>מאיפה המקורות?</summary><p>ממאגר ברישיון שמאפשר שימוש מסחרי, בהם ספריא ופרויקטים פתוחים אחרים.</p></details>
+ <details><summary>מה קורה כשאין תשובה במקורות?</summary><p>חברותא אומרת שלא נמצא מקור, ולא מנסה לנחש.</p></details>
+</div></section>
+
+<div class="final"><h2>בואו נלמד ביחד</h2><a class="btn big" href="#/signup">הרשמה חינם</a></div>
+<footer><div class="wrap"><a class="logo" style="font-size:20px" href="#/"><svg style="width:30px;height:30px"><use href="#mark"/></svg>חברותא</a><nav><a>תנאי שימוש</a><a>פרטיות</a><a>נגישות</a><a>צור קשר</a></nav><span>© חברותא</span></div></footer>
+</div>
+
+<div class="view" id="v-signup"><div class="auth">
+ <form onsubmit="location.hash='#/app';return false"><a class="logo" href="#/" style="margin-bottom:34px"><svg><use href="#mark"/></svg>חברותא</a>
+  <h2>שמחים שבאתם</h2><p class="sub" style="text-align:right;margin:8px 0 0;font-size:18px">צרו חשבון והתחילו ללמוד.</p>
+  <button type="button" class="btn w" style="margin-top:26px" onclick="location.hash='#/app'">המשך עם Google</button><p class="or">או עם מייל</p>
+  <label>אימייל</label><input type="email" dir="ltr" placeholder="name@example.com"><label>סיסמה</label><input type="password" dir="ltr" placeholder="לפחות 8 תווים">
+  <button class="btn v big" style="margin-top:26px">יצירת חשבון</button><p class="sw">כבר רשומים? <a href="#/signup">כניסה</a></p></form>
+ <div class="art"><span></span><div class="stack"><div class="b">למה התורה מתחילה ב״בראשית״?</div><div class="b me2">רש״י עונה על כך בפסוק הראשון, ומפנה למצווה הראשונה.</div></div></div>
+</div></div>
+
+<div class="view" id="v-app"><div class="app">
+ <aside class="pane sb"><a class="logo" href="#/" style="margin:6px 8px 14px;font-size:22px"><svg style="width:34px;height:34px"><use href="#mark"/></svg>חברותא</a>
+  <a class="btn v">+ שיחה חדשה</a><h4>היום</h4><a class="on">למה בראשית ולא המצווה הראשונה</a><a>דין שבת בבישול</a><h4>השבוע</h4><a>הקדמת הרמב״ם</a><a>מערך שיעור: פרשת נח</a><a>סוגיית אלו מציאות</a></aside>
+ <main class="pane"><div class="top2"><span>שיחה</span><span style="color:var(--mute);font-size:15px">3 מקורות</span></div>
+  <div class="msgs"><div class="b me">למה התורה מתחילה ב״בראשית״ ולא במצווה הראשונה?</div>
+   <div class="b ai">רש״י פותח בדיוק בשאלה הזו. לפי רבי יצחק, היה ראוי להתחיל את התורה מ״החדש הזה לכם״, שהיא המצווה הראשונה שנצטוו בה ישראל. <span class="ref">1</span><br><br>ומדוע פתחה התורה בבריאה? כדי להראות שהארץ כולה שייכת לבורא, והוא נותן אותה למי שיישר בעיניו. <span class="ref">2</span></div></div>
+  <div class="cw">
+   <div class="menu" id="modemenu" role="menu" aria-label="בחירת מצב לימוד"><button role="menuitemradio" aria-checked="false" data-mode="שיעור"><span class="ico"><svg class="ic2" viewBox="0 0 24 24"><path d="M4 5h16v11H4zM8 20h8M12 16v4"/></svg></span><span class="t">שיעור<small>מערך מלא למורים</small></span><svg class="ic2 ck" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></svg></button><button role="menuitemradio" aria-checked="false" data-mode="הסבר"><span class="ico"><svg class="ic2" viewBox="0 0 24 24"><path d="M12 3a7 7 0 0 0-4 12.7V18h8v-2.3A7 7 0 0 0 12 3ZM9.5 21h5"/></svg></span><span class="t">הסבר<small>פסוק או סוגיה, עם מפרשים</small></span><svg class="ic2 ck" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></svg></button><button role="menuitemradio" aria-checked="true" data-mode="שאלה ותשובה"><span class="ico"><svg class="ic2" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z"/></svg></span><span class="t">שאלה ותשובה<small>רק מהמקורות</small></span><svg class="ic2 ck" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></svg></button><button role="menuitemradio" aria-checked="false" data-mode="הלכה ושו״ת"><span class="ico"><svg class="ic2" viewBox="0 0 24 24"><path d="M4 4h12a4 4 0 0 1 4 4v12H8a4 4 0 0 1-4-4ZM8 8h8M8 12h8"/></svg></span><span class="t">הלכה ושו״ת<small>שולחן ערוך ונושאי כליו</small></span><svg class="ic2 ck" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></svg></button><button role="menuitemradio" aria-checked="false" data-mode="חברותא"><span class="ico"><svg class="ic2" viewBox="0 0 24 24"><path d="M16 11a3 3 0 1 0-6 0M3 20a6 6 0 0 1 12 0M17 12a3 3 0 1 0 0-6M21 20a5 5 0 0 0-4-4.9"/></svg></span><span class="t">חברותא<small>לימוד בדיאלוג</small></span><svg class="ic2 ck" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></svg></button><h5>בבדיקה</h5><button role="menuitemradio" aria-checked="false" data-mode="פרשת השבוע"><span class="ico"><svg class="ic2" viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2ZM8 3v18"/></svg></span><span class="t">פרשת השבוע</span><span class="bt">בטא</span><svg class="ic2 ck" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></svg></button><button role="menuitemradio" aria-checked="false" data-mode="דף יומי"><span class="ico"><svg class="ic2" viewBox="0 0 24 24"><path d="M4 6h16v14H4zM4 10h16M8 3v4M16 3v4"/></svg></span><span class="t">דף יומי</span><span class="bt">בטא</span><svg class="ic2 ck" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></svg></button><button role="menuitemradio" aria-checked="false" data-mode="דף מקורות"><span class="ico"><svg class="ic2" viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM14 3v5h5M9 13h6M9 17h6"/></svg></span><span class="t">דף מקורות</span><span class="bt">בטא</span><svg class="ic2 ck" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></svg></button></div>
+   <div class="comp">
+    <button type="button" class="modebtn" id="modebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="modemenu"><svg class="ic2" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg><span id="modelabel">שאלה ותשובה</span><svg class="ic2 chev" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></svg></button>
+    <input placeholder="שאלו כל דבר…" aria-label="הודעה לחברותא"><button class="btn v">שלח</button>
+   </div>
+  </div>
+ </main>
+ <aside class="pane srcp"><h4>המקורות בתשובה</h4>
+  <div class="sc"><b>1 · רש״י על בראשית א׳:א׳</b><p>אמר רבי יצחק: לא היה צריך להתחיל את התורה אלא מ״החדש הזה לכם״, שהיא מצוה ראשונה שנצטוו ישראל.</p></div>
+  <div class="sc"><b>2 · רש״י על בראשית א׳:א׳</b><p>שאם יאמרו אומות העולם ליסטים אתם, שכבשתם ארצות שבעה גוים, הן אומרים להם: כל הארץ של הקדוש ברוך הוא היא.</p></div></aside>
+</div></div>
+<a class="back" href="../index.html">← חזרה להשוואת הסגנונות</a>
+<script>
+function route(){const h=(location.hash||'#/').replace('#','');const id=h.startsWith('/signup')?'v-signup':h.startsWith('/app')?'v-app':'v-landing';
+ document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id===id));if(h&&h[0]!=='/'){const e=document.getElementById(h);e&&e.scrollIntoView()}else window.scrollTo(0,0)}
+addEventListener('hashchange',route);route();
+(function(){const b=document.getElementById('modebtn'),m=document.getElementById('modemenu'),l=document.getElementById('modelabel');if(!b)return;
+ const set=o=>{m.classList.toggle('open',o);b.setAttribute('aria-expanded',o)};
+ b.addEventListener('click',e=>{e.stopPropagation();set(!m.classList.contains('open'));if(m.classList.contains('open'))(m.querySelector('[aria-checked=true]')||m.querySelector('button')).focus()});
+ m.addEventListener('click',e=>{const t=e.target.closest('button[data-mode]');if(!t)return;m.querySelectorAll('button[data-mode]').forEach(x=>x.setAttribute('aria-checked',x===t));l.textContent=t.dataset.mode;set(false);b.focus()});
+ document.addEventListener('click',e=>{if(!m.contains(e.target))set(false)});
+ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&m.classList.contains('open')){set(false);b.focus()}
+  if(m.classList.contains('open')&&(e.key==='ArrowDown'||e.key==='ArrowUp')){e.preventDefault();const a=[...m.querySelectorAll('button')],i=a.indexOf(document.activeElement);a[(i+(e.key==='ArrowDown'?1:-1)+a.length)%a.length].focus()}});
+})();
+</script>
+</body></html>

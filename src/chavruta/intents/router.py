@@ -91,6 +91,78 @@ _HALACHA_PAT = re.compile(
     r"|האם\s+(מותר|אסור|צריך|חייב|כשר|מחו?יי?ב)|מה\s+הדין|מהי?\s+ההלכה|מה\s+ההלכה"
     r"|הלכה\s+למעשה|כיצד\s+(נוהגים|יש\s+לנהוג|פוסקים)", re.IGNORECASE)
 
+_PURE_GREETING_PAT = re.compile(
+    r"^[\s]*(?:שלום|שלום\s+עליכם|היי|הי|בוקר\s+טוב|ערב\s+טוב|צהריים\s+טובים|מה\s+נשמע|מה\s+שלומך|מה\s+קורה|hello|hi|hey)[\s.!?,]*$",
+    re.IGNORECASE,
+)
+
+
+def is_pure_greeting(text: str) -> bool:
+    """Return True if text is ONLY a standalone greeting with no substantive content."""
+    if not text:
+        return False
+    return bool(_PURE_GREETING_PAT.match(text))
+
+
+_PURE_ACK_PREFIXES = (
+    "תודה", "יישר כוח", "יישר כח", "חזק וברוך", "שכוייח", "חן חן",
+    "מעולה תודה", "אחלה תודה", "סבבה תודה", "הבנתי תודה", "אוקיי תודה", "אוקי תודה",
+    "בסדר גמור תודה", "נפלא תודה", "מצוין תודה",
+    "thanks", "thank you", "great thanks", "got it thanks",
+)
+
+_STANDALONE_ACKS = {
+    "תודה", "תודה רבה", "תודה רבה לך", "תודה לך", "יישר כוח", "יישר כח", "יישר כוחך",
+    "חזק וברוך", "שכוייח", "חן חן", "מעולה", "אחלה", "סבבה", "הבנתי", "בסדר גמור",
+    "מצוין", "נפלא", "thanks", "thank you", "thank you very much", "got it",
+}
+
+_NON_ACK_KEYWORDS = {
+    "?", "؟", "מה", "האם", "למה", "מדוע", "איך", "כיצד", "מתי", "איפה", "היכן",
+    "מי", "מניין", "איזה", "איזו", "אילו", "אבל", "אלא", "ומה", "והאם", "ולמה",
+    "תסביר", "הסבר", "פרט", "תפרט", "הרחב", "תרחיב", "תביא", "תראה",
+    "מקור", "מקורות", "פסוק", "גמרא", "סוגיה", "שיעור", "דין", "הלכה", "מותר", "אסור",
+    "what", "why", "how", "when", "where", "who", "which", "but",
+}
+
+
+def is_conversational_acknowledgement(text: str) -> bool:
+    """Return True if text is a conversational acknowledgement/gratitude/closing turn
+    without any substantive inquiry or question.
+    """
+    if not text:
+        return False
+    clean = " ".join(text.strip().split())
+    if not clean:
+        return False
+    if "?" in clean or "؟" in clean:
+        return False
+
+    stripped = clean.strip(".!?,;:~- ")
+    low_stripped = stripped.lower()
+    if stripped in _STANDALONE_ACKS or low_stripped in _STANDALONE_ACKS:
+        return True
+
+    words = clean.split()
+    if len(words) > 14:
+        return False
+
+    matched_prefix = False
+    for p in _PURE_ACK_PREFIXES:
+        if clean.startswith(p) or clean.lower().startswith(p):
+            matched_prefix = True
+            break
+    if not matched_prefix and not any(w in ("תודה", "מעולה", "הבנתי", "שכוייח") for w in words[:2]):
+        return False
+
+    clean_words_lower = [w.strip(".!?,;:~-\"'״`()").lower() for w in words]
+    for w in clean_words_lower:
+        if w in _NON_ACK_KEYWORDS:
+            return False
+
+    return True
+
+
 
 # Modern technology terms whose halachically-operative concept shares no root with the surface
 # word. A question like "is it permitted to play on a COMPUTER on Shabbat" embeds close to the
@@ -112,6 +184,63 @@ _TECH_TERMS: tuple[str, ...] = (
 _TECH_CONCEPT_EXPANSION = (
     "חשמל שימוש במכשיר חשמלי הפעלת מעגל חשמלי מוקצה "
     "electricity electrical device muktzeh"
+)
+
+# Concept bridges: modern/colloquial topics whose foundational Torah/halachic terms
+# use different vocabulary. Appended ONLY to query.search_text (the dense/sparse embedding
+# input). query.text (what the LLM receives) is ALWAYS kept untouched.
+_CONCEPT_BRIDGES: tuple[tuple[tuple[str, ...], str], ...] = (
+    # Technology / Electricity (preserves _TECH_TERMS)
+    (_TECH_TERMS, _TECH_CONCEPT_EXPANSION),
+
+    # Lashon Hara / Rechilut -> Torah terminology (Leviticus 19:16, Shemot 23:1, Chafetz Chaim)
+    (
+        ("לשון הרע", "איסור לשון הרע", "רכילות", "איסור רכילות", "מוציא שם רע",
+         "הוצאת שם רע", "בעל לשון הרע", "הלכות לשון הרע", "lashon hara", "evil speech", "slander", "gossip", "talebearer"),
+        "רכיל לא תלך רכיל בעמיך לא תשא שמע שוא חפץ חיים דעות ז ויקרא יט טז"
+    ),
+
+    # Hashavat Aveida / Lost Property
+    (
+        ("השבת אבידה", "השבת אבדה", "מצוות השבת אבידה", "אבידה ומציאה", "lost property", "returning lost property"),
+        "השב תשיבם לא תוכל להתעלם חמור אחיך שור אחיך דברים כב"
+    ),
+
+    # Shiluach HaKen
+    (
+        ("שילוח הקן", "שלוח הקן", "מצוות שילוח הקן", "mother bird", "shiluach haken"),
+        "שלח תשלח את האם ואת הבנים תקח לך למען ייטב לך דברים כב"
+    ),
+
+    # Ribbit / Interest
+    (
+        ("ריבית", "איסור ריבית", "הלוואה בריבית", "היתר עיסקה", "היתר עסקה", "usury", "interest loan"),
+        "נשך ותרבית לא תשיך לאחיך אל תקח מאתו נשך ויקרא כה דברים כג"
+    ),
+
+    # Lifnei Iver / Stumbling Block
+    (
+        ("לפני עיוור", "לפני עיוור לא תיתן מכשול", "לפני עור", "מכשול", "stumbling block"),
+        "לפני עור לא תתן מכשל ויראת מאלקיך ויקרא יט יד"
+    ),
+
+    # Ona'at Devarim / Verbal Hurt
+    (
+        ("אונאת דברים", "הונאת דברים", "פגיעה מילולית", "לצער בדיבור"),
+        "לא תונו איש את עמיתו ויראת מאלקיך בבא מציעא נח"
+    ),
+
+    # Bal Tashchit / Wastefulness
+    (
+        ("בל תשחית", "השחתה", "השחתת רכוש", "השחתת עצים", "wastefulness"),
+        "לא תשחית את עצה לנדח עליו גרזן דברים כ"
+    ),
+
+    # Tza'ar Ba'alei Chayim / Animal Cruelty
+    (
+        ("צער בעלי חיים", "התאכזרות לבעלי חיים", "cruelty to animals", "animal welfare"),
+        "עזוב תעזוב עמו פריקה וטעינה חסימה שור בדישו שבת קכח"
+    ),
 )
 
 
@@ -235,8 +364,11 @@ class Router:
         if not query.search_text:
             query.search_text = retrieval_text(query.text)
 
-        if _has_tech_term(query.text) and _TECH_CONCEPT_EXPANSION not in query.search_text:
-            query.search_text = f"{query.search_text} {_TECH_CONCEPT_EXPANSION}"
+        low = query.text.lower()
+        for terms, expansion in _CONCEPT_BRIDGES:
+            if any(_alias_hit(t, query.text, low) for t in terms):
+                if expansion not in query.search_text:
+                    query.search_text = f"{query.search_text} {expansion}"
 
         commentators = detect_commentators(query.text)
         if commentators and not query.commentator_ids:

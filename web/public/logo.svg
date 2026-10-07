@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="חברותא">
+  <path d="M8 14a10 10 0 0 1 10-10h22a10 10 0 0 1 10 10v16a10 10 0 0 1-10 10H26L14 50V40a10 10 0 0 1-6-9Z" fill="#5b3df5"/>
+  <path d="M34 20H48a8 8 0 0 1 8 8V38a8 8 0 0 1-8 8H46V54L38 46H34a10 10 0 0 1-10-10V30a10 10 0 0 1 10-10Z" fill="#19c9a0" fill-opacity=".92"/>
+  <circle cx="31" cy="31" r="2.6" fill="#fff"/><circle cx="39" cy="31" r="2.6" fill="#fff"/>
+</svg>

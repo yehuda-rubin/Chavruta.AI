@@ -8,6 +8,7 @@ The pipeline is loaded once at startup and shared across requests.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -15,6 +16,7 @@ import re
 import sys
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
@@ -23,6 +25,11 @@ from typing import NamedTuple
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+try:
+    import torch  # noqa: F401,E402 — MUST precede qdrant_client import (Windows pyarrow DLL order)
+except Exception:  # noqa: BLE001
+    pass
 
 # Source markers ([S1], [S1, S5], (S1), 【S1】, …) are the grounding mechanism — the pipeline maps them
 # to citations, then we strip them from the DISPLAYED text so the answer reads cleanly.
@@ -220,6 +227,10 @@ def _widen_citations_from_note(result, note: str, owner_id: str = "",
                 found[ref] = payload
     he = True
     for ref, payload in found.items():
+        from chavruta.corpus.refs import license_for_ref
+
+        lic = payload.get("license") or payload.get("license_he") or license_for_ref(ref, "he")[0]
+        ver = payload.get("version_title") or payload.get("version_he") or license_for_ref(ref, "he")[1]
         result.citations.append(CitationOut(
             ref=ref, ref_he=(hebrew_display_ref(ref) or "") if he else "",
             text_he=payload.get("text_he") or payload.get("text") or "",
@@ -230,7 +241,7 @@ def _widen_citations_from_note(result, note: str, owner_id: str = "",
             # citation rendered as a bare "Chizkuni,_Deuteronomy.10.6.1" chip beside "rashbam".
             commentator=(payload.get("commentator_id") or commentator_from_ref(ref) or ""),
             deep_link=payload.get("deep_link") or "",
-            license=payload.get("license") or "", version_title=payload.get("version_title") or ""))
+            license=lic or "", version_title=ver or ""))
     if missing := [r for r in in_scope if r not in found]:
         # Resolved to nothing in the corpus — named a work that does not exist, or invented the ref
         # outright.
@@ -278,6 +289,9 @@ def _strip_markers(text: str, he: bool = False) -> str:
         lambda m: (f"**{m.group(1).strip()}**" if (m.group(1) or "").strip() else ""), t
     )
     t = _MD_BLOCKQUOTE_RE.sub("", t)
+    # Clean up punctuation collisions left where citation markers were stripped (e.g. ",." -> "." or ",," -> ",")
+    t = re.sub(r",\s*\.", ".", t)
+    t = re.sub(r",\s*,+", ",", t)
     t = re.sub(r"[ \t]{2,}", " ", t)
     return t.strip()
 
@@ -300,17 +314,9 @@ def _has_bleed(text: str) -> bool:
 
 
 _SENTENCE_SPLIT_RE = re.compile(r"([.!?]\s+|\n+)")   # captured so separators are preserved verbatim
-_MAX_BLEED_FIXES = 20   # bound worst-case latency/cost if something is very wrong with one answer.
-# Was 3, then 8 — both were still too low in practice. A long lesson or responsa answer quoting many
-# sources can bleed in a dozen-plus sentences, and every sentence over the cap reaches the user in
-# broken Hebrew, which is exactly the defect this whole mechanism exists to prevent. The cap's job is
-# to stop a runaway answer from costing unbounded time and money, not to ration the fix — 20 covers
-# every real answer seen so far while still bounding the pathological case.
-_BLEED_FIX_WORKERS = 4
-# Raising the cap without this would have made the worst case 20 sentences x 2 attempts = 40 model
-# calls IN SERIES, all of them blocking the user's response. The rewrites are independent of each
-# other (each sees one sentence and nothing else), so they parallelise exactly. Small pool: this runs
-# alongside other users' generation calls, and the point is to cut the tail, not to burst the provider.
+_MAX_BLEED_FIXES = 60   # bound worst-case latency/cost: expanded 3x from 20 to 60 sentences.
+# Covers even very long lessons or multi-source sheets while still bounding pathological runaway.
+_BLEED_FIX_WORKERS = 8   # concurrent parallel rewrite workers to keep latency low.
 
 _BLEED_FIX_SYSTEM = (
     "Rewrite the given Hebrew sentence so it contains NO English or other non-Hebrew words or "
@@ -459,11 +465,10 @@ def _strip_instruction_echo(text: str, he: bool) -> str:
                 parts[i + 1] = ""            # sentence before it joins directly onto the one after
     return re.sub(r"[ \t]{2,}", " ", "".join(parts)).strip()
 
-import torch  # noqa: F401,E402 — MUST precede qdrant_client import (Windows pyarrow DLL order)
-
 from contextlib import asynccontextmanager, contextmanager
 
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -488,8 +493,10 @@ from chavruta.llm.agentic import is_degrade_message
 from chavruta.llm import base as llm_base
 from chavruta.llm.base import GroundedPrompt
 from chavruta.pipeline.pipeline import _max_tokens_for
+from chavruta.generation.grounded import strip_mudgash_label
 from chavruta.intents.hebrew_refs import detect_tractates, detect_hebrew_refs
-from chavruta.intents.router import detect_commentators
+from chavruta.intents.router import detect_commentators, is_pure_greeting, is_conversational_acknowledgement
+from chavruta.intents.llm_planner import classify_and_distill, strip_control_codes
 
 import app.accounts as accounts
 import app.orgs as orgs
@@ -500,7 +507,7 @@ import app.devhelpers as devhelpers
 import app.db as db
 from app import plans
 from app.billing import payplus
-from app.jobs import registry as jobs
+from app.jobs import JobCancelledError, is_cancelled, registry as jobs
 
 
 # ── Startup ───────────────────────────────────────────────────────────────────
@@ -524,6 +531,44 @@ def _configure_logging() -> None:
     root.setLevel(getattr(logging, level, logging.INFO))
 
 
+# The BYO-model headers (web/lib/api.ts) carry the user's OWN provider key, base URL and model. We
+# promise that key is never stored server-side, so no Sentry event may carry it. The SDK's default
+# EventScrubber denylist only knows generic names (authorization, x-api-key, ...), not these.
+_USER_LLM_HEADER_PREFIX = "x-user-llm-"
+_USER_LLM_HEADERS = ["x-user-llm-key", "x-user-llm-base-url", "x-user-llm-model"]
+
+
+def _strip_user_llm_headers(headers):
+    """Return `headers` (a dict, or a list of [name, value] pairs) minus every x-user-llm-* header."""
+    def _is_user_llm(name) -> bool:
+        return isinstance(name, str) and name.lower().startswith(_USER_LLM_HEADER_PREFIX)
+
+    if isinstance(headers, dict):
+        return {k: v for k, v in headers.items() if not _is_user_llm(k)}
+    if isinstance(headers, (list, tuple)):
+        return [h for h in headers
+                if not (isinstance(h, (list, tuple)) and h and _is_user_llm(h[0]))]
+    return headers
+
+
+def _scrub_sentry_event(event, hint=None):
+    """Sentry before_send / before_send_transaction hook: drop x-user-llm-* headers from the request
+    and from any breadcrumb data that recorded headers. Module-level so it is unit-testable."""
+    try:
+        request = event.get("request")
+        if isinstance(request, dict) and "headers" in request:
+            request["headers"] = _strip_user_llm_headers(request["headers"])
+        crumbs = event.get("breadcrumbs")
+        values = crumbs.get("values") if isinstance(crumbs, dict) else crumbs
+        for crumb in values or []:
+            data = crumb.get("data") if isinstance(crumb, dict) else None
+            if isinstance(data, dict) and "headers" in data:
+                data["headers"] = _strip_user_llm_headers(data["headers"])
+    except Exception:  # a scrubber must never be the reason an error goes unreported
+        pass
+    return event
+
+
 def _configure_sentry() -> None:
     """Backend error tracking — a no-op unless SENTRY_DSN is set, same "absent = inert" convention
     as the Supabase auth integration. FastAPI's integration auto-captures unhandled exceptions; the
@@ -534,12 +579,18 @@ def _configure_sentry() -> None:
         return
     import sentry_sdk
     from sentry_sdk.integrations.fastapi import FastApiIntegration
+    from sentry_sdk.scrubber import DEFAULT_DENYLIST, EventScrubber
 
     sentry_sdk.init(
         dsn=dsn,
         integrations=[FastApiIntegration()],
         send_default_pii=False,   # nothing here forwards user content to a third party by default
         environment=os.environ.get("CHAVRUTA_ENV", "production"),
+        # Belt and braces: the scrubber masks the BYO-key headers by name wherever they appear,
+        # before_send drops them (any x-user-llm-* name) from request headers and breadcrumbs.
+        event_scrubber=EventScrubber(denylist=DEFAULT_DENYLIST + _USER_LLM_HEADERS),
+        before_send=_scrub_sentry_event,
+        before_send_transaction=_scrub_sentry_event,
     )
 
 
@@ -707,6 +758,8 @@ class QueryResponse(BaseModel):
     # separately so the client can render it beside the sources rather than inside the prose.
     # Empty for everyone outside the rollout, and empty whenever the model did not emit one.
     source_note: str = ""
+    # The actual model ID that generated this answer (e.g. Gemini 3.1 Flash-Lite or Nebius Qwen)
+    model_used: str = ""
 
 
 # ── Lesson audience / grade / length ─────────────────────────────────────────
@@ -729,31 +782,49 @@ _BAND_PED = {
            "גשר אל עיון בית־מדרש עם פיגומים ורלוונטיות; משך ~45–60 דק'.",
 }
 
+_BAND_PED_EN = {
+    "a-c": "Grades 1–3 (ages 6–9): Concrete thinking and short attention span; learning through storytelling, imagery, movement; simple English — explain difficult terms; one key idea per lesson; ~30 min.",
+    "d-f": "Grades 4–6 (ages 9–12): Early abstract thinking; worked examples, graphic organizers, comparing two opinions; worksheet and exit ticket; intro to chavruta study; ~45 min.",
+    "g-i": "Grades 7–9 (ages 12–15): Dispute and conceptual roots, chavruta debate, reasoned argumentation from two sources; basic lamdanic/talmudic terminology with clear explanations; ~45 min.",
+    "j-l": "Grades 10–12 (ages 15–18): Source-based textual analysis, two-sided inquiry, introduction to later authorities (Acharonim), synthesis essay; bridging to beit-midrash iyun; ~45–60 min.",
+}
+
 # lesson length → retrieval breadth + concrete time budget + a depth instruction.
 # Minutes scale with the audience: a school lesson is bounded by the class period (and by the
 # age band), a beit-midrash iyun can run longer.
 _LENGTHS = {
-    "short":  {"top_k": 10, "he": "קצר",  "yeshiva_min": "25–35 דק׳", "words": "700–1000",
+    "short":  {"top_k": 10, "he": "קצר", "en": "Short", "yeshiva_min": "25–35 דק׳", "yeshiva_min_en": "25–35 min", "words": "700–1000",
                "school_min": {"a-c": "15–20 דק׳", "d-f": "25–30 דק׳", "g-i": "25–30 דק׳", "j-l": "30–35 דק׳"},
-               "depth": "שיעור קצר וממוקד, אך כתוב במלואו: מעט מקורות, מהלך תמציתי, ושיעור מלא של כ-700–1000 מילים."},
-    "medium": {"top_k": 16, "he": "בינוני", "yeshiva_min": "45–60 דק׳", "words": "1600–2400",
+               "school_min_en": {"a-c": "15–20 min", "d-f": "25–30 min", "g-i": "25–30 min", "j-l": "30–35 min"},
+               "depth": "שיעור קצר וממוקד, אך כתוב במלואו: מעט מקורות, מהלך תמציתי, ושיעור מלא של כ-700–1000 מילים.",
+               "depth_en": "A short, focused lesson written out in full: few sources, concise flow, and a complete lesson of ~700–1000 words."},
+    "medium": {"top_k": 16, "he": "בינוני", "en": "Medium", "yeshiva_min": "45–60 דק׳", "yeshiva_min_en": "45–60 min", "words": "1600–2400",
                "school_min": {"a-c": "30 דק׳", "d-f": "45 דק׳", "g-i": "45 דק׳", "j-l": "45–50 דק׳"},
+               "school_min_en": {"a-c": "30 min", "d-f": "45 min", "g-i": "45 min", "j-l": "45–50 min"},
                "depth": "שיעור באורך בינוני, מפורט ומלא: כיסוי מאוזן ומעמיק של המקורות והמהלך. השיעור המלא "
-                        "צריך להיות **לפחות 1600–2400 מילים** — פַתח כל שלב לעומק, אל תסכם ואל תקצר."},
-    "long":   {"top_k": 26, "he": "ארוך",  "yeshiva_min": "75–90 דק׳", "words": "3000–4500",
+                        "צריך להיות **לפחות 1600–2400 מילים** — פַתח כל שלב לעומק, אל תסכם ואל תקצר.",
+               "depth_en": "A medium-length lesson, detailed and complete: balanced, in-depth coverage of sources and pedagogical flow. The full lesson "
+                           "must be **at least 1600–2400 words** — develop every stage thoroughly, do not summarize or truncate."},
+    "long":   {"top_k": 26, "he": "ארוך", "en": "Long", "yeshiva_min": "75–90 דק׳", "yeshiva_min_en": "75–90 min", "words": "3000–4500",
                "school_min": {"a-c": "40 דק׳ (בשני חלקים)", "d-f": "60–90 דק׳ (שיעור כפול)",
                               "g-i": "60–90 דק׳ (שיעור כפול)", "j-l": "90 דק׳ (שיעור כפול)"},
+               "school_min_en": {"a-c": "40 min (two parts)", "d-f": "60–90 min (double period)",
+                                 "g-i": "60–90 min (double period)", "j-l": "90 min (double period)"},
                "depth": "שיעור ארוך ומעמיק: מקורות רבים, מהלך מפורט, ושיעור מלא ומקיף של **3000–4500 מילים** — "
-                        "פַתח כל שיטה במלואה, הקשה ותרץ, נתח כל צד של החקירה לעומק."},
+                        "פַתח כל שיטה במלואה, הקשה ותרץ, נתח כל צד של החקירה לעומק.",
+               "depth_en": "A long, comprehensive in-depth lesson: extensive sources, detailed progression, and a thorough full lesson of **3000–4500 words** — "
+                           "fully develop each opinion, raise questions and resolve them, analyzing each dimension thoroughly."},
 }
 
 
-def _length_minutes(length: str, audience: str | None, grade_band: str | None) -> str:
+def _length_minutes(length: str, audience: str | None, grade_band: str | None, lang: str = "he") -> str:
     """The concrete time budget for this (length × audience × grade band)."""
     ln = _LENGTHS.get(length, _LENGTHS["medium"])
+    is_en = (lang == "en")
     if audience == "school":
-        return ln["school_min"].get(grade_band or "", ln["school_min"]["d-f"])
-    return ln["yeshiva_min"]
+        key = "school_min_en" if is_en else "school_min"
+        return ln[key].get(grade_band or "", ln[key]["d-f"])
+    return ln["yeshiva_min_en"] if is_en else ln["yeshiva_min"]
 
 
 def _templates_client():
@@ -770,14 +841,24 @@ def _templates_client():
 _REPO_DIR = Path(__file__).resolve().parents[1]
 
 
-def _attach_template_bodies(pl: dict) -> None:
+def _attach_template_bodies(pl: dict, lang: str = "he") -> None:
     """Load the template's actual .md file bodies (the pedagogical scaffold) from disk into the
     payload — the RAG manifest only carries metadata, so without this the template files are never
     read at generation time and the whole template library is dead at runtime."""
     files = pl.get("files") or {}
-    d = _REPO_DIR / (pl.get("dir") or "")
+    files_en = pl.get("files_en") or {}
+    dir_str = pl.get("dir") or (f"lessons/templates/{pl.get('id')}" if pl.get("id") else "")
+    d = _REPO_DIR / dir_str
     for role in ("full_lesson", "lesson_flow", "source_sheet"):
-        fn = files.get(role)
+        fn = None
+        if lang == "en":
+            fn = files_en.get(role)
+            if not fn:
+                candidate = f"TEMPLATE_{role}_en.md"
+                if (d / candidate).is_file():
+                    fn = candidate
+        if not fn:
+            fn = files.get(role)
         if fn:
             try:
                 # `dir`/`fn` come from the template collection's payload, not from a user — but this
@@ -791,7 +872,7 @@ def _attach_template_bodies(pl: dict) -> None:
                 _log.warning("template body unreadable (role=%s, file=%s)", role, fn)
 
 
-def _select_template(topic: str, audience: str | None = None, grade_band: str | None = None):
+def _select_template(topic: str, audience: str | None = None, grade_band: str | None = None, lang: str = "he"):
     """Pick the best-matching lesson-template PAYLOAD from the template RAG (filtered by
     audience/grade), with its .md file bodies loaded in."""
     try:
@@ -810,7 +891,7 @@ def _select_template(topic: str, audience: str | None = None, grade_band: str | 
         if not res.points:
             return None
         pl = dict(res.points[0].payload or {})
-        _attach_template_bodies(pl)
+        _attach_template_bodies(pl, lang=lang)
         return pl
     except Exception:
         return None
@@ -954,7 +1035,7 @@ def _resolve_topic(question: str, history) -> str:
 
 
 # Tolerate the model bolding/indenting the delimiter (**===FULL_LESSON===**, leading spaces, RTL marks).
-def _source_sheet_entry(n: int, c: CitationOut) -> str:
+def _source_sheet_entry(n: int, c: CitationOut, lang: str = "he") -> str:
     """One source on the sheet: the verbatim text, plus credit where the licence requires it.
 
     A source sheet REPRODUCES the text — it is not a citation. CC-BY, CC-BY-SA and CC-BY-NC all
@@ -963,14 +1044,17 @@ def _source_sheet_entry(n: int, c: CitationOut) -> str:
     it omits which edition the text is and under what terms. Public-domain and CC0 sources need no
     credit line, so they don't get noise.
 
-    The heading uses the HEBREW ref when one is known (`ref_he`, already resolved by the caller via
-    hebrew_display_ref) — a Hebrew source sheet handed to a class shouldn't title every source in
-    transliterated English. Falls back to the English ref when no Hebrew rendering exists, which is
-    the same honest-gap rule hebrew_display_ref itself follows. Likewise the body prefers the Hebrew
-    text and only falls back to the English one when the source has no Hebrew at all (some responsa
-    in the corpus exist only as English translations).
+    When lang == 'en', prioritizes the English text (c.text_en) if available and formats an
+    English or bilingual heading so English lessons do not force Hebrew-only source sheets.
+    When lang == 'he', prefers the Hebrew ref and text.
     """
-    entry = f"**{n}. {c.ref_he or c.ref}**\n{c.text_he or c.text_en}"
+    if lang == "en":
+        ref_title = f"{c.ref} ({c.ref_he})" if (c.ref_he and c.ref_he != c.ref) else c.ref
+        body = c.text_en or c.text_he
+    else:
+        ref_title = c.ref_he or c.ref
+        body = c.text_he or c.text_en
+    entry = f"**{n}. {ref_title}**\n{body}"
     if rights.requires_attribution(c.license):
         entry += "\n\n> " + rights.attribution_line(
             ref=c.ref, version_title=c.version_title,
@@ -1027,21 +1111,39 @@ def _lesson_job_md(question: str, hits, lang: str, *, audience: str | None,
         lines += [""]
 
     # who the lesson is for
-    if audience == "school":
-        lines += ["## AUDIENCE", f"בית ספר — כיתות {_GRADE_HE.get(grade_band, grade_band or '?')}.",
-                  _BAND_PED.get(grade_band, ""), ""]
-    elif audience == "yeshiva":
-        lines += ["## AUDIENCE", "בית מדרש / ישיבה — לומדים מבוגרים; שיעור עיון.", ""]
+    if lang == "en":
+        if audience == "school":
+            lines += ["## AUDIENCE", f"School — grades {grade_band or '?'}.",
+                      _BAND_PED_EN.get(grade_band, ""), ""]
+        elif audience == "yeshiva":
+            lines += ["## AUDIENCE", "Beit Midrash / Yeshiva — adult learners; in-depth study.", ""]
 
-    mins = _length_minutes(length, audience, grade_band)
-    lines += ["## LENGTH", f"{ln['he']} — כ־{mins} סה\"כ. {ln['depth']} "
-              f"היקף היעד של השיעור המלא: **{ln.get('words','1600–2400')} מילים**. "
-              "התאם/י את הזמנים בשלבי מהלך השיעור כך שיסתכמו לטווח הזה. "
-              "שיעור קצר מהיעד אינו מקובל — כתוב במלואו ובהרחבה.", ""]
+        mins = _length_minutes(length, audience, grade_band, lang="en")
+        len_name = ln.get("en", "Medium")
+        depth = ln.get("depth_en", ln["depth"])
+        words = ln.get("words", "1600–2400")
+        lines += ["## LENGTH", f"{len_name} — approx {mins} total. {depth} "
+                  f"Target word count for the full lesson: **{words} words**. "
+                  "Calibrate stage timings in the lesson flow to sum to this duration. "
+                  "A lesson shorter than the target is unacceptable — write in full and elaborate thoroughly.", ""]
+    else:
+        if audience == "school":
+            lines += ["## AUDIENCE", f"בית ספר — כיתות {_GRADE_HE.get(grade_band, grade_band or '?')}.",
+                      _BAND_PED.get(grade_band, ""), ""]
+        elif audience == "yeshiva":
+            lines += ["## AUDIENCE", "בית מדרש / ישיבה — לומדים מבוגרים; שיעור עיון.", ""]
+
+        mins = _length_minutes(length, audience, grade_band, lang="he")
+        lines += ["## LENGTH", f"{ln['he']} — כ־{mins} סה\"כ. {ln['depth']} "
+                  f"היקף היעד של השיעור המלא: **{ln.get('words','1600–2400')} מילים**. "
+                  "התאם/י את הזמנים בשלבי מהלך השיעור כך שיסתכמו לטווח הזה. "
+                  "שיעור קצר מהיעד אינו מקובל — כתוב במלואו ובהרחבה.", ""]
 
     if tpl:
+        tpl_title = (tpl.get("title_en") if lang == "en" else None) or tpl.get("title", "")
+        tpl_struct = (tpl.get("structure_en") if lang == "en" else None) or tpl.get("structure", "")
         lines += ["## SELECTED TEMPLATE — follow THIS structure and pedagogy",
-                  f"{tpl.get('title','')} — מבנה: {tpl.get('structure','')}"]
+                  f"{tpl_title} — " + (f"Structure: {tpl_struct}" if lang == "en" else f"מבנה: {tpl_struct}")]
         skel = tpl.get("_full_lesson") or ""
         if skel:
             skel = re.sub(r"<!--.*?-->", "", skel, flags=re.S).strip()
@@ -1051,9 +1153,25 @@ def _lesson_job_md(question: str, hits, lang: str, *, audience: str | None,
         lines += [""]
 
     lines += ["## TOPIC", question.strip(), "", "## SOURCES"]
+    from chavruta.corpus.refs import talmud_hebrew_display_ref, talmud_english_display_ref, hebrew_display_ref
+    from chavruta.generation.grounded import source_body
     for i, h in enumerate(hits, 1):
         who = f" ({h.commentator_id})" if getattr(h, "commentator_id", None) else ""
-        lines += [f"### [S{i}] {h.ref}{who}", (getattr(h, "text", "") or "").strip(), ""]
+        ref_str = getattr(h, "ref", "") or ""
+        if lang == "he":
+            try:
+                title = talmud_hebrew_display_ref(ref_str) or hebrew_display_ref(ref_str) or ref_str
+            except Exception:
+                title = ref_str
+            header = f"### [S{i}] {title} (מזהה מקור: {ref_str}){who}"
+        else:
+            try:
+                title = talmud_english_display_ref(ref_str) or ref_str
+            except Exception:
+                title = ref_str
+            header = f"### [S{i}] {title} (source ID: {ref_str}){who}"
+        clean_text = source_body(getattr(h, "text", "") or "").strip()
+        lines += [header, clean_text, ""]
 
     # ── Clarify gate (applies to every audience) ──
     lines += [
@@ -1071,43 +1189,73 @@ def _lesson_job_md(question: str, hits, lang: str, *, audience: str | None,
         "short questions in the user's language — and STOP (no lesson yet). Otherwise go to STEP 2.",
         "",
         "STEP 2 — Write ONE answer with these parts, separated by these EXACT delimiter lines:",
-        "===SOURCE_SHEET===", "===LESSON_FLOW===", "===FULL_LESSON===", "===ORDER===", "",
-        "SOURCE_SHEET — the sources ARRANGED IN THE ORDER THEY ARE DISCUSSED (1 = first taught, then 2, …). "
-        "For each: a number, its reference, and its full text.",
+        "===LESSON_FLOW===", "===FULL_LESSON===", "===ORDER===", "",
+        "Do NOT write a separate source sheet — the platform automatically constructs the complete verified "
+        "source sheet from the citations and your ORDER list. Focus all depth, length, and tokens on LESSON_FLOW and FULL_LESSON.",
     ]
 
     if audience == "school":
-        gh = _GRADE_HE.get(grade_band, grade_band or "")
-        lines += [
-            f"LESSON_FLOW — a timed CLASSROOM plan for grade band {gh}, following the TEMPLATE SKELETON's stages "
-            "(explicit-instruction arc: hook & prior-knowledge → I-Do → We-Do with a check → deepen → You-Do "
-            "with differentiation → summary + formative assessment). Give each stage a time estimate, its "
-            "guiding question, and reference the sources by [S#].",
-            f"FULL_LESSON — the full lesson WRITTEN OUT in age-appropriate prose for {gh}, following that "
-            "skeleton. Match language and cognitive load to the AUDIENCE band (young grades: simple Hebrew, "
-            "translate hard words, story/imagery, one idea; older: מחלוקת/חקירה, טיעון מנומק, ניתוח מקור). "
-            "Explain, ask checking questions, keep the pupils active. A real classroom lesson — not a summary.",
-            "SOURCE PREFERENCE — prefer the most age-appropriate SOURCES (the pasuk, רש\"י, a simple story or "
-            "midrash, the Mishnah). Use a deep/kabbalistic/chassidic/lamdanic source ONLY if you render its "
-            "idea in simple, concrete terms — never quote it verbatim to young pupils. It is fine to use only "
-            "some of the SOURCES.",
-        ]
+        if lang == "en":
+            lines += [
+                f"LESSON_FLOW — a timed CLASSROOM plan for grade band {grade_band or '?'}, following the TEMPLATE SKELETON's stages "
+                "(explicit-instruction arc: hook & prior-knowledge → I-Do → We-Do with a check → deepen → You-Do "
+                "with differentiation → summary + formative assessment). Give each stage a time estimate, its "
+                "guiding question, and reference the sources by [S#].",
+                f"FULL_LESSON — the full lesson WRITTEN OUT in age-appropriate English prose for grades {grade_band or '?'}, following that "
+                "skeleton. Match language and cognitive load to the AUDIENCE band (young grades: simple English, "
+                "explain hard terms, story/imagery, one idea; older: dispute/inquiry, reasoned argumentation, source analysis). "
+                "Explain, ask checking questions, keep the pupils active. A real classroom lesson — not a summary.",
+                "SOURCE PREFERENCE — prefer the most age-appropriate SOURCES (the biblical verse, a simple story or "
+                "midrash, the Mishnah). Use a deep/kabbalistic/chassidic/lamdanic source ONLY if you render its "
+                "idea in simple, concrete terms — never quote it verbatim to young pupils. It is fine to use only "
+                "some of the SOURCES.",
+            ]
+        else:
+            gh = _GRADE_HE.get(grade_band, grade_band or "")
+            lines += [
+                f"LESSON_FLOW — a timed CLASSROOM plan for grade band {gh}, following the TEMPLATE SKELETON's stages "
+                "(explicit-instruction arc: hook & prior-knowledge → I-Do → We-Do with a check → deepen → You-Do "
+                "with differentiation → summary + formative assessment). Give each stage a time estimate, its "
+                "guiding question, and reference the sources by [S#].",
+                f"FULL_LESSON — the full lesson WRITTEN OUT in age-appropriate prose for {gh}, following that "
+                "skeleton. Match language and cognitive load to the AUDIENCE band (young grades: simple Hebrew, "
+                "translate hard words, story/imagery, one idea; older: מחלוקת/חקירה, טיעון מנומק, ניתוח מקור). "
+                "Explain, ask checking questions, keep the pupils active. A real classroom lesson — not a summary.",
+                "SOURCE PREFERENCE — prefer the most age-appropriate SOURCES (the pasuk, רש\"י, a simple story or "
+                "midrash, the Mishnah). Use a deep/kabbalistic/chassidic/lamdanic source ONLY if you render its "
+                "idea in simple, concrete terms — never quote it verbatim to young pupils. It is fine to use only "
+                "some of the SOURCES.",
+            ]
     else:
-        lines += [
-            "LESSON_FLOW — a clear, detailed beit-midrash outline that follows the SELECTED TEMPLATE's arc for "
-            "THIS genre (the template dictates the shape — e.g. an iyun חקירה, a הלכה pesak, a מוסר arc on a "
-            "מידה, a חסידות מאמר, a פרשה פשט→דרש→רעיון, an אגדה קושי→פירוש→מסר). For each stage: the guiding "
-            "question, which source is brought, and what is asked/answered.",
-            "FULL_LESSON — a full beit-midrash shiur written out in depth, following THAT template arc — do NOT "
-            "force a gemara-iyun חקירה onto a non-iyun genre (a mussar/chassidut/parasha shiur has no "
-            "'צד א׳/צד ב׳ נפקא מינה'). WHERE the genre is a talmudic/lamdanic sugya: sharpen a central חקירה "
-            "with TWO clearly-named sides, map the ראשונים to the sides, deepen with אחרונים, give נפקא מינה, "
-            "and conclude with the יסוד. Present each שיטה, raise קושיות and answer them; progress step by step. "
-            "A real, full shiur.",
-        ]
+        if lang == "en":
+            lines += [
+                "LESSON_FLOW — a clear, detailed beit-midrash outline that follows the SELECTED TEMPLATE's arc for "
+                "THIS genre (the template dictates the shape — e.g. an iyun conceptual inquiry, a practical halacha pesak, "
+                "a mussar arc on a character trait, a chassidic discourse, a parasha peshat→derash→insight arc, an aggada difficulty→exegesis→message). "
+                "For each stage: the guiding question, which source is brought, and what is asked/answered.",
+                "FULL_LESSON — a full beit-midrash shiur written out in depth in English, following THAT template arc — do NOT "
+                "force a gemara-iyun inquiry onto a non-iyun genre. WHERE the genre is a talmudic/lamdanic sugya: sharpen a central inquiry "
+                "with TWO clearly-named sides, map the early commentators to the sides, deepen with later authorities, give practical ramifications (nafka mina), "
+                "and conclude with the foundational principle. Present each opinion, raise difficulties and resolve them; progress step by step. "
+                "A real, full shiur.",
+            ]
+        else:
+            lines += [
+                "LESSON_FLOW — a clear, detailed beit-midrash outline that follows the SELECTED TEMPLATE's arc for "
+                "THIS genre (the template dictates the shape — e.g. an iyun חקירה, a הלכה pesak, a מוסר arc on a "
+                "מידה, a חסידות מאמר, a פרשה פשט→דרש→רעיון, an אגדה קושי→פירוש→מסר). For each stage: the guiding "
+                "question, which source is brought, and what is asked/answered.",
+                "FULL_LESSON — a full beit-midrash shiur written out in depth, following THAT template arc — do NOT "
+                "force a gemara-iyun חקירה onto a non-iyun genre (a mussar/chassidut/parasha shiur has no "
+                "'צד א׳/צד ב׳ נפקא מינה'). WHERE the genre is a talmudic/lamdanic sugya: sharpen a central חקירה "
+                "with TWO clearly-named sides, map the ראשונים to the sides, deepen with אחרונים, give נפקא מינה, "
+                "and conclude with the יסוד. Present each שיטה, raise קושיות and answer them; progress step by step. "
+                "A real, full shiur.",
+            ]
 
+    len_label = ln.get("en", "Medium") if lang == "en" else ln["he"]
     lines += [
-        f"Respect the requested LENGTH ({ln['he']}).",
+        f"Respect the requested LENGTH ({len_label}).",
         "ORDER — a single line listing the source markers in the exact order they are discussed, e.g. "
         "'S3, S1, S5'. The backend orders the sources panel by this list.",
         "",
@@ -1136,7 +1284,7 @@ def _split_lesson(text: str) -> tuple[str, str, str, str]:
 
 def _run_lesson(question: str, lang: str, history=None, audience: str = "",
                 grade_band: str = "", length: str = "", owner_id: str = "local",
-                llm=None) -> QueryResponse:
+                llm=None, target_files: list[str] | None = None) -> QueryResponse:
     """Dedicated LESSON path: resolve audience/grade → pick a template from the template RAG →
     real source retrieval → Claude writes the 3 files at the right register (or asks clarifying
     questions first) via the bridge → 3 Word files + only-cited sources (in discussion order).
@@ -1178,7 +1326,7 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
         msg = head + "\n\n" + "\n".join(f"• {a}" for a in ask)
         return QueryResponse(answer=msg, citations=[], grounded=False, intent="lesson", files=[])
 
-    tpl = _select_template(topic, aud, band)
+    tpl = _select_template(topic, aud, band, lang=lang)
 
     ln = _LENGTHS[length]
     # School gets a wider candidate pool so the model has enough accessible sources (verse, Rashi,
@@ -1197,11 +1345,13 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
         fset = {b.ref for b in floor}
         hits = floor + [h for h in hits if h.ref not in fset]
     return _generate_lesson_from_hits(topic, hits, lang, he, audience=aud, grade_band=band,
-                                      length=length, tpl=tpl, history=history, owner_id=owner_id, llm=llm)
+                                      length=length, tpl=tpl, history=history, owner_id=owner_id, llm=llm,
+                                      target_files=target_files)
 
 
 def _generate_lesson_from_hits(topic: str, hits, lang: str, he: bool, *, audience: str, grade_band: str,
-                               length: str, tpl: dict | None, history, owner_id: str, llm) -> QueryResponse:
+                               length: str, tpl: dict | None, history, owner_id: str, llm,
+                               target_files: list[str] | None = None) -> QueryResponse:
     """The lesson generation tail, shared by `_run_lesson` (hits from semantic retrieval) and
     `_run_parsha`/`_run_daf_yomi` (hits from a calendar-resolved ref, when the model decides the
     user wants a full lesson rather than a chavruta turn) — identical from here on regardless of
@@ -1258,12 +1408,19 @@ def _generate_lesson_from_hits(topic: str, hits, lang: str, he: bool, *, audienc
             en_text = (getattr(h, "text_en", "") or "").strip()
             if not he_text and not en_text:
                 he_text = getattr(h, "text", "") or ""
-            used.append(CitationOut(ref=h.ref, ref_he=(hebrew_display_ref(h.ref) or "") if he else "",
+            from chavruta.corpus.refs import license_for_ref, talmud_english_display_ref, talmud_hebrew_display_ref
+
+            ref_he = hebrew_display_ref(h.ref) or talmud_hebrew_display_ref(h.ref) or ""
+            ref_en = talmud_english_display_ref(h.ref) or h.ref
+            lic = getattr(h, "license", "") or license_for_ref(h.ref, "he" if he else "en")[0]
+            ver = getattr(h, "version_title", "") or license_for_ref(h.ref, "he" if he else "en")[1]
+            used.append(CitationOut(ref=ref_en if not he else h.ref,
+                                    ref_he=ref_he if he else (ref_he or ""),
                                     text_he=he_text, text_en=en_text,
                                     commentator=(getattr(h, "commentator_id", "") or ""),
                                     deep_link=(getattr(h, "deep_link", "") or ""),
-                                    license=(getattr(h, "license", "") or ""),
-                                    version_title=(getattr(h, "version_title", "") or "")))
+                                    license=lic or "",
+                                    version_title=ver or ""))
     # ss isn't bleed-fixed here: it's about to be replaced by the mechanically-assembled sheet below
     # whenever `used` is non-empty (the common case) — fixing bleed in text that's discarded a few
     # lines later would just spend real LLM calls for nothing.
@@ -1271,13 +1428,16 @@ def _generate_lesson_from_hits(topic: str, hits, lang: str, he: bool, *, audienc
     lf, fl = _strip_instruction_echo(lf, he), _strip_instruction_echo(fl, he)
     lf = _strip_markers(_fix_bleeding_sentences(lf, he, llm), he=he)
     fl = _strip_markers(_fix_bleeding_sentences(fl, he, llm), he=he)
+    from chavruta.generation.grounded import sanitize_priestly_terms
+    lf = sanitize_priestly_terms(lf, question=topic, sources=hits)
+    fl = sanitize_priestly_terms(fl, question=topic, sources=hits)
 
     # Source sheet = the FULL retrieved source texts, in teaching order — ALWAYS built mechanically from
     # the cited sources (which carry the complete RAG text), NOT from the model's SOURCE_SHEET prose.
     # Models truncate the source texts ("…") when asked to reproduce them; the RAG already has the full
     # text, so we assemble it directly and guarantee complete, verbatim sources.
     if used:
-        ss = "\n\n".join(_source_sheet_entry(n, c) for n, c in enumerate(used, 1))
+        ss = "\n\n".join(_source_sheet_entry(n, c, lang=lang) for n, c in enumerate(used, 1))
 
     # Citation-faithfulness: flag any verbatim quote in the lesson not found in the retrieved sources.
     # Runs on the LESSON TEXT, before the licence footer is appended below — the footer names refs and
@@ -1340,9 +1500,16 @@ def _generate_lesson_from_hits(topic: str, hits, lang: str, he: bool, *, audienc
              else ["source_sheet.doc", "lesson_flow.doc", "full_lesson.doc"])
     titles = ([f"דף מקורות — {topic}{tag}", f"מהלך השיעור — {topic}{tag}", f"שיעור מלא — {topic}{tag}"] if he
               else [f"Source Sheet — {topic}{tag}", f"Lesson Flow — {topic}{tag}", f"Full Lesson — {topic}{tag}"])
+    raw_files = [
+        ("sources", names[0], titles[0], ss),
+        ("flow", names[1], titles[1], lf),
+        ("full", names[2], titles[2], fl),
+    ]
+    if target_files:
+        raw_files = [rf for rf in raw_files if rf[0] in target_files]
     # skip any file that came out blank (malformed split) — a blank Word download is worse than 2 good files
-    files = [FileOut(name=names[i], title=titles[i], content=c)
-             for i, c in enumerate((ss, lf, fl)) if c.strip()]
+    files = [FileOut(name=rf[1], title=rf[2], content=rf[3])
+             for rf in raw_files if rf[3].strip()]
     caveats = ([("הערה: ציטוטים בשיעור שלא אומתו מול המקורות — יש לבדוק: «" + "», «".join(bad_q[:2]) + "»")
                 if he else ("Note: quote(s) in the lesson were not found in the sources — verify: «"
                             + "», «".join(bad_q[:2]) + "»")] if bad_q else [])
@@ -1367,10 +1534,185 @@ def _generate_lesson_from_hits(topic: str, hits, lang: str, he: bool, *, audienc
                          intent="lesson", caveats=caveats, files=files, lesson_id=lesson_id)
 
 
-def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bool = False) -> str:
+def _recover_lesson_topic(history: list[Turn] | None) -> str:
+    """Recover the core lesson topic from previous lesson files or user query."""
+    if not history:
+        return ""
+    for h in reversed(history):
+        if getattr(h, "role", "") == "assistant" and getattr(h, "lesson", False):
+            files = getattr(h, "files", []) or []
+            for f in files:
+                title = f.get("title") or ""
+                if " — " in title:
+                    part = title.split(" — ", 1)[1]
+                    topic = part.split(" · ", 1)[0].strip()
+                    if topic:
+                        return topic
+    # Fallback to earliest substantive user query
+    for h in history:
+        if getattr(h, "role", "") == "user":
+            txt = (getattr(h, "text", "") or "").strip()
+            if txt and not _is_clarify_answer(txt):
+                return txt
+    return ""
+
+
+def _edit_lesson_file(
+    question: str,
+    lang: str,
+    history: list[Turn],
+    decision,
+    owner_id: str = "local",
+    llm=None,
+) -> QueryResponse:
+    """Single-file edit: updates only the requested file (flow, full, or sources).
+
+    Preserves the other 2 files completely unchanged, saving ~70% latency and token costs.
+    """
+    pipeline = _get_pipeline()
+    llm = llm or pipeline.llm
+    he = (lang or "he") != "en"
+
+    # 1. Find the previous lesson files from history
+    last_lesson_turn = None
+    for h in reversed(history or []):
+        if getattr(h, "role", "") == "assistant" and getattr(h, "lesson", False) and getattr(h, "files", None):
+            last_lesson_turn = h
+            break
+
+    if not last_lesson_turn or not last_lesson_turn.files:
+        # Fallback to full lesson generation if no files in history
+        return _run_lesson(
+            decision.topic or question,
+            lang=lang,
+            history=history,
+            owner_id=owner_id,
+            llm=llm,
+        )
+
+    prev_files = last_lesson_turn.files  # list of dicts: {"name": ..., "title": ..., "content": ...}
+    target = getattr(decision, "target_file", None) or "flow"
+
+    # Identify target file index and label
+    target_idx = None
+    if target == "flow":
+        target_names = ("מהלך_השיעור", "lesson_flow")
+        label = "מהלך השיעור" if he else "Lesson Flow"
+    elif target == "full":
+        target_names = ("השיעור_המלא", "full_lesson")
+        label = "השיעור המלא" if he else "Full Lesson"
+    else:  # sources
+        target_names = ("דף_מקורות", "source_sheet")
+        label = "דף המקורות" if he else "Source Sheet"
+
+    for idx, f in enumerate(prev_files):
+        fname = (f.get("name") or "").lower()
+        if any(tn in fname for tn in target_names):
+            target_idx = idx
+            break
+
+    if target_idx is None:
+        target_idx = 1 if len(prev_files) > 1 and target == "flow" else (2 if len(prev_files) > 2 and target == "full" else 0)
+
+    target_file = prev_files[target_idx]
+    old_content = target_file.get("content") or ""
+
+    # 2. Build editing job prompt for generator model
+    instruction = getattr(decision, "instruction", None) or question
+    job = "\n".join([
+        f"lang: {lang}", "",
+        f"## TASK — EDIT LESSON FILE: {label}",
+        "The user requested an edit to this specific document of the lesson.", "",
+        f"## USER INSTRUCTION",
+        instruction.strip(), "",
+        f"## ORIGINAL DOCUMENT CONTENT",
+        old_content.strip(), "",
+        "## INSTRUCTIONS",
+        f"1. Apply the user's requested edit precisely to this document ({label}).",
+        "2. Maintain the structure, timing/stages, pedagogic tone, and formatting of the original document.",
+        "3. Preserve all source citations [S#] intact so they match the existing sources.",
+        "4. LANGUAGE: write ONLY in the question's language without foreign words.",
+        "5. Output ONLY the complete updated document text. Do NOT include any meta-commentary, introduction, or closing remarks.",
+    ])
+
+    raw, _ = llm.request(job, lang=lang, token_budget=3000)
+    new_content = _strip_instruction_echo(raw.strip(), he)
+    new_content = _strip_markers(new_content, he=he).strip()
+    from chavruta.generation.grounded import sanitize_priestly_terms
+    new_content = sanitize_priestly_terms(new_content, question=instruction)
+
+    if not new_content:
+        new_content = old_content  # safety fallback
+
+    # 3. Assemble updated files
+    updated_files = []
+    for idx, f in enumerate(prev_files):
+        if idx == target_idx:
+            updated_files.append(
+                FileOut(
+                    name=f.get("name", f"{target}.doc"),
+                    title=f.get("title", label),
+                    content=new_content,
+                )
+            )
+        else:
+            updated_files.append(
+                FileOut(
+                    name=f.get("name", ""),
+                    title=f.get("title", ""),
+                    content=f.get("content", ""),
+                )
+            )
+
+    # Re-use citations from previous turn
+    raw_cits = getattr(last_lesson_turn, "citations", []) or []
+    used_cits = []
+    for c in raw_cits:
+        if isinstance(c, dict):
+            used_cits.append(CitationOut(**c))
+        elif isinstance(c, CitationOut):
+            used_cits.append(c)
+
+    # Persist updated lesson in DB library
+    topic = getattr(decision, "topic", "") or _recover_lesson_topic(history) or "שיעור מעודכן"
+    lesson_id = ""
+    try:
+        import uuid
+        lesson_id = uuid.uuid4().hex[:12]
+        db.save_lesson(
+            lesson_id,
+            topic,
+            audience="",
+            grade_band="",
+            length="",
+            lang=lang,
+            files=[f.model_dump() for f in updated_files],
+            citations=[c.model_dump() for c in used_cits],
+            owner_id=owner_id,
+        )
+    except Exception:
+        lesson_id = ""
+
+    ans = f"עדכנתי את {label} בהתאם לבקשתך." if he else f"Updated {label} according to your request."
+    return QueryResponse(
+        answer=ans,
+        citations=used_cits,
+        grounded=bool(used_cits),
+        intent="lesson",
+        files=updated_files,
+        lesson_id=lesson_id,
+    )
+
+
+def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bool = False,
+                     distilled_question: str = "") -> str:
     """Bridge job: play a Socratic study-partner (chavruta) — learn WITH the user, don't lecture."""
-    lines = [f"lang: {lang}", "", "## ROLE",
-             "אתה **חברותא** לימודי — אתה לומד יחד עם המשתמש, בגובה העיניים, ולא מרצה מלמעלה.", ""]
+    role_instruction = (
+        "You are **Chavruta** — a study partner learning together with the user at eye level, not lecturing from above."
+        if (lang or "").startswith("en")
+        else "אתה **חברותא** לימודי — אתה לומד יחד עם המשתמש, בגובה העיניים, ולא מרצה מלמעלה."
+    )
+    lines = [f"lang: {lang}", "", "## ROLE", role_instruction, ""]
     prior = [h for h in (history or []) if (getattr(h, "text", "") or "").strip()]
     if prior:
         lines += ["## CONVERSATION SO FAR"]
@@ -1400,6 +1742,30 @@ def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bo
     for i, h in enumerate(hits, 1):
         who = f" ({h.commentator_id})" if getattr(h, "commentator_id", None) else ""
         lines += [f"### [S{i}] {h.ref}{who}", (getattr(h, "text", "") or "").strip(), ""]
+    if distilled_question and distilled_question != question:
+        lines += ["## FOCUSED CORE QUESTION", distilled_question.strip(), ""]
+
+    if (lang or "").startswith("en"):
+        recovery_instruction = (
+            "**ONLY WHEN THE SOURCES GENUINELY DON'T FIT** (a LAST resort — if ANY source above touches the topic, "
+            "learn with it and do NOT stall): if the sources truly do not cover what the learner asked, do NOT "
+            "invent a source. FIRST try to fetch better ones yourself — reply with ONLY a block starting with the "
+            "EXACT line '===NEED_SOURCES===' followed by 1–5 focused search queries (one per line), and STOP. ONLY "
+            "if that STILL comes back with nothing relevant, ask the learner warmly for direction — "
+            "'Hold on — I didn't find the right source, please guide me'. Do NOT ask the learner to name a daf when relevant "
+            "sources are already present above."
+        )
+    else:
+        recovery_instruction = (
+            "**ONLY WHEN THE SOURCES GENUINELY DON'T FIT** (a LAST resort — if ANY source above touches the topic, "
+            "learn with it and do NOT stall): if the sources truly do not cover what the learner asked, do NOT "
+            "invent a source. FIRST try to fetch better ones yourself — reply with ONLY a block starting with the "
+            "EXACT line '===NEED_SOURCES===' followed by 1–5 focused search queries (one per line), and STOP. ONLY "
+            "if that STILL comes back with nothing relevant, ask the learner warmly for direction — "
+            "'רגע — לא עלה לי המקור הנכון, תכוון אותי'. Do NOT ask the learner to name a daf when relevant "
+            "sources are already present above."
+        )
+
     lines += [
         "## INSTRUCTIONS FOR CLAUDE (the chavruta)",
         "Study b'chavruta — do NOT deliver a lecture or dump the whole sugya. Instead, in ONE short, warm "
@@ -1409,13 +1775,7 @@ def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bo
         "step, one question at a time.",
         "If the learner asked a direct factual question, answer it briefly and grounded, then hand the ball "
         "back with a question.",
-        "**ONLY WHEN THE SOURCES GENUINELY DON'T FIT** (a LAST resort — if ANY source above touches the topic, "
-        "learn with it and do NOT stall): if the sources truly do not cover what the learner asked, do NOT "
-        "invent a source. FIRST try to fetch better ones yourself — reply with ONLY a block starting with the "
-        "EXACT line '===NEED_SOURCES===' followed by 1–5 focused search queries (one per line), and STOP. ONLY "
-        "if that STILL comes back with nothing relevant, ask the learner warmly for direction — "
-        "'רגע — לא עלה לי המקור הנכון, תכוון אותי'. Do NOT ask the learner to name a daf when relevant "
-        "sources are already present above.",
+        recovery_instruction,
         "Ground everything ONLY in the SOURCES; cite by [S#] (stripped from display). "
         "MUST NOT invent sources, citations, or attributions that are not in the SOURCES above — this "
         "applies EVEN WHEN the learner is the one who states a 'quote' or 'pasuk'. If they hand you a phrase "
@@ -1441,7 +1801,7 @@ def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bo
 # A small/fast model dedicated to trivial yes/no classification (_wants_full_lesson) — same
 # provider/key as the main pipeline LLM, but NOT the main model_id. Verify this id is still live on
 # the configured provider's catalog before relying on it; CHAVRUTA_CLASSIFIER_MODEL overrides it.
-_CLASSIFIER_MODEL_DEFAULT = "Qwen/Qwen2.5-7B-Instruct"
+_CLASSIFIER_MODEL_DEFAULT = "Qwen/Qwen3-30B-A3B-Instruct-2507"
 _classifier_llm_cache = None
 
 
@@ -1481,9 +1841,12 @@ def _wants_full_lesson(question: str, llm=None) -> bool:
     reply defaults to False (the cheaper, safer path), same philosophy as _fix_bleeding_sentences —
     a misfire here must never break a turn. `llm` overrides the classifier lookup (dependency
     injection for tests)."""
+    clean = " ".join((question or "").split()).strip()
+    if not clean:
+        return False
     llm = llm or _classifier_llm() or _get_pipeline().llm
     try:
-        prompt = GroundedPrompt(system=_WANTS_LESSON_SYSTEM, sources=[], question=question, bare=True)
+        prompt = GroundedPrompt(system=_WANTS_LESSON_SYSTEM, sources=[], question=clean, bare=True)
         res = llm.generate(prompt, lang="he", max_tokens=10, temperature=0.0)
         reply = (res.text or "").strip()
     except Exception:
@@ -1494,11 +1857,12 @@ def _wants_full_lesson(question: str, llm=None) -> bool:
 
 
 def _generate_chavruta_turn(question: str, hits, lang: str, he: bool, history, weak: bool,
-                            llm) -> QueryResponse:
+                            llm, distilled_question: str = "") -> QueryResponse:
     """The chavruta generation tail, shared by `_run_chavruta` (hits from semantic retrieval) and
     `_run_parsha`/`_run_daf_yomi` (hits from a calendar-resolved ref) — identical from here on
     regardless of how `hits` was produced, same principle as _generate_lesson_from_hits below."""
-    job = _chavruta_job_md(question, hits, lang, history, weak_retrieval=weak)
+    job = _chavruta_job_md(question, hits, lang, history, weak_retrieval=weak,
+                           distilled_question=distilled_question)
     # A chavruta turn is a conversational exchange, not a treatise — budget it like EXPLAIN.
     raw, fetched = llm.request(job, lang=lang,
                               token_budget=_max_tokens_for(Intent.EXPLAIN, _get_pipeline().profile))
@@ -1511,12 +1875,17 @@ def _generate_chavruta_turn(question: str, hits, lang: str, he: bool, history, w
         if 1 <= i <= len(hits) and i not in seen:
             seen.add(i)
             h = hits[i - 1]
+            from chavruta.corpus.refs import license_for_ref
+
+            lic = getattr(h, "license", "") or license_for_ref(h.ref, "he" if he else "en")[0]
+            ver = getattr(h, "version_title", "") or license_for_ref(h.ref, "he" if he else "en")[1]
             used.append(CitationOut(ref=h.ref, ref_he=(hebrew_display_ref(h.ref) or "") if he else "",
-                                    text_he=(getattr(h, "text", "") or ""), text_en="",
+                                    text_he=(getattr(h, "text", "") or ""),
+                                    text_en=(getattr(h, "text_en", "") or ""),
                                     commentator=(getattr(h, "commentator_id", "") or ""),
                                     deep_link=(getattr(h, "deep_link", "") or ""),
-                                    license=(getattr(h, "license", "") or ""),
-                                    version_title=(getattr(h, "version_title", "") or "")))
+                                    license=lic or "",
+                                    version_title=ver or ""))
     raw = _strip_instruction_echo(raw, he)
     # Split the model's source list off FIRST — see _split_source_note for why it must not reach the
     # foreign-language pass.
@@ -1556,6 +1925,10 @@ def _generate_qa_turn_from_hits(question: str, hits, lang: str, he: bool, histor
     answer = pipeline._qa_answer(query, result, llm, history=history)
 
     def _cite(c) -> CitationOut:
+        from chavruta.corpus.refs import license_for_ref
+
+        lic = getattr(c, "license", "") or license_for_ref(c.ref, "he" if he else "en")[0]
+        ver = getattr(c, "version_title", "") or license_for_ref(c.ref, "he" if he else "en")[1]
         return CitationOut(
             ref=c.ref,
             ref_he=(hebrew_display_ref(c.ref) or "") if he else "",
@@ -1563,8 +1936,8 @@ def _generate_qa_turn_from_hits(question: str, hits, lang: str, he: bool, histor
             text_en=getattr(c, "text_en", ""),
             commentator=getattr(c, "commentator_id", "") or "",
             deep_link=getattr(c, "deep_link", "") or "",
-            license=getattr(c, "license", "") or "",
-            version_title=getattr(c, "version_title", "") or "",
+            license=lic or "",
+            version_title=ver or "",
         )
 
     text = _strip_instruction_echo(answer.text, he)
@@ -1624,6 +1997,16 @@ def _conversation_signals(user_turns: list[str], question: str, rq: Query, histo
         rq.named_refs = _carried_refs(history) or detect_hebrew_refs(convo)
 
 
+_EMPTY_META_SOURCES_RE = re.compile(
+    r"^(?:"
+    r"(?:תסביר|תסכם|סכם|באר|תבאר|הסבר|נתח|תנתח|פרט|תפרט|מה\s+(?:הם|הן|אומרים|אומרות|כתוב\s+ב))\s+(?:לי\s+)?(?:את\s+)?(?:כל\s+)?(?:ה)?(?:מקורות(?:\s+ש(?:הבאת|ציינת|הובאו|קיימים))?|דף(?:\s+המקורות)?|טקסטים|מובאות|ציטוטים|הדף)"
+    r"|"
+    r"(?:explain|summarize|analyze|break\s+down|clarify|what\s+(?:are|do))\s+(?:me\s+)?(?:the\s+)?(?:all\s+)?(?:sources|source\s+sheet|sheet|citations|texts)(?:\s+(?:say|mean|mentioned|above))?"
+    r")(?:\s*[:.?!—–-])?$",
+    re.IGNORECASE,
+)
+
+
 def _run_chavruta(question: str, lang: str, history=None, llm=None) -> QueryResponse:
     """Socratic study-partner mode: retrieve on the topic, then Claude plays a chavruta that asks
     questions and learns WITH the user (grounded), rather than lecturing. When retrieval confidence
@@ -1633,9 +2016,29 @@ def _run_chavruta(question: str, lang: str, history=None, llm=None) -> QueryResp
     llm = llm or pipeline.llm
     user_turns = [(getattr(h, "text", "") or "").strip() for h in (history or [])
                   if getattr(h, "role", "user") == "user" and (getattr(h, "text", "") or "").strip()]
+    carried = _carried_refs(history)
+    clean_q = " ".join(question.split()).strip()
+
+    if _EMPTY_META_SOURCES_RE.match(clean_q) and carried:
+        # User asked to explain/summarize the existing sources from previous turns:
+        # Ground directly on the carried citations rather than semantic searching for "מקור"
+        targets = with_ref_variants(carried)
+        hits = _fetch_ranked_hits(targets, limit=len(targets) * 2) if hasattr(pipeline, "retriever") else []
+        if not hits:
+            q = Query(text=" ".join(carried), lang=lang or None, intent=Intent.QA, named_refs=carried)
+            rq = pipeline._resolve_query(q)
+            rq.named_refs = carried
+            res = pipeline.retriever.retrieve(rq, top_k=10)
+            hits = list(res.hits)
+        he = (lang or "") != "en"
+        return _generate_chavruta_turn(question, hits, lang or "he", he, history, weak=(not hits), llm=llm)
+
     anchor = (user_turns[0] + " " + question) if user_turns else question   # keep retrieval on the topic
-    q = Query(text=anchor, lang=lang or None, intent=Intent.QA)
-    rq = pipeline._resolve_query(q)
+    q = Query(text=anchor, lang=lang or None, intent=Intent.CHAVRUTA)
+    try:
+        rq = pipeline._resolve_query(q, history=history)
+    except TypeError:
+        rq = pipeline._resolve_query(q)
     _conversation_signals(user_turns, question, rq, history)
     lang = rq.lang or lang or "he"
     he = lang != "en"
@@ -1646,15 +2049,14 @@ def _run_chavruta(question: str, lang: str, history=None, llm=None) -> QueryResp
     # (~0.02-0.06) on a different scale than relevance_threshold, so comparing them lit 'weak' on
     # EVERY hybrid turn and nudged the chavruta to stall instead of teach.
     weak = result.is_empty
-    return _generate_chavruta_turn(question, hits, lang, he, history, weak, llm)
+    return _generate_chavruta_turn(question, hits, lang, he, history, weak, llm,
+                                  distilled_question=getattr(rq, "distilled_text", "") or "")
 
 
 def _calendar_cache_key(kind: str, today) -> str:
-    """The cache bucket identity: today's ISO date for daf_yomi (a new daf every day), the ISO
-    date of the most recent Sunday for parsha (the same parsha all week)."""
-    if kind == "daf_yomi":
-        return today.isoformat()
-    return (today - timedelta(days=today.isoweekday() % 7)).isoformat()
+    """The cache bucket identity: today's ISO date for both daf_yomi and parsha (checked daily to
+    account for holiday readings and mid-week calendar shifts on the first question of each day)."""
+    return today.isoformat()
 
 
 def _resolve_parsha_cached():
@@ -1692,7 +2094,7 @@ _CHAVRUTA_HIT_CAP = 25
 _LESSON_HIT_CAP = 40
 
 
-def _cap_hits(hits: list, max_total: int) -> list:
+def _cap_hits(hits: list, max_total: int, min_commentaries: int = 0) -> list:
     """Caught live (2026-08-05): parsha/daf-yomi's fetch (a whole parsha's verses, or a whole daf,
     times every commentator in COMMENTATOR_HE) can pull in hundreds of hits — far more than any
     other job template in this app is written for. Fed unbounded into a job prompt, this produced a
@@ -1701,15 +2103,20 @@ def _cap_hits(hits: list, max_total: int) -> list:
     echoed fragments of its own instructions and left unbalanced ** markers (breaking bold
     rendering for the rest of the message too).
 
-    Keeps EVERY base-text hit (there are never many — one daf's 2 amudim, or one parsha's verses —
+    Keeps EVERY base-text hit (there are never many — one daf's amudim, or one parsha's verses —
     and they're what the question is actually about) and fills the rest of the budget with
     commentary, preserving whatever order it already arrives in (for daf yomi, that's
-    daf_yomi_sort_key's Gemara/Rashi-first ordering)."""
+    daf_yomi_sort_key's Gemara/Rashi-first ordering). When base text alone meets or exceeds max_total
+    (e.g. a long parsha of 70+ verses), up to min_commentaries of top commentary hits are retained
+    so the prompt is never commentary-starved."""
     if len(hits) <= max_total:
         return hits
     base = [h for h in hits if not getattr(h, "commentator_id", None)]
     commentary = [h for h in hits if getattr(h, "commentator_id", None)]
-    return base + commentary[:max(0, max_total - len(base))]
+    avail_comm = max_total - len(base)
+    if avail_comm > 0:
+        return base + commentary[:avail_comm]
+    return base + commentary[:min_commentaries]
 
 
 def _fetch_ranked_hits(targets: list[str], *, filters=None, limit: int | None = None):
@@ -1726,13 +2133,44 @@ def _fetch_ranked_hits(targets: list[str], *, filters=None, limit: int | None = 
     return [_to_hit(h) for h in raw]
 
 
+def _dedup_hits(hits: list) -> list:
+    seen = set()
+    out = []
+    for h in hits:
+        key = getattr(h, "chunk_id", None) or getattr(h, "ref", None)
+        if key and key not in seen:
+            seen.add(key)
+            out.append(h)
+    return out
+
+
+_GENERIC_CALENDAR_QUERY_RE = re.compile(
+    r"^(?:"
+    r"(?:מה|איזה|איזו|ספר\s+לי\s+על|מהי|מי|תספר\s+לי\s+על|על\s+מה\s+(?:מדבר(?:ת)?|הם\s+מדברים)|תסכם|סכם|מה\s+הנושא\s+של)\s+"
+    r")?"
+    r"(?:פרשת\s+השבוע|הפרשה(?:\s+השבוע)?|הדף\s+היומי|הדף(?:\s+היומי)?|דף\s+יומי|פרשה|פרשתנו)"
+    r"[\s?!.]*$"
+    r"|^(?:what(?:\s+is)?\s+)?(?:the\s+)?(?:parsha|parashat\s+hashavua|torah\s+portion|daf\s+yomi|daily\s+daf)[\s?!.]*$",
+    re.IGNORECASE,
+)
+
+
+def _is_generic_calendar_query(text: str) -> bool:
+    clean = " ".join((text or "").split()).strip()
+    if not clean:
+        return True
+    if is_pure_greeting(clean):
+        return True
+    return bool(_GENERIC_CALENDAR_QUERY_RE.match(clean))
+
+
 def _run_parsha(question: str, lang: str, history=None, owner_id: str = "local",
                 llm=None) -> QueryResponse:
     """Parshat HaShavua: resolve this week's range from Sefaria's calendar (cached — see
-    _resolve_parsha_cached), fetch its verses + commentaries, then default to a direct Q&A turn
-    scoped to those sources — or a full lesson if the model judges the user actually asked for one
-    (see _wants_full_lesson). No local parsha-name table: Sefaria's own ref range is authoritative,
-    including on a combined-parsha week."""
+    _resolve_parsha_cached). Upfront, provide the bounding scope (תיחום): boundary verses of the parsha
+    plus Haftarah opening/closing. When the user asks a substantive question, retrieve targeted sources
+    matching the question, with agentic ===NEED_SOURCES=== on demand. Default to direct Q&A, or full
+    lesson if requested."""
     pipeline = _get_pipeline()
     llm = llm or pipeline.llm
     lang = lang or "he"
@@ -1742,31 +2180,45 @@ def _run_parsha(question: str, lang: str, history=None, owner_id: str = "local",
         msg = ("לא הצלחנו לזהות את פרשת השבוע כרגע — נסו שוב בעוד רגע." if he
                else "Couldn't resolve this week's parsha right now — please try again shortly.")
         return QueryResponse(answer=msg, citations=[], grounded=False, intent="parsha", files=[])
+
     verse_refs = expand_range(info.ref_range)
-    ref_variants = with_ref_variants(verse_refs)
-    targets = ref_variants + commentary_refs(ref_variants, list(COMMENTATOR_HE))
-    hits = _fetch_ranked_hits(targets, limit=max(len(targets) * 4, 400))
-    # The Haftarah (a separate Nevi'im reading) gets only its OPENING and CLOSING pasuk up front —
-    # not the full range, and no commentaries at all. It's a secondary reading relative to the
-    # parsha itself (whose full text + commentary IS preloaded above), so the model is given just
-    # enough to know what it is and where it starts/ends; if the turn actually needs the intervening
-    # verses or a commentary on them, the agentic ===NEED_SOURCES=== loop can pull them on demand
-    # (same self-fetch mechanism every other thin-retrieval turn already relies on).
+    # ── Boundary scope (תיחום): opening and closing verses of the parsha ──
+    boundary_refs = {verse_refs[0], verse_refs[1], verse_refs[-1]} if len(verse_refs) >= 3 else set(verse_refs)
+    boundary_hits = _fetch_ranked_hits(with_ref_variants(list(boundary_refs)), limit=10)
+
     haftarah_hits: list = []
     if info.haftarah_ref:
         haftarah_verse_refs = expand_range(info.haftarah_ref)
         if haftarah_verse_refs:
-            boundary_refs = {haftarah_verse_refs[0], haftarah_verse_refs[-1]}
-            haftarah_hits = _fetch_ranked_hits(with_ref_variants(list(boundary_refs)), limit=20)
+            h_bounds = {haftarah_verse_refs[0], haftarah_verse_refs[-1]}
+            haftarah_hits = _fetch_ranked_hits(with_ref_variants(list(h_bounds)), limit=20)
+
     topic = info.name_he if he else info.name_en
-    question = f"{_parsha_context_note(info, he)}\n{question}"
-    if _wants_full_lesson(question):
-        tpl = _select_template(topic, "yeshiva", "")
-        return _generate_lesson_from_hits(topic, _cap_hits(hits, _LESSON_HIT_CAP) + haftarah_hits,
+    raw_question = question
+    clean_q = " ".join((raw_question or "").split()).strip()
+
+    # ── Substantive question: retrieve targeted sources matching user's question ──
+    specific_hits: list = []
+    if clean_q and not _is_generic_calendar_query(clean_q) and hasattr(pipeline, "retriever"):
+        try:
+            q = Query(text=f"{topic} {clean_q}", lang=lang, intent=Intent.QA)
+            rq = pipeline._resolve_query(q, history=history) if hasattr(pipeline, "_resolve_query") else q
+            res = pipeline.retriever.retrieve(rq, top_k=15)
+            specific_hits = list(res.hits)
+        except Exception:
+            _log.warning("retrieval for parsha specific question failed; falling back to boundary hits", exc_info=True)
+
+    all_hits = _dedup_hits(specific_hits + boundary_hits + haftarah_hits)
+
+    if _wants_full_lesson(raw_question):
+        tpl = _select_template(topic, "yeshiva", "", lang=lang)
+        return _generate_lesson_from_hits(topic, _cap_hits(all_hits, _LESSON_HIT_CAP, min_commentaries=15),
                                           lang, he, audience="yeshiva", grade_band="", length="medium",
                                           tpl=tpl, history=history, owner_id=owner_id, llm=llm)
-    hits = _cap_hits(hits, _CHAVRUTA_HIT_CAP) + haftarah_hits
-    return _generate_qa_turn_from_hits(question, hits, lang, he, history, llm=llm)
+
+    hits = _cap_hits(all_hits, _CHAVRUTA_HIT_CAP, min_commentaries=15)
+    prompt = f"{_parsha_context_note(info, he)}\n{raw_question}"
+    return _generate_qa_turn_from_hits(prompt, hits, lang, he, history, llm=llm)
 
 
 def _parsha_context_note(info, he: bool) -> str:
@@ -1775,29 +2227,30 @@ def _parsha_context_note(info, he: bool) -> str:
     then reads the Haftarah) from the Haftarah (a SEPARATE reading from Nevi'im/Prophets). Left to
     infer this from the source refs alone, the model has no reason to keep them apart."""
     if he:
-        note = f"(לעיונך: פרשת השבוע היא {info.ref_range}. המפטיר הוא הפסוקים האחרונים של קריאת התורה עצמה — חלק מהפרשה, לא קריאה נפרדת."
+        note = f"(לעיונך: פרשת השבוע היא {info.name_he} ({info.ref_range}). קיבלת את תיחום הפסוקים (פתיחה וסיום) ומקורות ממוקדים לשאלת המשתמש. המפטיר הוא הפסוקים האחרונים של קריאת התורה עצמה — חלק מהפרשה, לא קריאה נפרדת."
         if info.haftarah_ref:
             note += (f" ההפטרה, לעומת זאת, היא קריאה נפרדת לגמרי מהנביאים: {info.haftarah_ref}. "
-                     f"אל תבלבל בין השניים. קיבלת רק את הפסוק הראשון והאחרון של ההפטרה — אם את/ה "
-                     f"צריך/ה את הפסוקים שביניהם, או פירוש עליהם, בקש/י אותם דרך ===NEED_SOURCES===.")
+                     f"אל תבלבל בין השניים. קיבלת את הפסוק הראשון והאחרון של ההפטרה — אם את/ה "
+                     f"צריך/ה פסוקים נוספים או פירוש עליהם, בקש/י אותם דרך ===NEED_SOURCES===.")
         return note + ")"
-    note = (f"(For reference: this week's Torah portion is {info.ref_range}. The Maftir is the final "
+    note = (f"(For reference: this week's Torah portion is {info.name_en} ({info.ref_range}). You were given the boundary verses and sources focused on the user's question. The Maftir is the final "
            f"verses of the Torah reading itself — part of the parsha, not a separate reading.")
     if info.haftarah_ref:
         note += (f" The Haftarah, by contrast, is an entirely separate reading from Nevi'im/Prophets: "
-                 f"{info.haftarah_ref}. Do not conflate the two. You were given only the Haftarah's "
-                 f"opening and closing verse — if you need the verses in between, or a commentary on "
-                 f"them, request them via ===NEED_SOURCES===.")
+                 f"{info.haftarah_ref}. Do not conflate the two. You were given the Haftarah's "
+                 f"opening and closing verse — if you need additional verses or commentaries, "
+                 f"request them via ===NEED_SOURCES===.")
     return note + ")"
 
 
 def _run_daf_yomi(question: str, lang: str, history=None, owner_id: str = "local",
                   llm=None) -> QueryResponse:
-    """Daf Yomi: resolve today's daf from Sefaria's calendar (cached), fetch BOTH amudim (Daf Yomi
-    covers a whole daf per day) plus their commentaries, sort so Gemara/Rashi lead and Tosafot
-    follows (daf_yomi_sort_key), then default to a chavruta-style turn — or a full lesson if the
-    model judges the user actually asked for one."""
-    from chavruta.lessons.builder import daf_yomi_sort_key
+    """Daf Yomi: resolve today's daf from Sefaria's calendar (cached). Upfront, provide the bounding
+    scope (תיחום): opening boundary segments of amud a and amud b + Rashi. When the user asks a
+    substantive question, retrieve targeted sources matching the question, with agentic
+    ===NEED_SOURCES=== on demand. Mirrors Parshat HaShavua: defaults to direct Q&A, or full lesson if
+    requested."""
+    from chavruta.corpus.refs import daf_amud_to_corpus_n
 
     pipeline = _get_pipeline()
     llm = llm or pipeline.llm
@@ -1808,20 +2261,43 @@ def _run_daf_yomi(question: str, lang: str, history=None, owner_id: str = "local
         msg = ("לא הצלחנו לזהות את הדף היומי כרגע — נסו שוב בעוד רגע." if he
                else "Couldn't resolve today's daf yomi right now — please try again shortly.")
         return QueryResponse(answer=msg, citations=[], grounded=False, intent="dafyomi", files=[])
-    daf_refs = [f"{info.tractate} {info.daf}a", f"{info.tractate} {info.daf}b"]
-    ref_variants = with_ref_variants(daf_refs)
-    targets = ref_variants + commentary_refs(ref_variants, list(COMMENTATOR_HE))
-    hits = _fetch_ranked_hits(targets, limit=max(len(targets) * 4, 400))
-    hits.sort(key=daf_yomi_sort_key)
+
+    n_a = daf_amud_to_corpus_n(info.daf, "a")
+    n_b = daf_amud_to_corpus_n(info.daf, "b")
+    t_clean = info.tractate.replace(" ", "_")
+
+    # ── Boundary scope (תיחום): opening boundary segments of amud a and amud b + Rashi ──
+    boundary_refs = [f"{t_clean}.{n_a}.1", f"{t_clean}.{n_a}.2", f"{t_clean}.{n_b}.1"]
+    ref_variants = with_ref_variants(boundary_refs)
+    targets = ref_variants + commentary_refs(ref_variants, ["rashi"])
+    boundary_hits = _fetch_ranked_hits(targets, limit=20)
+
     topic = f"{info.tractate} {info.daf}"
-    if _wants_full_lesson(question):
-        tpl = _select_template(topic, "yeshiva", "")
-        return _generate_lesson_from_hits(topic, _cap_hits(hits, _LESSON_HIT_CAP), lang, he,
-                                          audience="yeshiva", grade_band="", length="medium",
+    raw_question = question
+    clean_q = " ".join((raw_question or "").split()).strip()
+
+    # ── Substantive question: retrieve targeted sources matching user's question ──
+    specific_hits: list = []
+    if clean_q and not _is_generic_calendar_query(clean_q) and hasattr(pipeline, "retriever"):
+        try:
+            q = Query(text=f"{topic} {clean_q}", lang=lang, intent=Intent.QA, tractates=[info.tractate])
+            rq = pipeline._resolve_query(q, history=history) if hasattr(pipeline, "_resolve_query") else q
+            res = pipeline.retriever.retrieve(rq, top_k=15)
+            specific_hits = list(res.hits)
+        except Exception:
+            _log.warning("retrieval for daf yomi specific question failed; falling back to boundary hits", exc_info=True)
+
+    all_hits = _dedup_hits(specific_hits + boundary_hits)
+
+    if _wants_full_lesson(raw_question):
+        tpl = _select_template(topic, "yeshiva", "", lang=lang)
+        return _generate_lesson_from_hits(topic, _cap_hits(all_hits, _LESSON_HIT_CAP, min_commentaries=15),
+                                          lang, he, audience="yeshiva", grade_band="", length="medium",
                                           tpl=tpl, history=history, owner_id=owner_id, llm=llm)
-    hits = _cap_hits(hits, _CHAVRUTA_HIT_CAP)
-    question = f"{_daf_yomi_context_note(info.tractate, info.daf, he)}\n{question}"
-    return _generate_chavruta_turn(question, hits, lang, he, history, weak=(not hits), llm=llm)
+
+    hits = _cap_hits(all_hits, _CHAVRUTA_HIT_CAP, min_commentaries=15)
+    prompt = f"{_daf_yomi_context_note(info.tractate, info.daf, he)}\n{raw_question}"
+    return _generate_qa_turn_from_hits(prompt, hits, lang, he, history, llm=llm)
 
 
 def _daf_yomi_context_note(tractate: str, daf: int, he: bool) -> str:
@@ -1832,12 +2308,231 @@ def _daf_yomi_context_note(tractate: str, daf: int, he: bool) -> str:
     We already know the real daf from Sefaria, so just tell the model directly rather than making
     it infer a fact it structurally cannot get right from what it's shown."""
     if he:
-        return (f"(לעיונך: הדף האמיתי של היום הוא {tractate} דף {daf}. אם המשתמש שואל על מספר הדף, "
-               f"ענה {daf} ולא מספר אחר — המספרים שמופיעים ברפרנסים של המקורות למטה הם מספור פנימי "
-               f"של מסד הנתונים, לא מספר הדף האמיתי.)")
-    return (f"(For reference: today's real daf is {tractate} {daf}. If asked which daf this is, "
-           f"answer {daf} — the numbers in the source refs below are the database's internal "
-           f"numbering, not the real daf number.)")
+        return (f"(לעיונך: הדף האמיתי של היום הוא {tractate} דף {daf}. קיבלת את תיחום פתיחת הדף ומקורות ממוקדים לשאלת המשתמש — "
+               f"אם את/ה צריך/ה מקטעים נוספים, פירוש רש\"י, תוספות או מפרשים נוספים, בקש/י אותם דרך ===NEED_SOURCES===. "
+               f"אם המשתמש שואל על מספר הדף, ענה {daf} ולא מספר אחר — המספרים שמופיעים ברפרנסים של "
+               f"המקורות למטה הם מספור פנימי של מסד הנתונים, לא מספר הדף האמיתי.)")
+    return (f"(For reference: today's real daf is {tractate} {daf}. You were given the daf boundary and sources focused on the user's question — "
+           f"if you need additional segments, Rashi, Tosafot or other commentaries, request them via ===NEED_SOURCES===. "
+           f"If asked which daf this is, answer {daf} — the numbers in the source refs below are the "
+           f"database's internal numbering, not the real daf number.)")
+
+
+# ── Source Sheet Companion Path (Spec 008) ───────────────────────────────────
+
+_SOURCESHEET_REBUILD_VERB = r"(?:בנה|לבנות|צור|ליצור|ערוך|לערוך|הפק|להפיק|הכן|להכין|כתוב|לכתוב|שכתב|לשכתב|חדש|לחדש|סכם|לסכם|הוצא|להוציא)"
+_SOURCESHEET_NOUN = r"(?:דף\s*מקורות|דף\s*המקורות|קובץ|חוברת|סיכום|ליווי)"
+_SOURCESHEET_BUILD_RE = re.compile(
+    rf"(?:{_SOURCESHEET_REBUILD_VERB}\s+(?:[^\n.?!]{{0,30}}?){_SOURCESHEET_NOUN}|{_SOURCESHEET_NOUN}\s+(?:חדש|מעודכן))",
+    re.IGNORECASE,
+)
+
+
+def _is_sourcesheet_rebuild_request(text: str) -> bool:
+    """Explicit signal that this turn in a source-sheet chat wants a file re-generated."""
+    clean = " ".join((text or "").split())
+    return bool(_SOURCESHEET_BUILD_RE.search(clean))
+
+
+def _sourcesheet_mode_enabled(owner_id: str) -> bool:
+    """The source sheet companion's rollout gate.
+
+    CHAVRUTA_SOURCE_SHEET_BETA_OWNERS is a comma-separated allowlist of owner_ids, or "*" once it is
+    open to everyone; empty (the default) means nobody. Admin owners always have access.
+    """
+    if _is_admin(owner_id):
+        return True
+    raw = os.environ.get("CHAVRUTA_SOURCE_SHEET_BETA_OWNERS", "").strip()
+    if raw == "*":
+        return True
+    if owner_id and owner_id in {o.strip() for o in raw.split(",") if o.strip()}:
+        return True
+    return bool(owner_id) and devhelpers.has_feature(owner_id, "sourcesheet")
+
+
+def _run_sourcesheet(
+    question: str,
+    lang: str,
+    history: list[Turn] | None = None,
+    owner_id: str = "local",
+    llm=None,
+) -> QueryResponse:
+    """Ingest and analyze a source sheet, creating a structured Companion Guide (Spec 008)."""
+    from chavruta.sourcesheet.analyzer import analyze_source_sheet
+    from chavruta.sourcesheet.parser import parse_source_sheet
+
+    he = (lang or "") != "en"
+
+    # Check for follow-up conversational study on an existing sheet
+    has_prior_sheet = any(getattr(h, "sourcesheet", False) for h in (history or []))
+    is_rebuild = _is_sourcesheet_rebuild_request(question)
+
+    if has_prior_sheet and not is_rebuild:
+        return _run_chavruta(question, lang, history=history, llm=llm)
+
+    # Separate user instruction/prompt from attached source sheet content if augmented
+    header_regex = re.compile(
+        r"##\s+(?:מקורות שצירף המשתמש|Sources the user attached)[^\n]*\n?",
+        re.IGNORECASE,
+    )
+    user_instruction = ""
+    sheet_text = question
+
+    if match := header_regex.search(question):
+        user_instruction = question[:match.start()].strip()
+        sheet_text = question[match.end():].strip()
+
+    parsed_items = parse_source_sheet(sheet_text)
+    if not parsed_items and user_instruction:
+        # Fallback to whole question if split yielded no items
+        parsed_items = parse_source_sheet(question)
+
+    if not parsed_items:
+        msg = (
+            "לא זוהו מקורות תורניים בדף שהועלה. אנא ודא שהקובץ או הטקסט מכיל מראי מקומות או ציטוטים."
+            if he
+            else "No rabbinic sources were detected. Please make sure the input contains citations or source text."
+        )
+        return QueryResponse(answer=msg, citations=[], grounded=False, intent="sourcesheet", files=[])
+
+    pipeline = _get_pipeline()
+    llm = llm or getattr(pipeline, "llm", None)
+
+    # Fetch verified corpus texts for identified refs via Qdrant store
+    corpus_lookup: dict[str, str] = {}
+    try:
+        from chavruta.corpus.refs import with_ref_variants
+
+        ref_map: dict[str, list[str]] = {}
+        all_targets: list[str] = []
+
+        for item in parsed_items:
+            candidates: list[str] = []
+            if item.ref:
+                candidates.append(item.ref)
+            if item.canonical_sefaria_ref:
+                candidates.append(item.canonical_sefaria_ref)
+
+            for cr in candidates:
+                variants = with_ref_variants([cr])
+                # Expand chapter-level Tanakh refs (e.g. Leviticus.8 -> verses 1..36)
+                if "." in cr:
+                    p = cr.split(".")
+                    if len(p) == 2 and p[1].isdigit():
+                        variants.extend(with_ref_variants([f"{p[0]}.{p[1]}.{v}" for v in range(1, 37)]))
+                for v in variants:
+                    ref_map.setdefault(v, []).append(cr)
+                    if item.ref:
+                        ref_map.setdefault(v, []).append(item.ref)
+                    if item.canonical_sefaria_ref:
+                        ref_map.setdefault(v, []).append(item.canonical_sefaria_ref)
+                    all_targets.append(v)
+
+        if all_targets:
+            hits = _fetch_ranked_hits(all_targets, limit=max(len(all_targets) * 4, 300))
+            for h in hits:
+                origs = ref_map.get(h.ref, [])
+                if not origs and h.canonical_ref:
+                    origs = ref_map.get(h.canonical_ref, [])
+                for orig in origs:
+                    prev = corpus_lookup.get(orig, "")
+                    if h.text_he and h.text_he not in prev:
+                        corpus_lookup[orig] = (prev + "\n" + h.text_he).strip()
+    except Exception as exc:
+        _log.warning("sourcesheet corpus fetch fallback: %s", exc)
+
+    # Synthesize companion guide
+    from chavruta.intents.llm_planner import distill_query
+    distilled_hint = distill_query(user_instruction or question, history=history, intent=Intent.SOURCESHEET)
+    topic_hint = distilled_hint or user_instruction or (parsed_items[0].header if parsed_items else "סוגיה תורנית")
+    guide = analyze_source_sheet(
+        items=parsed_items,
+        topic_hint=topic_hint,
+        corpus_lookup=corpus_lookup,
+        llm=llm,
+        lang=lang,
+        user_instruction=user_instruction,
+    )
+
+    html_printable = guide.to_html_printable()
+    sheet_id = uuid.uuid4().hex[:12]
+
+    # Exactly ONE file: PDF format
+    files = [
+        FileOut(
+            name=f"sourcesheet_{sheet_id}.pdf",
+            title=f"חוברת ליווי: {guide.title or guide.topic}" if he else f"Companion Guide: {guide.title or guide.topic}",
+            content=html_printable,
+        ),
+    ]
+
+    # Convert sections to citations so they appear in the UI's left-hand source cards
+    citations_list = [
+        CitationOut(
+            ref="דף מקורות שהועלה",
+            ref_he=f"דף המקורות: {guide.title or 'קובץ שהועלה'}",
+            text_he=sheet_text,
+            text_en=(getattr(guide, "text_en", "") or ""),
+            commentator="דף המקורות",
+            deep_link="",
+            license="user_provided",
+            version_title="קובץ שהועלה כמקור",
+        )
+    ] + [
+        CitationOut(
+            ref=s.ref or s.title or f"מקור {s.index}",
+            ref_he=s.title or s.ref or f"מקור {s.index}",
+            text_he=s.expanded_context or s.source_snippet or s.plain_explanation or "",
+            text_en=(getattr(s, "text_en", "") or ""),
+            commentator=s.role_tag or "",
+            deep_link="",
+            license="user_provided" if s.status != "corpus" else "public domain",
+            version_title="דף מקורות" if s.status != "corpus" else "מאגר חברותא",
+        )
+        for s in guide.sections
+        if (s.ref or s.source_snippet or s.expanded_context or s.title)
+    ]
+
+    # Save to SQLite database
+    try:
+        db.save_source_sheet(
+            sheet_id=sheet_id,
+            title=guide.title,
+            raw_content=question,
+            parsed_sheet=[item.to_dict() for item in parsed_items],
+            files=[f.model_dump() for f in files],
+            citations=guide.citations,
+            owner_id=owner_id,
+        )
+    except Exception as exc:
+        _log.warning("saving source sheet failed: %s", exc)
+
+    summary_block = f"{guide.summary}\n\n" if guide.summary else ""
+    intro_msg = (
+        f"### {guide.title}\n\n"
+        f"**שאלת היסוד:** {guide.core_inquiry}\n\n"
+        f"{summary_block}"
+        f"---\n"
+        f"עובדו בהצלחה **{len(parsed_items)} מקורות** בדף. "
+        f"חוברת הליווי המלאה זמינה כעת לצפייה ולהורדה כ-PDF מעוצב בקובץ המצורף, "
+        f"וניתן להמשיך ולדון בסוגיה כאן בשיחה."
+        if he
+        else f"### {guide.title}\n\n"
+        f"**Core Inquiry:** {guide.core_inquiry}\n\n"
+        f"{summary_block}"
+        f"---\n"
+        f"Successfully analyzed **{len(parsed_items)} sources**. "
+        f"The full companion guide is ready for viewing and download as a styled PDF in the attachment. "
+        f"You can continue to ask questions about the sheet here in the chat."
+    )
+
+    return QueryResponse(
+        answer=intro_msg,
+        citations=citations_list,
+        grounded=True,
+        intent="sourcesheet",
+        files=files,
+    )
 
 
 # Global concurrency gate — every generation reaches the LLM/embedder/Qdrant through this one
@@ -1875,12 +2570,51 @@ _in_flight_count = 0
 _concurrency_at_start: ContextVar[int] = ContextVar("_concurrency_at_start", default=0)
 
 
+def _greeting_response(lang: str, intent_str: str = "") -> QueryResponse:
+    he = (lang or "") != "en"
+    greeting = (
+        "שלום וברכה! אני חברותא — שותף הלימוד שלך. במה נוכל להעמיק היום? אפשר לעיין בסוגיה, ללמוד משנה או גמרא עם מפרשים, או לברר שאלה הלכתית."
+        if he
+        else "Hello and welcome! I am Chavruta — your study partner. What shall we explore today? We can delve into a sugya, study Mishnah or Gemara with commentaries, or clarify a halachic question."
+    )
+    return QueryResponse(
+        answer=greeting,
+        citations=[],
+        grounded=False,
+        intent=intent_str or "qa",
+        files=[],
+    )
+
+
+def _acknowledgement_response(lang: str, intent_str: str = "", question: str = "") -> QueryResponse:
+    he = (lang or "") != "en"
+    if he:
+        clean = question.strip() if question else ""
+        if any(w in clean for w in ("צדק", "צדקתי", "אגיד לו", "אומר לו", "אספר לו", "אעדכן")):
+            ack = "בשמחה רבה! שמחתי לעזור ולברר את הדברים. שיהיה בהצלחה בדיון! תמיד כאן בשמחה לכל שאלה, לימוד סוגיה או בירור הלכתי נוסף."
+        else:
+            ack = "בשמחה רבה! תמיד כאן לעזרתך לכל שאלה, לימוד סוגיה או בירור הלכתי נוסף."
+    else:
+        ack = "You're very welcome! Glad I could help clarify. Feel free to reach out anytime for more questions or Torah study."
+    return QueryResponse(
+        answer=ack,
+        citations=[],
+        grounded=False,
+        intent=intent_str or "qa",
+        files=[],
+    )
+
+
 def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
                audience: str = "", grade_band: str = "", length: str = "",
                owner_id: str = "local", llm=None) -> QueryResponse:
     """Safety wrapper: a retrieval/LLM/backend failure degrades to an honest error response instead
     of a 500 for the whole request (real HTTPExceptions — e.g. 422 bad intent — still propagate).
     `llm` defaults to the pipeline's own shared backend; a caller may override it (BYOK)."""
+    if is_pure_greeting(question):
+        return _greeting_response(lang, intent_str)
+    if is_conversational_acknowledgement(question):
+        return _acknowledgement_response(lang, intent_str, question)
     he = (lang or "") != "en"
     # Every route reaches generation through here — /query, /sessions/{id}/query, its async twin and
     # the calendar paths. Setting the flag on ONE of them is what made the trailing source list work
@@ -1904,6 +2638,8 @@ def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
                                owner_id, llm)
     except HTTPException:
         raise
+    except JobCancelledError:
+        raise
     except Exception:
         _log.exception("query processing failed (intent=%r)", intent_str)
         return QueryResponse(
@@ -1918,16 +2654,9 @@ def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
 
 
 def _calendar_modes_enabled(owner_id: str) -> bool:
-    """Parshat HaShavua / Daf Yomi's rollout gate — other accounts see nothing different (the
-    frontend hides the options entirely; this is the real server-side enforcement, checked whether
-    or not the request came through the UI). CHAVRUTA_CALENDAR_BETA_OWNERS is either a comma-
-    separated allowlist of owner_ids, or "*" once the feature is out of beta for everyone; empty
-    (the default) means nobody yet.
-
-    Same shape as `_sugya_enabled` below: the env var is the blunt instrument (a redeploy to change
-    who is in), and a dev helper granted the "calendar" feature from the admin panel is the one the
-    operator can flip per person, with the consent the env var cannot carry.
-    """
+    """Parshat HaShavua / Daf Yomi's rollout gate."""
+    if _is_admin(owner_id):
+        return True
     raw = os.environ.get("CHAVRUTA_CALENDAR_BETA_OWNERS", "").strip()
     if raw == "*":
         return True
@@ -1996,6 +2725,16 @@ def _is_admin(owner_id: str) -> bool:
 def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Turn],
                     audience: str = "", grade_band: str = "", length: str = "",
                     owner_id: str = "local", llm=None) -> QueryResponse:
+    if is_pure_greeting(question):
+        return _greeting_response(lang, intent_str)
+    if is_conversational_acknowledgement(question):
+        return _acknowledgement_response(lang, intent_str, question)
+
+    dist_res = classify_and_distill(question, history=history, intent=intent_str)
+    if dist_res.action == "chitchat" and dist_res.answer:
+        clean_ans = strip_control_codes(strip_mudgash_label(dist_res.answer))
+        return QueryResponse(answer=clean_ans, citations=[], grounded=False, intent=intent_str or "qa", files=[])
+
     he = (lang or "") != "en"
     if intent_str == "shut":          # UI's responsa mode → HALACHA intent
         intent_str = "halacha"
@@ -2014,27 +2753,76 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=f"unknown intent: {intent_str!r}") from exc
 
-    if intent == Intent.LESSON:            # lesson mode → Claude writes the 3 files, audience-adapted
-        # Mode is STICKY (see _prepare_continue) — every turn in a lesson-mode chat lands here,
-        # forever, regardless of what the client sends. Without this check, a plain follow-up
-        # question ("תסביר לי יותר על מה שרש\"י אמר") fell straight into _run_lesson, which has no
-        # notion of "this isn't a new topic" beyond the narrow audience/length clarify-echo
-        # (_is_clarify_answer) — it retrieved sources for the follow-up's OWN wording and silently
-        # built a second, unrelated lesson, spending a real weekly lesson-pool charge on garbage
-        # (caught live 2026-08-21, reading the code with the founder — never shipped a working
-        # follow-up path). Once a lesson has actually finished in this session, only an EXPLICIT
-        # request to build or change one runs _run_lesson again; anything else continues as a
-        # grounded chavruta turn instead — _prepare_continue already folded the lesson's own text
-        # into history (_lesson_turn_text), so the discussion is anchored on what was actually taught.
-        if any(h.role == "assistant" and h.lesson for h in history) and not _is_lesson_build_request(question):
-            return _run_chavruta(question, lang, history=history, llm=llm)
-        return _run_lesson(question, lang, history=history, audience=audience,
-                           grade_band=grade_band, length=length, owner_id=owner_id, llm=llm)
+    lesson_target_files = dist_res.requested_files if dist_res.requested_files else None
+    if intent == Intent.LESSON or (dist_res.requested_files and not intent_str):
+        lesson_topic = dist_res.distilled_query or question
+        if any(h.role == "assistant" and h.lesson for h in history):
+            from chavruta.intents.llm_planner import classify_lesson_followup
+            last_topic = _recover_lesson_topic(history)
+            decision = classify_lesson_followup(question, history=history, last_lesson_topic=last_topic)
+            if decision.action == "chat":
+                return _run_chavruta(question, lang, history=history, llm=llm)
+            elif decision.action == "edit_file" and decision.target_file:
+                return _edit_lesson_file(question, lang, history=history, decision=decision,
+                                         owner_id=owner_id, llm=llm)
+            else:  # rebuild_all
+                rebuild_topic = decision.topic or last_topic or lesson_topic
+                return _run_lesson(rebuild_topic, lang, history=history, audience=audience,
+                                   grade_band=grade_band, length=length, owner_id=owner_id, llm=llm,
+                                   target_files=lesson_target_files)
+        return _run_lesson(lesson_topic, lang, history=history, audience=audience,
+                           grade_band=grade_band, length=length, owner_id=owner_id, llm=llm,
+                           target_files=lesson_target_files)
 
-    q = Query(text=question, lang=lang or None, intent=intent)
+    if intent == Intent.SOURCESHEET or intent_str == "sourcesheet":
+        if not _sourcesheet_mode_enabled(owner_id):
+            msg = (
+                "מצב ניתוח דפי מקורות זמין כרגע בבטא סגורה בלבד."
+                if he
+                else "Source sheet mode is currently in private beta."
+            )
+            return QueryResponse(answer=msg, citations=[], grounded=False, intent="sourcesheet", files=[])
+        return _run_sourcesheet(question, lang, history=history, owner_id=owner_id, llm=llm)
+
+    has_attachments = ("## מקורות שצירף המשתמש" in question) or ("## Sources the user attached" in question)
+    has_prior_answers = any(getattr(h, "role", "") == "assistant" for h in (history or []))
+    carried = _carried_refs(history)
+    clean_q = " ".join(question.split()).strip()
+
+    # Catch open meta-queries ("תסביר את המקורות", "תסכם את הדף") when no sources are attached/cited
+    if _EMPTY_META_SOURCES_RE.match(clean_q) and not has_attachments:
+        if carried or has_prior_answers:
+            return _run_chavruta(question, lang, history=history, llm=llm)
+        msg = (
+            "לא זוהו מקורות או נושא מוגדר לביאור. "
+            "אנא ציינו את שם הסוגיה או מראה המקום (למשל: *'בבא מציעא דף כ\"א ע\"א'* או *'הלכות שבת פרק א'*), "
+            "או העלו דף מקורות (קובץ Word / PDF / טקסט) בסרגל השמאלי, והחברותא תבאר ותנתח אותם בשמחה."
+            if he
+            else "No specific sources or topic were provided to explain. "
+                 "Please specify a tractate or citation (e.g. *'Bava Metzia 21a'*, *'Mishneh Torah, Shabbat 1'*), "
+                 "or upload a source sheet in the left side panel, and Chavruta will be glad to analyze and explain it for you."
+        )
+        return QueryResponse(answer=msg, citations=[], grounded=False, intent=intent_str or "qa", files=[])
+
+    if is_cancelled():
+        raise JobCancelledError("job cancelled by user")
+    q = Query(
+        text=question,
+        lang=lang or None,
+        intent=intent,
+        distilled_text=dist_res.distilled_query or None,
+        search_text=dist_res.distilled_query or None,
+        rerank=True,
+    )
     answer = _get_pipeline().ask(q, history=history, llm=llm)
+    if is_cancelled():
+        raise JobCancelledError("job cancelled by user")
 
     def _cite(c) -> CitationOut:
+        from chavruta.corpus.refs import license_for_ref
+
+        lic = getattr(c, "license", "") or license_for_ref(c.ref, "he" if he else "en")[0]
+        ver = getattr(c, "version_title", "") or license_for_ref(c.ref, "he" if he else "en")[1]
         return CitationOut(
             ref=c.ref,
             ref_he=(hebrew_display_ref(c.ref) or "") if he else "",
@@ -2042,8 +2830,8 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
             text_en=getattr(c, "text_en", ""),
             commentator=getattr(c, "commentator_id", "") or "",
             deep_link=getattr(c, "deep_link", "") or "",
-            license=getattr(c, "license", "") or "",
-            version_title=getattr(c, "version_title", "") or "",
+            license=lic or "",
+            version_title=ver or "",
         )
 
     lesson_plan = None
@@ -2065,6 +2853,11 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
     text = _strip_instruction_echo(answer.text, he)
     text, source_note = _split_source_note(text)
     clean = _strip_markers(_fix_bleeding_sentences(text, he, resolved_llm), he=he)
+    clean = strip_mudgash_label(clean)
+    clean = strip_control_codes(clean)
+
+    used_model = getattr(answer, "model_used", "") or getattr(resolved_llm, "model_id", "")
+    _log.info("query completed: model=%s grounded=%s citations=%d", used_model, answer.grounded, len(citations_out))
 
     out = QueryResponse(
         answer=clean,
@@ -2075,6 +2868,7 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
         lesson_plan=lesson_plan,
         files=[],
         source_note=source_note,
+        model_used=used_model,
     )
     # Sources the model used without marking, plus a finding for anything it named that resolves to
     # nothing OR was never actually retrieved this turn — see _widen_citations_from_note.
@@ -2216,7 +3010,13 @@ def _attachment_text(att: Attachment) -> str:
 
             import docx
             d = docx.Document(io.BytesIO(raw))
-            return "\n".join(p.text for p in d.paragraphs).strip()
+            para_text = "\n".join(p.text for p in d.paragraphs if p.text.strip())
+            table_text = "\n".join(
+                " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
+                for table in d.tables
+                for row in table.rows
+            )
+            return (para_text + ("\n" + table_text if table_text else "")).strip()
         except Exception as exc:
             _log.warning("attachment docx extract failed (%s): %s", att.name, exc)
             return ""
@@ -2606,7 +3406,9 @@ def _settle_tokens(owner: str, res: Reservation, usage: dict, intent: str,
     """
     if owner == "local":
         return
-    actual = plans.normalized_tokens(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
+    actual = usage.get("billed_tokens") if "billed_tokens" in usage else plans.normalized_tokens(
+        usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
+    )
     if not actual and not res.tokens:
         return
     if res.ctx and meter == db.TOKENS:
@@ -2757,8 +3559,9 @@ def _record_event(owner: str, intent: str, req: QueryRequest | None, usage: dict
             lang=(req.lang if req else "") or "he",
             prompt_tokens=usage.get("prompt_tokens", 0),
             completion_tokens=usage.get("completion_tokens", 0),
-            billed_tokens=plans.normalized_tokens(usage.get("prompt_tokens", 0),
-                                                  usage.get("completion_tokens", 0)),
+            billed_tokens=usage.get("billed_tokens") if "billed_tokens" in usage else plans.normalized_tokens(
+                usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
+            ),
             llm_calls=usage.get("calls", 0),
             ms=ms,
             concurrent_at_start=_concurrency_at_start.get(),
@@ -2809,6 +3612,7 @@ def _resolve_llm_for_request(owner: str, lang: str, intent: str, user_key: str |
     res = _enforce_quota(owner, lang, intent, user_key=key)
     if res.used_byok:
         return res, _byok_llm(key, _hstr(base_url), _hstr(model)), db.BYOK_TOKENS
+
     return res, None, db.TOKENS
 
 
@@ -2880,6 +3684,7 @@ class MeOut(BaseModel):
     # enforcement (that's the server-side check in _run_query_impl, which runs regardless of what
     # the client shows).
     calendar_modes_enabled: bool = False
+    sourcesheet_enabled: bool = False
     # Admin dashboard link — see _is_admin. UI convenience only, same as the field above; the real
     # enforcement is the 404 every /admin/* route raises for a non-admin owner.
     is_admin: bool = False
@@ -2976,6 +3781,7 @@ def me(owner: str = Depends(current_owner)):
         blocked_until=ban["until"] if ban else None,
         blocked_reason=ban["reason"] if ban else "",
         calendar_modes_enabled=_calendar_modes_enabled(owner),
+        sourcesheet_enabled=_sourcesheet_mode_enabled(owner),
         is_admin=_is_admin(owner),
         org_id=(_org := orgs.membership(owner) or {}).get("org_id", "") or "",
         org_name=_org.get("name", "") or "",
@@ -3355,8 +4161,10 @@ def redeem_coupon(req: RedeemRequest, lang: str = "he", owner: str = Depends(cur
         else:
             message = (f"התוכנית שודרגה ל'{name}' עד {until}." if he else
                        f"Upgraded to {name} until {until}.")
+    t = plans.tier(res["plan"]) if res.get("plan") else None
+    plan_name = (t.name_en if (lang or "").startswith("en") else t.name_he) if t else ""
     return RedeemOut(kind=res["kind"], plan=res["plan"],
-                     plan_name=plans.tier(res["plan"]).name_he if res["plan"] else "",
+                     plan_name=plan_name,
                      until=res["until"], credits_added=res["credits_added"],
                      credits_balance=res["credits_balance"], message=message,
                      discount_added_ils=res.get("discount_added_ils", 0))
@@ -3406,6 +4214,294 @@ async def billing_webhook(request: Request):
         raise HTTPException(status_code=400, detail="bad payload") from exc
     billing.handle_event(payplus.parse_event(payload))
     return {"ok": True}
+
+
+# ── Referral Partner Program ──────────────────────────────────────────────────
+
+class ReferralClaimRequest(BaseModel):
+    code: str = Field(..., max_length=64)
+
+
+class ReferralStatusOut(BaseModel):
+    ok: bool = True
+    has_payment_method: bool = False
+    code: str | None = None
+    referral_link: str | None = None
+    discount_pct: float = 10.0
+    reward_pct: float = 10.0
+    referred_count: int = 0
+    open_credit_ils: float = 0.0
+    applied_credit_ils: float = 0.0
+    used_credit_ils: float = 0.0
+    auto_convert_credits: bool = True
+    validity_days: int = 90
+
+
+class ReferralSettingsIn(BaseModel):
+    auto_convert_credits: bool
+
+
+class ReferralSettingsOut(BaseModel):
+    ok: bool = True
+    auto_convert_credits: bool
+
+
+class ReferralGenerateOut(BaseModel):
+    ok: bool = True
+    code: str
+    referral_link: str
+    discount_pct: float = 10.0
+    reward_pct: float = 10.0
+
+
+class ReferralValidateOut(BaseModel):
+    valid: bool
+    discount_pct: float = 0.0
+
+
+class ReferralClaimOut(BaseModel):
+    ok: bool = True
+    code: str
+    discount_pct: float
+
+
+def _format_referral_link(code: str) -> str:
+    base_url = os.environ.get("CHAVRUTA_BASE_URL", "https://chavrutaai.org").rstrip("/")
+    return f"{base_url}/?ref={code}"
+
+
+@app.get("/api/referral/status", response_model=ReferralStatusOut)
+@app.get("/referral/status", response_model=ReferralStatusOut)
+@app.get("/referrals/status", response_model=ReferralStatusOut)
+def referral_status(owner: str = Depends(current_owner)):
+    """Return referral partner status, discount/reward rates, stats, and referral link."""
+    if owner == "local":
+        return ReferralStatusOut(
+            ok=True,
+            has_payment_method=False,
+            code=None,
+            referral_link=None,
+            discount_pct=10.0,
+            reward_pct=10.0,
+            referred_count=0,
+            open_credit_ils=0.0,
+            applied_credit_ils=0.0,
+            used_credit_ils=0.0,
+            auto_convert_credits=True,
+            validity_days=90,
+        )
+    has_pm = db.has_active_payment_method(owner)
+    partner = db.get_referral_partner(owner)
+    stats = db.get_referral_stats(owner)
+    code = partner["code"] if partner and partner.get("is_active") else None
+    return ReferralStatusOut(
+        ok=True,
+        has_payment_method=has_pm,
+        code=code,
+        referral_link=_format_referral_link(code) if code else None,
+        discount_pct=float(partner["discount_pct"]) if partner else 10.0,
+        reward_pct=float(partner["reward_pct"]) if partner else 10.0,
+        referred_count=stats.get("referred_count", 0),
+        open_credit_ils=stats.get("open_credit_ils", 0.0),
+        applied_credit_ils=stats.get("applied_credit_ils", 0.0),
+        used_credit_ils=stats.get("used_credit_ils", 0.0),
+        auto_convert_credits=stats.get("auto_convert_credits", True),
+        validity_days=stats.get("validity_days", 90),
+    )
+
+
+@app.post("/api/referral/settings", response_model=ReferralSettingsOut)
+@app.post("/referral/settings", response_model=ReferralSettingsOut)
+@app.post("/referrals/settings", response_model=ReferralSettingsOut)
+def update_referral_settings(body: ReferralSettingsIn, owner: str = Depends(current_owner)):
+    """Update settings for referral partner program, such as auto-conversion to credits."""
+    if owner != "local":
+        db.set_auto_convert_credits(owner, body.auto_convert_credits)
+    return ReferralSettingsOut(ok=True, auto_convert_credits=body.auto_convert_credits)
+
+
+@app.post("/api/referral/generate", response_model=ReferralGenerateOut)
+@app.post("/referral/generate", response_model=ReferralGenerateOut)
+@app.post("/referrals/generate", response_model=ReferralGenerateOut)
+def referral_generate(owner: str = Depends(current_owner)):
+    """Generate a unique referral code and partner link for an eligible account."""
+    if owner == "local":
+        raise HTTPException(
+            status_code=403,
+            detail="יצירת קישור שותפים זמינה רק למשתמשים בעלי כרטיס אשראי או מנוי פעיל"
+        )
+    if not db.has_active_payment_method(owner):
+        raise HTTPException(
+            status_code=403,
+            detail="יצירת קישור שותפים זמינה רק למשתמשים בעלי כרטיס אשראי או מנוי פעיל"
+        )
+
+    partner = db.get_referral_partner(owner)
+    if partner and partner.get("is_active"):
+        code = partner["code"]
+        discount_pct = float(partner["discount_pct"])
+        reward_pct = float(partner["reward_pct"])
+    else:
+        chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        code = None
+        import secrets
+        for _ in range(10):
+            candidate = "".join(secrets.choice(chars) for _ in range(8))
+            if db.create_referral_partner(owner, candidate):
+                code = candidate
+                break
+        if not code:
+            raise HTTPException(status_code=500, detail="Could not generate unique referral code")
+        discount_pct = 10.0
+        reward_pct = 10.0
+
+    return ReferralGenerateOut(
+        ok=True,
+        code=code,
+        referral_link=_format_referral_link(code),
+        discount_pct=discount_pct,
+        reward_pct=reward_pct,
+    )
+
+
+@app.get("/api/referral/validate", response_model=ReferralValidateOut)
+@app.get("/referral/validate", response_model=ReferralValidateOut)
+@app.get("/referrals/validate", response_model=ReferralValidateOut)
+def referral_validate(code: str = ""):
+    """Validate a referral code and return its discount percentage."""
+    norm_code = (code or "").strip().upper()
+    if not norm_code:
+        return ReferralValidateOut(valid=False, discount_pct=0.0)
+    partner = db.get_referral_partner_by_code(norm_code)
+    if partner and partner.get("is_active"):
+        return ReferralValidateOut(valid=True, discount_pct=float(partner.get("discount_pct", 10.0)))
+    return ReferralValidateOut(valid=False, discount_pct=0.0)
+
+
+@app.post("/api/referral/claim", response_model=ReferralClaimOut)
+@app.post("/referral/claim", response_model=ReferralClaimOut)
+@app.post("/referrals/claim", response_model=ReferralClaimOut)
+def referral_claim(req: ReferralClaimRequest, owner: str = Depends(current_owner)):
+    """Claim/redeem a referral code for the current authenticated user."""
+    if owner == "local":
+        raise HTTPException(status_code=400, detail="יש להתחבר כדי לממש קוד הפניה")
+    norm_code = (req.code or "").strip().upper()
+    if not norm_code:
+        raise HTTPException(status_code=400, detail="קוד הפניה לא יכול להיות ריק")
+    partner = db.get_referral_partner_by_code(norm_code)
+    if not partner or not partner.get("is_active"):
+        raise HTTPException(status_code=404, detail="קוד הפניה לא תקין או לא קיים")
+    if partner["owner_id"] == owner:
+        raise HTTPException(status_code=400, detail="לא ניתן לממש קוד הפניה של עצמך")
+    if db.get_referral_redemption(owner):
+        raise HTTPException(status_code=400, detail="כבר מומש קוד הפניה בעבר עבור חשבון זה")
+
+    ok = db.record_referral_redemption(owner, norm_code)
+    if not ok:
+        raise HTTPException(status_code=400, detail="שגיאה במימוש קוד ההפניה")
+
+    return ReferralClaimOut(
+        ok=True,
+        code=partner["code"],
+        discount_pct=float(partner.get("discount_pct", 10.0)),
+    )
+
+
+@app.post("/auth/email-hook")
+@app.post("/account/email-hook")
+async def auth_email_hook(request: Request):
+    """Supabase Auth 'Send Email' Hook callback.
+
+    Public (no bearer token) but verified via Standard Webhooks HMAC-SHA256 signature
+    against SUPABASE_AUTH_HOOK_SECRET. Exempt from the bearer auth gate.
+
+    Fails CLOSED: with no secret configured it answers 503 and sends nothing; otherwise any
+    anonymous caller could make the server mail a caller-chosen recipient a caller-chosen link.
+    Local dev can opt into the unsigned path with CHAVRUTA_EMAIL_HOOK_ALLOW_UNSIGNED=1.
+
+    Dispatches transactional authentication emails (sign-up verification, password recovery,
+    magic link) through the multi-provider EmailPool (Brevo -> Amazon SES hybrid).
+    """
+    secret = os.environ.get("SUPABASE_AUTH_HOOK_SECRET", "").strip()
+    raw = await request.body()
+
+    if secret:
+        from app.email_pool import verify_supabase_hook
+        if not verify_supabase_hook(raw, dict(request.headers), secret):
+            _log.warning("Invalid signature on auth email hook")
+            return JSONResponse(
+                status_code=401,
+                content={"error": {"http_code": 401, "message": "Invalid webhook signature"}},
+            )
+    elif os.environ.get("CHAVRUTA_EMAIL_HOOK_ALLOW_UNSIGNED", "").strip() == "1":
+        _log.warning("Auth email hook accepted UNSIGNED (CHAVRUTA_EMAIL_HOOK_ALLOW_UNSIGNED=1), dev only")
+    else:
+        # Fail closed, like the PayPlus webhook: no secret means nothing here can be authentic.
+        return JSONResponse(
+            status_code=503,
+            content={"error": {"http_code": 503, "message": "email hook not configured"}},
+        )
+
+    import json
+    try:
+        payload = json.loads(raw or b"{}")
+        if not isinstance(payload, dict):
+            raise ValueError("payload is not a JSON object")
+    except ValueError:  # JSONDecodeError / UnicodeDecodeError are ValueErrors
+        # Generic message: never echo parser internals back to the caller.
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"http_code": 400, "message": "Malformed payload"}},
+        )
+
+    user = payload.get("user") or {}
+    email_data = payload.get("email_data") or {}
+
+    recipient = (user.get("email") or "").strip()
+    action_type = email_data.get("email_action_type") or "signup"
+    token_hash = email_data.get("token_hash") or ""
+    token_otp = email_data.get("token") or None
+    redirect_to = email_data.get("redirect_to") or ""
+    site_url = email_data.get("site_url") or os.environ.get("SUPABASE_URL", "https://chavrutaai.org")
+
+    if not recipient:
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"http_code": 400, "message": "Recipient email missing in payload"}},
+        )
+
+    from app.email_pool import build_verify_link, pool, render_auth_email
+
+    verify_link = build_verify_link(
+        site_url=site_url,
+        token_hash=token_hash,
+        action_type=action_type,
+        redirect_to=redirect_to,
+    )
+    email_lang = (user.get("user_metadata") or {}).get("lang") or email_data.get("lang") or "he"
+    subject, html_body, text_body = render_auth_email(
+        action_type=action_type,
+        action_url=verify_link,
+        token=token_otp,
+        lang=email_lang,
+    )
+
+    ok, provider_or_reason = pool.send(
+        to=recipient,
+        subject=subject,
+        html=html_body,
+        text=text_body,
+    )
+
+    if not ok:
+        _log.warning("Email delivery failed for %s (reason: %s)", recipient, provider_or_reason)
+        # Propagate structured error back to Supabase GoTrue so the client receives the quota message
+        return JSONResponse(
+            status_code=429,
+            content={"error": {"http_code": 429, "message": "email_daily_quota_exhausted"}},
+        )
+
+    return JSONResponse(status_code=200, content={})
 
 
 # ── Sessions ──────────────────────────────────────────────────────────────────
@@ -3497,21 +4593,24 @@ _FULL_LESSON_FILE_NAMES = ("השיעור_המלא.doc", "full_lesson.doc")
 
 
 def _lesson_turn_text(m: dict) -> tuple[str, bool]:
-    """The text to carry into history for one saved turn, plus whether it was a completed LESSON.
-
-    `QueryResponse.answer` is deliberately empty for a finished lesson (see
-    `_generate_lesson_from_hits`) — its content lives only in `files`. Left as `m["text"]` as-is,
-    every consumer of `history` downstream (a chavruta follow-up, `_conversation_signals`, the raw
-    chat history hardened into the next LLM prompt via `render_messages`) would see an EMPTY
-    assistant turn sitting where the lesson was — as if nothing had been taught. Substituting the
-    full-lesson file's own text lets a follow-up turn actually discuss what was built.
-    """
+    """The text to carry into history for one saved turn, plus whether it was a completed LESSON."""
     text = m.get("text") or ""
     files = m.get("files") or []
     if text.strip() or not files:
         return text, False
     full = next((f for f in files if f.get("name") in _FULL_LESSON_FILE_NAMES), files[-1])
     return full.get("content") or "", True
+
+
+def _sourcesheet_turn_text(m: dict) -> tuple[str, bool]:
+    """The text to carry into history for one saved turn, plus whether it was a completed SOURCE SHEET."""
+    text = m.get("text") or ""
+    files = m.get("files") or []
+    is_sourcesheet = any("sourcesheet" in (f.get("name") or "") for f in files) or m.get("intent") == "sourcesheet"
+    if is_sourcesheet and files:
+        ss_md = next((f for f in files if (f.get("name") or "").endswith(".md")), files[0])
+        return ss_md.get("content") or text, True
+    return text, is_sourcesheet
 
 
 def _prepare_continue(session_id: str, req: QueryRequest, owner: str) -> tuple[list[Turn], str]:
@@ -3524,14 +4623,19 @@ def _prepare_continue(session_id: str, req: QueryRequest, owner: str) -> tuple[l
         raise HTTPException(status_code=404, detail="session not found")
     # Carry each assistant turn's CITED refs, not just its prose. db.get_messages already decodes
     # them; dropping them here is what let a five-turn discussion of a sugya lose the sugya (see
-    # _conversation_signals). `lesson=` marks a turn that finished a lesson (see _lesson_turn_text) —
-    # _run_query_impl uses it to tell a follow-up question from a request for a genuinely new lesson.
+    # _conversation_signals). `lesson=` and `sourcesheet=` mark turns that finished special modes.
     history = []
     for m in history_rows[-8:]:
         text, is_lesson = _lesson_turn_text(m)
+        ss_text, is_sourcesheet = _sourcesheet_turn_text(m)
+        if is_sourcesheet:
+            text = ss_text
         history.append(Turn(role=m["role"], text=text,
                             refs=[r for c in (m.get("citations") or []) if (r := (c or {}).get("ref"))],
-                            lesson=is_lesson))
+                            lesson=is_lesson,
+                            sourcesheet=is_sourcesheet,
+                            files=m.get("files") or [],
+                            citations=m.get("citations") or []))
     db.save_message(session_id, "user", req.question)
     # Sticky mode: a chat stays in the mode chosen on its first turn — ignore any intent the client
     # sends on later turns. Legacy sessions (mode=NULL) fall back to the per-request intent.
@@ -3604,7 +4708,7 @@ def query_async(req: QueryRequest, owner: str = Depends(current_owner),
         jid = jobs.submit(owner, _metered(owner, reserved, req.intent, lambda: jsonable_encoder(
             _run_query(q, req.lang, req.intent, [], audience=req.audience,
                        grade_band=req.grade_band, length=req.length, owner_id=owner, llm=llm)),
-            req, meter=meter))
+            req, meter=meter), credits_spent=reserved.credits_spent)
     return JobAccepted(job_id=jid)
 
 
@@ -3625,7 +4729,7 @@ def create_session_async(req: QueryRequest, owner: str = Depends(current_owner),
         jid = jobs.submit(owner, _metered(
             owner, reserved, req.intent,
             lambda: jsonable_encoder(_first_query_work(sid, req, owner, llm=llm)),
-            req, meter=meter))
+            req, meter=meter), session_id=sid, credits_spent=reserved.credits_spent)
     return JobAccepted(job_id=jid, session_id=sid)
 
 
@@ -3644,14 +4748,14 @@ def session_query_async(session_id: str, req: QueryRequest, owner: str = Depends
         history, intent = _prepare_continue(session_id, req, owner)
         jid = jobs.submit(owner, _metered(owner, reserved, req.intent, lambda: jsonable_encoder(
             _continue_query_work(session_id, req, history, intent, owner, llm=llm)),
-            req, meter=meter))
+            req, meter=meter), session_id=session_id, credits_spent=reserved.credits_spent)
     return JobAccepted(job_id=jid, session_id=session_id)
 
 
 class JobStatusOut(BaseModel):
-    status: str                 # pending | running | done | error
+    status: str                 # pending | running | done | error | cancelled
     result: dict | None = None  # present when status == done (the endpoint's normal response body)
-    error: str | None = None    # present when status == error
+    error: str | None = None    # present when status == error or cancelled
 
 
 @app.get("/jobs/{job_id}", response_model=JobStatusOut)
@@ -3664,7 +4768,36 @@ def get_job(job_id: str, owner: str = Depends(current_owner)):
         return JobStatusOut(status="done", result=job.result)
     if job.status == "error":
         return JobStatusOut(status="error", error=job.error)
+    if job.status == "cancelled":
+        return JobStatusOut(status="cancelled", error="cancelled by user")
     return JobStatusOut(status=job.status)
+
+
+@app.post("/jobs/{job_id}/cancel")
+def cancel_job(job_id: str, owner: str = Depends(current_owner)):
+    """Cancel an in-progress generation job."""
+    ok, spent = jobs.cancel_job(job_id, owner)
+    refunded = 0
+    if ok and spent > 0:
+        refunded = db.refund_stopped_credits(owner, spent, max_weekly=3)
+        if refunded:
+            _log.info("owner=%s refunded %d credit(s) on stop (spent %d)", owner, refunded, spent)
+    return {"cancelled": ok, "job_id": job_id, "refunded_credits": refunded}
+
+
+@app.post("/sessions/{session_id}/cancel")
+def cancel_session_job(session_id: str, owner: str = Depends(current_owner)):
+    """Cancel any in-progress generation job for a session."""
+    active = jobs.get_active_for_session(session_id, owner)
+    if active:
+        ok, spent = jobs.cancel_job(active.id, owner)
+        refunded = 0
+        if ok and spent > 0:
+            refunded = db.refund_stopped_credits(owner, spent, max_weekly=3)
+            if refunded:
+                _log.info("owner=%s refunded %d credit(s) on stop (spent %d)", owner, refunded, spent)
+        return {"cancelled": ok, "job_id": active.id, "session_id": session_id, "refunded_credits": refunded}
+    return {"cancelled": False, "session_id": session_id, "refunded_credits": 0}
 
 
 class MessageOut(BaseModel):
@@ -3683,10 +4816,13 @@ class MessageOut(BaseModel):
 
 
 @app.get("/sessions/{session_id}/messages", response_model=list[MessageOut])
-def get_messages(session_id: str, owner: str = Depends(current_owner)):
+def get_messages(session_id: str, response: Response, owner: str = Depends(current_owner)):
     msgs = db.get_messages(session_id, owner)
     if not msgs:
         raise HTTPException(status_code=404, detail="session not found")
+    active = jobs.get_active_for_session(session_id, owner)
+    if active:
+        response.headers["X-Active-Job-Id"] = active.id
     return msgs
 
 
@@ -4360,3 +5496,32 @@ def org_set_cap(req: MemberActionIn, owner: str = Depends(current_owner)):
         raise HTTPException(status_code=404, detail="not found")
     orgs.log_access(m["org_id"], owner, "set_cap", req.owner_id)
     return {"owner_id": req.owner_id, "daily_cap": cap}
+
+
+# ── Source Sheet Companion Library (Spec 008) ────────────────────────────────
+
+@app.get("/sourcesheets")
+def list_saved_sourcesheets(owner: str = Depends(current_owner)):
+    if not _sourcesheet_mode_enabled(owner):
+        raise HTTPException(status_code=403, detail="Source sheet mode is currently in private beta.")
+    return db.list_source_sheets(owner)
+
+
+@app.get("/sourcesheets/{sheet_id}")
+def get_saved_sourcesheet(sheet_id: str, owner: str = Depends(current_owner)):
+    if not _sourcesheet_mode_enabled(owner):
+        raise HTTPException(status_code=403, detail="Source sheet mode is currently in private beta.")
+    sheet = db.get_source_sheet(sheet_id, owner)
+    if not sheet:
+        raise HTTPException(status_code=404, detail="Source sheet not found")
+    return sheet
+
+
+@app.delete("/sourcesheets/{sheet_id}")
+def delete_saved_sourcesheet(sheet_id: str, owner: str = Depends(current_owner)):
+    if not _sourcesheet_mode_enabled(owner):
+        raise HTTPException(status_code=403, detail="Source sheet mode is currently in private beta.")
+    deleted = db.delete_source_sheet(sheet_id, owner)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Source sheet not found")
+    return {"deleted": True, "id": sheet_id}

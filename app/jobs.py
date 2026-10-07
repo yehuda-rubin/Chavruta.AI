@@ -17,16 +17,21 @@ doesn't need it (Principle: no speculative infrastructure).
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import threading
 import time
 import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 _log = logging.getLogger("chavruta.jobs")
+
+
+class JobCancelledError(Exception):
+    """Raised when an in-progress generation is cancelled by the user."""
 
 
 @dataclass
@@ -37,11 +42,23 @@ class Job:
 
     id: str
     owner: str
-    status: str = "pending"      # pending | running | done | error
+    session_id: str | None = None
+    status: str = "pending"      # pending | running | done | error | cancelled
     result: Any = None
     error: str | None = None
     created_at: float = 0.0
     finished_at: float = 0.0
+    cancel_event: threading.Event = field(default_factory=threading.Event)
+    credits_spent: int = 0
+
+
+_current_job: contextvars.ContextVar[Job | None] = contextvars.ContextVar("current_job", default=None)
+
+
+def is_cancelled() -> bool:
+    """Check if the currently executing job has been cancelled by the user."""
+    job = _current_job.get()
+    return job is not None and (job.status == "cancelled" or job.cancel_event.is_set())
 
 
 class JobRegistry:
@@ -53,42 +70,83 @@ class JobRegistry:
     jobs past their TTL so the dict can't grow without bound.
     """
 
+    JobCancelledError = JobCancelledError
+    is_cancelled = staticmethod(is_cancelled)
+
     def __init__(self, max_workers: int = 2, ttl_s: float = 3600.0):
         self._pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="job")
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
         self._ttl = ttl_s
 
-    def submit(self, owner: str, fn: Callable[[], Any]) -> str:
+    def submit(self, owner: str, fn: Callable[[], Any], session_id: str | None = None,
+               credits_spent: int = 0) -> str:
         """Register a job, hand `fn` to the pool, and return the job id at once. `fn` is called with
         no arguments and must return a JSON-serialisable value; any exception is captured onto the
         job as an error (never crashes the worker thread)."""
         now = time.time()
         self._reap(now)
         jid = uuid.uuid4().hex[:16]
-        job = Job(id=jid, owner=owner, created_at=now)
+        job = Job(id=jid, owner=owner, session_id=session_id, created_at=now,
+                  credits_spent=credits_spent)
         with self._lock:
             self._jobs[jid] = job
 
         def _run() -> None:
+            _current_job.set(job)
             with self._lock:
+                if job.status == "cancelled" or job.cancel_event.is_set():
+                    return
                 job.status = "running"
             try:
                 res = fn()
             except Exception as exc:            # noqa: BLE001 — a failed job must not kill the worker
+                if job.status == "cancelled" or job.cancel_event.is_set() or isinstance(exc, JobCancelledError):
+                    return
                 _log.exception("job %s FAILED", jid)
                 with self._lock:
-                    job.error = str(exc) or exc.__class__.__name__
-                    job.status = "error"
-                    job.finished_at = time.time()
+                    if job.status != "cancelled":
+                        job.error = str(exc) or exc.__class__.__name__
+                        job.status = "error"
+                        job.finished_at = time.time()
                 return
             with self._lock:
-                job.result = res
-                job.status = "done"
-                job.finished_at = time.time()
+                if job.status != "cancelled":
+                    job.result = res
+                    job.status = "done"
+                    job.finished_at = time.time()
 
         self._pool.submit(_run)
         return jid
+
+    def cancel_job(self, jid: str, owner: str) -> tuple[bool, int]:
+        """Cancel a pending or running job. Sets status to 'cancelled' and triggers cancel_event.
+        Returns (was_cancelled, credits_spent). credits_spent is cleared to prevent duplicate refunds."""
+        with self._lock:
+            job = self._jobs.get(jid)
+            if job is None or job.owner != owner:
+                return False, 0
+            if job.status in ("done", "error", "cancelled"):
+                return False, 0
+            job.status = "cancelled"
+            job.cancel_event.set()
+            job.finished_at = time.time()
+            spent = job.credits_spent
+            job.credits_spent = 0
+            return True, spent
+
+    def cancel(self, jid: str, owner: str) -> bool:
+        """Cancel a pending or running job. Backward-compatible boolean return."""
+        ok, _ = self.cancel_job(jid, owner)
+        return ok
+
+    def get_active_for_session(self, session_id: str, owner: str) -> Job | None:
+        """Return the running/pending job for session_id owned by owner, if any."""
+        with self._lock:
+            for j in self._jobs.values():
+                if j.session_id == session_id and j.owner == owner and j.status in ("pending", "running"):
+                    return j
+            return None
 
     def get(self, jid: str, owner: str) -> Job | None:
         """Return the job iff it exists AND belongs to `owner` — otherwise None, so a caller can never
@@ -110,3 +168,4 @@ class JobRegistry:
 # Module-level singleton — the app shares one registry (like the rate-limiter windows). Small pool by
 # design (see class docstring); TTL keeps finished jobs pollable for an hour after they complete.
 registry = JobRegistry(max_workers=2, ttl_s=3600.0)
+

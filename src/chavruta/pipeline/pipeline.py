@@ -29,8 +29,13 @@ _guard_log = logging.getLogger("chavruta.guards")
 
 
 def _detect_lang(text: str) -> str:
-    """Hebrew if it contains Hebrew letters, else English (FR-010)."""
-    return "he" if any("֐" <= ch <= "׿" for ch in text) else "en"
+    """Hebrew if Hebrew letters dominate Latin letters, else English (FR-010)."""
+    he_count = sum(1 for ch in (text or "") if "\u0590" <= ch <= "\u05ff")
+    en_count = sum(1 for ch in (text or "") if "a" <= ch.lower() <= "z")
+    if he_count > en_count or (he_count > 0 and en_count == 0):
+        return "he"
+    return "en"
+
 
 
 # Per-intent generation budgets (user decision 2026-06-18): lessons need room for a full
@@ -38,7 +43,7 @@ def _detect_lang(text: str) -> str:
 # the profile's llm_max_tokens for any other intent.
 # Backend names that mean "an OpenAI-compatible HTTP API". 'nebius' is the historical name and is
 # kept working; 'api' and 'openai' say what it actually is.
-_API_BACKENDS = frozenset({"api", "openai", "nebius"})
+_API_BACKENDS = frozenset({"api", "openai", "nebius", "fallback"})
 
 # Raised across the board 2026-08-12 (user decision). Thorough, step-by-step answers are a
 # deliberate product choice, not a bug to trim (see the "long answers are a feature" decision), and
@@ -50,7 +55,7 @@ _API_BACKENDS = frozenset({"api", "openai", "nebius"})
 _INTENT_MAX_TOKENS = {
     Intent.QA: 6000,
     Intent.EXPLAIN: 8000,
-    Intent.LESSON: 48000,
+    Intent.LESSON: 30000,
     Intent.COMPARE: 20000,
     Intent.HALACHA: 24000,     # a teshuva: source → poskim → pesak, can be substantial
 }
@@ -115,7 +120,39 @@ def build_backends(profile: Profile):
     # CloudLLM is a plain OpenAI-compatible client and the provider is just a base URL. Naming the
     # backend after one vendor made switching look like a code change when it is an env change, so
     # the capability name is now the real one and the vendor name follows it.
-    if profile.llm_backend in _API_BACKENDS:
+    if profile.llm_backend == "fallback":
+        from chavruta.llm.cloud import CloudLLM
+        from chavruta.llm.fallback import FallbackLLM
+
+        if not (profile.llm_api_key or "").strip():
+            # No primary key configured — run directly on secondary (Nebius)
+            llm = CloudLLM(
+                profile.llm_fallback_model,
+                profile.llm_fallback_base_url,
+                profile.llm_fallback_api_key,
+                timeout_s=getattr(profile, "llm_fallback_timeout_s", 180.0),
+                max_retries=profile.llm_max_retries,
+                min_output_tokens=0,
+            )
+        else:
+            primary_llm = CloudLLM(
+                profile.llm_model,
+                profile.llm_base_url,
+                profile.llm_api_key,
+                timeout_s=min(profile.llm_timeout_s, 25.0),
+                max_retries=profile.llm_max_retries,
+                min_output_tokens=getattr(profile, "llm_min_output_tokens", 0),
+            )
+            secondary_llm = CloudLLM(
+                profile.llm_fallback_model,
+                profile.llm_fallback_base_url,
+                profile.llm_fallback_api_key,
+                timeout_s=getattr(profile, "llm_fallback_timeout_s", 180.0),
+                max_retries=profile.llm_max_retries,
+                min_output_tokens=0,
+            )
+            llm = FallbackLLM(primary_llm, secondary_llm)
+    elif profile.llm_backend in _API_BACKENDS:
         from chavruta.llm.cloud import CloudLLM
 
         llm = CloudLLM(profile.llm_model, profile.llm_base_url, profile.llm_api_key,
@@ -134,11 +171,14 @@ def build_backends(profile: Profile):
             f"DictaLM/Ollama backend has been removed."
         )
 
-    reranker = None
-    if profile.rerank:
-        from chavruta.retrieval.rerank import Reranker
+    from chavruta.retrieval.rerank import Reranker
 
-        reranker = Reranker(profile.rerank_model, device=profile.embedding_device)
+    if profile.rerank:
+        backend = "api" if (profile.rerank_model or "").startswith("@cf/") else "auto"
+        reranker = Reranker(profile.rerank_model, device=profile.embedding_device, backend=backend)
+    else:
+        # Cloudflare Workers AI API Reranker (available for admin/user-gated queries)
+        reranker = Reranker("@cf/baai/bge-reranker-base", backend="api")
 
     # Prefer the corpus-derived, corpus-aligned graph on disk (LinkStore + ref index — O(1) RAM);
     # fall back to the legacy in-memory links.jsonl if it isn't built yet.
@@ -260,9 +300,17 @@ class ChavrutaPipeline:
         if hasattr(llm, "source_fetcher"):
             llm.source_fetcher = self._build_source_fetcher()
 
-    def _resolve_query(self, request: Query) -> Query:
-        if request.lang is None or request.lang == "":
+    def _resolve_query(self, request: Query, history=None) -> Query:
+        passed_lang = getattr(request, "lang", None)
+        if passed_lang and str(passed_lang).strip():
+            request.lang = str(passed_lang).strip()
+        else:
             request.lang = _detect_lang(request.text)
+        from chavruta.intents.llm_planner import distill_query
+        distilled = distill_query(request.text, history=history, intent=request.intent)
+        request.distilled_text = distilled
+        if not request.search_text:
+            request.search_text = distilled
         if self.router is not None:
             return self.router.route(request)
         return request
@@ -329,7 +377,7 @@ class ChavrutaPipeline:
         if not fetched or is_degrade_message(raw):
             return None                                   # nothing fetched, or a timeout/no-fetch degrade
         marker_map = {f"S{i}": s for i, s in enumerate(fetched, 1)}
-        text, citations, is_grounded = grounded.enforce_citations(raw, marker_map)
+        text, citations, is_grounded = grounded.enforce_citations(raw, marker_map, question=query.text)
         if not is_grounded:
             return None                                   # model didn't actually cite a fetched source
         return Answer(text=text, citations=citations, grounded=True, no_source=False,
@@ -358,7 +406,11 @@ class ChavrutaPipeline:
                 lines += [f"### [{s.marker}] {s.ref}{who}", (s.text or "").strip(), ""]
         else:
             lines += ["(no sources retrieved)", ""]
-        lines += ["## QUESTION", prompt.question.strip(), "", "## INSTRUCTIONS"]
+        lines += ["## QUESTION", prompt.question.strip()]
+        distilled = getattr(prompt, "distilled_question", "")
+        if distilled and distilled != prompt.question:
+            lines += ["", "## FOCUSED QUESTION", distilled.strip()]
+        lines += ["", "## INSTRUCTIONS"]
         lines += (["ענה אך ורק מהמקורות; צטט כל טענה בסימון [S#]; כתוב בעברית ברורה ומלאה, ללא מילים בשפה "
                    "זרה; אם אין תשובה במקורות — אמור זאת בפירוש ואל תמציא."] if he else
                   ["Answer ONLY from the SOURCES; cite every claim by [S#]; write in clear, full English "
@@ -372,7 +424,7 @@ class ChavrutaPipeline:
         override (BYOK — app/api.py::_byok_llm) so a single turn is billed to the caller's own
         provider key instead, without touching the pipeline's shared state."""
         llm = llm or self.llm
-        query = self._anchor_followup(self._resolve_query(request), history)
+        query = self._anchor_followup(self._resolve_query(request, history=history), history)
 
         # Out-of-corpus work honesty (spec edge case): the question explicitly asks about
         # a body of work that is not loaded → say so; never substitute similar-sounding
@@ -427,6 +479,12 @@ class ChavrutaPipeline:
         if query.intent in (Intent.LESSON, Intent.HALACHA):
             return self._lesson_answer(query, result, llm, history=history)
 
+        if query.intent in (Intent.CHAVRUTA, "chavruta"):
+            return self._chavruta_answer(query, result, llm, history=history)
+
+        if query.intent in (Intent.SOURCESHEET, "sourcesheet"):
+            return self._sourcesheet_answer(query, result, llm, history=history)
+
         return self._qa_answer(query, result, llm, history=history, missing_note=missing_note)
 
     def _qa_answer(self, query, result, llm=None, *, history=None, missing_note=None):
@@ -435,8 +493,10 @@ class ChavrutaPipeline:
         calendar modes, which build a `RetrievalResult` from a calendar-resolved ref instead of
         running the retriever, same principle as `_lesson_answer` being callable either way."""
         llm = llm or self.llm
+        distilled = getattr(query, "distilled_text", "") or ""
         prompt, marker_map = grounded.build_prompt(
-            query.text, result.hits, intent=query.intent, history=history, lang=query.lang
+            query.text, result.hits, intent=query.intent, history=history, lang=query.lang,
+            distilled_question=distilled,
         )
         # Run through the agentic ===NEED_SOURCES=== loop so the model can pull MORE sources when the
         # retrieved set is THIN (it answers in a single round if the sources already suffice). On a
@@ -460,11 +520,13 @@ class ChavrutaPipeline:
             # own text scan ever over/undercounts (see agentic.py::append_sources). Falls back to
             # the old count-based guess only for a source that never went through that loop.
             marker_map.setdefault(s.marker or f"S{i}", s)
-        text, citations, is_grounded = grounded.enforce_citations(raw, marker_map)
+        text, citations, is_grounded = grounded.enforce_citations(raw, marker_map, question=query.text)
+        used_model = getattr(llm, "last_model_used", "") or getattr(llm, "model_id", "")
         answer = Answer(
             text=text, citations=citations, grounded=is_grounded,
             no_source=not is_grounded, intent=query.intent,
             retrieved_refs=[h.ref for h in result.hits] + [s.ref for s in (fetched or [])],
+            model_used=used_model,
         )
         if missing_note:
             answer.caveats.append(missing_note)
@@ -479,7 +541,7 @@ class ChavrutaPipeline:
         # folded into marker_map/citations above) — checking against result.hits alone false-flagged
         # a faithful quote as "not found" whenever it came from a source the FIRST retrieval round
         # missed and a later agentic round supplied.
-        bad_q = grounded.unverified_quotes(text, list(result.hits) + list(fetched or []))
+        bad_q = grounded.unverified_quotes(text, list(result.hits) + list(fetched or []), lang=query.lang)
         if bad_q:
             answer.caveats.append(("הערה: ציטוט/ים שלא נמצאו במקורות שנשלפו: «" + "», «".join(bad_q[:2]) + "» — יש לאמת.")
                                   if query.lang != "en" else
@@ -565,13 +627,16 @@ class ChavrutaPipeline:
         """
         llm = llm or self.llm
         is_shut = query.intent is Intent.HALACHA
+        distilled = getattr(query, "distilled_text", "") or ""
         plan = self._build_lesson(query, result)
         if plan.sections:
             prompt, marker_map = grounded.build_lesson_walkthrough_prompt(
-                plan, query.text, lang=query.lang, shut=is_shut, history=history)
+                plan, query.text, lang=query.lang, shut=is_shut, history=history,
+                distilled_question=distilled)
         else:
             prompt, marker_map = grounded.build_prompt(
-                query.text, result.hits, intent=query.intent, lang=query.lang, history=history)
+                query.text, result.hits, intent=query.intent, lang=query.lang, history=history,
+                distilled_question=distilled)
         # Run through the agentic ===NEED_SOURCES=== loop, same as _qa_answer: a lesson/responsa
         # whose initial sources share only a surface word with a modern real-world question (e.g.
         # "computer" retrieving a games sugya instead of the corpus's own electricity/muktzeh
@@ -596,14 +661,70 @@ class ChavrutaPipeline:
             # own text scan ever over/undercounts (see agentic.py::append_sources). Falls back to
             # the old count-based guess only for a source that never went through that loop.
             marker_map.setdefault(s.marker or f"S{i}", s)
-        text, citations, is_grounded = grounded.enforce_citations(raw, marker_map)
+        text, citations, is_grounded = grounded.enforce_citations(raw, marker_map, question=query.text)
         if plan.sections:
             plan = grounded.prune_lesson_to_cited(plan, citations)
+        used_model = getattr(llm, "last_model_used", "") or getattr(llm, "model_id", "")
         answer = Answer(text=text, citations=citations, grounded=is_grounded,
                         no_source=not is_grounded, intent=query.intent,
-                        retrieved_refs=[h.ref for h in result.hits] + [s.ref for s in (fetched or [])])
+                        retrieved_refs=[h.ref for h in result.hits] + [s.ref for s in (fetched or [])],
+                        model_used=used_model)
         answer.lesson_plan = plan
         return grounded.maybe_halacha_caveat(answer, query.lang)
+
+    def _chavruta_answer(self, query: Query, result, llm=None, *, history=None) -> Answer:
+        """Socratic study-partner chavruta turn with prompt sandwiching."""
+        llm = llm or self.llm
+        distilled = getattr(query, "distilled_text", "") or ""
+        prompt, marker_map = grounded.build_prompt(
+            query.text, result.hits, intent=Intent.QA, history=history, lang=query.lang,
+            distilled_question=distilled,
+        )
+        raw, fetched = self._agentic_generate(prompt, query.lang, Intent.QA, llm)
+        from chavruta.llm.agentic import is_degrade_message
+        if is_degrade_message(raw):
+            llm_out = llm.generate(
+                prompt, lang=query.lang,
+                max_tokens=_max_tokens_for(Intent.QA, self.profile),
+                temperature=self.profile.llm_temperature,
+            )
+            raw, fetched = llm_out.text, getattr(llm_out, "fetched_sources", None) or []
+        for i, s in enumerate(fetched or [], len(marker_map) + 1):
+            marker_map.setdefault(s.marker or f"S{i}", s)
+        text, citations, is_grounded = grounded.enforce_citations(raw, marker_map, question=query.text)
+        used_model = getattr(llm, "last_model_used", "") or getattr(llm, "model_id", "")
+        return Answer(
+            text=text, citations=citations, grounded=is_grounded,
+            no_source=not is_grounded, intent=Intent.CHAVRUTA,
+            retrieved_refs=[h.ref for h in result.hits] + [s.ref for s in (fetched or [])],
+            model_used=used_model,
+        )
+
+    def _sourcesheet_answer(self, query: Query, result, llm=None, *, history=None) -> Answer:
+        """Sourcesheet intent synthesis using retrieved sources and prompt sandwiching."""
+        llm = llm or self.llm
+        distilled = getattr(query, "distilled_text", "") or ""
+        prompt, marker_map = grounded.build_prompt(
+            query.text, result.hits, intent=Intent.SOURCESHEET, history=history, lang=query.lang,
+            distilled_question=distilled,
+        )
+        raw, fetched = self._agentic_generate(prompt, query.lang, Intent.SOURCESHEET, llm)
+        from chavruta.llm.agentic import is_degrade_message
+        if is_degrade_message(raw):
+            llm_out = llm.generate(
+                prompt, lang=query.lang,
+                max_tokens=_max_tokens_for(Intent.SOURCESHEET, self.profile),
+                temperature=self.profile.llm_temperature,
+            )
+            raw, fetched = llm_out.text, getattr(llm_out, "fetched_sources", None) or []
+        for i, s in enumerate(fetched or [], len(marker_map) + 1):
+            marker_map.setdefault(s.marker or f"S{i}", s)
+        text, citations, is_grounded = grounded.enforce_citations(raw, marker_map, question=query.text)
+        return Answer(
+            text=text, citations=citations, grounded=is_grounded,
+            no_source=not is_grounded, intent=Intent.SOURCESHEET,
+            retrieved_refs=[h.ref for h in result.hits] + [s.ref for s in (fetched or [])],
+        )
 
     def _template_index(self, intent=None):
         """Lazily load the template index for the intent — the responsa (שו"ת) set for HALACHA,

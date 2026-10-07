@@ -86,6 +86,12 @@ class Profile:
     # model that answers directly (the baseline). See chavruta/llm/presets.py.
     llm_min_output_tokens: int = 0
 
+    # ── Fallback Generation (primary -> fallback) ──
+    llm_fallback_model: str = "Qwen/Qwen3-235B-A22B-Instruct-2507"
+    llm_fallback_base_url: str = "https://api.studio.nebius.ai/v1"
+    llm_fallback_api_key: str = ""
+    llm_fallback_timeout_s: float = 180.0
+
     # ── Query understanding (spec 002) ──
     query_planner: str = "none"               # "none" (heuristic only) | "llm" (LLM fallback)
 
@@ -136,6 +142,10 @@ class Profile:
         p.llm_max_tokens = int(_env("CHAVRUTA_LLM_MAX_TOKENS", str(p.llm_max_tokens)))
         p.llm_timeout_s = float(_env("CHAVRUTA_LLM_TIMEOUT_S", str(p.llm_timeout_s)))
         p.llm_max_retries = int(_env("CHAVRUTA_LLM_MAX_RETRIES", str(p.llm_max_retries)))
+        p.llm_fallback_model = _env("CHAVRUTA_LLM_FALLBACK_MODEL", p.llm_fallback_model)
+        p.llm_fallback_base_url = _env("CHAVRUTA_LLM_FALLBACK_BASE_URL", p.llm_fallback_base_url)
+        p.llm_fallback_api_key = _env("CHAVRUTA_LLM_FALLBACK_API_KEY", p.llm_fallback_api_key) or os.environ.get("NEBIUS_API_KEY", "")
+        p.llm_fallback_timeout_s = float(_env("CHAVRUTA_LLM_FALLBACK_TIMEOUT_S", str(p.llm_fallback_timeout_s)))
         p.query_planner = _env("CHAVRUTA_QUERY_PLANNER", p.query_planner)
         return p
 

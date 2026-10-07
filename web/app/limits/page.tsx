@@ -30,6 +30,29 @@ export default function Limits() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      const q = sp.get("lang");
+      if (q === "en" || q === "he") {
+        setLang(q);
+        return;
+      }
+      const saved = localStorage.getItem("chavruta-lang");
+      if (saved === "en" || saved === "he") {
+        setLang(saved);
+      }
+    } catch {}
+  }, []);
+
+  const toggleLang = () => {
+    const next = lang === "he" ? "en" : "he";
+    setLang(next);
+    try {
+      localStorage.setItem("chavruta-lang", next);
+    } catch {}
+  };
+
+  useEffect(() => {
     async function fetchLimits() {
       try {
         const res = await fetch(`/billing/limits?lang=${lang}`);
@@ -61,8 +84,8 @@ export default function Limits() {
             {tr(lang, "backToApp")}
           </Link>
           <button
-            onClick={() => setLang(lang === "he" ? "en" : "he")}
-            className="px-3 py-1.5 rounded-full glass text-ink/70 text-xs font-semibold"
+            onClick={toggleLang}
+            className="px-3 py-1.5 rounded-full glass text-ink/70 text-xs font-semibold hover:text-tekhelet transition cursor-pointer"
           >
             עברית · EN
           </button>

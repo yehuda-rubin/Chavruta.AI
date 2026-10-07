@@ -104,6 +104,8 @@ def main() -> None:
             "structure": m.get("structure", ""),
             "dir": str(mp.parent.relative_to(REPO)).replace("\\", "/"),
             "files": m.get("files", {}),
+            "files_en": m.get("files_en", {}),
+            "title_en": m.get("title_en", ""),
             "example_topics": m.get("example_topics", []),
         }
         points.append(models.PointStruct(id=str(uuid.uuid5(_NS, tid)), vector=e.dense, payload=payload))

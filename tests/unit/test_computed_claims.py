@@ -140,7 +140,7 @@ def test_resolve_facts_reads_the_cache_and_never_touches_the_network(monkeypatch
                         lambda: pytest.fail("the checker must not call Sefaria"))
     rows = {
         ("daf_yomi", "2026-08-13"): '{"tractate": "Chullin", "daf": 104}',
-        ("parsha", "2026-08-09"): ('{"name_en": "Shoftim", "name_he": "\\u05e9\\u05e4\\u05d8\\u05d9\\u05dd",'
+        ("parsha", "2026-08-13"): ('{"name_en": "Shoftim", "name_he": "\\u05e9\\u05e4\\u05d8\\u05d9\\u05dd",'
                                    ' "ref_range": "Deuteronomy 16:18-21:9", "haftarah_ref": ""}'),
     }
     now = datetime(2026, 8, 13, 9, 0, tzinfo=ZoneInfo("Asia/Jerusalem"))
@@ -181,7 +181,7 @@ def test_today_is_computed_in_jerusalem_not_utc():
 
 
 def test_cache_keys_match_the_buckets_the_api_writes():
-    # daf_yomi buckets by day; parsha by the week's Sunday (Thursday 2026-08-13 → 2026-08-09).
+    # daf_yomi and parsha both bucket by day to check daily for holiday/special readings.
     assert computed.cache_key("daf_yomi", date(2026, 8, 13)) == "2026-08-13"
-    assert computed.cache_key("parsha", date(2026, 8, 13)) == "2026-08-09"
+    assert computed.cache_key("parsha", date(2026, 8, 13)) == "2026-08-13"
     assert computed.cache_key("parsha", date(2026, 8, 9)) == "2026-08-09"

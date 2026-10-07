@@ -44,9 +44,13 @@ HELPER_PLAN = "basic"
 # Features an operator may open for a helper. Checked against this list rather than accepted as free
 # text: a typo would create a grant that silently matches nothing, which looks exactly like the
 # feature being broken.
-FEATURES: tuple[str, ...] = ("sugya", "calendar")
+FEATURES: tuple[str, ...] = ("sugya", "calendar", "sourcesheet")
 
-FEATURE_LABELS_HE = {"sugya": "משחק הסוגיה", "calendar": "פרשת שבוע ודף יומי"}
+FEATURE_LABELS_HE = {
+    "sugya": "משחק הסוגיה",
+    "calendar": "פרשת שבוע ודף יומי",
+    "sourcesheet": "ניתוח דפי מקורות",
+}
 
 
 def _now() -> str:

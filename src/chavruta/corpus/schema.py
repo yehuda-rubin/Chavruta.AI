@@ -27,6 +27,8 @@ class Intent(str, Enum):
     COMPARE = "compare"
     LESSON = "lesson"
     HALACHA = "halacha"        # reserved / deferred until a halachic corpus is loaded
+    SOURCESHEET = "sourcesheet"
+    CHAVRUTA = "chavruta"
 
 
 @dataclass(frozen=True)
@@ -163,6 +165,10 @@ class Turn:
     # (app/api.py::_run_query_impl) tell "this session already has a finished lesson" from the turns
     # alone, without a second DB round-trip. Optional and False by default, same reasoning as `refs`.
     lesson: bool = False
+    # True for an assistant turn that completed a SOURCE SHEET companion guide.
+    sourcesheet: bool = False
+    files: list[dict] = field(default_factory=list)
+    citations: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -183,6 +189,8 @@ class Query:
     # tractate rather than anchoring, so "what does Rashi say in Sukkah" can reach Rashi on Sukkah
     # even when the daf is never given.
     tractates: list[str] | None = None
+    distilled_text: str = ""
+    rerank: bool = False
 
 
 @dataclass
@@ -216,3 +224,4 @@ class Answer:
     # just the ones it cited. Lets a caller tell "named a real work" apart from "named a work it was
     # actually given"; see app/api.py::_widen_citations_from_note.
     retrieved_refs: list[str] = field(default_factory=list)
+    model_used: str = ""
