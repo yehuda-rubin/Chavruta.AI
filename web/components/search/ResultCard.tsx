@@ -38,7 +38,10 @@ export function ResultCard({ hit, lang }: { hit: SearchHit; lang: Lang }) {
   const eraChip = ERA_CHIPS.find((e) => e.id === hit.era);
   const categoryName = eraChip ? (lang === "he" ? eraChip.he : eraChip.en) : CATEGORY_LABELS[lang]?.[hit.work_id] || hit.work_id;
   const license = hit.license_he || hit.license_en || "";
-  const version = hit.version_he || hit.version_en || "";
+  // the edition's name only in the reader's script: a Hebrew screen does not print "Birkat Asher, Jerusalem 2010"
+  const hasHe = (s: string) => /[֐-׿]/.test(s);
+  const versionRaw = hit.version_he || hit.version_en || "";
+  const version = lang === "he" ? (hasHe(versionRaw) ? versionRaw : "") : hasHe(versionRaw) ? "" : versionRaw;
 
   return (
     <article className="glass rounded-2xl p-5 sm:p-6 transition-all duration-200 hover:shadow-md hover:shadow-tekhelet/5 flex flex-col gap-3">
@@ -46,11 +49,11 @@ export function ResultCard({ hit, lang }: { hit: SearchHit; lang: Lang }) {
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="flex flex-col">
           <h2 className="font-serif text-xl sm:text-2xl font-bold text-tekhelet leading-snug">
-            {lang === "he" && hit.ref_he ? hit.ref_he : hit.ref}
+            {lang === "he" ? hit.ref_he || hit.ref : hit.ref_en || hit.ref}
           </h2>
-          {(hit.author_he || hit.book) && (
+          {(lang === "he" ? hit.author_he : hit.book) && (
             <p className="text-sm text-ink/70 font-medium">
-              {hit.author_he || hit.book}
+              {lang === "he" ? hit.author_he : hit.book}
               {hit.category_path && (
                 <span className="text-ink/40 text-xs mr-2 ml-2">
                   ({lang === "he" && hit.category_he ? hit.category_he : hit.category_path})

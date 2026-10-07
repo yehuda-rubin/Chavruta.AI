@@ -2,7 +2,8 @@
 import { useEffect, useState } from "react";
 import type { Attachment, Citation, Lang, Message } from "@/lib/types";
 import { tr } from "@/lib/i18n";
-import { commentatorTag, isHe } from "@/lib/format";
+import { isHe } from "@/lib/format";
+import { citeText, useCiteLabels } from "@/lib/labels";
 import { fileKind } from "@/lib/files";
 import { Icon } from "./Icon";
 
@@ -96,6 +97,8 @@ export function SourcesPanel({
     }
   }
 
+  const labels = useCiteLabels(order);
+
   // Show the evidence, not just a list of titles: when a new source arrives, its card opens (the
   // panel only exists because there is something to read). Keyed on the newest ref so a re-render
   // doesn't undo a card the reader has since opened or closed.
@@ -147,6 +150,7 @@ export function SourcesPanel({
             .map(({ c, n }) => {
               const open = isOpen(c.ref);
               const full = lang === "en" ? c.text_en || c.text_he : c.text_he || c.text_en;
+              const cite = citeText(c, lang, labels);
               return (
                 <div
                   key={c.ref}
@@ -162,10 +166,10 @@ export function SourcesPanel({
                         <span className="inline-grid place-items-center h-5 w-5 rounded-full bg-indigo text-white text-[11px] font-bold tabular-nums shrink-0">
                           {n}
                         </span>
-                        {commentatorTag(c)}
+                        {cite.who}
                       </p>
                       <h4 className="text-[17px] font-bold text-ink mt-1.5 leading-tight break-words">
-                        {(lang !== "en" && c.ref_he) || c.ref}
+                        {cite.title}
                       </h4>
                     </div>
                     <Icon name={open ? "expand_less" : "expand_more"} className="text-ink/40 shrink-0" />

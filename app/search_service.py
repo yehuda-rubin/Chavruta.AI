@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from chavruta.corpus.cite_labels import cite_labels
 from chavruta.corpus.normalize import deuphemize_he, normalize_he
 from chavruta.corpus.source_lookup import SourceIndex, parse as parse_source
 from chavruta.intents.hebrew_refs import HE_TRACTATES
@@ -71,6 +72,7 @@ class SearchHit(BaseModel):
     version_he: str = ""
     version_en: str | None = None
     category_path: str = ""
+    ref_en: str = ""
     ref_he: str = ""            # the citation in Hebrew ('תוספתא ביכורים ב׳, י׳')
     category_he: str = ""       # category_path in Hebrew
     era: str = ""               # time period: tanakh, chazal, geonim, rishonim, acharonim, modern, other
@@ -117,6 +119,7 @@ class ReaderUnitResponse(BaseModel):
 class ReaderLinkItem(BaseModel):
     ref: str
     ref_he: str = ""
+    ref_en: str = ""
     source_ref: str = ""
     category: str = ""
     type: str = ""
@@ -578,7 +581,8 @@ async def search_query(
                 version_he=r["version_he"] or "",
                 version_en=r["version_en"],
                 category_path=r["category_path"] or "",
-                ref_he=ref_labels(r["ref"] or "")[0],
+                ref_he=ref_labels(r["ref"] or "", r["author_he"] or "")[0],
+                ref_en=ref_labels(r["ref"] or "")[1],
                 category_he=category_labels(r["category_path"] or ""),
                 era=r["era"],
             )
@@ -946,27 +950,11 @@ def category_labels(path: str) -> str:
     return " / ".join((_category_he or {}).get("/".join(parts[: i + 1])) or p for i, p in enumerate(parts))
 
 
-def ref_labels(ref: str) -> tuple[str, str]:
-    """(Hebrew, English) citation for a corpus display ref: 'Genesis 1:1' -> ('בראשית א, א', 'Genesis 1:1'),
-    'Berakhot 3:1' -> ('ברכות ב ע״א, א', 'Berakhot 2a:1'). Falls back to the ref itself for titles the
-    catalogue does not know, so a label is never empty."""
-    m = _REF_PARTS.match((ref or "").strip())
-    if not m:
-        return ref or "", ref or ""
-    title, nums = m.group("title"), [int(n) for n in m.group("nums").split(":")]
-    title_he = _titles().get(title, ("", ""))[0]
-    if not title_he and ", " in title:    # 'Ein Yaakov, Berakhot': work + the tractate it is cited by
-        head, tail = title.rsplit(", ", 1)
-        head_he, tail_he = _titles().get(head, ("", ""))[0], _titles().get(tail, ("", ""))[0]
-        title_he = f"{head_he or head}, {tail_he or tail}"
-    title_he = title_he or title
-    en_parts = [str(n) for n in nums]
-    he_parts = [to_gematria_he(n) for n in nums]
-    if _is_bavli_title(title):
-        daf, amud = (nums[0] + 1) // 2, ("a" if nums[0] % 2 else "b")
-        en_parts[0] = f"{daf}{amud}"
-        he_parts[0] = f"{to_gematria_he(daf)} {'ע״א' if amud == 'a' else 'ע״ב'}"
-    return f"{title_he} {', '.join(he_parts)}", f"{title} {':'.join(en_parts)}"
+def ref_labels(ref: str, author_he: str = "", full: bool = False) -> tuple[str, str]:
+    """(Hebrew, English) citation for a ref: one language each, chapter and section only (corpus.cite_labels).
+    The Hebrew is empty when no Hebrew name for the work is known."""
+    cl = cite_labels(ref, title_he=author_he, full=full)
+    return cl["he"], cl["en"]
 
 
 @app.get("/reader/catalog")
@@ -1118,6 +1106,14 @@ async def reader_toc(request: Request, book: str = Query(..., min_length=1, max_
     return JSONResponse(_toc_cache[title], headers={"Cache-Control": "public, max-age=3600"})
 
 
+@app.get("/reader/labels")
+async def reader_labels(ref: list[str] = Query(..., max_length=80)) -> JSONResponse:
+    """One-language citation labels for refs the chat cites (corpus spelling): {ref: {he, en, who_he, who_en}}.
+    Pure string work on static tables, so no database and cacheable."""
+    out = {r: cite_labels(r) for r in ref[:80]}
+    return JSONResponse(out, headers={"Cache-Control": "public, max-age=86400"})
+
+
 @app.get("/reader/unit", response_model=ReaderUnitResponse)
 async def reader_unit(
     request: Request,
@@ -1157,7 +1153,7 @@ async def reader_unit(
     segments: list[ReaderSegment] = []
     for idx, r in enumerate(rows):
         seg_num = extract_segment_num(r["ref"] or "", idx + 1)
-        ref_he, ref_en = ref_labels(r["ref"] or "")
+        ref_he, ref_en = ref_labels(r["ref"] or "", r["author_he"] or "", full=True)
         segments.append(
             ReaderSegment(
                 ref=r["ref"] or "",
@@ -1474,7 +1470,7 @@ async def reader_links(
         related = await asyncio.to_thread(_parallels, clean_ref)
 
     for item in commentaries + related:
-        item.ref_he = ref_labels(item.ref)[0]
+        item.ref_he, item.ref_en = ref_labels(item.ref, item.author_he)
 
     return ReaderLinksResponse(
         ref=clean_ref,

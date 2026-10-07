@@ -31,7 +31,8 @@ export interface CommentaryItem {
   commentator: string;         // e.g. "רש\"י", "רמב\"ן", "אבן עזרא", "ספורנו", "תוספות"
   commentator_en?: string;
   ref: string;                 // e.g. "Rashi on Genesis 1:1:1"
-  ref_he?: string;             // e.g. "רש\"י על בראשית א׳, א׳, א׳"
+  ref_he?: string;             // e.g. "רש\"י על בראשית א׳, א׳"
+  ref_en?: string;             // e.g. "Rashi on Genesis 1:1"
   type: "commentary" | "parallel" | "halacha" | "midrash" | "other";
   text_he: string;
   text_en?: string | null;

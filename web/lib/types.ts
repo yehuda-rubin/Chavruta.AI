@@ -112,6 +112,7 @@ export interface SearchHit {
   category_path: string;
   /** Hebrew citation / category, built by the search service from the catalogue. */
   ref_he?: string;
+  ref_en?: string;
   category_he?: string;
   era?: string;
 }
