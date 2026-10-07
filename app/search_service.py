@@ -919,7 +919,12 @@ def ref_labels(ref: str) -> tuple[str, str]:
     if not m:
         return ref or "", ref or ""
     title, nums = m.group("title"), [int(n) for n in m.group("nums").split(":")]
-    title_he = _titles().get(title, ("", ""))[0] or title
+    title_he = _titles().get(title, ("", ""))[0]
+    if not title_he and ", " in title:    # 'Ein Yaakov, Berakhot': work + the tractate it is cited by
+        head, tail = title.rsplit(", ", 1)
+        head_he, tail_he = _titles().get(head, ("", ""))[0], _titles().get(tail, ("", ""))[0]
+        title_he = f"{head_he or head}, {tail_he or tail}"
+    title_he = title_he or title
     en_parts = [str(n) for n in nums]
     he_parts = [to_gematria_he(n) for n in nums]
     if _is_bavli_title(title):
