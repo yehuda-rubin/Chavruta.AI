@@ -16,9 +16,15 @@ def test_bavli_shows_daf_and_amud_not_the_internal_segment():
     assert cite_labels("Berakhot.4.2")["en"] == "Berakhot 2b"
 
 
-def test_reader_page_keeps_the_segment_of_a_base_text():
-    assert ref_labels("Berakhot 3:2", full=True) == ("ברכות ב' ע״א, ב'", "Berakhot 2a:2")
+def test_reader_page_keeps_a_verse_but_never_the_line_of_a_daf():
+    assert ref_labels("Berakhot 3:2", full=True) == ("ברכות ב' ע״א", "Berakhot 2a")
     assert ref_labels("Genesis 1:3", full=True)[1] == "Genesis 1:3"
+
+
+def test_reader_header_names_the_daf_not_a_chapter():
+    from chavruta.corpus.cite_labels import section_he
+    assert section_he("Shabbat 42:5") == 'דף כ"א ע״ב'
+    assert section_he("Genesis 1:1") is None
 
 
 def test_commentary_never_shows_its_own_index():

@@ -454,9 +454,19 @@ function ReaderInner() {
                 </>
               )}
 
-              <span className="font-bold text-tekhelet truncate">
-                {(unit?.book_he || unit?.book || rawRef.split(".")[0] || "").replace(/^[•.\s]+/, "")}
-              </span>
+              {unit?.book ? (
+                <Link
+                  href={`/library?book=${encodeURIComponent(unit.book)}`}
+                  className="font-bold text-tekhelet truncate hover:underline"
+                  title="לעמוד הספר"
+                >
+                  {(unit.book_he || unit.book).replace(/^[•.\s]+/, "")}
+                </Link>
+              ) : (
+                <span className="font-bold text-tekhelet truncate">
+                  {(rawRef.split(".")[0] || "").replace(/^[•.\s]+/, "")}
+                </span>
+              )}
 
               {unit?.section_name && (
                 <>
@@ -698,9 +708,12 @@ function ReaderInner() {
                             {seg.label}
                           </span>
 
-                          <span className="text-xs font-serif text-ink/40 font-medium">
-                            {seg.ref_he || formatHebrewRef(seg.ref)}
-                          </span>
+                          {/* a label that repeats the previous segment's (every line of a daf) adds nothing */}
+                          {(seg.ref_he || formatHebrewRef(seg.ref)) !== (unit.segments[idx - 1]?.ref_he ?? "") && (
+                            <span className="text-xs font-serif text-ink/40 font-medium">
+                              {seg.ref_he || formatHebrewRef(seg.ref)}
+                            </span>
+                          )}
                         </div>
 
                         {/* Hover Actions & 3-dots Menu Button */}

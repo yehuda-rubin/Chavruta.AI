@@ -136,11 +136,17 @@ def _position(title: str, nums: list[int], he: bool, full: bool = False) -> str:
     if _bavli(title) and nums:
         daf, amud = (nums[0] + 1) // 2, "a" if nums[0] % 2 else "b"
         pos = f"{hebrew_numeral(daf)} {'ע״א' if amud == 'a' else 'ע״ב'}" if he else f"{daf}{amud}"
-        if full and not commentary and len(nums) > 1:
-            pos += f", {hebrew_numeral(nums[1])}" if he else f":{nums[1]}"
-        return pos
+        return pos          # the line inside a daf is an internal index: never shown, even on the reader page
     kept = nums if (full and not commentary) else nums[:2]
     return ", ".join(hebrew_numeral(n) for n in kept) if he else ":".join(str(n) for n in kept)
+
+
+def section_he(ref: str) -> str | None:
+    """'דף כ"א ע"ב' for a Bavli ref (the reader's header), None for any other work."""
+    sp = _split(ref)
+    if sp is None or not _bavli(sp[0]) or " on " in sp[0]:
+        return None
+    return "דף " + _position(sp[0], sp[1], True)
 
 
 def cite_labels(ref: str, *, title_he: str = "", full: bool = False) -> dict[str, str]:

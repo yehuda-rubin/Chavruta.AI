@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from chavruta.corpus.cite_labels import cite_labels
+from chavruta.corpus.cite_labels import cite_labels, section_he
 from chavruta.corpus.normalize import deuphemize_he, normalize_he
 from chavruta.corpus.source_lookup import SourceIndex, parse as parse_source
 from chavruta.intents.hebrew_refs import HE_TRACTATES
@@ -1175,7 +1175,7 @@ async def reader_unit(
     raw_book_he = rows[0]["author_he"] or rows[0]["book"] or ""
     clean_book_he = re.sub(r"^[•.\s]+", "", raw_book_he).strip()
     clean_book = re.sub(r"^[•.\s]+", "", rows[0]["book"] or "").strip()
-    sec_name = format_section_name(clean_ref)
+    sec_name = section_he(rows[0]["ref"] or "") or format_section_name(clean_ref)
 
     return ReaderUnitResponse(
         ref=clean_ref,
