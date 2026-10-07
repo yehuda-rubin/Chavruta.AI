@@ -114,13 +114,6 @@ export function CommentarySidebar({
           </button>
         </div>
 
-        {/* Selected Segment Excerpt Quote */}
-        {activeSegment && (
-          <div className="px-4 py-2.5 bg-gold/5 border-b border-gold/15 text-xs text-ink/80 leading-relaxed font-serif line-clamp-2 italic">
-            &quot;{activeSegment.text_he}&quot;
-          </div>
-        )}
-
         {/* Tabs: מפרשים vs קשרים ומקבילות */}
         <div className="flex items-center border-b border-line/60 shrink-0 bg-white/30 px-2 pt-2 gap-1">
           <button
