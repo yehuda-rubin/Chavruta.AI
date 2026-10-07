@@ -169,3 +169,32 @@ export function sourceLabel(m: SourceMatch, lang: Lang): string {
   if (daf) return `${m.book_he} ${formatTalmudDaf(`${daf[1]}${daf[2]}`)}`;
   return `${m.book_he} ${m.nums.map((n) => toGematria(n)).join(":")}`;
 }
+
+/** One chapter / daf / siman of a book, as the reader's index holds it (GET /reader/toc). */
+export interface TocUnit {
+  ref: string;       // what the reader opens: 'Genesis.1', 'Berakhot.2a'
+  section: string;   // for works that name a section before the number ('Chizkuni, Genesis') — else ''
+  n: number;
+  side: string;      // 'a' | 'b' for dapim, else ''
+  count: number;     // segments in the unit
+}
+
+export interface Toc {
+  book: string;
+  kind: "chapter" | "daf";
+  units: TocUnit[];
+}
+
+export async function fetchToc(book: string, signal?: AbortSignal): Promise<Toc | null> {
+  const res = await fetch(`/reader/toc?book=${encodeURIComponent(book)}`, {
+    headers: { Accept: "application/json" },
+    signal,
+  });
+  return res.ok ? ((await res.json()) as Toc) : null;
+}
+
+export function unitLabel(u: TocUnit, kind: Toc["kind"], lang: Lang): string {
+  if (lang === "en") return `${u.n}${u.side}`;
+  if (kind === "daf") return `${toGematria(u.n)}${u.side === "a" ? "." : ":"}`;
+  return toGematria(u.n);
+}

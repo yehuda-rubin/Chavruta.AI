@@ -5,6 +5,8 @@ export interface SearchQueryParams {
   offset?: number;
   limit?: number;
   work_id?: string;
+  /** Search inside one book (its English title). */
+  book?: string;
 }
 
 export const CANONICAL_CATEGORIES = [
@@ -75,6 +77,9 @@ export async function fetchSearch(params: SearchQueryParams): Promise<SearchResp
   }
   if (params.work_id && params.work_id.trim()) {
     sp.set("work_id", params.work_id.trim());
+  }
+  if (params.book && params.book.trim()) {
+    sp.set("book", params.book.trim());
   }
 
   const res = await fetch(`/search/query?${sp.toString()}`, {

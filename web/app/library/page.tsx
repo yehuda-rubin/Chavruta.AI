@@ -13,13 +13,17 @@ import {
   buildTree,
   fetchCatalog,
   fetchSources,
+  fetchToc,
   pathLabels,
   searchBooks,
   searchIndex,
   sourceLabel,
+  unitLabel,
   type Catalog,
+  type CatalogBook,
   type CategoryNode,
   type SourceMatch,
+  type Toc,
 } from "@/lib/library";
 
 // Beta: the page is for the admin account only, like the beta chat modes. The gate is UX — the
@@ -57,6 +61,13 @@ const T: Record<Lang, Record<string, string>> = {
     all: "הכול",
     hintContent: "חיפוש בתוך הטקסט של כל הספרים. לחץ Enter.",
     suggested: "הצעות",
+    start: "התחל לקרוא",
+    inBook: "חיפוש בתוך הספר…",
+    inside: "בתוך",
+    toLibrary: "לספרייה",
+    chapters: "פרקים",
+    dapim: "דפים",
+    noToc: "אין רשימת פרקים לספר הזה",
   },
   en: {
     title: "Book library",
@@ -81,6 +92,13 @@ const T: Record<Lang, Record<string, string>> = {
     all: "All",
     hintContent: "Searches the text of every book. Press Enter.",
     suggested: "Suggestions",
+    start: "Start reading",
+    inBook: "Search inside this book…",
+    inside: "In",
+    toLibrary: "Library",
+    chapters: "Chapters",
+    dapim: "Folios",
+    noToc: "No chapter list for this book",
   },
 };
 
@@ -91,7 +109,19 @@ const SUGGESTED: Record<Lang, string[]> = {
 
 const readUrl = (ref: string) => `/search/read/${encodeURIComponent(ref)}`;
 
-function Branch({ node, lang, open, depth }: { node: CategoryNode; lang: Lang; open: boolean; depth: number }) {
+function Branch({
+  node,
+  lang,
+  open,
+  depth,
+  onOpen,
+}: {
+  node: CategoryNode;
+  lang: Lang;
+  open: boolean;
+  depth: number;
+  onOpen: (b: CatalogBook) => void;
+}) {
   return (
     <details open={open} className="group" key={`${node.path}-${open}`}>
       <summary
@@ -104,12 +134,16 @@ function Branch({ node, lang, open, depth }: { node: CategoryNode; lang: Lang; o
       </summary>
       <div>
         {node.children.map((c) => (
-          <Branch key={c.path} node={c} lang={lang} open={open} depth={depth + 1} />
+          <Branch key={c.path} node={c} lang={lang} open={open} depth={depth + 1} onOpen={onOpen} />
         ))}
         {node.books.map((b) => (
           <Link
             key={b.first_ref}
-            href={readUrl(b.first_ref)}
+            href={bookUrl(b)}
+            onClick={(e) => {
+              e.preventDefault();
+              onOpen(b);
+            }}
             className="block py-1.5 px-2 rounded-lg hover:bg-black/5 text-ink"
             style={{ paddingInlineStart: `${(depth + 1) * 16 + 34}px` }}
           >
@@ -118,6 +152,97 @@ function Branch({ node, lang, open, depth }: { node: CategoryNode; lang: Lang; o
         ))}
       </div>
     </details>
+  );
+}
+
+const bookUrl = (b: CatalogBook) => `/library?book=${encodeURIComponent(b.title_en)}`;
+
+/** A book's page: where it sits, a way in at the start, search inside it, and its chapters / dapim. */
+function BookView({
+  book,
+  catalog,
+  lang,
+  onBack,
+  onSearchInside,
+}: {
+  book: CatalogBook;
+  catalog: Catalog;
+  lang: Lang;
+  onBack: () => void;
+  onSearchInside: (q: string) => void;
+}) {
+  const t = T[lang];
+  const [toc, setToc] = useState<Toc | null | undefined>(undefined);
+  const [q, setQ] = useState("");
+
+  useEffect(() => {
+    const ctl = new AbortController();
+    setToc(undefined);
+    fetchToc(book.title_en, ctl.signal).then(setToc).catch(() => {});
+    return () => ctl.abort();
+  }, [book.title_en]);
+
+  // Units grouped by the section they sit in (most books have a single, unnamed group).
+  const groups = useMemo(() => {
+    const m = new Map<string, Toc["units"]>();
+    for (const u of toc?.units ?? []) m.set(u.section, [...(m.get(u.section) ?? []), u]);
+    return [...m.entries()];
+  }, [toc]);
+
+  return (
+    <div className="flex flex-col gap-4">
+      <button onClick={onBack} className="self-start text-sm text-ink/60 hover:text-ink flex items-center gap-1">
+        <Icon name="arrow_back" className="text-[18px] rtl:rotate-180" />
+        {t.toLibrary}
+      </button>
+      <div>
+        <h2 className="text-2xl font-bold text-tekhelet">{bookTitle(book, lang)}</h2>
+        <div className="text-sm text-ink/50 mt-1">{pathLabels(catalog, book.path, lang).join(" › ")}</div>
+      </div>
+      <div className="flex flex-wrap gap-2 items-center">
+        <Link href={readUrl(book.first_ref)} className="px-5 py-2 rounded-xl grad text-white text-sm font-semibold shadow-md">
+          {t.start}
+        </Link>
+        <form
+          className="flex-1 min-w-[200px] flex items-center gap-2 rounded-xl border border-line bg-white/70 px-3 py-1.5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (q.trim()) onSearchInside(q.trim());
+          }}
+        >
+          <Icon name="search" className="text-[18px] text-ink/50" />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder={t.inBook}
+            className="flex-1 bg-transparent outline-none text-sm text-ink"
+          />
+        </form>
+      </div>
+      {toc === undefined && <p className="text-ink/60">{t.loading}</p>}
+      {toc === null && <p className="text-ink/60">{t.noToc}</p>}
+      {toc &&
+        groups.map(([section, units]) => (
+          <div key={section} className="flex flex-col gap-2">
+            <div className="text-sm font-semibold text-ink/70">
+              {section || (toc.kind === "daf" ? t.dapim : t.chapters)}
+              <span className="text-ink/40 font-normal"> · {units.length}</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {units.map((u) => (
+                <Link
+                  key={u.ref}
+                  href={readUrl(u.ref)}
+                  title={`${u.count}`}
+                  className="min-w-[2.6rem] text-center px-2.5 py-1.5 rounded-lg bg-black/5 hover:bg-tekhelet hover:text-white text-sm text-ink"
+                >
+                  {unitLabel(u, toc.kind, lang)}
+                </Link>
+              ))}
+            </div>
+          </div>
+        ))}
+    </div>
   );
 }
 
@@ -157,6 +282,9 @@ export default function LibraryPage() {
   const [contentError, setContentError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [workId, setWorkId] = useState("");
+  const [bookFilter, setBookFilter] = useState("");          // content search inside one book (English title)
+  const [openBook, setOpenBook] = useState<CatalogBook | null>(null);
+  const [pendingBook, setPendingBook] = useState("");        // ?book= from the URL, until the catalogue loads
   const booted = useRef(false);
 
   // Language, admin gate, and the state carried in the URL (also what /search redirects to).
@@ -171,6 +299,8 @@ export default function LibraryPage() {
       setInput(q);
       if (content) setSubmitted(q);
       setWorkId(sp.get("work_id") || "");
+      if (content) setBookFilter(sp.get("book") || "");
+      else setPendingBook(sp.get("book") || "");
       const p = parseInt(sp.get("page") || "1", 10);
       setPage(Number.isNaN(p) || p < 1 ? 1 : p);
     } catch {}
@@ -183,6 +313,29 @@ export default function LibraryPage() {
     fetchCatalog().then(setCatalog).catch(() => setFailed(true));
   }, [admin]);
 
+  useEffect(() => {
+    if (!catalog || !pendingBook) return;
+    setOpenBook(catalog.books.find((b) => b.title_en === pendingBook) ?? null);
+    setPendingBook("");
+  }, [catalog, pendingBook]);
+
+  const openBookPage = useCallback((b: CatalogBook) => {
+    setOpenBook(b);
+    setMode("book");
+    try {
+      window.scrollTo({ top: 0 });
+    } catch {}
+  }, []);
+
+  const searchInsideBook = useCallback((b: CatalogBook, q: string) => {
+    setBookFilter(b.title_en);
+    setWorkId("");
+    setInput(q);
+    setSubmitted(q);
+    setPage(1);
+    setMode("content");
+  }, []);
+
   // Keep the URL shareable without a navigation.
   useEffect(() => {
     if (!booted.current) return;
@@ -191,12 +344,14 @@ export default function LibraryPage() {
     const q = mode === "content" ? submitted : input;
     if (q.trim()) sp.set("q", q.trim());
     if (mode === "content" && workId) sp.set("work_id", workId);
+    if (mode === "content" && bookFilter) sp.set("book", bookFilter);
+    if (mode === "book" && openBook) sp.set("book", openBook.title_en);
     if (mode === "content" && page > 1) sp.set("page", String(page));
     const qs = sp.toString();
     try {
       window.history.replaceState(null, "", qs ? `/library?${qs}` : "/library");
     } catch {}
-  }, [mode, input, submitted, workId, page]);
+  }, [mode, input, submitted, workId, page, bookFilter, openBook]);
 
   const tree = useMemo(() => (catalog ? buildTree(catalog, lang) : []), [catalog, lang]);
   const index = useMemo(() => (catalog ? searchIndex(catalog.books) : null), [catalog]);
@@ -231,14 +386,20 @@ export default function LibraryPage() {
     let live = true;
     setContentLoading(true);
     setContentError(null);
-    fetchSearch({ q: submitted, offset: (page - 1) * PAGE_SIZE, limit: PAGE_SIZE, work_id: workId || undefined })
+    fetchSearch({
+      q: submitted,
+      offset: (page - 1) * PAGE_SIZE,
+      limit: PAGE_SIZE,
+      work_id: workId || undefined,
+      book: bookFilter || undefined,
+    })
       .then((r) => live && setContent(r))
       .catch((e) => live && setContentError(e?.message === "RATE_LIMITED" ? "429" : "error"))
       .finally(() => live && setContentLoading(false));
     return () => {
       live = false;
     };
-  }, [admin, mode, submitted, page, workId]);
+  }, [admin, mode, submitted, page, workId, bookFilter]);
 
   const runContent = useCallback(() => {
     setSubmitted(input.trim());
@@ -246,6 +407,8 @@ export default function LibraryPage() {
   }, [input]);
 
   const t = T[lang];
+  const filterBook = catalog?.books.find((b) => b.title_en === bookFilter);
+  const insideTitle = filterBook ? bookTitle(filterBook, lang) : bookFilter;
   const totalPages = content ? Math.max(1, Math.ceil(content.total / PAGE_SIZE)) : 1;
 
   return (
@@ -296,7 +459,10 @@ export default function LibraryPage() {
               <Icon name="search" className="text-[20px] text-ink/50" />
               <input
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  if (e.target.value.trim()) setOpenBook(null); // typing a new search leaves the book page
+                }}
                 placeholder={mode === "book" ? t.phBook : t.phContent}
                 className="flex-1 bg-transparent outline-none text-ink"
                 autoFocus
@@ -319,8 +485,19 @@ export default function LibraryPage() {
 
             {failed && mode === "book" && <p className="text-red-700">{t.error}</p>}
 
+            {/* ───────────── book page ───────────── */}
+            {mode === "book" && openBook && catalog && (
+              <BookView
+                book={openBook}
+                catalog={catalog}
+                lang={lang}
+                onBack={() => setOpenBook(null)}
+                onSearchInside={(q) => searchInsideBook(openBook, q)}
+              />
+            )}
+
             {/* ───────────── book / source ───────────── */}
-            {mode === "book" && (
+            {mode === "book" && !openBook && (
               <>
                 {!catalog && !failed && <p className="text-ink/60">{t.loading}</p>}
 
@@ -336,7 +513,7 @@ export default function LibraryPage() {
                     </div>
                     <div>
                       {tree.map((n) => (
-                        <Branch key={n.path} node={n} lang={lang} open={openAll} depth={0} />
+                        <Branch key={n.path} node={n} lang={lang} open={openAll} depth={0} onOpen={openBookPage} />
                       ))}
                     </div>
                   </>
@@ -354,7 +531,14 @@ export default function LibraryPage() {
                         <ul className="flex flex-col">
                           {bookHits.map((b) => (
                             <li key={b.first_ref}>
-                              <Link href={readUrl(b.first_ref)} className="block py-2 px-2 rounded-lg hover:bg-black/5">
+                              <Link
+                                href={bookUrl(b)}
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  openBookPage(b);
+                                }}
+                                className="block py-2 px-2 rounded-lg hover:bg-black/5"
+                              >
                                 <div className="text-ink font-medium">{bookTitle(b, lang)}</div>
                                 <div className="text-xs text-ink/50">{pathLabels(catalog, b.path, lang).join(" › ")}</div>
                               </Link>
@@ -391,6 +575,19 @@ export default function LibraryPage() {
                       ))}
                     </div>
                   </div>
+                )}
+
+                {bookFilter && (
+                  <button
+                    onClick={() => {
+                      setBookFilter("");
+                      setPage(1);
+                    }}
+                    className="self-start flex items-center gap-2 px-3 py-1 rounded-full bg-tekhelet/10 text-tekhelet text-sm"
+                  >
+                    {t.inside}: {insideTitle}
+                    <Icon name="close" className="text-[16px]" />
+                  </button>
                 )}
 
                 {submitted.trim() && sources.length > 0 && (

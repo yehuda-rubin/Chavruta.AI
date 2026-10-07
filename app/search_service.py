@@ -27,6 +27,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from chavruta.corpus.normalize import deuphemize_he, normalize_he
 from chavruta.corpus.source_lookup import SourceIndex, parse as parse_source
+from chavruta.intents.hebrew_refs import HE_TRACTATES
 from chavruta.corpus.refs import (
     canonical_ref,
     commentator_title,
@@ -393,6 +394,7 @@ async def search_query(
     offset: int = Query(0, ge=0, le=10000, description="Offset for pagination"),
     limit: int = Query(20, ge=1, le=100, description="Number of results per page"),
     work_id: str | None = Query(None, description="Optional work_id filter, comma-separated"),
+    book: str | None = Query(None, max_length=200, description="Optional: search inside one book (its English title)"),
 ):
     # 0. Rate limiting (120 req/min)
     client_key = _get_client_key(request)
@@ -452,15 +454,22 @@ async def search_query(
     # Connect to database
     db = get_db()
 
+    # Inside one book: its rows carry the title in `book` — exactly, or as "<title>, <section>" for the
+    # works whose sections are recorded in the book name.
+    book_sql, book_params = "", []
+    if book and book.strip():
+        book_sql = " AND (c.book = ? OR c.book LIKE ? ESCAPE '\\')"
+        book_params = [book.strip(), like_escape(book.strip()) + ", %"]
+
     # 5. Facet counts aggregation (computed on all matches matching language and query)
-    facets_sql = """
+    facets_sql = f"""
         SELECT c.work_id, COUNT(*) as cnt
         FROM search_fts f
         JOIN chunks c ON c.rowid = f.rowid
-        WHERE search_fts MATCH ?
+        WHERE search_fts MATCH ?{book_sql}
         GROUP BY c.work_id
     """
-    facet_rows = db.execute(facets_sql, (match_expr,)).fetchall()
+    facet_rows = db.execute(facets_sql, (match_expr, *book_params)).fetchall()
     facets = {row["work_id"]: row["cnt"] for row in facet_rows}
 
     # Total matching hits (filtered by work_ids if specified)
@@ -470,7 +479,7 @@ async def search_query(
         total = sum(facets.values())
 
     # 6. Fetch paginated search hits
-    params: list[Any] = [match_expr]
+    params: list[Any] = [match_expr, *book_params]
     where_extra = ""
     if work_ids:
         placeholders = ",".join("?" for _ in work_ids)
@@ -492,7 +501,7 @@ async def search_query(
                c.category_path
         FROM search_fts f
         JOIN chunks c ON c.rowid = f.rowid
-        WHERE search_fts MATCH ?
+        WHERE search_fts MATCH ?{book_sql}
         {where_extra}
         ORDER BY c.canon_order, c.sort_title, c.ref
         LIMIT ? OFFSET ?
@@ -918,6 +927,67 @@ async def reader_resolve(request: Request, q: str = Query(..., min_length=1, max
         if link:
             out.append({"ref": link, "book_he": src.book_he, "book_en": src.book_en, "nums": list(src.nums)})
     return {"query": q, "matches": out}
+
+
+_UNIT_RE = re.compile(r"^(?P<head>.+?)\.(?P<first>\d+[ab]?)(?:\.\d+[ab]?)*$")
+_toc_cache: dict[str, dict] = {}
+_TOC_MAX_ROWS = 60000
+
+
+def _book_units(db: sqlite3.Connection, title_en: str) -> dict:
+    """The units of one book (chapters, dapim, simanim…), derived from the reader's own index.
+
+    chunk_id is '<corpus ref>_<work_id>' and UNIQUE-indexed, so a book is two cheap prefix ranges:
+    '<stem>.' (its numbered refs) and '<stem>,' (works that record a section name before the number,
+    like 'Chizkuni,_Genesis.17'). A unit is a ref cut after its first number. Bavli refs are amud-linear
+    (N = 2·daf ∓ 1, so Berakhot.3 is 2a and Berakhot.4 is 2b) and are turned back into dapim here.
+    """
+    stem = title_en.replace(" ", "_")
+    is_bavli = title_en in HE_TRACTATES.values()
+    ranges = [(stem + ".", stem + "/"), (stem + ",", stem + "-")]
+    units: dict[tuple[str, int, str], int] = {}
+    for lo, hi in ranges:
+        for chunk_id, work_id in db.execute(
+                "SELECT chunk_id, work_id FROM chunks WHERE chunk_id >= ? AND chunk_id < ? LIMIT ?",
+                (lo, hi, _TOC_MAX_ROWS)):
+            suffix = "_" + (work_id or "")
+            ref = chunk_id[: -len(suffix)] if suffix != "_" and chunk_id.endswith(suffix) else chunk_id
+            m = _UNIT_RE.match(ref)
+            if not m:
+                continue
+            head, first = m.group("head"), m.group("first")
+            side = ""
+            if first[-1] in "ab":
+                n, side = int(first[:-1]), first[-1]
+            else:
+                n = int(first)
+                if is_bavli:
+                    n, side = (n + 1) // 2, "a" if n % 2 else "b"
+            key = (head, n, side)
+            units[key] = units.get(key, 0) + 1
+    out = []
+    for (head, n, side), count in sorted(units.items(), key=lambda kv: (kv[0][0], kv[0][1], kv[0][2])):
+        section = head[len(stem) + 1:] if head.startswith(stem + ",") else ""
+        out.append({"ref": f"{head}.{n}{side}", "section": section.lstrip("_").replace("_", " "),
+                    "n": n, "side": side, "count": count})
+    return {"book": title_en, "kind": "daf" if is_bavli else "chapter", "units": out}
+
+
+@app.get("/reader/toc")
+async def reader_toc(request: Request, book: str = Query(..., min_length=1, max_length=200)):
+    """Table of contents for the library's book page: the chapters / dapim a book actually has."""
+    if not _rate_limiter.allow(_get_client_key(request)):
+        return JSONResponse(status_code=429, content={"detail": "rate limit exceeded — please slow down"},
+                            headers={"Retry-After": "60"})
+    title = book.strip()
+    if title not in _toc_cache:
+        data = _book_units(get_db(), title)
+        if not data["units"]:
+            raise HTTPException(status_code=404, detail=f"No units for: {title}")
+        if len(_toc_cache) > 512:
+            _toc_cache.clear()
+        _toc_cache[title] = data
+    return JSONResponse(_toc_cache[title], headers={"Cache-Control": "public, max-age=3600"})
 
 
 @app.get("/reader/unit", response_model=ReaderUnitResponse)
