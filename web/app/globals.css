@@ -15,7 +15,7 @@ body {
 }
 h1, h2, h3 { text-wrap: balance; }
 p { text-wrap: pretty; }
-:focus-visible { outline: 2px solid #5b3df5; outline-offset: 2px; }
+button:focus-visible, a:focus-visible, summary:focus-visible, [role="button"]:focus-visible { outline: 2px solid #5b3df5; outline-offset: 2px; }
 button:active:not(:disabled), a.btn-press:active { scale: 0.97; }
 button { transition-property: background-color, color, border-color, opacity, box-shadow, scale; transition-duration: 150ms; }
 ::-webkit-scrollbar { width: 8px; }
