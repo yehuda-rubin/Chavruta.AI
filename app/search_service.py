@@ -7,6 +7,7 @@ with canonical ordering, language isolation, facet aggregation, and rate limitin
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import sqlite3
@@ -1154,6 +1155,82 @@ async def reader_unit(
     )
 
 
+# ── Parallels ─────────────────────────────────────────────────────────────────
+# The corpus carries commentary→text edges but no parallel edges (Tosefta ↔ Mishnah ↔ Gemara ↔ Midrash), and
+# Sefaria's links dataset has no commercial licence we can rely on. So parallels are derived from the texts we
+# already hold: passages of the primary literature that share runs of words with this one. Probe the FTS index
+# with a few 4-word phrases from the segment, then score each candidate by the 3-word shingles it shares.
+_PARALLEL_BASES = {"Mishnah", "Tosefta", "Talmud", "Midrash", "Halakhah"}
+_PARALLEL_SKIP_TOP = {"Tanakh", "Reference"}          # a verse quoted in a passage is not a parallel of it
+_PARALLEL_MIN_WORDS = 6
+_PARALLEL_MIN_SHARED = 3
+_PARALLEL_MIN_SCORE = 0.3
+_PARALLEL_MAX = 8
+_parallels_cache: dict[str, list] = {}
+
+
+def _shingles(words: list[str], n: int) -> set[str]:
+    return {" ".join(words[i:i + n]) for i in range(len(words) - n + 1)}
+
+
+def _is_commentary_path(path: str) -> bool:
+    return any(" on " in part or part == "Commentary" for part in path.split(" / "))
+
+
+def _parallels(ref: str) -> list[ReaderLinkItem]:
+    if ref in _parallels_cache:
+        return _parallels_cache[ref]
+    out: list[ReaderLinkItem] = []
+    db = get_db()
+    m = _REF_PARTS.match(ref)
+    me = None
+    if m:   # chunk_id is '<corpus ref>_<work_id>' and UNIQUE-indexed: a range lookup, not a table scan
+        corpus_ref = m.group("title").replace(" ", "_") + "." + m.group("nums").replace(":", ".")
+        me = db.execute(
+            "SELECT rowid, search_he, book, category_path FROM chunks WHERE chunk_id >= ? AND chunk_id < ? LIMIT 1",
+            (corpus_ref + "_", corpus_ref + "`"),
+        ).fetchone()
+    path = (me["category_path"] if me else "") or ""
+    words = ((me["search_he"] if me else "") or "").split()
+    if me is None or len(words) < _PARALLEL_MIN_WORDS or path.split(" / ")[0] not in _PARALLEL_BASES             or _is_commentary_path(path):
+        _parallels_cache[ref] = out
+        return out
+
+    mine = _shingles(words, 3)
+    probes = sorted(_shingles(words, 4))
+    probes = probes[:: max(1, len(probes) // 10)][:10]
+    match = "search_he : (" + " OR ".join('"%s"' % p.replace('"', '""') for p in probes) + ")"
+    rows = db.execute(
+        """SELECT c.ref, c.book, c.author_he, c.category_path, c.work_id, c.search_he, c.text_he, c.text_en
+           FROM search_fts f JOIN chunks c ON c.rowid = f.rowid
+           WHERE search_fts MATCH ? AND c.rowid != ? LIMIT 400""",
+        (match, me["rowid"]),
+    ).fetchall()
+    scored = []
+    for r in rows:
+        cpath = r["category_path"] or ""
+        if r["book"] == me["book"] or cpath.split(" / ")[0] in _PARALLEL_SKIP_TOP or _is_commentary_path(cpath):
+            continue
+        theirs = _shingles((r["search_he"] or "").split(), 3)
+        if not theirs:
+            continue
+        shared = len(mine & theirs)
+        score = shared / min(len(mine), len(theirs))
+        if shared >= _PARALLEL_MIN_SHARED and score >= _PARALLEL_MIN_SCORE:
+            scored.append((score, r))
+    scored.sort(key=lambda x: -x[0])
+    for _, r in scored[:_PARALLEL_MAX]:
+        out.append(ReaderLinkItem(
+            ref=r["ref"] or "", source_ref=r["ref"] or "", category=r["category_path"] or r["work_id"] or "parallel",
+            type="parallel", author_he=r["author_he"] or r["book"] or "", book=r["book"] or "",
+            text_he=r["text_he"], text_en=r["text_en"],
+        ))
+    if len(_parallels_cache) > 2000:
+        _parallels_cache.clear()
+    _parallels_cache[ref] = out
+    return out
+
+
 @app.get("/reader/links", response_model=ReaderLinksResponse)
 async def reader_links(
     request: Request,
@@ -1352,6 +1429,9 @@ async def reader_links(
                         related.append(link_item)
         except Exception:
             pass
+
+    if not related:
+        related = await asyncio.to_thread(_parallels, clean_ref)
 
     for item in commentaries + related:
         item.ref_he = ref_labels(item.ref)[0]
