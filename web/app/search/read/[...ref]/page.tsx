@@ -287,7 +287,7 @@ function ReaderInner() {
 
   const handleSearchPhrase = (phrase: string) => {
     const clean = phrase.trim().slice(0, 80);
-    router.push(`/search?q=${encodeURIComponent(clean)}`);
+    router.push(`/library?mode=content&q=${encodeURIComponent(clean)}`);
   };
 
   const handleCopyCitation = (
@@ -365,7 +365,7 @@ function ReaderInner() {
             </Link>
 
             <Link
-              href="/search"
+              href="/library"
               className="w-full sm:w-auto px-6 py-2.5 rounded-xl glass text-ink/80 hover:text-tekhelet font-semibold text-sm transition text-center flex items-center justify-center gap-2"
             >
               <Icon name="search" className="text-[18px]" />
@@ -400,7 +400,7 @@ function ReaderInner() {
                 if (typeof window !== "undefined" && window.history.length > 1) {
                   router.back();
                 } else {
-                  router.push("/search");
+                  router.push("/library");
                 }
               }}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl glass hover:bg-tekhelet/10 text-xs sm:text-sm font-bold text-tekhelet border border-tekhelet/20 transition shrink-0 cursor-pointer shadow-xs"
@@ -431,7 +431,7 @@ function ReaderInner() {
               className="flex items-center gap-1.5 text-xs sm:text-sm font-serif truncate"
             >
               <Link
-                href="/search"
+                href="/library"
                 className="text-ink/65 hover:text-tekhelet transition shrink-0"
               >
                 ספרייה
@@ -441,7 +441,7 @@ function ReaderInner() {
               {unit?.category && (
                 <>
                   <Link
-                    href={`/search?work_id=${encodeURIComponent(unit.category)}`}
+                    href="/library"
                     className="text-ink/65 hover:text-tekhelet transition shrink-0 hidden sm:inline"
                   >
                     {unit.category === "tanakh"
@@ -640,7 +640,7 @@ function ReaderInner() {
                 ייתכן שמראה המקום אינו קיים במאגר או שיש שגיאת תקשורת עם השרת.
               </p>
               <Link
-                href="/search"
+                href="/library"
                 className="px-5 py-2 rounded-xl grad text-white text-sm font-semibold shadow-md hover:opacity-95 transition"
               >
                 חזרה לחיפוש בספרייה

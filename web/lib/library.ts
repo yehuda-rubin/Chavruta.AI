@@ -1,4 +1,5 @@
 import type { Lang } from "@/lib/types";
+import { formatTalmudDaf, toGematria } from "@/lib/reader";
 
 /** One work in the library — built by scripts/build_catalog.py, served at /reader/catalog. */
 export interface CatalogBook {
@@ -142,4 +143,29 @@ export function pathLabels(cat: Catalog, path: string, lang: Lang): string[] {
     const meta = cat.categories[parts.slice(0, i + 1).join("/")];
     return (lang === "he" ? meta?.he : meta?.en) || part;
   });
+}
+
+/** A citation the server could read from the query and found in the reader ("בראשית א א"). */
+export interface SourceMatch {
+  ref: string;       // what the reader opens: 'Genesis 1:3', 'Genesis.1', 'Berakhot.2a'
+  book_he: string;
+  book_en: string;
+  nums: number[];
+}
+
+/** Library source search: a typed citation → readable units (empty when it is not a citation). */
+export async function fetchSources(q: string, signal?: AbortSignal): Promise<SourceMatch[]> {
+  const res = await fetch(`/reader/resolve?q=${encodeURIComponent(q.trim())}`, {
+    headers: { Accept: "application/json" },
+    signal,
+  });
+  if (!res.ok) return [];
+  return ((await res.json()) as { matches: SourceMatch[] }).matches ?? [];
+}
+
+export function sourceLabel(m: SourceMatch, lang: Lang): string {
+  const daf = /\.(\d+)([ab])$/.exec(m.ref);
+  if (lang === "en") return daf ? `${m.book_en} ${daf[1]}${daf[2]}` : `${m.book_en} ${m.nums.join(":")}`;
+  if (daf) return `${m.book_he} ${formatTalmudDaf(`${daf[1]}${daf[2]}`)}`;
+  return `${m.book_he} ${m.nums.map((n) => toGematria(n)).join(":")}`;
 }

@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from chavruta.corpus.normalize import deuphemize_he, normalize_he
+from chavruta.corpus.source_lookup import SourceIndex, parse as parse_source
 from chavruta.corpus.refs import (
     canonical_ref,
     commentator_title,
@@ -861,6 +862,64 @@ async def reader_catalog() -> Response:
                     headers={"Cache-Control": "public, max-age=3600"})
 
 
+def _unit_where(clean_ref: str) -> tuple[str, list[Any]]:
+    """WHERE clause + params selecting the rows of one reader unit (a chapter, a daf, a siman…)."""
+    clauses: list[str] = []
+    params: list[Any] = []
+    for p in get_unit_query_prefixes(clean_ref):
+        pattern = f"{like_escape(p)}%"
+        clauses.append("ref LIKE ? ESCAPE '\\'")
+        params.append(pattern)
+        clauses.append("chunk_id LIKE ? ESCAPE '\\'")
+        params.append(pattern)
+    clauses.append("ref = ?")
+    params.append(clean_ref)
+    clauses.append("chunk_id = ?")
+    params.append(clean_ref)
+    return " OR ".join(clauses), params
+
+
+def _unit_exists(db: sqlite3.Connection, clean_ref: str) -> bool:
+    where_sql, params = _unit_where(clean_ref)
+    return db.execute(f"SELECT 1 FROM chunks WHERE {where_sql} LIMIT 1", params).fetchone() is not None
+
+
+_source_index: SourceIndex | None = None
+
+
+def _get_source_index() -> SourceIndex:
+    global _source_index
+    if _source_index is None:
+        import json
+        books = json.loads(_CATALOG_PATH.read_text(encoding="utf-8"))["books"]
+        _source_index = SourceIndex(books)
+    return _source_index
+
+
+@app.get("/reader/resolve")
+async def reader_resolve(request: Request, q: str = Query(..., min_length=1, max_length=120)):
+    """Library source search: a typed citation ("בראשית א א", "ברכות ב ע״ב") → readable units.
+
+    Only citations that exist in the reader's index are returned, so a link from here never 404s.
+    A verse-level citation opens its whole chapter and the reader scrolls to the verse."""
+    if not _rate_limiter.allow(_get_client_key(request)):
+        return JSONResponse(status_code=429, content={"detail": "rate limit exceeded — please slow down"},
+                            headers={"Retry-After": "60"})
+    db = get_db()
+    out = []
+    for src in parse_source(q, _get_source_index()):
+        link = None
+        # The reader widens "Genesis 1:9" to the whole chapter even when verse 9 does not exist, so the
+        # verse itself is checked exactly; otherwise the chapter opens without a scroll target.
+        if src.target and db.execute("SELECT 1 FROM chunks WHERE ref = ? LIMIT 1", (src.target,)).fetchone():
+            link = src.target
+        elif _unit_exists(db, src.ref):
+            link = src.ref
+        if link:
+            out.append({"ref": link, "book_he": src.book_he, "book_en": src.book_en, "nums": list(src.nums)})
+    return {"query": q, "matches": out}
+
+
 @app.get("/reader/unit", response_model=ReaderUnitResponse)
 async def reader_unit(
     request: Request,
@@ -883,23 +942,7 @@ async def reader_unit(
     if not clean_ref:
         raise HTTPException(status_code=404, detail="Unit not found")
     db = get_db()
-    prefixes = get_unit_query_prefixes(clean_ref)
-
-    clauses: list[str] = []
-    params: list[Any] = []
-    for p in prefixes:
-        pattern = f"{like_escape(p)}%"
-        clauses.append("ref LIKE ? ESCAPE '\\'")
-        params.append(pattern)
-        clauses.append("chunk_id LIKE ? ESCAPE '\\'")
-        params.append(pattern)
-
-    clauses.append("ref = ?")
-    params.append(clean_ref)
-    clauses.append("chunk_id = ?")
-    params.append(clean_ref)
-
-    where_sql = " OR ".join(clauses)
+    where_sql, params = _unit_where(clean_ref)
     query_sql = f"""
         SELECT rowid, chunk_id, ref, book, author_he, work_id, category_path,
                text_he, text_en, license_he, license_en, version_he, version_en
