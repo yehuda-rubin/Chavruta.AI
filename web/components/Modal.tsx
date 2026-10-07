@@ -33,7 +33,7 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={`glass rounded-[28px] p-6 w-full ${maxW} flex flex-col gap-4 max-h-[85vh]`}
+        className={`glass menu-surface rounded-[28px] p-6 w-full ${maxW} flex flex-col gap-4 max-h-[85vh]`}
       >
         <div className="flex items-center justify-between">
           <h3 className="font-serif text-xl font-bold text-tekhelet">{title}</h3>

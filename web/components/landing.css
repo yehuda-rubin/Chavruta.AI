@@ -4,6 +4,12 @@
 .lp {
   --violet: #5b3df5; --violet2: #8b6bff; --mint: #19c9a0; --coral: #ff6b5e; --sun: #ffc83d;
   --ink: #1a1633; --mute: #6b6788; --line: #e6e2fa; --bg: #f6f4ff; --card: #fff;
+  /* The landing is light-only, so it paints its own canvas: a visitor who once chose the app's dark
+     theme has body.theme-dark set, and without this the dark body would show behind dark text. */
+  background:
+    radial-gradient(60% 50% at 92% -8%, rgba(139, 107, 255, 0.28) 0%, transparent 60%),
+    radial-gradient(50% 45% at -4% 100%, rgba(25, 201, 160, 0.18) 0%, transparent 60%),
+    #f6f4ff;
   height: 100dvh; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth;
   color: var(--ink); font-size: 18px; line-height: 1.65;
 }
