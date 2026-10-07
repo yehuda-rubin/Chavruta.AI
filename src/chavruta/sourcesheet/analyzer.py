@@ -63,6 +63,9 @@ class CompanionGuide:
     chavruta_questions: dict[str, list[str]]  # peshat, comparison, sevara
     summary: str
     citations: list[str] = field(default_factory=list)
+    # True when the model's analysis could not be used and this guide is the mechanical fallback.
+    # The caller must say so — the fallback's section text is placeholder, not analysis.
+    degraded: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1189,6 +1192,60 @@ def _find_corpus_text(lookup: dict[str, str], ref: str | None, canonical: str | 
     return None
 
 
+_MIN_BODY_LINE_CHARS = 12
+_POINTER_WORD_RE = re.compile(r"פרק|פסוקים?|דף|סימן|סעיף|הלכה|\d")
+_POINTER_MAX_WORDS = 6
+MISSING_TEXT_NOTE = (
+    "מקור זה מופיע בדף כמראה מקום בלבד, ולשונו אינה בדף ואינה במאגר. "
+    "לכן לא בוארו דבריו כאן; אפשר להדביק את לשונו בצ'אט."
+)
+
+
+def _has_source_body(item: ParsedSourceItem) -> bool:
+    """Does the item carry text of its own, as opposed to a reference plus the teacher's pointers?
+
+    Outline sheets repeat a bare reference under the bullet ("שמות פרק יג פסוקים ג-ז.") and add
+    study instructions around a gemara range. Counting those as the source made a bare pasuk look
+    "user provided", and the model then explained it from memory. A range item is a pointer unless
+    it quotes; short lines (a repeated ref, a bullet letter) do not count.
+    """
+    if (item.metadata or {}).get("ref_range"):
+        return False
+    for ln in (ln.strip() for ln in (item.cleaned_text or "").split("\n")):
+        if not ln or ln == item.header.strip() or len(ln) < _MIN_BODY_LINE_CHARS:
+            continue
+        if len(ln.split()) <= _POINTER_MAX_WORDS and _POINTER_WORD_RE.search(ln):
+            continue   # a repeated reference ("ויקרא פרק ח' פסוקים לג-לו."), not text
+        return True
+    return False
+
+
+def _classify_item(
+    item: ParsedSourceItem, ref: str | None, lookup: dict[str, str]
+) -> tuple[str, str, str | None]:
+    """(status, snippet, corpus_text) for one item — the single decision all three callers share.
+
+    A sheet that QUOTES its source carries the text itself, so that text wins even when the item's
+    reference also resolves in the corpus: the reference can be the base text a Rishonim excerpt sits
+    on ("קובץ שיטות קמאי … יומא ג ב" → Yoma 3b), and showing the gemara as that excerpt is wrong. The
+    corpus text is still returned, as context. Only a bare reference is shown AS the corpus text.
+    """
+    canonical = item.canonical_sefaria_ref or ""
+    corpus_text = _find_corpus_text(lookup, ref, canonical)
+    quoted = str((item.metadata or {}).get("quoted_text") or "").strip()
+    has_body = _has_source_body(item)
+    if quoted:
+        return STATUS_USER_PROVIDED, quoted, corpus_text
+    if corpus_text:
+        return STATUS_VERIFIED_CORPUS, corpus_text[:300] + ("…" if len(corpus_text) > 300 else ""), corpus_text
+    if has_body:
+        return STATUS_USER_PROVIDED, item.cleaned_text, None
+    return STATUS_MISSING_REF, "(טקסט אינו קיים בדף ואינו במאגר)", None
+
+
+_PROMPT_CORPUS_CHARS = 4000
+
+
 def build_sourcesheet_prompt_context(
     items: list[ParsedSourceItem],
     corpus_lookup: dict[str, str] | None = None,
@@ -1200,20 +1257,7 @@ def build_sourcesheet_prompt_context(
     for item in items:
         source_id = f"S{item.index}"
         ref = item.ref or "None"
-        canonical = item.canonical_sefaria_ref or ""
-        corpus_text = _find_corpus_text(lookup, ref, canonical)
-
-        has_substantive_body = bool(
-            item.cleaned_text
-            and item.cleaned_text.strip() != item.header.strip()
-            and len(item.cleaned_text.strip()) > 5
-        )
-        if corpus_text:
-            status = STATUS_VERIFIED_CORPUS
-        elif has_substantive_body:
-            status = STATUS_USER_PROVIDED
-        else:
-            status = STATUS_MISSING_REF
+        status, snippet, corpus_text = _classify_item(item, item.ref, lookup)
 
         block = [f'<source id="{source_id}" status="{status}" ref="{ref}">']
         block.append(f"  <header>{item.header}</header>")
@@ -1221,10 +1265,16 @@ def build_sourcesheet_prompt_context(
             block.append(f"  <dibur_hamatchil>{item.dibur_hamatchil}</dibur_hamatchil>")
         if item.author_note_text:
             block.append(f"  <author_annotation>{item.author_note_text}</author_annotation>")
-        if corpus_text:
-            block.append(f"  <corpus_verified_text>{corpus_text}</corpus_verified_text>")
-        elif status == STATUS_USER_PROVIDED:
-            block.append(f"  <user_provided_text>{item.cleaned_text}</user_provided_text>")
+        if status == STATUS_USER_PROVIDED:
+            block.append(f"  <user_provided_text>{snippet if item.metadata.get('quoted_text') else item.cleaned_text}</user_provided_text>")
+            if corpus_text:
+                block.append(
+                    f"  <corpus_context_text>{corpus_text[:_PROMPT_CORPUS_CHARS]}</corpus_context_text>"
+                )
+        elif corpus_text:
+            block.append(
+                f"  <corpus_verified_text>{corpus_text[:_PROMPT_CORPUS_CHARS]}</corpus_verified_text>"
+            )
         else:
             block.append("  <instruction>UNINDEXED BARE REF. DO NOT HALLUCINATE TEXT.</instruction>")
         block.append("</source>")
@@ -1273,6 +1323,160 @@ def _clean_hebrew_prose(text: str) -> str:
     return cleaned.strip()
 
 
+def _mermaid_label(text: str, limit: int = 34) -> str:
+    """A label safe inside a mermaid ["..."] node: no quotes, brackets or bullet prefix, bounded length."""
+    cleaned = re.sub(r"^\s*(?:[א-ת]|\d+)\s*[.)]\s*", "", text or "")
+    cleaned = re.sub(r"[\"'״׳\[\]{}()<>|#`]", "", cleaned)
+    cleaned = " ".join(cleaned.split())
+    return cleaned if len(cleaned) <= limit else cleaned[:limit].rstrip() + "…"
+
+
+def _build_flowchart(topic: str, sections: list[SourceSection]) -> str:
+    """The sugya map, built from the sections themselves — every source, in sheet order.
+
+    The model used to author this inside its JSON, where the quotes in `A["..."]` broke parsing, and
+    the fallback capped it at five nodes. Neither needs the model: the title and role tag of each
+    section are already known.
+    """
+    if not sections:
+        return ""
+    lines = ["flowchart TD", f'    N0["שאלת היסוד: {_mermaid_label(topic, 40)}"]']
+    prev = "N0"
+    for i, sec in enumerate(sections, start=1):
+        node = f"N{i}"
+        label = _mermaid_label(sec.title or sec.ref or f"מקור {sec.index}")
+        lines.append(f'    {node}["מקור {sec.index}: {label}"]')
+        tag = _mermaid_label(sec.role_tag, 24) if sec.role_tag and sec.role_tag != "מקור" else ""
+        lines.append(f"    {prev} -->|{tag}| {node}" if tag else f"    {prev} --> {node}")
+        prev = node
+    return "\n".join(lines)
+
+
+def _repair_json_quotes(raw: str) -> str:
+    """Escape straight double quotes that sit INSIDE a JSON string value.
+
+    Hebrew prose is full of them (ד"ה "דנין פר", ר"ת, a quoted dibbur) and a model reliably leaves some
+    unescaped. A quote only closes a string when the next non-space character is structural
+    (`, : } ]`) or the text ends; any other quote inside a string is content, so it gets a backslash.
+    The earlier fix (only gershayim between two Hebrew letters) missed every quote next to a space.
+    """
+    out: list[str] = []
+    in_str = False
+    i, n = 0, len(raw)
+    while i < n:
+        ch = raw[i]
+        if not in_str:
+            out.append(ch)
+            if ch == '"':
+                in_str = True
+        elif ch == "\\" and i + 1 < n:
+            out.append(ch)
+            out.append(raw[i + 1])
+            i += 1
+        elif ch == '"':
+            j = i + 1
+            while j < n and raw[j] in " \t\r\n":
+                j += 1
+            if j >= n or raw[j] in ",:}]":
+                out.append(ch)
+                in_str = False
+            else:
+                out.append('\\"')
+        else:
+            out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _parse_llm_json(response_text: str) -> dict | None:
+    """Pull the JSON object out of a model reply, tolerating fences, stray quotes and trailing commas.
+
+    Returns None when nothing parses — including a reply cut off by the token limit, which no amount
+    of quote repair can complete — so the caller can retry instead of guessing.
+    """
+    text = (response_text or "").strip()
+    if not text:
+        return None
+    fenced = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.DOTALL)
+    candidate = fenced.group(1) if fenced else text
+    if "{" not in candidate or "}" not in candidate:
+        return None
+    candidate = candidate[candidate.find("{"):candidate.rfind("}") + 1]
+
+    attempts = [
+        candidate,
+        re.sub(r'(?<=[֐-׿])"(?=[֐-׿])', "״", candidate),
+        _repair_json_quotes(candidate),
+    ]
+    attempts.append(re.sub(r",(\s*[}\]])", r"\1", attempts[-1]))
+    for attempt in attempts:
+        try:
+            data = json.loads(attempt)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(data, dict):
+            return data
+    return None
+
+
+def _generate_text(llm: Any, prompt: str, system: str, max_tokens: int) -> tuple[str, str]:
+    """One model call → (text, finish_reason). finish_reason is "" when the backend does not say."""
+    if hasattr(llm, "generate"):
+        grounded_prompt = GroundedPrompt(system=system, sources=[], question=prompt, bare=True)
+        res = llm.generate(grounded_prompt, lang="he", max_tokens=max_tokens, temperature=0.2)
+        text = res.text if hasattr(res, "text") else str(res)
+        return text or "", str(getattr(res, "finish_reason", "") or "")
+    if hasattr(llm, "complete"):
+        return str(llm.complete(prompt)) or "", ""
+    return "", ""
+
+
+_NIQQUD_RE = re.compile(r"[֑-ׇ]")
+_MATCH_DROP_RE = re.compile(r"[^\w\s]|_", re.UNICODE)
+# A quotation as the model writes it: opened after a space/bracket (never mid-word, so the gershayim
+# of an acronym like רמב״ם is not an opening) and closed before a non-letter.
+_QUOTE_RE = re.compile(
+    r"(?<![א-ת])([בלמוהשכ]?)(?:[״“]([^״“”]+?)[״”]|['‘]([^'‘’]+?)['’])(?![א-ת])"
+)
+UNVERIFIED_QUOTE_MARK = "[ציטוט שלא אומת מול הדף]"
+_MIN_QUOTE_WORDS = 2
+
+
+def _normalize_for_match(text: str) -> str:
+    """Letters and single spaces only: no niqqud, quote marks, geresh, ellipses or punctuation."""
+    text = _NIQQUD_RE.sub("", text or "")
+    text = _MATCH_DROP_RE.sub(" ", text)
+    return " ".join(text.split())
+
+
+def _scrub_unverified_quotes(text: str, haystack: str) -> tuple[str, int]:
+    """Replace each quotation that is not in the sheet or the corpus text with a visible marker.
+
+    The model is told to quote only what the sources contain, and still wrote "צוואה צוואה" about a
+    gemara whose text was never supplied (the sheet says "צוה צוה"). A quotation is checked piece by
+    piece around its ellipses, so "מאימתי … עד סוף האשמורת" passes when both halves are present.
+    One-word quotations are left alone: a lone term is not a claim about a text. Returns (text, count).
+    """
+    count = 0
+
+    def _check(m: re.Match) -> str:
+        nonlocal count
+        pieces = [p for p in re.split(r"\.{2,}|…", (m.group(2) or m.group(3) or "")) if p.strip()]
+        for piece in pieces:
+            norm = _normalize_for_match(piece)
+            if len(norm.split()) >= _MIN_QUOTE_WORDS and norm not in haystack:
+                count += 1
+                return m.group(1) + UNVERIFIED_QUOTE_MARK
+        return m.group(0)
+
+    return _QUOTE_RE.sub(_check, text or ""), count
+
+
+def _synthesis_token_budget(n_items: int) -> int:
+    """Output room for the JSON: a fixed 3500 truncated a 7-source sheet mid-object. Scale with sources."""
+    return min(9000, 1800 + 800 * max(1, n_items))
+
+
 def _synthesize_with_llm(
     items: list[ParsedSourceItem],
     topic_hint: str,
@@ -1283,6 +1487,12 @@ def _synthesize_with_llm(
 ) -> CompanionGuide | None:
     """Invoke the LLM to perform deep Torah synthesis of the source sheet."""
     sources_xml = build_sourcesheet_prompt_context(items, corpus_lookup)
+    request_block = ""
+    if user_instruction.strip():
+        request_block = (
+            "\nבקשת המשתמש (להתחשב בה בהדגשים, לא לשנות את מבנה ה-JSON): "
+            f"{user_instruction.strip()}\n"
+        )
     prompt = f"""אתה תלמיד חכם מובהק, מגיד שיעור ועורך תורני מומחה במערכת 'חברותא AI'.
 לפניך דף מקורות תורני שחולץ לתוך מקטעי XML (מקורות מאומתים מהמאגר או טקסטים מדף המשתמש).
 עליך לנתח את הדף ברמה למדנית ופדגוגית גבוהה, ולבנות חוברת ליווי מקיפה למהלך הסוגיה.
@@ -1293,7 +1503,14 @@ def _synthesize_with_llm(
    אין לפצל מקור יחיד למספר אובייקטים, ואין להשמיט אף מקור!
 2. שפה וסגנון: כתוב אך ורק בעברית תורנית עשירה, רהוטה וצחה. ללא שום תווים לועזיים, ללא שמות באנגלית, וללא מילים זרות.
 3. ציר חקירה וטבלה: נסח חקירה ישיבתית אמיתית ובנה טבלת השוואת שיטות חדה.
-
+4. פורמט: בתוך ערכי המחרוזת אסור להשתמש במירכאות כפולות ישרות. לראשי תיבות ולציטוטים השתמש ב-״ (גרשיים) או ב-׳, ולא ב-".
+5. אל תצטט ואל תתאר מזיכרונך את לשונו של מקור. הביאור נשען רק על הטקסט שב-XML של אותו מקור (corpus_verified_text,
+   corpus_context_text או user_provided_text); מקור שסומן MISSING_REF אין לבארו כלל. כל ציטוט במירכאות חייב להופיע
+   בטקסט ב-XML כלשונו, ואם אינו מופיע שם אל תכתוב אותו.
+6. הסיכום, שאלת היסוד, טבלת השיטות ושאלות החברותא נשענים אך ורק על מקורות שיש להם טקסט (לא MISSING_REF).
+   מקור שסומן MISSING_REF מותר להזכיר רק כמראה מקום שהדף מפנה אליו, בלי לתאר את תוכנו ובלי לצטט אותו.
+7. חלק מהמקורות כוללים את הערות המרצה של הדף ולא רק את לשון המקור. ביאור המקור צריך להתבסס על לשון המקור עצמה.
+{request_block}
 החזר פלט מובנה בפורמט JSON בלבד (עטוף ב-```json ... ``` או JSON ישיר בלבד):
 {{
   "topic": "נושא הסוגיה המרכזי והמדויק בעברית",
@@ -1322,40 +1539,48 @@ def _synthesize_with_llm(
     "peshat": ["שאלת פשט והבנה 1", "שאלת פשט והבנה 2"],
     "comparison": ["שאלת השוואת שיטות 1", "שאלת השוואת שיטות 2"],
     "sevara": ["שאלת סברא, חקירה ולמדנות 1", "שאלת סברא ולמדנות 2"]
-  }},
-  "flowchart_mermaid": "flowchart TD\\n    A[שאלת היסוד] --> B[מקור 1]\\n    B --> C[מקור 2]"
+  }}
 }}
 
 מקורות הדף לעיון:
 {sources_xml}
 """
+    system = "אתה תלמיד חכם מובהק, מגיד שיעור ועורך תורני מומחה במערכת 'חברותא AI'. כתוב בעברית תורנית צחה בלבד."
+    budget = _synthesis_token_budget(len(items))
     try:
-        response_text = ""
-        system = "אתה תלמיד חכם מובהק, מגיד שיעור ועורך תורני מומחה במערכת 'חברותא AI'. כתוב בעברית תורנית צחה בלבד."
-        if hasattr(llm, "generate"):
-            grounded_prompt = GroundedPrompt(system=system, sources=[], question=prompt, bare=True)
-            res = llm.generate(grounded_prompt, lang="he", max_tokens=3500, temperature=0.2)
-            response_text = res.text if hasattr(res, "text") else str(res)
-        elif hasattr(llm, "complete"):
-            response_text = str(llm.complete(prompt))
-
-        if not response_text:
+        data = None
+        for attempt in (1, 2):
+            attempt_prompt = prompt if attempt == 1 else (
+                prompt + "\n\nהתשובה הקודמת לא הייתה JSON תקין (חתוכה או עם מירכאות לא מוגנות). "
+                "החזר שוב את ה-JSON המלא בלבד, ללא טקסט נוסף, בלי מירכאות כפולות בתוך ערכים, "
+                "ובביאורים תמציתיים יותר (עד 3 משפטים למקור)."
+            )
+            response_text, finish = _generate_text(llm, attempt_prompt, system, budget)
+            data = _parse_llm_json(response_text)
+            if data is not None:
+                break
+            _log.warning(
+                "sourcesheet LLM reply was not parseable JSON (attempt %d/2, finish_reason=%r, %d chars)",
+                attempt, finish, len(response_text),
+            )
+        if data is None:
             return None
-
-        # Extract JSON block
-        json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response_text, re.DOTALL)
-        raw_json = json_match.group(1) if json_match else response_text.strip()
-        if not json_match and "{" in raw_json and "}" in raw_json:
-            raw_json = raw_json[raw_json.find("{"):raw_json.rfind("}") + 1]
-
-        # Convert unescaped Hebrew acronym quotes (e.g. רמב"ם -> רמב״ם) to avoid invalid JSON syntax
-        raw_json = re.sub(r'(?<=[\u0590-\u05FF])"(?=[\u0590-\u05FF])', '״', raw_json)
-
-        data = json.loads(raw_json)
         raw_topic = data.get("topic") or topic_hint or (items[0].header if items else "סוגיה תורנית")
         topic = _clean_topic_text(raw_topic) or "סוגיה תורנית"
-        core_inquiry = _clean_hebrew_prose(data.get("core_inquiry") or f"בירור יסודות וגדרי {topic}.")
-        summary = _clean_hebrew_prose(data.get("summary") or "")
+
+        haystack = _normalize_for_match(
+            "\n".join([it.raw_text for it in items] + list(corpus_lookup.values()))
+        )
+        scrubbed = 0
+
+        def _clean_checked(text: str) -> str:
+            nonlocal scrubbed
+            cleaned, n = _scrub_unverified_quotes(_clean_hebrew_prose(text), haystack)
+            scrubbed += n
+            return cleaned
+
+        core_inquiry = _clean_checked(data.get("core_inquiry") or f"בירור יסודות וגדרי {topic}.")
+        summary = _clean_checked(data.get("summary") or "")
 
         llm_sections_data: dict[int, dict] = {}
         for idx, s in enumerate(data.get("sections", [])):
@@ -1373,30 +1598,18 @@ def _synthesize_with_llm(
         for item in items:
             sec_data = llm_sections_data.get(item.index, {})
             ref = item.ref or (item.canonical_sefaria_ref if item.canonical_sefaria_ref and len(item.canonical_sefaria_ref.split()) <= 4 else None)
-            canonical = item.canonical_sefaria_ref or ""
-            corpus_text = _find_corpus_text(corpus_lookup, ref, canonical)
-            has_body = bool(
-                item.cleaned_text
-                and item.cleaned_text.strip() != item.header.strip()
-                and len(item.cleaned_text.strip()) > 5
-            )
-
-            if corpus_text:
-                status = STATUS_VERIFIED_CORPUS
-                snippet = corpus_text[:300] + ("…" if len(corpus_text) > 300 else "")
+            status, snippet, corpus_text = _classify_item(item, ref, corpus_lookup)
+            if status == STATUS_VERIFIED_CORPUS:
                 citations.append(ref or item.header)
-            elif has_body:
-                status = STATUS_USER_PROVIDED
-                snippet = item.cleaned_text
-            else:
-                status = STATUS_MISSING_REF
-                snippet = "(טקסט אינו קיים בדף ואינו במאגר)"
 
             raw_title = sec_data.get("title") or item.header or ref or f"מקור {item.index}"
             title = _clean_topic_text(raw_title) or (ref or f"מקור {item.index}")
             role = _clean_hebrew_prose(sec_data.get("role_tag") or "מקור")
-            explanation = _clean_hebrew_prose(sec_data.get("plain_explanation") or f"ביאור מקור {item.index} במסגרת מהלך הסוגיה.")
-            diyuk = _clean_hebrew_prose(sec_data.get("diyuk") or (item.dibur_hamatchil and f'ד"ה "{item.dibur_hamatchil}"') or "")
+            explanation = _clean_checked(sec_data.get("plain_explanation") or f"ביאור מקור {item.index} במסגרת מהלך הסוגיה.")
+            diyuk = _clean_checked(sec_data.get("diyuk") or (item.dibur_hamatchil and f'ד"ה "{item.dibur_hamatchil}"') or "")
+            if status == STATUS_MISSING_REF:
+                # Whatever the model wrote here came from its memory — there was no text to read.
+                explanation, diyuk, sec_data = MISSING_TEXT_NOTE, "", {**sec_data, "difficult_words": {}}
 
             sec = SourceSection(
                 index=item.index,
@@ -1413,15 +1626,20 @@ def _synthesize_with_llm(
             )
             sections.append(sec)
 
-        flowchart = _clean_hebrew_prose(data.get("flowchart_mermaid") or "")
+        flowchart = _build_flowchart(topic, sections)
         opinion_table = [
-            {k: _clean_hebrew_prose(v) for k, v in row.items()}
+            {k: _clean_checked(str(v)) for k, v in row.items()}
             for row in (data.get("opinion_table") or [])
+            if isinstance(row, dict)
         ]
         chavruta_questions = {
-            level: [_clean_hebrew_prose(q) for q in qs]
+            level: [_clean_checked(str(q)) for q in qs]
             for level, qs in (data.get("chavruta_questions") or {}).items()
+            if isinstance(qs, list)
         }
+
+        if scrubbed:
+            _log.warning("sourcesheet: %d quotation(s) in the model's text were not in any source and were marked", scrubbed)
 
         return CompanionGuide(
             title=f"מהלך הסוגיה — {topic}",
@@ -1495,24 +1713,9 @@ def analyze_source_sheet(
 
     for idx, item in enumerate(items):
         ref = item.ref or (item.canonical_sefaria_ref if item.canonical_sefaria_ref and len(item.canonical_sefaria_ref.split()) <= 4 else None)
-        canonical = item.canonical_sefaria_ref or ""
-        corpus_text = _find_corpus_text(lookup, ref, canonical)
-
-        has_substantive_body = bool(
-            item.cleaned_text
-            and item.cleaned_text.strip() != item.header.strip()
-            and len(item.cleaned_text.strip()) > 5
-        )
-        if corpus_text:
-            status = STATUS_VERIFIED_CORPUS
-            snippet = corpus_text[:300] + ("…" if len(corpus_text) > 300 else "")
+        status, snippet, corpus_text = _classify_item(item, ref, lookup)
+        if status == STATUS_VERIFIED_CORPUS:
             citations.append(ref)
-        elif has_substantive_body:
-            status = STATUS_USER_PROVIDED
-            snippet = item.cleaned_text
-        else:
-            status = STATUS_MISSING_REF
-            snippet = "(טקסט אינו קיים בדף ואינו במאגר)"
 
         role = role_cycle[idx % len(role_cycle)]
         raw_title = item.header if item.header and len(item.header) < 60 else (ref or f"מקור {item.index}")
@@ -1535,18 +1738,7 @@ def analyze_source_sheet(
     cleaned_topic = _clean_topic_text(topic_hint)
     first_header = _clean_topic_text(items[0].header) if items else ""
     detected_topic = cleaned_topic or first_header or (items[0].ref if items else "סוגיה תורנית")
-    first_ref = items[0].ref or "סוגיית היסוד"
-
-    # Mermaid Flowchart
-    mermaid_nodes = []
-    mermaid_nodes.append('flowchart TD')
-    mermaid_nodes.append(f'    A["שאלת היסוד: {detected_topic[:40]}"] --> B["מקור 1: {first_ref}"]')
-    for i in range(1, min(len(sections), 5)):
-        prev_char = chr(ord('B') + i - 1)
-        curr_char = chr(ord('B') + i)
-        curr_sec = sections[i]
-        mermaid_nodes.append(f'    {prev_char} -->|{curr_sec.role_tag}| {curr_char}["מקור {curr_sec.index}: {curr_sec.title[:30]}"]')
-    flowchart_code = "\n".join(mermaid_nodes)
+    flowchart_code = _build_flowchart(detected_topic, sections)
 
     opinion_table = [
         {
@@ -1594,4 +1786,5 @@ def analyze_source_sheet(
         chavruta_questions=chavruta_questions,
         summary=summary_text,
         citations=citations,
+        degraded=True,
     )

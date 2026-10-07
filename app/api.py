@@ -2358,7 +2358,11 @@ def _run_sourcesheet(
     llm=None,
 ) -> QueryResponse:
     """Ingest and analyze a source sheet, creating a structured Companion Guide (Spec 008)."""
-    from chavruta.sourcesheet.analyzer import analyze_source_sheet
+    from chavruta.sourcesheet.analyzer import (
+        STATUS_USER_PROVIDED,
+        STATUS_VERIFIED_CORPUS,
+        analyze_source_sheet,
+    )
     from chavruta.sourcesheet.parser import parse_source_sheet
 
     he = (lang or "") != "en"
@@ -2413,6 +2417,13 @@ def _run_sourcesheet(
             if item.canonical_sefaria_ref:
                 candidates.append(item.canonical_sefaria_ref)
 
+            # A range ("ויקרא ח' לג–לו", "יומא ב ע"א – ג ע"ב") fetches every verse/amud in it; the text of
+            # all of them lands under the item's own ref.
+            for extra in (item.metadata or {}).get("ref_range", []):
+                for v in with_ref_variants([extra]):
+                    ref_map.setdefault(v, []).append(item.ref or extra)
+                    all_targets.append(v)
+
             for cr in candidates:
                 variants = with_ref_variants([cr])
                 # Expand chapter-level Tanakh refs (e.g. Leviticus.8 -> verses 1..36)
@@ -2430,7 +2441,9 @@ def _run_sourcesheet(
 
         if all_targets:
             hits = _fetch_ranked_hits(all_targets, limit=max(len(all_targets) * 4, 300))
-            for h in hits:
+            # Keep the sheet's own order (verse 33 before 34) rather than the retriever's score order.
+            order = {t: i for i, t in reversed(list(enumerate(all_targets)))}
+            for h in sorted(hits, key=lambda x: order.get(x.ref, len(order))):
                 origs = ref_map.get(h.ref, [])
                 if not origs and h.canonical_ref:
                     origs = ref_map.get(h.canonical_ref, [])
@@ -2444,7 +2457,13 @@ def _run_sourcesheet(
     # Synthesize companion guide
     from chavruta.intents.llm_planner import distill_query
     distilled_hint = distill_query(user_instruction or question, history=history, intent=Intent.SOURCESHEET)
-    topic_hint = distilled_hint or user_instruction or (parsed_items[0].header if parsed_items else "סוגיה תורנית")
+    # The sheet's own title names the sugya; the user's instruction only says what to do with it
+    # ("summarize the flow"), and used as the topic it became "בירור יסודות סיכום מהלך הדף מקורות".
+    from chavruta.sourcesheet.parser import extract_sheet_title
+    topic_hint = (
+        extract_sheet_title(sheet_text) or distilled_hint or user_instruction
+        or (parsed_items[0].header if parsed_items else "סוגיה תורנית")
+    )
     guide = analyze_source_sheet(
         items=parsed_items,
         topic_hint=topic_hint,
@@ -2453,6 +2472,21 @@ def _run_sourcesheet(
         lang=lang,
         user_instruction=user_instruction,
     )
+
+    if guide.degraded:
+        # The model's analysis could not be used. The mechanical fallback has structure but no
+        # analysis ("ביאור מקור N במסגרת מהלך הסוגיה"), and shipping it as a finished booklet under
+        # "עובדו בהצלחה" told the user a hollow file was their answer. Say so, attach nothing, and
+        # leave the chat free of a sourcesheet turn so the next send runs the analysis again.
+        _log.warning("sourcesheet: analysis degraded for %d items; no booklet produced", len(parsed_items))
+        msg = (
+            f"זיהיתי {len(parsed_items)} מקורות בדף, אבל לא הצלחתי להשלים את הניתוח שלהם הפעם "
+            "(תקלה זמנית בעיבוד). לא יצרתי חוברת ריקה. אפשר לשלוח שוב את הבקשה והדף."
+            if he
+            else f"I found {len(parsed_items)} sources in the sheet but could not finish analysing them this "
+            "time (a temporary processing error). I did not produce an empty booklet. Please send the request and sheet again."
+        )
+        return QueryResponse(answer=msg, citations=[], grounded=False, intent="sourcesheet", files=[])
 
     html_printable = guide.to_html_printable()
     sheet_id = uuid.uuid4().hex[:12]
@@ -2482,12 +2516,24 @@ def _run_sourcesheet(
         CitationOut(
             ref=s.ref or s.title or f"מקור {s.index}",
             ref_he=s.title or s.ref or f"מקור {s.index}",
-            text_he=s.expanded_context or s.source_snippet or s.plain_explanation or "",
+            # A source the sheet quoted shows the sheet's own text; the corpus text under the same ref is
+            # background, not what the sheet cites. Only a bare reference shows the corpus text.
+            text_he=(
+                (s.source_snippet if s.status == STATUS_USER_PROVIDED else s.expanded_context or s.source_snippet)
+                or s.plain_explanation or ""
+            ),
             text_en=(getattr(s, "text_en", "") or ""),
-            commentator=s.role_tag or "",
+            # The role in the sugya ("קושיא / דיוק") is not a commentator; the card's commentator slot
+            # names an author. And the corpus mixes licences, so a verified card must not claim public domain.
+            commentator="",
             deep_link="",
-            license="user_provided" if s.status != "corpus" else "public domain",
-            version_title="דף מקורות" if s.status != "corpus" else "מאגר חברותא",
+            license="user_provided" if s.status != STATUS_VERIFIED_CORPUS else "",
+            version_title=" · ".join(
+                p for p in (
+                    s.role_tag if s.role_tag and s.role_tag != "מקור" else "",
+                    "מאגר חברותא" if s.status == STATUS_VERIFIED_CORPUS else "דף מקורות",
+                ) if p
+            ),
         )
         for s in guide.sections
         if (s.ref or s.source_snippet or s.expanded_context or s.title)

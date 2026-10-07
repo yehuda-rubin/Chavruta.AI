@@ -29,8 +29,17 @@ def test_sourcesheet_gating_disabled_by_default(monkeypatch):
     assert resp.grounded is False
 
 
+_GOOD_JSON = (
+    '{"topic": "ייאוש שלא מדעת", "core_inquiry": "חקירה", "summary": "סיכום", "sections": [], '
+    '"opinion_table": [], "chavruta_questions": {}}'
+)
+
+
 def test_sourcesheet_gating_enabled_for_admin(monkeypatch):
     monkeypatch.setenv("CHAVRUTA_ADMIN_OWNERS", "admin_user_456")
+    # The model is stubbed: with no key configured the call used to fail and the mechanical fallback
+    # booklet satisfied this test, which is exactly the behaviour that must no longer pass as success.
+    monkeypatch.setattr("chavruta.sourcesheet.analyzer._generate_text", lambda *a, **k: (_GOOD_JSON, "stop"))
 
     res = api._sourcesheet_mode_enabled("admin_user_456")
     assert res is True
@@ -45,6 +54,23 @@ def test_sourcesheet_gating_enabled_for_admin(monkeypatch):
     assert resp.grounded is True
     assert len(resp.files) >= 1
     assert "חוברת ליווי" in resp.files[0].title or "Markdown" in resp.files[0].title
+
+
+def test_sourcesheet_failed_analysis_is_reported_not_shipped_as_a_booklet(monkeypatch):
+    monkeypatch.setenv("CHAVRUTA_ADMIN_OWNERS", "admin_user_456")
+    monkeypatch.setattr("chavruta.sourcesheet.analyzer._generate_text", lambda *a, **k: ("not json", "stop"))
+
+    resp = api._run_query_impl(
+        question="1. בבא מציעא דף כ\"א ע\"א:\nאמר רבא ייאוש שלא מדעת.",
+        lang="he",
+        intent_str="sourcesheet",
+        history=[],
+        owner_id="admin_user_456",
+    )
+    assert resp.files == []
+    assert resp.grounded is False
+    assert "לא הצלחתי להשלים" in resp.answer
+    assert "עובדו בהצלחה" not in resp.answer
 
 
 def test_sourcesheet_rebuild_request_regex():
@@ -132,3 +158,22 @@ def test_empty_meta_sources_query_with_prior_citations(monkeypatch):
     assert len(called_chavruta) == 1
     assert called_chavruta[0][1] == ["Bava_Metzia.21a.1", "Rashi_on_Bava_Metzia.21a.1"]
     assert resp.answer == "ביאור המקורות"
+
+
+def test_sourcesheet_cards_do_not_mislabel_role_as_commentator_or_licence(monkeypatch):
+    monkeypatch.setenv("CHAVRUTA_ADMIN_OWNERS", "admin_user_456")
+    monkeypatch.setattr("chavruta.sourcesheet.analyzer._generate_text", lambda *a, **k: (_GOOD_JSON, "stop"))
+
+    resp = api._run_query_impl(
+        question="1. בבא מציעא דף כ\"א ע\"א:\nאמר רבא ייאוש שלא מדעת.",
+        lang="he",
+        intent_str="sourcesheet",
+        history=[],
+        owner_id="admin_user_456",
+    )
+    cards = resp.citations[1:]            # [0] is the uploaded sheet itself
+    assert cards, "expected one card per section"
+    for c in cards:
+        assert c.commentator == ""
+        assert c.license in ("", "user_provided")
+        assert c.license != "public domain"
