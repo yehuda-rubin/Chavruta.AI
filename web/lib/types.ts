@@ -110,6 +110,9 @@ export interface SearchHit {
   version_he: string;
   version_en: string | null;
   category_path: string;
+  /** Hebrew citation / category, built by the search service from the catalogue. */
+  ref_he?: string;
+  category_he?: string;
 }
 
 export interface SearchResponse {

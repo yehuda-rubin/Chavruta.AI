@@ -71,6 +71,8 @@ class SearchHit(BaseModel):
     version_he: str = ""
     version_en: str | None = None
     category_path: str = ""
+    ref_he: str = ""            # the citation in Hebrew ('תוספתא ביכורים ב׳, י׳')
+    category_he: str = ""       # category_path in Hebrew
 
 
 class SearchResponse(BaseModel):
@@ -557,6 +559,8 @@ async def search_query(
                 version_he=r["version_he"] or "",
                 version_en=r["version_en"],
                 category_path=r["category_path"] or "",
+                ref_he=ref_labels(r["ref"] or "")[0],
+                category_he=category_labels(r["category_path"] or ""),
             )
         )
 
@@ -883,18 +887,21 @@ def format_section_name(clean_ref: str) -> str:
 _CATALOG_PATH = Path(__file__).resolve().parent.parent / "src" / "chavruta" / "corpus" / "data" / "catalog.json"
 _BOOK_ORDER_PATH = _CATALOG_PATH.with_name("book_order.json")   # scripts/lookup_book_order.py
 _catalog_cache: bytes | None = None
+_category_he: dict[str, str] | None = None             # "Tosefta/Vilna Edition" -> Hebrew name of the last part
 _title_index: dict[str, tuple[str, str]] | None = None   # English title -> (Hebrew title, category path)
 _REF_PARTS = re.compile(r"^(?P<title>.+?) (?P<nums>\d+(?::\d+)*)$")
 
 
 def _titles() -> dict[str, tuple[str, str]]:
-    global _title_index
+    global _title_index, _category_he
     if _title_index is None:
         import json
         try:
-            books = json.loads(_CATALOG_PATH.read_text(encoding="utf-8"))["books"]
+            cat = json.loads(_CATALOG_PATH.read_text(encoding="utf-8"))
+            books = cat["books"]
+            _category_he = {k: v.get("he", "") for k, v in cat.get("categories", {}).items()}
         except (OSError, ValueError, KeyError):
-            books = []
+            books, _category_he = [], {}
         _title_index = {b["title_en"]: (b.get("title_he") or "", b.get("path") or "") for b in books}
     return _title_index
 
@@ -909,6 +916,13 @@ def _is_bavli_title(title: str) -> bool:
         base = title.split(" on ", 1)[1]
         return t.get(base, ("", ""))[1].startswith("Talmud/Bavli")
     return False
+
+
+def category_labels(path: str) -> str:
+    """'Tosefta / Vilna Edition / Seder Zeraim' -> 'תוספתא / מהדורת וילנא / סדר זרעים' (unknown parts stay English)."""
+    _titles()
+    parts = [p for p in (path or "").split(" / ") if p]
+    return " / ".join((_category_he or {}).get("/".join(parts[: i + 1])) or p for i, p in enumerate(parts))
 
 
 def ref_labels(ref: str) -> tuple[str, str]:

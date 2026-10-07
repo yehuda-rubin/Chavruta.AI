@@ -44,14 +44,14 @@ export function ResultCard({ hit, lang }: { hit: SearchHit; lang: Lang }) {
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="flex flex-col">
           <h2 className="font-serif text-xl sm:text-2xl font-bold text-tekhelet leading-snug">
-            {hit.ref}
+            {lang === "he" && hit.ref_he ? hit.ref_he : hit.ref}
           </h2>
           {(hit.author_he || hit.book) && (
             <p className="text-sm text-ink/70 font-medium">
               {hit.author_he || hit.book}
               {hit.category_path && (
                 <span className="text-ink/40 text-xs mr-2 ml-2">
-                  ({hit.category_path})
+                  ({lang === "he" && hit.category_he ? hit.category_he : hit.category_path})
                 </span>
               )}
             </p>
