@@ -880,6 +880,7 @@ def format_section_name(clean_ref: str) -> str:
 
 # ── Reader Endpoints ──────────────────────────────────────────────────────────
 _CATALOG_PATH = Path(__file__).resolve().parent.parent / "src" / "chavruta" / "corpus" / "data" / "catalog.json"
+_BOOK_ORDER_PATH = _CATALOG_PATH.with_name("book_order.json")   # scripts/lookup_book_order.py
 _catalog_cache: bytes | None = None
 _title_index: dict[str, tuple[str, str]] | None = None   # English title -> (Hebrew title, category path)
 _REF_PARTS = re.compile(r"^(?P<title>.+?) (?P<nums>\d+(?::\d+)*)$")
@@ -943,7 +944,12 @@ async def reader_catalog() -> Response:
             ranks = json.loads(_LAYER_RANK_PATH.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             ranks = {}
-        for b in cat.get("books", []):      # learning order, so book search lists Torah before Rashi before the Malbim
+        try:
+            order = json.loads(_BOOK_ORDER_PATH.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            order = {}
+        for b in cat.get("books", []):
+            b["order"] = order.get(b["title_en"], 10**9)     # load order: Genesis -> Deuteronomy, Seder Zeraim -> ...      # learning order, so book search lists Torah before Rashi before the Malbim
             b["rank"] = ranks.get(" / ".join((b.get("path") or "").split("/")), _UNRANKED)
         _catalog_cache = json.dumps(cat, ensure_ascii=False).encode("utf-8")
     return Response(content=_catalog_cache, media_type="application/json",

@@ -13,6 +13,8 @@ export interface CatalogBook {
   license: string;
   /** Learning-order rank (lower first), added by /reader/catalog from layer_rank.json. */
   rank?: number;
+  /** Canonical load order of the book's first chunk (Genesis before Exodus), from /reader/catalog. */
+  order?: number;
 }
 
 export interface CatalogCategory {
@@ -47,8 +49,7 @@ export function bookTitle(b: CatalogBook, lang: Lang): string {
   return lang === "he" ? b.title_he : b.title_en;
 }
 
-/** Group the flat book list into the category tree. Sefaria's own TOC order is not kept in the
- *  catalogue, so siblings are sorted alphabetically in the reader's language. */
+/** Group the flat book list into the category tree, siblings in learning order. */
 export function buildTree(cat: Catalog, lang: Lang): CategoryNode[] {
   const cmp = collator(lang).compare;
   const nodes = new Map<string, CategoryNode>();
@@ -83,10 +84,24 @@ export function buildTree(cat: Catalog, lang: Lang): CategoryNode[] {
     }
   }
 
+  // Learning order, not alphabetical: books by layer rank then canonical load order; a category sits where
+  // its earliest book does (Tanakh, Mishnah, Tosefta, Talmud, Midrash, then the later literature).
+  const key = (b: CatalogBook): [number, number] => [b.rank ?? 800, b.order ?? 1e9];
+  const byKey = (x: [number, number], y: [number, number]) => x[0] - y[0] || x[1] - y[1];
+  const first = new Map<CategoryNode, [number, number]>();
+  const firstOf = (n: CategoryNode): [number, number] => {
+    let best = first.get(n);
+    if (best) return best;
+    best = [Infinity, Infinity];
+    for (const b of n.books) if (byKey(key(b), best) < 0) best = key(b);
+    for (const c of n.children) if (byKey(firstOf(c), best) < 0) best = firstOf(c);
+    first.set(n, best);
+    return best;
+  };
   const sortRec = (list: CategoryNode[]) => {
-    list.sort((a, b) => cmp(a.name, b.name));
+    list.sort((a, b) => byKey(firstOf(a), firstOf(b)) || cmp(a.name, b.name));
     for (const n of list) {
-      n.books.sort((a, b) => cmp(bookTitle(a, lang), bookTitle(b, lang)));
+      n.books.sort((a, b) => byKey(key(a), key(b)) || cmp(bookTitle(a, lang), bookTitle(b, lang)));
       sortRec(n.children);
     }
   };
@@ -137,7 +152,7 @@ export function searchBooks(
   }
   // learning order first (Torah, Prophets, Writings, Mishnah, Gemara, then each commentator by his era);
   // an exact title always leads, and inside one layer the closer title match comes first
-  scored.sort((x, y) => x.layer - y.layer || x.rank - y.rank);
+  scored.sort((x, y) => x.layer - y.layer || x.rank - y.rank || (x.b.order ?? 1e9) - (y.b.order ?? 1e9));
   return scored.slice(0, limit).map((s) => s.b);
 }
 
