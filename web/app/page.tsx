@@ -17,6 +17,7 @@ import { PlansModal } from "@/components/PlansModal";
 import { SupportModal } from "@/components/SupportModal";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
 import { SignIn } from "@/components/SignIn";
+import { Landing } from "@/components/Landing";
 import { Blocked } from "@/components/Blocked";
 import { ConfirmConsent } from "@/components/ConfirmConsent";
 import { useAuth } from "@/lib/auth";
@@ -40,6 +41,13 @@ function isPageReload(): boolean {
 export default function Home() {
   const auth = useAuth();
   const [lang, setLang] = useState<Lang>("he");
+  const [directToSignIn, setDirectToSignIn] = useState(false);
+  useEffect(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      setDirectToSignIn(!!(sp.get("ref") || sp.get("mode")));
+    } catch {}
+  }, []);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -673,7 +681,9 @@ export default function Home() {
     return <div className="min-h-dvh grid place-items-center text-ink/50">{tr(lang, "authWorking")}</div>;
   }
   if (auth.enabled && !auth.user) {
-    return <SignIn lang={lang} />;
+    // A link that already says what it wants (?ref= from a partner, ?mode=up) goes straight to the
+    // form; everyone else lands on the front page, which sends them to /signup.
+    return directToSignIn ? <SignIn lang={lang} /> : <Landing />;
   }
   // An account with no recorded terms/age consent — e.g. created by calling Supabase's own signup
   // API directly, bypassing SignIn.tsx's checkboxes entirely. The backend already 403s every route

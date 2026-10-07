@@ -250,7 +250,7 @@ function SearchContent() {
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src="/logo.png"
+              src="/logo.svg"
               alt={tr(lang, "brand")}
               className="h-9 w-auto object-contain"
             />

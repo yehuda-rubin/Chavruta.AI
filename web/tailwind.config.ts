@@ -1,25 +1,33 @@
 import type { Config } from "tailwindcss";
 
-// The exact design tokens from the static UI (app/frontend/public/ui/tailwind.config.cjs) — same
-// colours and fonts, so the Next.js app renders identically.
+// Design tokens for the "Conversation" redesign (violet / mint / coral on a lavender canvas).
+// The token NAMES are unchanged (ink, tekhelet, gold, cream, line, indigo) so every component picks
+// up the new palette without a rewrite: tekhelet = deep violet for headings and selected fills,
+// indigo = the brand violet, gold = the mint accent (text + tints), line = lavender hairline.
 const config: Config = {
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./lib/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
-        ink: "#1c1a17",
-        tekhelet: "#002045",
-        "tekhelet-2": "#1a365d",
-        indigo: "#3a5ba0",
-        gold: "#8a6510",
-        "gold-soft": "#b88f2e",
-        cream: "#fdfbf6",
-        "cream-2": "#f6f1e7",
-        line: "#ece2cf",
+        ink: "#1a1633",
+        tekhelet: "#2b2170",
+        "tekhelet-2": "#3a2d99",
+        indigo: "#5b3df5",
+        gold: "#0e8f72",
+        "gold-soft": "#19c9a0",
+        coral: "#ff6b5e",
+        sun: "#ffc83d",
+        cream: "#f6f4ff",
+        "cream-2": "#efeaff",
+        line: "#e6e2fa",
       },
       fontFamily: {
-        serif: ['"Frank Ruhl Libre"', "serif"],
-        sans: ["Heebo", "sans-serif"],
+        // Rubik carries the whole UI; "serif" now means Rubik too (it was the heading face), and
+        // `quote` (Frank Ruhl Libre) is kept for quoted source text so the primary text reads as
+        // distinct from the assistant's own voice.
+        serif: ["Rubik", "Heebo", "sans-serif"],
+        sans: ["Rubik", "Heebo", "sans-serif"],
+        quote: ['"Frank Ruhl Libre"', "serif"],
       },
     },
   },

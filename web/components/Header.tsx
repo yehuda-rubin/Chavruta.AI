@@ -68,8 +68,8 @@ export function Header({
           title={tr(lang, "newChatShort")}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt={tr(lang, "brand")} className="h-10 w-auto object-contain" />
-          <h1 className="font-serif text-2xl font-bold text-tekhelet hidden sm:block">{tr(lang, "brand")}</h1>
+          <img src="/logo.svg" alt={tr(lang, "brand")} className="h-10 w-auto object-contain" />
+          <h1 className="text-2xl font-extrabold tracking-tight text-ink hidden sm:block">{tr(lang, "brand")}</h1>
         </button>
       </div>
       <div className="flex items-center gap-2">

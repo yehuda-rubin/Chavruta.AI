@@ -70,8 +70,8 @@ export function downloadDoc(filename: string, title: string, bodyText: string, l
     .join("");
   const bodyContent =
     lang === "en"
-      ? `<body dir="ltr" style="font-family: Calibri, Arial, sans-serif; font-size: 12pt; line-height: 1.6; text-align: left; color: #1c1a17;"><h1 style="color: #002045; font-size: 20pt; text-align: left;">${esc(title)}</h1>${paras}</body></html>`
-      : `<body dir="rtl" style="font-family:'Frank Ruhl Libre','David',serif;font-size:13pt;line-height:1.7;color:#1c1a17;"><h1 style="color:#002045;font-size:20pt">${esc(title)}</h1>${paras}</body></html>`;
+      ? `<body dir="ltr" style="font-family: Calibri, Arial, sans-serif; font-size: 12pt; line-height: 1.6; text-align: left; color: #1a1633;"><h1 style="color: #2b2170; font-size: 20pt; text-align: left;">${esc(title)}</h1>${paras}</body></html>`
+      : `<body dir="rtl" style="font-family:'Frank Ruhl Libre','David',serif;font-size:13pt;line-height:1.7;color:#1a1633;"><h1 style="color:#2b2170;font-size:20pt">${esc(title)}</h1>${paras}</body></html>`;
   const html =
     '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" ' +
     'xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>' +

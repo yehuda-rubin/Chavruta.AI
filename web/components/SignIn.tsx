@@ -232,17 +232,26 @@ export function SignIn({ lang }: { lang: Lang }) {
   }
 
   const field =
-    "w-full glass rounded-2xl px-4 py-3 font-serif text-[15px] outline-none focus:ring-2 focus:ring-indigo/30";
+    "w-full bg-white border border-line rounded-full px-5 py-3.5 text-[15px] outline-none transition focus:border-indigo focus:ring-4 focus:ring-indigo/15";
+
+  // A worked example beside the form: the product's whole promise (a cited answer) in one glance.
+  const demoQ = lang === "he" ? "למה התורה מתחילה ב״בראשית״?" : "Why does the Torah begin with “Bereshit”?";
+  const demoA = lang === "he"
+    ? "רש״י עונה על כך כבר בפסוק הראשון, ומפנה למצווה הראשונה."
+    : "Rashi answers this at the very first verse, pointing to the first commandment.";
 
   return (
-    <div className="min-h-dvh grid place-items-center p-4">
-      <div className="glass rounded-[28px] p-8 w-full max-w-sm flex flex-col gap-5">
-        <div className="flex flex-col items-center gap-2 text-center">
-          <div className="h-14 w-14 rounded-2xl grad grid place-items-center text-white">
-            <Icon name="menu_book" className="text-[26px]" />
-          </div>
-          <h1 className="font-serif text-2xl font-bold text-tekhelet">{tr(lang, "signInTitle")}</h1>
-          <p className="text-xs text-ink/55 leading-relaxed">{tr(lang, "signInSubtitle")}</p>
+    <div className="min-h-dvh lg:grid lg:grid-cols-2 lg:gap-5 lg:p-5">
+      <div className="grid place-items-center p-4">
+      <div className="w-full max-w-sm flex flex-col gap-5">
+        <div className="flex flex-col items-start gap-2">
+          <a href="/welcome" className="inline-flex items-center gap-2.5 mb-6 font-extrabold text-2xl text-ink">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo.svg" alt="" className="h-10 w-10" />
+            {tr(lang, "brand")}
+          </a>
+          <h1 className="font-serif text-4xl font-extrabold text-ink leading-tight">{tr(lang, mode === "up" ? "signUpBtn" : "signInTitle")}</h1>
+          <p className="text-sm text-ink/60 leading-relaxed">{tr(lang, "signInSubtitle")}</p>
         </div>
 
         <form onSubmit={submit} className="flex flex-col gap-3">
@@ -406,7 +415,16 @@ export function SignIn({ lang }: { lang: Lang }) {
           )}
         </p>
       </div>
+      </div>
 
+      <aside
+        aria-hidden="true"
+        className="hidden lg:flex flex-col justify-end gap-3.5 rounded-[36px] p-10 text-white relative overflow-hidden"
+        style={{ background: "linear-gradient(150deg,#5b3df5,#8d5cff 60%,#ff6b5e)" }}
+      >
+        <div className="self-start max-w-[85%] rounded-3xl rounded-es-md bg-white/20 backdrop-blur px-5 py-3.5 text-xl">{demoQ}</div>
+        <div className="self-end max-w-[90%] rounded-3xl rounded-ee-md bg-white text-ink px-5 py-3.5 text-lg">{demoA}</div>
+      </aside>
     </div>
   );
 }

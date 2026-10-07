@@ -64,8 +64,8 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,      // prevent iOS zoom-on-input-focus jank in the chat composer
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#faf7ef" },
-    { media: "(prefers-color-scheme: dark)", color: "#0f1626" },
+    { media: "(prefers-color-scheme: light)", color: "#f6f4ff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0f0d1f" },
   ],
 };
 
