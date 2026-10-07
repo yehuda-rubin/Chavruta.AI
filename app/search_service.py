@@ -215,6 +215,7 @@ def get_db() -> sqlite3.Connection:
             uri = f"file:{Path(path).resolve().as_posix()}?mode=ro"
             conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
             conn.row_factory = sqlite3.Row
+            _load_layer_rank(conn)
             _db_connection = conn
         return _db_connection
 
@@ -387,6 +388,28 @@ async def health():
     }
 
 
+# ── Content-search ordering ───────────────────────────────────────────────────
+# Results come back in the order a learner meets the sources, not alphabetically: Tanakh (Torah,
+# Prophets, Writings), then Chazal (Mishnah, Tosefta, Gemara, Midrash), then the commentators and later
+# literature by THEIR era — a Rishon beside the Rishonim, an Acharon beside the Acharonim. The rank of
+# each category comes from data/layer_rank.json (scripts/build_layer_rank.py); ties fall back to `rowid`,
+# the load order, which is canonical inside a book (Genesis → Deuteronomy, verses and dapim in sequence).
+_LAYER_RANK_PATH = Path(__file__).resolve().parent.parent / "src" / "chavruta" / "corpus" / "data" / "layer_rank.json"
+_UNRANKED = 800        # rows with no category (e.g. the Hebrew-Wikisource additions) go after the ranked works
+
+
+def _load_layer_rank(conn: sqlite3.Connection) -> None:
+    """Put the ranks in a TEMP table of this connection, so the ordering is a join and the read-only
+    database file is never touched."""
+    import json
+    conn.execute("CREATE TEMP TABLE IF NOT EXISTS layer_rank (category_path TEXT PRIMARY KEY, rank INTEGER)")
+    try:
+        ranks = json.loads(_LAYER_RANK_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        ranks = {}
+    conn.executemany("INSERT OR REPLACE INTO layer_rank VALUES (?, ?)", list(ranks.items()))
+
+
 @app.get("/search/query", response_model=SearchResponse)
 async def search_query(
     request: Request,
@@ -501,9 +524,10 @@ async def search_query(
                c.category_path
         FROM search_fts f
         JOIN chunks c ON c.rowid = f.rowid
+        LEFT JOIN layer_rank lr ON lr.category_path = c.category_path
         WHERE search_fts MATCH ?{book_sql}
         {where_extra}
-        ORDER BY c.canon_order, c.sort_title, c.ref
+        ORDER BY COALESCE(lr.rank, {_UNRANKED}), c.rowid
         LIMIT ? OFFSET ?
     """
     params.extend([limit, offset])
