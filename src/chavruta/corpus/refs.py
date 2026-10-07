@@ -453,6 +453,7 @@ _TRACTATE_HE = {en: he for he, en in HE_TRACTATES.items()}    # 'Sukkah' -> 'ס�
 # generated there works locally and is silently absent in the deployed image — the same trap
 # licenses.json (its neighbour here) was moved out of. See .gitignore's note at the `data/` rule.
 _HEBREW_TITLES_PATH = Path(__file__).parent / "data" / "hebrew_titles.json"
+_HEBREW_TITLES_OVERRIDES_PATH = Path(__file__).parent / "data" / "hebrew_titles_overrides.json"
 _hebrew_titles_map: dict[str, dict[str, str]] | None = None
 
 
@@ -469,6 +470,13 @@ def _load_hebrew_titles() -> dict[str, dict[str, str]]:
             }
         except (OSError, ValueError, AttributeError):
             _hebrew_titles_map = {}
+        # Hand-kept corrections live beside the generated file so a rebuild from Sefaria's TOC
+        # (scripts/build_hebrew_titles.py) never overwrites them.
+        try:
+            overrides = json.loads(_HEBREW_TITLES_OVERRIDES_PATH.read_text(encoding="utf-8"))
+            _hebrew_titles_map.update(overrides)
+        except (OSError, ValueError, AttributeError):
+            pass
     return _hebrew_titles_map
 
 # Curated on purpose: these classic Rishonim/Acharonim are prioritized because their Sefaria

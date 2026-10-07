@@ -25,6 +25,28 @@ def _get_json(endpoint: str) -> dict | list:
     return resp.json()
 
 
+def build_category_titles(toc: list) -> dict[str, dict]:
+    """Walk the TOC → {"Talmud/Bavli/Seder Moed": {"en": "Seder Moed", "he": "סדר מועד"}}.
+
+    Category names were previously thrown away; the library page needs them to label its tree.
+    Keyed by the full English path so two categories sharing a leaf name ("Commentary") stay apart.
+    """
+    cats: dict[str, dict] = {}
+
+    def walk(node, path: str) -> None:
+        if "contents" not in node:
+            return
+        name = node.get("category", "")
+        here = f"{path}/{name}" if path else name
+        cats[here] = {"en": name, "he": node.get("heCategory", "")}
+        for child in node["contents"]:
+            walk(child, here)
+
+    for node in toc:
+        walk(node, "")
+    return cats
+
+
 def build_hebrew_titles() -> dict[str, dict[str, str]]:
     """Walk the Sefaria TOC → {English title: {"he": …, "cat": top category, "sub": second level}}.
 
@@ -38,18 +60,20 @@ def build_hebrew_titles() -> dict[str, dict[str, str]]:
     toc = _get_json("index/")
     titles: dict[str, dict[str, str]] = {}
 
-    def walk(node, top_cat: str, sub_cat: str):
+    def walk(node, top_cat: str, sub_cat: str, path: tuple[str, ...] = ()):
         """Recursively walk the TOC tree, extracting titles from leaf nodes."""
         if "contents" in node:
-            # This is a category — recurse into its children, remembering the first two levels.
+            # This is a category — recurse into its children, remembering the first two levels
+            # and (for the library tree) the full category path.
+            here = path + (node.get("category", "") or "",)
             for child in node["contents"]:
-                walk(child, top_cat, sub_cat or (child.get("category", "") or ""))
+                walk(child, top_cat, sub_cat or (child.get("category", "") or ""), here)
         else:
             # This is a leaf node — extract title and heTitle
             title = node.get("title")
             he_title = node.get("heTitle")
             if title and he_title:
-                titles[title] = {"he": he_title, "cat": top_cat, "sub": sub_cat}
+                titles[title] = {"he": he_title, "cat": top_cat, "sub": sub_cat, "path": "/".join(path)}
 
     for node in toc:
         walk(node, node.get("category", "") or "", "")
@@ -74,6 +98,12 @@ def main() -> None:
         f.write("\n")  # trailing newline
 
     print(f"Wrote {output_path}")
+
+    cats = build_category_titles(_get_json("index/"))
+    cat_path = output_path.with_name("category_titles.json")
+    cat_path.write_text(json.dumps(cats, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                        encoding="utf-8")
+    print(f"Wrote {cat_path} ({len(cats)} categories)")
 
 
 if __name__ == "__main__":

@@ -842,6 +842,25 @@ def format_section_name(clean_ref: str) -> str:
 
 
 # ── Reader Endpoints ──────────────────────────────────────────────────────────
+_CATALOG_PATH = Path(__file__).resolve().parent.parent / "src" / "chavruta" / "corpus" / "data" / "catalog.json"
+_catalog_cache: bytes | None = None
+
+
+@app.get("/reader/catalog")
+async def reader_catalog() -> Response:
+    """The library page's book list: every commercially-licensed work with its Hebrew title and
+    category path. Static package data (scripts/build_catalog.py), so no database is touched and
+    the response is cacheable; the client does all filtering and searching."""
+    global _catalog_cache
+    if _catalog_cache is None:
+        try:
+            _catalog_cache = _CATALOG_PATH.read_bytes()
+        except OSError:
+            raise HTTPException(status_code=503, detail="Library catalogue not built (scripts/build_catalog.py).")
+    return Response(content=_catalog_cache, media_type="application/json",
+                    headers={"Cache-Control": "public, max-age=3600"})
+
+
 @app.get("/reader/unit", response_model=ReaderUnitResponse)
 async def reader_unit(
     request: Request,

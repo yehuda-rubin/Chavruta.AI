@@ -1,0 +1,145 @@
+import type { Lang } from "@/lib/types";
+
+/** One work in the library — built by scripts/build_catalog.py, served at /reader/catalog. */
+export interface CatalogBook {
+  title_en: string;
+  title_he: string;
+  /** Category path in Sefaria's English names, "/"-joined: "Tanakh/Rishonim on Tanakh/Rashi/Torah". */
+  path: string;
+  segments: number;
+  /** Corpus ref the reader opens the book at. */
+  first_ref: string;
+  license: string;
+}
+
+export interface CatalogCategory {
+  en: string;
+  he: string;
+}
+
+export interface Catalog {
+  categories: Record<string, CatalogCategory>;
+  books: CatalogBook[];
+}
+
+/** A node of the browse tree: a category, with sub-categories and the books directly in it. */
+export interface CategoryNode {
+  path: string;
+  name: string;
+  children: CategoryNode[];
+  books: CatalogBook[];
+  /** Books in this node and everything below it. */
+  total: number;
+}
+
+export async function fetchCatalog(): Promise<Catalog> {
+  const res = await fetch("/reader/catalog", { headers: { Accept: "application/json" } });
+  if (!res.ok) throw new Error(`catalog ${res.status}`);
+  return (await res.json()) as Catalog;
+}
+
+const collator = (lang: Lang) => new Intl.Collator(lang === "he" ? "he" : "en", { numeric: true });
+
+export function bookTitle(b: CatalogBook, lang: Lang): string {
+  return lang === "he" ? b.title_he : b.title_en;
+}
+
+/** Group the flat book list into the category tree. Sefaria's own TOC order is not kept in the
+ *  catalogue, so siblings are sorted alphabetically in the reader's language. */
+export function buildTree(cat: Catalog, lang: Lang): CategoryNode[] {
+  const cmp = collator(lang).compare;
+  const nodes = new Map<string, CategoryNode>();
+  const roots: CategoryNode[] = [];
+
+  const ensure = (path: string): CategoryNode => {
+    let node = nodes.get(path);
+    if (node) return node;
+    const i = path.lastIndexOf("/");
+    const meta = cat.categories[path];
+    node = {
+      path,
+      name: (lang === "he" ? meta?.he : meta?.en) || path.slice(i + 1),
+      children: [],
+      books: [],
+      total: 0,
+    };
+    nodes.set(path, node);
+    if (i === -1) roots.push(node);
+    else ensure(path.slice(0, i)).children.push(node);
+    return node;
+  };
+
+  for (const b of cat.books) {
+    const node = ensure(b.path);
+    node.books.push(b);
+    for (let p = b.path; ; ) {
+      nodes.get(p)!.total += 1;
+      const i = p.lastIndexOf("/");
+      if (i === -1) break;
+      p = p.slice(0, i);
+    }
+  }
+
+  const sortRec = (list: CategoryNode[]) => {
+    list.sort((a, b) => cmp(a.name, b.name));
+    for (const n of list) {
+      n.books.sort((a, b) => cmp(bookTitle(a, lang), bookTitle(b, lang)));
+      sortRec(n.children);
+    }
+  };
+  sortRec(roots);
+  return roots;
+}
+
+/** Fold a string for matching: drop niqqud/cantillation, geresh and gershayim, quotes, and
+ *  punctuation; map final letters to their regular forms; lowercase. */
+export function fold(s: string): string {
+  return s
+    .normalize("NFKD")
+    .replace(/[֑-ׇ]/g, "")
+    .replace(/[׳״"'`’‘“”׳״.,;:()\-_]/g, "")
+    .replace(/ך/g, "כ")
+    .replace(/ם/g, "מ")
+    .replace(/ן/g, "נ")
+    .replace(/ף/g, "פ")
+    .replace(/ץ/g, "צ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+/** Both-language haystack for one book, folded once. Hebrew and English titles are both searched
+ *  whatever the UI language, so "Rashi on Genesis" finds the book from a Hebrew screen and vice versa. */
+export function searchIndex(books: CatalogBook[]): Map<CatalogBook, string> {
+  return new Map(books.map((b) => [b, fold(`${b.title_he} ${b.title_en}`)]));
+}
+
+/** Every word of the query must appear (as a substring) in the book's title. Starts-with matches
+ *  rank first, then shorter titles, so "בראשית" lists Genesis before "רש"י על בראשית". */
+export function searchBooks(
+  books: CatalogBook[],
+  index: Map<CatalogBook, string>,
+  query: string,
+  limit = 200,
+): CatalogBook[] {
+  const words = fold(query).split(" ").filter(Boolean);
+  if (!words.length) return [];
+  const scored: { b: CatalogBook; rank: number }[] = [];
+  for (const b of books) {
+    const hay = index.get(b) ?? "";
+    if (!words.every((w) => hay.includes(w))) continue;
+    const starts = hay.startsWith(words[0]) || hay.includes(` ${words[0]}`) ? 0 : 1;
+    scored.push({ b, rank: starts * 1000 + hay.length });
+  }
+  scored.sort((x, y) => x.rank - y.rank);
+  return scored.slice(0, limit).map((s) => s.b);
+}
+
+/** "Tanakh/Torah" → ["תנ״ך", "תורה"] for a result's breadcrumb. */
+export function pathLabels(cat: Catalog, path: string, lang: Lang): string[] {
+  const parts = path.split("/");
+  return parts.map((part, i) => {
+    const meta = cat.categories[parts.slice(0, i + 1).join("/")];
+    return (lang === "he" ? meta?.he : meta?.en) || part;
+  });
+}

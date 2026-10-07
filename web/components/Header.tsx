@@ -108,6 +108,15 @@ export function Header({
         )}
         {isAdmin && (
           <Link
+            href="/library"
+            className="h-10 w-10 rounded-full glass grid place-items-center text-tekhelet"
+            title="ספריית הספרים (בטא)"
+          >
+            <Icon name="library_books" />
+          </Link>
+        )}
+        {isAdmin && (
+          <Link
             href="/admin"
             className="h-10 w-10 rounded-full glass grid place-items-center text-tekhelet"
             title="דשבורד ניהול"
