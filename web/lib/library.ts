@@ -50,39 +50,102 @@ export function bookTitle(b: CatalogBook, lang: Lang): string {
   return lang === "he" ? b.title_he : b.title_en;
 }
 
-/** Group the flat book list into the category tree, siblings in learning order. */
+const ERA_ROOTS: { upTo: number; key: string; he: string; en: string }[] = [
+  { upTo: 19, key: "E:tanakh", he: "תנ״ך", en: "Tanakh" },
+  { upTo: 199, key: "E:chazal", he: "חז״ל", en: "Chazal (Mishnah, Talmud, Midrash)" },
+  { upTo: 299, key: "E:geonim", he: "גאונים", en: "Geonim" },
+  { upTo: 399, key: "E:rishonim", he: "ראשונים", en: "Rishonim" },
+  { upTo: 499, key: "E:acharonim", he: "אחרונים", en: "Acharonim" },
+  { upTo: 799, key: "E:modern", he: "בני זמננו", en: "Contemporary" },
+  { upTo: 1e9, key: "E:reference", he: "ספרי עזר", en: "Reference" },
+];
+
+/** What a work is, whatever its era: the first part of Sefaria's path, in the reader's words. */
+const GENRES: Record<string, { he: string; en: string }> = {
+  Tanakh: { he: "פירושים על התנ״ך", en: "Tanakh commentary" },
+  Mishnah: { he: "משנה ופירושיה", en: "Mishnah and its commentary" },
+  Tosefta: { he: "תוספתא ופירושיה", en: "Tosefta and its commentary" },
+  Talmud: { he: "תלמוד ופירושיו", en: "Talmud and its commentary" },
+  Midrash: { he: "מדרש", en: "Midrash" },
+  Halakhah: { he: "הלכה", en: "Halakhah" },
+  Responsa: { he: "שו״ת", en: "Responsa" },
+  "Jewish Thought": { he: "מחשבת ישראל", en: "Jewish thought" },
+  Musar: { he: "מוסר", en: "Musar" },
+  Kabbalah: { he: "קבלה", en: "Kabbalah" },
+  Chasidut: { he: "חסידות", en: "Chasidut" },
+  Liturgy: { he: "תפילה", en: "Liturgy" },
+  "Second Temple": { he: "ספרות בית שני", en: "Second Temple literature" },
+  Reference: { he: "מילונים וספרי יעץ", en: "Reference" },
+};
+/** The period filter of content search, in learning order. */
+export const ERA_CHIPS: { id: string; he: string; en: string }[] = [
+  { id: "tanakh", he: "תנ״ך", en: "Tanakh" },
+  { id: "chazal", he: "חז״ל", en: "Chazal" },
+  { id: "geonim", he: "גאונים", en: "Geonim" },
+  { id: "rishonim", he: "ראשונים", en: "Rishonim" },
+  { id: "acharonim", he: "אחרונים", en: "Acharonim" },
+  { id: "modern", he: "בני זמננו", en: "Contemporary" },
+  { id: "other", he: "אחר", en: "Other" },
+];
+const ERA_WORD = /^(Geonim|Rishonim|Acharonim|Modern)( on |$)/;
+
+export interface Place {
+  key: string;
+  label: string;
+}
+
+/** Where a work sits in the library: by TIME, not by Sefaria's shelves. The Tanakh itself first, then Chazal,
+ *  then Geonim, Rishonim, Acharonim and today; a commentator stands with his own era, whatever he comments on
+ *  (Rashi on the Torah with the Rishonim), and inside an era by genre. */
+export function placement(cat: Catalog, b: CatalogBook, lang: Lang): Place[] {
+  const rank = b.rank ?? 800;
+  const parts = b.path.split("/");
+  const label = (i: number) => {
+    const meta = cat.categories[parts.slice(0, i + 1).join("/")];
+    return (lang === "he" ? meta?.he : meta?.en) || parts[i];
+  };
+  const root = ERA_ROOTS.find((r) => rank <= r.upTo)!;
+  const out: Place[] = [{ key: root.key, label: lang === "he" ? root.he : root.en }];
+  const primary = rank < 100;     // the text itself: Torah/Prophets/Writings, Mishnah, Tosefta, Talmud, Midrash
+  if (!primary) {
+    const g = GENRES[parts[0]];
+    out.push({ key: `${root.key}/G:${parts[0]}`, label: g ? (lang === "he" ? g.he : g.en) : parts[0] });
+  }
+  const base = out[out.length - 1].key;
+  // the root already says "Tanakh"; Mishnah, Talmud, Midrash keep their own first part
+  for (let i = !primary || root.key === "E:tanakh" ? 1 : 0; i < parts.length; i++) {
+    if (ERA_WORD.test(parts[i])) continue;
+    out.push({ key: `${base}|${parts.slice(0, i + 1).join("/")}`, label: label(i) });
+  }
+  return out;
+}
+
+/** The breadcrumb of a book in the time-based tree, without the book itself. */
+export function bookPathLabels(cat: Catalog, b: CatalogBook, lang: Lang): string[] {
+  return placement(cat, b, lang).map((p) => p.label);
+}
+
+/** Group the flat book list into the tree, in time order. */
 export function buildTree(cat: Catalog, lang: Lang): CategoryNode[] {
   const cmp = collator(lang).compare;
   const nodes = new Map<string, CategoryNode>();
   const roots: CategoryNode[] = [];
 
-  const ensure = (path: string): CategoryNode => {
-    let node = nodes.get(path);
+  const ensure = (places: Place[], depth: number): CategoryNode => {
+    const { key, label } = places[depth];
+    let node = nodes.get(key);
     if (node) return node;
-    const i = path.lastIndexOf("/");
-    const meta = cat.categories[path];
-    node = {
-      path,
-      name: (lang === "he" ? meta?.he : meta?.en) || path.slice(i + 1),
-      children: [],
-      books: [],
-      total: 0,
-    };
-    nodes.set(path, node);
-    if (i === -1) roots.push(node);
-    else ensure(path.slice(0, i)).children.push(node);
+    node = { path: key, name: label, children: [], books: [], total: 0 };
+    nodes.set(key, node);
+    if (depth === 0) roots.push(node);
+    else ensure(places, depth - 1).children.push(node);
     return node;
   };
 
   for (const b of cat.books) {
-    const node = ensure(b.path);
-    node.books.push(b);
-    for (let p = b.path; ; ) {
-      nodes.get(p)!.total += 1;
-      const i = p.lastIndexOf("/");
-      if (i === -1) break;
-      p = p.slice(0, i);
-    }
+    const places = placement(cat, b, lang);
+    ensure(places, places.length - 1).books.push(b);
+    for (const pl of places) nodes.get(pl.key)!.total += 1;
   }
 
   // Learning order, not alphabetical: books by layer rank then canonical load order; a category sits where
@@ -155,15 +218,6 @@ export function searchBooks(
   // an exact title always leads, and inside one layer the closer title match comes first
   scored.sort((x, y) => x.layer - y.layer || x.rank - y.rank || (x.b.order ?? 1e9) - (y.b.order ?? 1e9));
   return scored.slice(0, limit).map((s) => s.b);
-}
-
-/** "Tanakh/Torah" → ["תנ״ך", "תורה"] for a result's breadcrumb. */
-export function pathLabels(cat: Catalog, path: string, lang: Lang): string[] {
-  const parts = path.split("/");
-  return parts.map((part, i) => {
-    const meta = cat.categories[parts.slice(0, i + 1).join("/")];
-    return (lang === "he" ? meta?.he : meta?.en) || part;
-  });
 }
 
 /** A citation the server could read from the query and found in the reader ("בראשית א א"). */

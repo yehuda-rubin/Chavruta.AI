@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { Lang, SearchHit } from "@/lib/types";
 import { tr } from "@/lib/i18n";
 import { CATEGORY_LABELS } from "@/lib/search";
+import { ERA_CHIPS } from "@/lib/library";
 import { Icon } from "@/components/Icon";
 
 const LICENSE_LABEL: Record<Lang, Record<string, string>> = {
@@ -34,7 +35,8 @@ export interface ResultCardProps {
 export function ResultCard({ hit, lang }: { hit: SearchHit; lang: Lang }) {
   const [isExpanded, setIsExpanded] = useState(false);
 
-  const categoryName = CATEGORY_LABELS[lang]?.[hit.work_id] || hit.work_id;
+  const eraChip = ERA_CHIPS.find((e) => e.id === hit.era);
+  const categoryName = eraChip ? (lang === "he" ? eraChip.he : eraChip.en) : CATEGORY_LABELS[lang]?.[hit.work_id] || hit.work_id;
   const license = hit.license_he || hit.license_en || "";
   const version = hit.version_he || hit.version_en || "";
 

@@ -73,6 +73,7 @@ class SearchHit(BaseModel):
     category_path: str = ""
     ref_he: str = ""            # the citation in Hebrew ('תוספתא ביכורים ב׳, י׳')
     category_he: str = ""       # category_path in Hebrew
+    era: str = ""               # time period: tanakh, chazal, geonim, rishonim, acharonim, modern, other
 
 
 class SearchResponse(BaseModel):
@@ -83,6 +84,7 @@ class SearchResponse(BaseModel):
     limit: int
     hits: list[SearchHit]
     facets: dict[str, int]
+    eras: dict[str, int] = {}     # matches per time period: tanakh, chazal, geonim, rishonim, acharonim, modern, other
 
 
 class ReaderSegment(BaseModel):
@@ -404,6 +406,13 @@ _LAYER_RANK_PATH = Path(__file__).resolve().parent.parent / "src" / "chavruta" /
 _UNRANKED = 800        # rows with no category (e.g. the Hebrew-Wikisource additions) go after the ranked works
 
 
+# the time period of a row, from its layer rank (scripts/build_layer_rank.py: <20 Tanakh, <200 Chazal, 2xx Geonim ...)
+_ERA_SQL = (
+    "CASE WHEN COALESCE(lr.rank, 800) < 20 THEN 'tanakh' WHEN lr.rank < 200 THEN 'chazal' WHEN lr.rank < 300 THEN 'geonim' "
+    "WHEN lr.rank < 400 THEN 'rishonim' WHEN lr.rank < 500 THEN 'acharonim' WHEN lr.rank < 800 THEN 'modern' ELSE 'other' END"
+)
+
+
 def _load_layer_rank(conn: sqlite3.Connection) -> None:
     """Put the ranks in a TEMP table of this connection, so the ordering is a join and the read-only
     database file is never touched."""
@@ -423,6 +432,7 @@ async def search_query(
     offset: int = Query(0, ge=0, le=10000, description="Offset for pagination"),
     limit: int = Query(20, ge=1, le=100, description="Number of results per page"),
     work_id: str | None = Query(None, description="Optional work_id filter, comma-separated"),
+    era: str | None = Query(None, max_length=120, description="Optional time-period filter, comma-separated (tanakh, chazal, geonim, rishonim, acharonim, modern, other)"),
     book: str | None = Query(None, max_length=200, description="Optional: search inside one book (its English title)"),
 ):
     # 0. Rate limiting (120 req/min)
@@ -490,22 +500,27 @@ async def search_query(
         book_sql = " AND (c.book = ? OR c.book LIKE ? ESCAPE '\\')"
         book_params = [book.strip(), like_escape(book.strip()) + ", %"]
 
-    # 5. Facet counts aggregation (computed on all matches matching language and query)
+    eras_wanted = [e.strip().lower() for e in (era or "").split(",") if e.strip()]
+
+    # 5. Facet counts aggregation (computed on all matches matching language and query), by work and by period
     facets_sql = f"""
-        SELECT c.work_id, COUNT(*) as cnt
+        SELECT c.work_id, {_ERA_SQL} AS era, COUNT(*) as cnt
         FROM search_fts f
         JOIN chunks c ON c.rowid = f.rowid
+        LEFT JOIN layer_rank lr ON lr.category_path = c.category_path
         WHERE search_fts MATCH ?{book_sql}
-        GROUP BY c.work_id
+        GROUP BY c.work_id, era
     """
     facet_rows = db.execute(facets_sql, (match_expr, *book_params)).fetchall()
-    facets = {row["work_id"]: row["cnt"] for row in facet_rows}
-
-    # Total matching hits (filtered by work_ids if specified)
-    if work_ids:
-        total = sum(facets.get(w, 0) for w in work_ids)
-    else:
-        total = sum(facets.values())
+    facets: dict[str, int] = {}
+    eras: dict[str, int] = {}
+    total = 0
+    for row in facet_rows:
+        facets[row["work_id"]] = facets.get(row["work_id"], 0) + row["cnt"]
+        eras[row["era"]] = eras.get(row["era"], 0) + row["cnt"]
+        # total of the hits that pass the work and period filters
+        if (not work_ids or row["work_id"].lower() in work_ids) and (not eras_wanted or row["era"] in eras_wanted):
+            total += row["cnt"]
 
     # 6. Fetch paginated search hits
     params: list[Any] = [match_expr, *book_params]
@@ -514,6 +529,9 @@ async def search_query(
         placeholders = ",".join("?" for _ in work_ids)
         where_extra = f"AND LOWER(c.work_id) IN ({placeholders})"
         params.extend(work_ids)
+    if eras_wanted:
+        where_extra += f" AND {_ERA_SQL} IN ({','.join('?' for _ in eras_wanted)})"
+        params.extend(eras_wanted)
 
     query_sql = f"""
         SELECT c.ref,
@@ -527,7 +545,8 @@ async def search_query(
                c.license_en,
                c.version_he,
                c.version_en,
-               c.category_path
+               c.category_path,
+               {_ERA_SQL} AS era
         FROM search_fts f
         JOIN chunks c ON c.rowid = f.rowid
         LEFT JOIN layer_rank lr ON lr.category_path = c.category_path
@@ -561,6 +580,7 @@ async def search_query(
                 category_path=r["category_path"] or "",
                 ref_he=ref_labels(r["ref"] or "")[0],
                 category_he=category_labels(r["category_path"] or ""),
+                era=r["era"],
             )
         )
 
@@ -572,6 +592,7 @@ async def search_query(
         limit=limit,
         hits=hits,
         facets=facets,
+        eras=eras,
     )
 
 

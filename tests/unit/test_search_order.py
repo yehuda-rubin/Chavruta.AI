@@ -66,3 +66,17 @@ def test_learning_order(client):
 def test_a_rishon_commentary_precedes_an_acharon_one_whatever_they_comment_on():
     assert RANKS["Tanakh / Rishonim on Tanakh / Rashi / Torah"] < RANKS["Tanakh / Acharonim on Tanakh / Malbim / Torah"]
     assert RANKS["Mishnah / Seder Zeraim"] < RANKS["Tanakh / Rishonim on Tanakh / Rashi / Torah"]
+
+
+def test_era_buckets_follow_layer_rank():
+    import sqlite3
+    import app.search_service as svc
+
+    c = sqlite3.connect(":memory:")
+    c.execute("CREATE TABLE lr (rank INTEGER)")
+    got = []
+    for rank in (10, 12, 20, 45, 150, 200, 320, 410, 500, 900, None):
+        c.execute("DELETE FROM lr")
+        c.execute("INSERT INTO lr VALUES (?)", (rank,))
+        got.append(c.execute(f"SELECT {svc._ERA_SQL.replace('lr.rank', 'lr.rank')} FROM lr").fetchone()[0])
+    assert got == ["tanakh", "tanakh", "chazal", "chazal", "chazal", "geonim", "rishonim", "acharonim", "modern", "other", "other"]

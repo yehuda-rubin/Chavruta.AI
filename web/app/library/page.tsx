@@ -7,14 +7,15 @@ import { api } from "@/lib/api";
 import { Icon } from "@/components/Icon";
 import { ResultCard } from "@/components/search/ResultCard";
 import { Pagination } from "@/components/search/Pagination";
-import { CANONICAL_CATEGORIES, CATEGORY_LABELS, fetchSearch } from "@/lib/search";
+import { fetchSearch } from "@/lib/search";
 import {
   bookTitle,
   buildTree,
+  ERA_CHIPS,
   fetchCatalog,
   fetchSources,
   fetchToc,
-  pathLabels,
+  bookPathLabels,
   searchBooks,
   searchIndex,
   sourceLabel,
@@ -197,7 +198,7 @@ function BookView({
       </button>
       <div>
         <h2 className="text-2xl font-bold text-tekhelet">{bookTitle(book, lang)}</h2>
-        <div className="text-sm text-ink/50 mt-1">{pathLabels(catalog, book.path, lang).join(" › ")}</div>
+        <div className="text-sm text-ink/50 mt-1">{bookPathLabels(catalog, book, lang).join(" › ")}</div>
       </div>
       <div className="flex flex-wrap gap-2 items-center">
         <Link href={readUrl(book.first_ref)} className="px-5 py-2 rounded-xl grad text-white text-sm font-semibold shadow-md">
@@ -281,7 +282,7 @@ export default function LibraryPage() {
   const [contentLoading, setContentLoading] = useState(false);
   const [contentError, setContentError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-  const [workId, setWorkId] = useState("");
+  const [era, setEra] = useState("");
   const [bookFilter, setBookFilter] = useState("");          // content search inside one book (English title)
   const [openBook, setOpenBook] = useState<CatalogBook | null>(null);
   const [pendingBook, setPendingBook] = useState("");        // ?book= from the URL, until the catalogue loads
@@ -298,7 +299,7 @@ export default function LibraryPage() {
       const q = sp.get("q") || "";
       setInput(q);
       if (content) setSubmitted(q);
-      setWorkId(sp.get("work_id") || "");
+      setEra(sp.get("era") || "");
       if (content) setBookFilter(sp.get("book") || "");
       else setPendingBook(sp.get("book") || "");
       const p = parseInt(sp.get("page") || "1", 10);
@@ -329,7 +330,7 @@ export default function LibraryPage() {
 
   const searchInsideBook = useCallback((b: CatalogBook, q: string) => {
     setBookFilter(b.title_en);
-    setWorkId("");
+    setEra("");
     setInput(q);
     setSubmitted(q);
     setPage(1);
@@ -343,7 +344,7 @@ export default function LibraryPage() {
     if (mode === "content") sp.set("mode", "content");
     const q = mode === "content" ? submitted : input;
     if (q.trim()) sp.set("q", q.trim());
-    if (mode === "content" && workId) sp.set("work_id", workId);
+    if (mode === "content" && era) sp.set("era", era);
     if (mode === "content" && bookFilter) sp.set("book", bookFilter);
     if (mode === "book" && openBook) sp.set("book", openBook.title_en);
     if (mode === "content" && page > 1) sp.set("page", String(page));
@@ -351,7 +352,7 @@ export default function LibraryPage() {
     try {
       window.history.replaceState(null, "", qs ? `/library?${qs}` : "/library");
     } catch {}
-  }, [mode, input, submitted, workId, page, bookFilter, openBook]);
+  }, [mode, input, submitted, era, page, bookFilter, openBook]);
 
   const tree = useMemo(() => (catalog ? buildTree(catalog, lang) : []), [catalog, lang]);
   const index = useMemo(() => (catalog ? searchIndex(catalog.books) : null), [catalog]);
@@ -390,7 +391,7 @@ export default function LibraryPage() {
       q: submitted,
       offset: (page - 1) * PAGE_SIZE,
       limit: PAGE_SIZE,
-      work_id: workId || undefined,
+      era: era || undefined,
       book: bookFilter || undefined,
     })
       .then((r) => live && setContent(r))
@@ -399,7 +400,7 @@ export default function LibraryPage() {
     return () => {
       live = false;
     };
-  }, [admin, mode, submitted, page, workId, bookFilter]);
+  }, [admin, mode, submitted, page, era, bookFilter]);
 
   const runContent = useCallback(() => {
     setSubmitted(input.trim());
@@ -540,7 +541,7 @@ export default function LibraryPage() {
                                 className="block py-2 px-2 rounded-lg hover:bg-black/5"
                               >
                                 <div className="text-ink font-medium">{bookTitle(b, lang)}</div>
-                                <div className="text-xs text-ink/50">{pathLabels(catalog, b.path, lang).join(" › ")}</div>
+                                <div className="text-xs text-ink/50">{bookPathLabels(catalog, b, lang).join(" › ")}</div>
                               </Link>
                             </li>
                           ))}
@@ -601,23 +602,23 @@ export default function LibraryPage() {
                   <div className="flex flex-wrap gap-2">
                     <button
                       onClick={() => {
-                        setWorkId("");
+                        setEra("");
                         setPage(1);
                       }}
-                      className={`px-3 py-1 rounded-full text-sm ${!workId ? "bg-tekhelet text-white" : "bg-black/5 hover:bg-black/10 text-ink"}`}
+                      className={`px-3 py-1 rounded-full text-sm ${!era ? "bg-tekhelet text-white" : "bg-black/5 hover:bg-black/10 text-ink"}`}
                     >
                       {t.all}
                     </button>
-                    {CANONICAL_CATEGORIES.filter((c) => (content.facets[c] ?? 0) > 0 || workId === c).map((c) => (
+                    {ERA_CHIPS.filter((c) => (content.eras?.[c.id] ?? 0) > 0 || era === c.id).map((c) => (
                       <button
-                        key={c}
+                        key={c.id}
                         onClick={() => {
-                          setWorkId(c);
+                          setEra(c.id);
                           setPage(1);
                         }}
-                        className={`px-3 py-1 rounded-full text-sm ${workId === c ? "bg-tekhelet text-white" : "bg-black/5 hover:bg-black/10 text-ink"}`}
+                        className={`px-3 py-1 rounded-full text-sm ${era === c.id ? "bg-tekhelet text-white" : "bg-black/5 hover:bg-black/10 text-ink"}`}
                       >
-                        {CATEGORY_LABELS[lang][c] ?? c} <span className="opacity-60">{content.facets[c] ?? 0}</span>
+                        {lang === "he" ? c.he : c.en} <span className="opacity-60">{content.eras?.[c.id] ?? 0}</span>
                       </button>
                     ))}
                   </div>
