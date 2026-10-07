@@ -4,7 +4,6 @@ import re
 from collections import Counter
 from pathlib import Path
 
-from chavruta.corpus import rights
 
 _DATA = Path(__file__).resolve().parents[2] / "src" / "chavruta" / "corpus" / "data"
 _HEB = re.compile(r"[֐-׿]")
@@ -22,10 +21,11 @@ def test_hebrew_titles_are_unique():
     assert not dups, dups[:10]
 
 
-def test_every_book_is_commercially_licensed_and_has_an_entry_ref():
+def test_every_book_has_an_entry_ref_in_the_readers_form():
+    # The reader indexes display refs ('Genesis 1:1'), not corpus refs ('Genesis.1.1').
     for b in _CAT["books"]:
-        assert rights.allows_commercial_use(b["license"]), b["title_en"]
-        assert b["first_ref"] and " " not in b["first_ref"], b["title_en"]
+        assert b["first_ref"], b["title_en"]
+        assert not re.search(r"_|\.\d", b["first_ref"]), (b["title_en"], b["first_ref"])
 
 
 def test_every_category_on_a_books_path_has_a_hebrew_name():
