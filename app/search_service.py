@@ -959,7 +959,7 @@ async def reader_catalog() -> Response:
             b["rank"] = ranks.get(" / ".join((b.get("path") or "").split("/")), _UNRANKED)
         _catalog_cache = json.dumps(cat, ensure_ascii=False).encode("utf-8")
     return Response(content=_catalog_cache, media_type="application/json",
-                    headers={"Cache-Control": "public, max-age=3600"})
+                    headers={"Cache-Control": "public, max-age=300"})
 
 
 def _unit_where(clean_ref: str) -> tuple[str, list[Any]]:

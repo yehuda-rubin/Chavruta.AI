@@ -38,7 +38,8 @@ export interface CategoryNode {
 }
 
 export async function fetchCatalog(): Promise<Catalog> {
-  const res = await fetch("/reader/catalog", { headers: { Accept: "application/json" } });
+  // ?v= busts the browser cache of an older catalogue (it was cached for an hour without rank/order); bump it when the shape changes
+  const res = await fetch("/reader/catalog?v=2", { headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`catalog ${res.status}`);
   return (await res.json()) as Catalog;
 }
