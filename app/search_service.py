@@ -934,10 +934,18 @@ async def reader_catalog() -> Response:
     the response is cacheable; the client does all filtering and searching."""
     global _catalog_cache
     if _catalog_cache is None:
+        import json
         try:
-            _catalog_cache = _CATALOG_PATH.read_bytes()
-        except OSError:
+            cat = json.loads(_CATALOG_PATH.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
             raise HTTPException(status_code=503, detail="Library catalogue not built (scripts/build_catalog.py).")
+        try:
+            ranks = json.loads(_LAYER_RANK_PATH.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            ranks = {}
+        for b in cat.get("books", []):      # learning order, so book search lists Torah before Rashi before the Malbim
+            b["rank"] = ranks.get(" / ".join((b.get("path") or "").split("/")), _UNRANKED)
+        _catalog_cache = json.dumps(cat, ensure_ascii=False).encode("utf-8")
     return Response(content=_catalog_cache, media_type="application/json",
                     headers={"Cache-Control": "public, max-age=3600"})
 

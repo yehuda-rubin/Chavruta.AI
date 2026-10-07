@@ -11,6 +11,8 @@ export interface CatalogBook {
   /** Corpus ref the reader opens the book at. */
   first_ref: string;
   license: string;
+  /** Learning-order rank (lower first), added by /reader/catalog from layer_rank.json. */
+  rank?: number;
 }
 
 export interface CatalogCategory {
@@ -115,8 +117,8 @@ export function searchIndex(books: CatalogBook[]): Map<CatalogBook, string> {
   return new Map(books.map((b) => [b, fold(`${b.title_he} ${b.title_en}`)]));
 }
 
-/** Every word of the query must appear (as a substring) in the book's title. Starts-with matches
- *  rank first, then shorter titles, so "בראשית" lists Genesis before "רש"י על בראשית". */
+/** Every word of the query must appear (as a substring) in the book's title. Results follow the
+ *  learning order (`rank` from the catalogue), so "בראשית" lists Genesis before "רש"י על בראשית". */
 export function searchBooks(
   books: CatalogBook[],
   index: Map<CatalogBook, string>,
@@ -125,14 +127,17 @@ export function searchBooks(
 ): CatalogBook[] {
   const words = fold(query).split(" ").filter(Boolean);
   if (!words.length) return [];
-  const scored: { b: CatalogBook; rank: number }[] = [];
+  const scored: { b: CatalogBook; rank: number; layer: number }[] = [];
   for (const b of books) {
     const hay = index.get(b) ?? "";
     if (!words.every((w) => hay.includes(w))) continue;
     const starts = hay.startsWith(words[0]) || hay.includes(` ${words[0]}`) ? 0 : 1;
-    scored.push({ b, rank: starts * 1000 + hay.length });
+    const exact = hay === fold(query) || fold(b.title_he) === fold(query) || fold(b.title_en) === fold(query);
+    scored.push({ b, rank: starts * 1000 + hay.length, layer: exact ? -1 : b.rank ?? 800 });
   }
-  scored.sort((x, y) => x.rank - y.rank);
+  // learning order first (Torah, Prophets, Writings, Mishnah, Gemara, then each commentator by his era);
+  // an exact title always leads, and inside one layer the closer title match comes first
+  scored.sort((x, y) => x.layer - y.layer || x.rank - y.rank);
   return scored.slice(0, limit).map((s) => s.b);
 }
 
