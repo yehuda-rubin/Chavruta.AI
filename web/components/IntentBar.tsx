@@ -38,11 +38,6 @@ const ICON: Record<IntentId, string> = {
   sourcesheet: "description",
 };
 
-// Beta modes (parsha / daf yomi / source sheet) are switched off for everyone while they are in testing:
-// the server still allow-lists them per account, but the picker no longer offers them. Set this to true
-// to bring them back for the accounts the server enables them for.
-const SHOW_BETA_MODES = false;
-
 // Beta-gated modes
 const BETA_CALENDAR_INTENTS: ReadonlySet<IntentId> = new Set(["parsha", "dafyomi"]);
 const BETA_SOURCESHEET_INTENTS: ReadonlySet<IntentId> = new Set(["sourcesheet"]);
@@ -69,8 +64,8 @@ export function IntentBar({
   const rootRef = useRef<HTMLDivElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const visible = INTENTS.filter((i) => {
-    if (BETA_CALENDAR_INTENTS.has(i)) return SHOW_BETA_MODES && calendarModesEnabled;
-    if (BETA_SOURCESHEET_INTENTS.has(i)) return SHOW_BETA_MODES && sourcesheetModesEnabled;
+    if (BETA_CALENDAR_INTENTS.has(i)) return calendarModesEnabled;
+    if (BETA_SOURCESHEET_INTENTS.has(i)) return sourcesheetModesEnabled;
     return true;
   });
   const isBeta = (i: IntentId) => BETA_CALENDAR_INTENTS.has(i) || BETA_SOURCESHEET_INTENTS.has(i);
