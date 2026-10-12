@@ -59,6 +59,7 @@ services:
       CHAVRUTA_RELEVANCE_THRESHOLD: "0.0"
       CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-fb7545ed5add9650d7d881375fefb335}
       CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
+      CHAVRUTA_MISTRAL_API_KEY: ${CHAVRUTA_MISTRAL_API_KEY:-}
 
       # Generation — Nebius Token Factory (OpenAI-compatible). DeepSeek-V4-Pro is our primary model,
       # hosted on European Nebius servers (Finland, eu-north1). Min output tokens set to 3072 for reasoning floor.
