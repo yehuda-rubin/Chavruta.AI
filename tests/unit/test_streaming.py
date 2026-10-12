@@ -53,19 +53,26 @@ def test_streaming_regular_brackets_unaffected():
 def test_resolve_llm_mistral_override(monkeypatch):
     from unittest.mock import MagicMock
     import app.api as api_mod
+    from chavruta.llm.fallback import FallbackLLM
 
     mock_pipeline = MagicMock()
     mock_pipeline.profile.llm_timeout_s = 45.0
     mock_pipeline.profile.llm_max_retries = 2
     monkeypatch.setattr(api_mod, "_get_pipeline", lambda: mock_pipeline)
 
-    # Default local user without preset gets shared pipeline backend (None)
-    res, llm, meter = api_mod._resolve_llm_for_request("local", "he", "qa", None)
+    # Regular user never gets Mistral (returns None -> default shared backend)
+    monkeypatch.setenv("CHAVRUTA_MISTRAL_API_KEY", "mstrl_test123")
+    res, llm, meter = api_mod._resolve_llm_for_request("regular_user_123", "he", "qa", None)
     assert llm is None
 
-    # Mistral is disabled; requests requesting mistral preset fall back to default shared backend (None)
-    res, llm, meter = api_mod._resolve_llm_for_request("local", "he", "qa", None, preset="mistral-large-3")
-    assert llm is None
+    # Admin user (or local dev with env key) gets FallbackLLM (Mistral primary -> Nebius secondary)
+    monkeypatch.setattr(api_mod, "_is_admin", lambda uid: uid == "admin_user_456")
+    res, llm, meter = api_mod._resolve_llm_for_request("admin_user_456", "he", "qa", None)
+    assert isinstance(llm, FallbackLLM)
+    assert llm.primary.model_id == "mistral-large-2512"
+    assert "mistral.ai" in llm.primary.base_url
+    assert llm.secondary == mock_pipeline.llm
+
 
 
 

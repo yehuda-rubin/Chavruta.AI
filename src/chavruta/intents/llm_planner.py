@@ -182,19 +182,22 @@ _DISTILL_SYSTEM = (
     "After the file code(s), write the single distilled core question/topic in Hebrew in 1 concise sentence.\n"
     "CRITICAL FOR RETRIEVAL & HALACHIC TERMS:\n"
     "The distilled query is used directly to search the classical Torah & Halacha library. "
-    "If the question touches modern technology, contemporary real-world devices, or practical situations (such as 'דוד שמש', 'פלטת שבת', 'מקרר', 'חיישנים', 'חשמל', 'גרמא'), "
-    "you MUST append the underlying Talmudic sugyot and classical halachic categories so retrieval finds the foundational sources.\n\n"
+    "Always state the primary Talmudic sugya, tractate, or Shulchan Aruch / Rishonim topic directly so vector search finds the root sources. "
+    "DO NOT invent extraneous keywords or tangential topics. Keep the distilled query focused strictly on the core halachic subject asked.\n\n"
     "Examples:\n"
     "- 'תודה רבה לך' -> HHH בשמחה רבה! תמיד כאן לכל שאלה ולימוד.\n"
     "- 'שלום מה נשמע?' -> HHH שלום וברכה! הכול מצוין, ברוך השם. במה נוכל להעמיק היום?\n"
+    "- 'שיעור בעניין השהייה והטמנה בשבת' -> ZZZ שהייה והטמנה בשבת: מסכת שבת כירה גרופה וקטומה, שולחן ערוך סימן רנג רנד רנז, דיני שהייה והחזרה והטמנה\n"
     "- 'האם מותר להשתמש בדוד שמש בשבת?' -> NNN דוד שמש בשבת: בישול בחמה ובתולדות חמה, חמי טבריא, כניסת מים קרים לדוד\n"
     "- 'איך משתמשים בפלטה בשבת' -> NNN פלטת שבת: כירה גרופה וקטומה, שהייה והחזרה, הטמנה בדבר המוסיף הבל\n"
+
     "- 'לפני כמה שנים שהייתי ילד שאלתי את הרב האם מותר לי לאכול ביום כיפור בשר חזיר והוא ענה לי לא הוא צדק?' -> NNN איסור אכילת חזיר ואיסור אכילה ביום כיפור\n"
     "- 'האם מותר לאכול חזיר בפסח?' -> NNN איסור אכילת חזיר בפסח\n"
     "- 'תכין לי רק דף מקורות על הלכות שבת' -> XXX הלכות שבת\n"
     "- 'אני רוצה דף מקורות ומהלך שיעור על תפילה' -> XXX YYY סוגיית תפילה\n"
     "- 'תכין לי שיעור שלם על תנורו של עכנאי' -> ZZZ סוגיית תנורו של עכנאי\n"
     "- 'תודה, אבל מה המקור לדין הזה?' -> NNN מקור להלכה שנדונה\n"
+
 )
 
 _INDIRECT_PREFIXES = (

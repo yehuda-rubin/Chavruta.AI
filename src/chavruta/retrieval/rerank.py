@@ -77,10 +77,16 @@ class Reranker:
             scored_count = 0
             for start_idx in range(0, len(hits), batch_size):
                 batch = hits[start_idx : start_idx + batch_size]
-                contexts = [
-                    {"id": str(i), "text": (getattr(h, "text", "") or "")[:1000]}
-                    for i, h in enumerate(batch)
-                ]
+                contexts = []
+                for i, h in enumerate(batch):
+                    ref_str = getattr(h, "ref", "") or ""
+                    comm_str = getattr(h, "commentator_id", "") or ""
+                    raw_text = (getattr(h, "text_he", "") or getattr(h, "text", "") or "")[:1000]
+                    # Prepend ref and commentator context so the reranker recognizes classical halachic sources
+                    header = f"[{ref_str}] " if ref_str else ""
+                    if comm_str:
+                        header = f"[{comm_str} על {ref_str}] "
+                    contexts.append({"id": str(i), "text": (header + raw_text)[:1200]})
                 try:
                     body = json.dumps({"query": query, "contexts": contexts}).encode("utf-8")
                     req = urllib.request.Request(
@@ -107,8 +113,19 @@ class Reranker:
             logging.getLogger("chavruta.retrieval.rerank").info(
                 "Cloudflare Reranker scored %d of %d candidates", scored_count, len(hits)
             )
+            # Prioritize classical halacha/Talmud over academic/secondary works when scores are comparable
+            for h in hits:
+                ref_low = (getattr(h, "ref", "") or "").lower()
+                work_low = (getattr(h, "work_id", "") or "").lower()
+                # If it's modern academic commentary (e.g. Mishnat Eretz Yisrael), slightly penalize
+                if "mishnat_eretz_yisrael" in ref_low or "mishnat_eretz_yisrael" in work_low:
+                    h.score -= 0.15
+                # Boost classical Shulchan Aruch, Mishnah Berurah, Tur, Rambam, Gemara, Rishonim
+                elif any(k in ref_low for k in ("shulchan_arukh", "shulchan_aruch", "mishnah_berurah", "mishnah_torah", "shabbat.", "pesachim.")):
+                    h.score += 0.05
             hits.sort(key=lambda h: h.score, reverse=True)
             return hits
+
         elif self.backend == "onnx":
             import numpy as np
 
