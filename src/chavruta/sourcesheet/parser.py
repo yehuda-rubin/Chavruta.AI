@@ -192,6 +192,50 @@ def _quoted_text(raw_seg: str) -> str:
     return "\n".join(quoted)
 
 
+_COMMENTATOR_NAMES_LONGEST_FIRST = sorted(HE_COMMENTATORS, key=len, reverse=True)
+# A commentator's name, with the one-letter prefix a sentence puts on it ("ברש״י", "מתוס׳"). Longest
+# names first so "תוספות ישנים" is not read as "תוספות".
+_COMMENTATOR_RE = re.compile(
+    r"(?<![א-ת])[בלמוהכש]?(" + "|".join(re.escape(n) for n in _COMMENTATOR_NAMES_LONGEST_FIRST) + r")(?![א-ת])"
+)
+_ACRONYM_QUOTE_RE = re.compile(r'(?<=[א-ת])"(?=[א-ת])')
+_QUOTED_DH_RE = re.compile(r'"([^"]{2,80}?)"')
+_MAX_DH_WORDS = 6
+_TALMUD_BASE_RE = re.compile(r"^[A-Za-z_ ]+ \d+[ab]$")
+
+
+def _commentary_requests(raw_seg: str) -> list[dict[str, Any]]:
+    """The commentators a segment POINTS at and the dibbur hamatchil it names for each.
+
+    "עיינו ברש״י ד״ה "דנין פר אחד ואיל אחד" "דנין פר שלו", תוס׳ ישנים ד״ה דנין" is a pointer, not text:
+    the sheet carries none of what Rashi wrote. Returns [{"commentator": "Rashi", "dh": [...]}, ...] so
+    the caller can fetch that commentary and match it by dibbur. Quoted lines (the sheet's own
+    quotations) are skipped: a quotation of Sefer HaYashar is not a pointer to anyone.
+    """
+    prose = " ".join(
+        ln.strip() for ln in raw_seg.split("\n")
+        if ln.strip() and not ln.strip().startswith(('"', "“", "״")) and len(ln.strip()) < 600
+    )
+    prose = _ACRONYM_QUOTE_RE.sub("״", prose)         # רש"י → רש״י, so the remaining " are real quotes
+    matches = list(_COMMENTATOR_RE.finditer(prose))
+    found: dict[str, list[str]] = {}
+    for i, m in enumerate(matches):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(prose)
+        # The pointer ends at its sentence: what follows ("ספר הישר … סימן שג: "ואע״ג …"") is the next
+        # source, and its opening words are not a dibbur of this commentator.
+        span = re.split(r"\.\s", prose[m.end():end], maxsplit=1)[0]
+        dhs = [d.strip() for d in _QUOTED_DH_RE.findall(span) if len(d.split()) <= _MAX_DH_WORDS]
+        if not dhs:
+            plain = re.search(r'(?:ד״ה|דיבור המתחיל)\s+([^\n.,:;–—"]+)', span)
+            if plain and len(plain.group(1).split()) <= _MAX_DH_WORDS:
+                dhs = [plain.group(1).strip()]
+        if not dhs:
+            continue
+        bucket = found.setdefault(HE_COMMENTATORS[m.group(1)], [])
+        bucket.extend(d for d in dhs if d not in bucket)
+    return [{"commentator": name, "dh": dhs} for name, dhs in found.items()]
+
+
 @dataclass
 class ParsedSourceItem:
     index: int
@@ -349,6 +393,7 @@ def parse_source_sheet(text: str) -> list[ParsedSourceItem]:
     items: list[ParsedSourceItem] = []
     last_known_ref: str | None = None
     last_known_book: str | None = None
+    last_talmud_base: list[str] = []
 
     for idx, raw_seg in enumerate(raw_segments, start=1):
         lines = [line.strip() for line in raw_seg.split("\n") if line.strip()]
@@ -412,6 +457,18 @@ def parse_source_sheet(text: str) -> list[ParsedSourceItem]:
         last_known_ref = None if ref_range and len(ref_range) > 1 and " " in (detected_ref or "") else detected_ref
         last_known_book = book_id if last_known_ref else None
 
+        # A pointer to a commentator with no base of its own ("עיינו ברש״י ד״ה …") takes the gemara the
+        # sheet was last on — unlike "שם", which only reaches back one item, because a sheet states the
+        # sugya once and then points at commentary on it. Kept as a request, never as a ref: what the
+        # commentator wrote is fetched and matched by dibbur, not assumed.
+        commentary_requests: list[dict[str, Any]] = []
+        if not detected_ref and last_talmud_base:
+            commentary_requests = _commentary_requests(raw_seg)
+        elif detected_ref and not ref_range and _TALMUD_BASE_RE.match(detected_ref):
+            last_talmud_base = [detected_ref]
+        if ref_range and detected_ref and _TALMUD_BASE_RE.match(detected_ref):
+            last_talmud_base = list(ref_range)
+
         item = ParsedSourceItem(
             index=idx,
             raw_text=raw_seg,
@@ -426,6 +483,10 @@ def parse_source_sheet(text: str) -> list[ParsedSourceItem]:
                 "lines_count": len(lines),
                 **({"ref_range": ref_range} if len(ref_range) > 1 else {}),
                 **({"quoted_text": _quoted_text(raw_seg)} if _quoted_text(raw_seg) else {}),
+                **(
+                    {"commentary_requests": commentary_requests, "commentary_base": list(last_talmud_base)}
+                    if commentary_requests else {}
+                ),
             },
         )
         items.append(item)

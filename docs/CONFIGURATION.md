@@ -39,7 +39,7 @@ Every knob in Chavruta.AI is an environment variable. No code changes are requir
 | Variable | Purpose | Default | Where read |
 |----------|---------|---------|------------|
 | `CHAVRUTA_LLM_BACKEND` | LLM backend: `nebius` (the Nebius API, default) or `bridge` (Claude in-session, no external API) | `nebius` | `src/chavruta/config/profile.py:106` |
-| `CHAVRUTA_LLM_MODEL` | Model ID for the LLM | `Qwen/Qwen3-235B-A22B-Instruct-2507` | `src/chavruta/config/profile.py:107` |
+| `CHAVRUTA_LLM_MODEL` | Model ID for the LLM | `deepseek-ai/DeepSeek-V4-Pro` (preset: `deepseek-v4-pro`) | `src/chavruta/config/profile.py:107` |
 | `CHAVRUTA_LLM_BASE_URL` | Base URL for the LLM API | `https://api.studio.nebius.ai/v1` | `src/chavruta/config/profile.py:108` |
 | `CHAVRUTA_LLM_API_KEY` | API key for the LLM provider (also accepts `NEBIUS_API_KEY` as a fallback) | `""` | `src/chavruta/config/profile.py:109` |
 | `CHAVRUTA_LLM_TEMPERATURE` | Sampling temperature for generation | `0.2` | `src/chavruta/config/profile.py:110` |
@@ -170,9 +170,11 @@ Macaron V1 Venti on 2026-07-27: ~86,000 characters of reasoning and no answer at
 normal completion at 96,000. That case now raises `LLMEmptyAnswerError` naming the variable to raise,
 instead of returning `""` and being misdiagnosed downstream as a retrieval failure.
 
-**The baseline is `nebius` / `Qwen/Qwen3-235B-A22B-Instruct-2507`.** Every quality figure we have —
-the eval, citation behaviour, the Hebrew-only rule, `_strip_foreign` — was measured on it. Any other
-model is unmeasured until the eval is run against it.
+**The baseline evaluation was established on `nebius` / `Qwen/Qwen3-235B-A22B-Instruct-2507`.** 
+Production currently serves `deepseek-v4-pro` (`deepseek-ai/DeepSeek-V4-Pro` on Nebius).
+
+### Alternative / Evaluated Presets
+- `mistral-large-3` (`mistral-large-2512` via `https://api.mistral.ai/v1`): Candidate preset evaluated on 2026-10-07. Pricing: $0.50/1M prompt ($0.05 cached input), $1.50/1M completion. Benchmarked across a 20-run authentic user query set: 0% marker hallucination (`[S#]` compliance), highly structured output with clear numbered sections, ~2,500 chars average response, ~24.8s latency. To activate: set `CHAVRUTA_LLM_PRESET=mistral-large-3` and `CHAVRUTA_LLM_API_KEY=<mistral_key>`.
 
 ## Notes
 

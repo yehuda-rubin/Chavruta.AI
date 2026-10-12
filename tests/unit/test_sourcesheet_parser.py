@@ -138,3 +138,39 @@ def test_quoted_lines_become_the_items_own_text():
     items = parse_source_sheet(_OUTLINE_SHEET)
     assert "ופרש\"י" in items[3].metadata["quoted_text"]
     assert "quoted_text" not in items[0].metadata
+
+
+# ── A pointer to commentary ("עיינו ברש״י ד״ה …") with no base of its own ─────────────────────────
+
+_POINTER_SHEET = """קריאת שמע – שיעור
+אנחנו לומדים מסכת ברכות.
+מקורות:
+א. סוגיית הגמרא ב, א עד ב, ב ויש לעיין בה היטב לקראת השיעור
+ב. עיון בדברי המפרשים ברש"י ד"ה "מאימתי קורין" "משעה שהעני", ובתוס' ישנים ד"ה מאימתי. ספר אחר סימן ג:"ואע"ג דלא נאמר".
+א.
+גמרא ב, א "מאימתי קורין" ו-ב, ב "עד סוף האשמורת".
+ב.
+רש"י ד"ה "מאימתי קורין", "משעה שהעני". תוספות ישנים ד"ה "מאימתי".
+"""
+
+
+def test_commentary_pointer_keeps_each_commentator_and_dibbur_and_takes_the_gemara_range():
+    items = parse_source_sheet(_POINTER_SHEET)
+    pointer = items[1]
+    assert pointer.ref is None                                   # never a guessed base
+    assert pointer.metadata["commentary_requests"] == [
+        {"commentator": "Rashi", "dh": ["מאימתי קורין", "משעה שהעני"]},
+        {"commentator": "Tosafot Yeshanim", "dh": ["מאימתי"]},   # NOT folded into Tosafot
+    ]
+    assert pointer.metadata["commentary_base"] == ["Berakhot 2a", "Berakhot 2b"]
+
+
+def test_the_next_sources_opening_words_are_not_taken_as_a_dibbur():
+    pointer = parse_source_sheet(_POINTER_SHEET)[1]
+    dhs = [d for r in pointer.metadata["commentary_requests"] for d in r["dh"]]
+    assert not any("ואע" in d for d in dhs)
+
+
+def test_pointer_without_a_gemara_to_sit_on_makes_no_request():
+    items = parse_source_sheet("א. עיינו ברש\"י ד\"ה \"מאימתי קורין\"\nמשהו נוסף כאן לשורה.")
+    assert "commentary_requests" not in items[0].metadata

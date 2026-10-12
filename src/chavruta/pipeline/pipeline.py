@@ -823,17 +823,21 @@ class ChavrutaPipeline:
                     break
         return out
 
-    def ask_stream(self, request: Query, *, history: list[Turn] | None = None) -> Iterator[str]:
-        query = self._resolve_query(request)
+    def ask_stream(self, request: Query, *, history: list[Turn] | None = None, llm=None) -> tuple[Iterator[str], list[RankedHit]]:
+        """Streaming generation returning (raw_token_stream, retrieved_hits).
+        Allows passing per-request LLM override (e.g. Mistral Large 3 / BYOK)."""
+        llm = llm or self.llm
+        query = self._anchor_followup(self._resolve_query(request, history=history), history)
         result = self.retriever.retrieve(query, top_k=_top_k_for(query.intent, self.profile))
         if result.is_empty:
-            yield grounded.no_source_answer(query.lang, query.intent).text
-            return
+            def _empty_stream() -> Iterator[str]:
+                yield grounded.no_source_answer(query.lang, query.intent).text
+            return _empty_stream(), []
         prompt, _ = grounded.build_prompt(
             query.text, result.hits, intent=query.intent, history=history, lang=query.lang
         )
-        yield from self.llm.stream(
+        return llm.stream(
             prompt, lang=query.lang,
             max_tokens=_max_tokens_for(query.intent, self.profile),
             temperature=self.profile.llm_temperature,
-        )
+        ), result.hits

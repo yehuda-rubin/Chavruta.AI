@@ -468,7 +468,7 @@ def _strip_instruction_echo(text: str, he: bool) -> str:
 from contextlib import asynccontextmanager, contextmanager
 
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -478,6 +478,7 @@ from chavruta.config.profile import Profile
 from chavruta.corpus import rights
 from chavruta.corpus.refs import (
     COMMENTATOR_HE,
+    daf_amud_to_corpus_n,
     commentary_refs,
     commentator_from_ref,
     expand_range,
@@ -492,6 +493,7 @@ from chavruta.llm import metering
 from chavruta.llm.agentic import is_degrade_message
 from chavruta.llm import base as llm_base
 from chavruta.llm.base import GroundedPrompt
+from chavruta.llm.streaming import stream_with_marker_transformation
 from chavruta.pipeline.pipeline import _max_tokens_for
 from chavruta.generation.grounded import strip_mudgash_label
 from chavruta.intents.hebrew_refs import detect_tractates, detect_hebrew_refs
@@ -1832,17 +1834,32 @@ _WANTS_LESSON_SYSTEM = (
 _WANTS_LESSON_YES_RE = re.compile(r"^(כן|yes)\b", re.I)
 
 
+_LESSON_KEYWORD_RE = re.compile(
+    r"(?:"
+    r"שיעור"
+    r"|מערך"
+    r"|דף\s*מקורות"
+    r"|\blesson\b"
+    r"|\bsource\s*sheet\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
 def _wants_full_lesson(question: str, llm=None) -> bool:
-    """Cheap yes/no check: did the user actually ask for a full lesson to be built (e.g. 'תבנה לי
-    שיעור על הפרשה'), as opposed to the default turn style for parsha/daf-yomi (direct Q&A for
-    parsha, chavruta-style back-and-forth for daf-yomi)? Runs on _classifier_llm (a small/fast
-    model), not the main pipeline LLM — this is a trivial decision and should never add the main
-    model's latency/cost before the real turn even starts. Best-effort: any failure or unclear
-    reply defaults to False (the cheaper, safer path), same philosophy as _fix_bleeding_sentences —
-    a misfire here must never break a turn. `llm` overrides the classifier lookup (dependency
-    injection for tests)."""
+    """Cheap check: did the user actually ask for a full lesson to be built (e.g. 'תבנה לי
+    שיעור על הפרשה', 'מערך שיעור על הדף'), as opposed to the default turn style for parsha/daf-yomi
+    (direct Q&A)?
+
+    Guardrail: require explicit lesson-related terminology (e.g. 'שיעור', 'מערך', 'דף מקורות',
+    'lesson', 'source sheet') before even considering escalation to a lesson. A regular question
+    such as 'מה הקריאה היום ולמה קוראים אותה?' or 'מה הדף היום?' must NEVER trigger full lesson
+    generation. If keywords match, runs on _classifier_llm (a small/fast model) to confirm the user's
+    intent. Any failure or unclear reply defaults to False."""
     clean = " ".join((question or "").split()).strip()
     if not clean:
+        return False
+    if not _LESSON_KEYWORD_RE.search(clean):
         return False
     llm = llm or _classifier_llm() or _get_pipeline().llm
     try:
@@ -2320,6 +2337,9 @@ def _daf_yomi_context_note(tractate: str, daf: int, he: bool) -> str:
 
 # ── Source Sheet Companion Path (Spec 008) ───────────────────────────────────
 
+# Segments fetched per amud for a range item; an amud is stored as numbered lines and runs ~10-20.
+_SHEET_AMUD_SEGMENTS = 24
+
 _SOURCESHEET_REBUILD_VERB = r"(?:בנה|לבנות|צור|ליצור|ערוך|לערוך|הפק|להפיק|הכן|להכין|כתוב|לכתוב|שכתב|לשכתב|חדש|לחדש|סכם|לסכם|הוצא|להוציא)"
 _SOURCESHEET_NOUN = r"(?:דף\s*מקורות|דף\s*המקורות|קובץ|חוברת|סיכום|ליווי)"
 _SOURCESHEET_BUILD_RE = re.compile(
@@ -2348,6 +2368,60 @@ def _sourcesheet_mode_enabled(owner_id: str) -> bool:
     if owner_id and owner_id in {o.strip() for o in raw.split(",") if o.strip()}:
         return True
     return bool(owner_id) and devhelpers.has_feature(owner_id, "sourcesheet")
+
+
+def _sheet_amud_segment_refs(ref: str) -> list[str]:
+    """"Yoma 2a" → ["Yoma.3.1", … "Yoma.3.24"]; [] for anything that is not a Talmud amud.
+
+    The corpus stores a daf as numbered lines under its amud-linear number, and the opening ref
+    ("Yoma.3.1") is only the first line, so a whole amud has to be asked for line by line.
+    """
+    m = re.fullmatch(r"([A-Za-z_ ]+?)\s+(\d+)([ab])", ref or "")
+    if not m or " on " in ref:
+        return []
+    n = daf_amud_to_corpus_n(int(m.group(2)), m.group(3))
+    book = m.group(1).strip().replace(" ", "_")
+    return [f"{book}.{n}.{k}" for k in range(1, _SHEET_AMUD_SEGMENTS + 1)]
+
+
+_SHEET_COMMENTATOR_IDS = {"Rashi": "rashi", "Tosafot": "tosafot"}
+
+
+def _fetch_sheet_commentary(parsed_items) -> dict[str, str]:
+    """Fetch the commentary a sheet only POINTS at ("עיינו ברש״י ד״ה …") and match it by dibbur.
+
+    Each pointer item carries the commentators and dibburim it names plus the gemara it sits on. The
+    commentary on those lines is fetched, the comment whose own dibbur equals the one named is kept,
+    and the result is filed under a per-item key the analyzer reads. A commentator the corpus does
+    not hold, or a dibbur with no match, contributes nothing — the item then stays without text
+    rather than with a guess.
+    """
+    from chavruta.sourcesheet.analyzer import COMMENTATOR_LABEL_HE, pick_commentary
+
+    out: dict[str, str] = {}
+    for item in parsed_items:
+        meta = item.metadata or {}
+        requests, base = meta.get("commentary_requests"), meta.get("commentary_base")
+        if not requests or not base:
+            continue
+        bases = [r for amud in base for r in _sheet_amud_segment_refs(amud)]
+        chunks: list[str] = []
+        for req in requests:
+            cid = _SHEET_COMMENTATOR_IDS.get(req["commentator"])
+            if not cid or not bases:
+                continue
+            refs = commentary_refs(bases, [cid], max_comments=6)
+            hits = _fetch_ranked_hits(refs, limit=max(len(refs) * 2, 300))
+            order = {t: i for i, t in reversed(list(enumerate(refs)))}
+            comments = [(h.ref, h.text_he or "") for h in sorted(hits, key=lambda x: order.get(x.ref, len(order)))]
+            label = COMMENTATOR_LABEL_HE.get(req["commentator"], req["commentator"])
+            for dh, _ref, text in pick_commentary(req["dh"], comments):
+                chunks.append(f"[{label} ד״ה {dh}] {text}")
+        if chunks:
+            key = f"__commentary__{item.index}"
+            out[key] = "\n".join(chunks)
+            item.metadata["corpus_key"] = key
+    return out
 
 
 def _run_sourcesheet(
@@ -2419,9 +2493,14 @@ def _run_sourcesheet(
 
             # A range ("ויקרא ח' לג–לו", "יומא ב ע"א – ג ע"ב") fetches every verse/amud in it; the text of
             # all of them lands under the item's own ref.
+            # Under EVERY key the item can be looked up by (its ref and its canonical form): the analyzer
+            # tries the canonical key first, and a range filed only under the ref left it with verse 33.
+            # A Talmud amud is stored as numbered segments (the opening ref is only its first line), so
+            # each amud in a range is fetched as segments 1..N.
             for extra in (item.metadata or {}).get("ref_range", []):
-                for v in with_ref_variants([extra]):
-                    ref_map.setdefault(v, []).append(item.ref or extra)
+                seg_refs = _sheet_amud_segment_refs(extra) or [extra]
+                for v in with_ref_variants(seg_refs):
+                    ref_map.setdefault(v, []).extend(candidates or [extra])
                     all_targets.append(v)
 
             for cr in candidates:
@@ -2453,6 +2532,11 @@ def _run_sourcesheet(
                         corpus_lookup[orig] = (prev + "\n" + h.text_he).strip()
     except Exception as exc:
         _log.warning("sourcesheet corpus fetch fallback: %s", exc)
+
+    try:
+        corpus_lookup.update(_fetch_sheet_commentary(parsed_items))
+    except Exception as exc:
+        _log.warning("sourcesheet commentary fetch skipped: %s", exc)
 
     # Synthesize companion guide
     from chavruta.intents.llm_planner import distill_query
@@ -3647,17 +3731,50 @@ def _hstr(v) -> str:
 
 
 def _resolve_llm_for_request(owner: str, lang: str, intent: str, user_key: str | None,
-                             base_url: str | None = None, model: str | None = None):
+                             base_url: str | None = None, model: str | None = None,
+                             preset: str | None = None):
     """One-stop call for every route below: enforce quota (with the BYOK fallback), and return
     (reserved, llm_override, meter) — llm_override is None (use the pipeline's own shared backend)
     unless the turn was actually admitted on the caller's own key, in which case it's a fresh
     single-request CloudLLM built from it (see _byok_llm) and meter is BYOK_TOKENS so settlement
-    lands in the right pool. `base_url`/`model` let the caller point their key at a different
-    provider/model entirely — see _byok_llm's docstring."""
+    lands in the right pool. `base_url`/`model`/`preset` let the caller point their key or select
+    an alternate preset (e.g. mistral-large-3) for themselves without affecting other users."""
     key = _hstr(user_key)
     res = _enforce_quota(owner, lang, intent, user_key=key)
     if res.used_byok:
         return res, _byok_llm(key, _hstr(base_url), _hstr(model)), db.BYOK_TOKENS
+
+    # Check for per-user / opt-in preset or admin model override
+    preset_name = _hstr(preset).lower()
+    admin_override = os.environ.get("CHAVRUTA_ADMIN_LLM_PRESET", "").strip().lower()
+    target_preset = preset_name or (admin_override if (_is_admin(owner) or owner == "local") else "")
+
+    if target_preset == "mistral-large-3" or _hstr(model) in ("mistral-large-2512", "mistral-large-3"):
+        if db.is_mistral_budget_exceeded():
+            m_status = db.get_mistral_budget_status()
+            _log.warning(
+                "Mistral internal budget ceiling ($%.2f) reached (spent: $%.4f). Bypassing Mistral and routing directly to Nebius.",
+                m_status["budget_limit_usd"], m_status["spent_usd"],
+            )
+            return res, None, db.TOKENS
+
+        from chavruta.llm.presets import PRESETS
+        from chavruta.llm.cloud import CloudLLM
+        from chavruta.llm.fallback import FallbackLLM
+        mistral_p = PRESETS.get("mistral-large-3")
+        pipeline = _get_pipeline()
+        m_key = key or os.environ.get("CHAVRUTA_MISTRAL_API_KEY") or os.environ.get("MISTRAL_API_KEY") or "mstrl_8BxNXitCaqHULPBrsB0UBt87plDfmbrL_0iQmI9"
+        mistral_llm = CloudLLM(
+            mistral_p.model if mistral_p else "mistral-large-2512",
+            mistral_p.base_url if mistral_p else "https://api.mistral.ai/v1",
+            m_key,
+            timeout_s=getattr(pipeline.profile, "llm_timeout_s", 60.0),
+            max_retries=getattr(pipeline.profile, "llm_max_retries", 2),
+        )
+        # Automatic fallback to the deployment's default Nebius backend
+        fallback_llm = FallbackLLM(primary=mistral_llm, secondary=pipeline.llm)
+        pipeline.wire_source_fetcher(fallback_llm)
+        return res, fallback_llm, db.TOKENS
 
     return res, None, db.TOKENS
 
@@ -3678,16 +3795,96 @@ class QueryRequest(BaseModel):
 def query(req: QueryRequest, owner: str = Depends(current_owner),
          x_user_llm_key: str | None = Header(default=None, alias="X-User-LLM-Key"),
          x_user_llm_base_url: str | None = Header(default=None, alias="X-User-LLM-Base-URL"),
-         x_user_llm_model: str | None = Header(default=None, alias="X-User-LLM-Model")):
+         x_user_llm_model: str | None = Header(default=None, alias="X-User-LLM-Model"),
+         x_user_llm_preset: str | None = Header(default=None, alias="X-User-LLM-Preset")):
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
     reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key,
-                                                    x_user_llm_base_url, x_user_llm_model)
+                                                    x_user_llm_base_url, x_user_llm_model, x_user_llm_preset)
     # The gate lives in _run_query, which every generation path goes through — see there.
     return _metered(owner, reserved, req.intent, lambda: _run_query(
         _augment_question(req.question, req.attachments), req.lang, req.intent, [],
         audience=req.audience, grade_band=req.grade_band, length=req.length,
         owner_id=owner, llm=llm), req, meter=meter)()
+
+
+@app.post("/query/stream")
+def query_stream(req: QueryRequest, owner: str = Depends(current_owner),
+                 x_user_llm_key: str | None = Header(default=None, alias="X-User-LLM-Key"),
+                 x_user_llm_base_url: str | None = Header(default=None, alias="X-User-LLM-Base-URL"),
+                 x_user_llm_model: str | None = Header(default=None, alias="X-User-LLM-Model"),
+                 x_user_llm_preset: str | None = Header(default=None, alias="X-User-LLM-Preset")):
+    """Stateless query with real-time SSE token & citation streaming."""
+    if not req.question.strip():
+        raise HTTPException(status_code=422, detail="question must not be empty")
+    reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key,
+                                                    x_user_llm_base_url, x_user_llm_model, x_user_llm_preset)
+
+    def _gen():
+        augmented_q = _augment_question(req.question, req.attachments)
+        pipeline = _get_pipeline()
+        effective_llm = llm or pipeline.llm
+        if is_pure_greeting(augmented_q):
+            resp = _greeting_response(req.lang, req.intent)
+            _settle_tokens(owner, reserved, {}, req.intent, meter=meter)
+            yield f"event: token\ndata: {json.dumps({'text': resp.answer}, ensure_ascii=False)}\n\n"
+            yield f"event: done\ndata: {json.dumps({'answer': resp.answer, 'citations': []}, ensure_ascii=False)}\n\n"
+            return
+
+        parsed_intent = None
+        if req.intent:
+            try:
+                parsed_intent = Intent(req.intent)
+            except ValueError:
+                parsed_intent = None
+
+        q = Query(text=augmented_q, lang=req.lang or None, intent=parsed_intent, rerank=True)
+        try:
+            raw_stream, hits = pipeline.ask_stream(q, history=[], llm=effective_llm)
+        except Exception as exc:
+            _log.exception("streaming ask_stream failed: %s", exc)
+            he = (req.lang or "") != "en"
+            err_msg = ("אירעה שגיאה בעיבוד הבקשה — נסו שוב." if he else "An error occurred processing the request — please try again.")
+            yield f"event: token\ndata: {json.dumps({'text': err_msg}, ensure_ascii=False)}\n\n"
+            yield f"event: done\ndata: {json.dumps({'answer': err_msg, 'citations': []}, ensure_ascii=False)}\n\n"
+            _settle_tokens(owner, reserved, {}, req.intent, meter=meter)
+            return
+
+        full_chunks = []
+        citations = []
+        seen = set()
+        for event_str in stream_with_marker_transformation(raw_stream, hits):
+            yield event_str
+            if event_str.startswith("event: token"):
+                try:
+                    c = json.loads(event_str.strip().split("\n")[1].replace("data: ", "")).get("text", "")
+                    full_chunks.append(c)
+                except Exception:
+                    pass
+            elif event_str.startswith("event: citation"):
+                try:
+                    cd = json.loads(event_str.strip().split("\n")[1].replace("data: ", ""))
+                    m = cd.get("marker")
+                    if m and m not in seen:
+                        seen.add(m)
+                        citations.append(cd)
+                except Exception:
+                    pass
+        ans = "".join(full_chunks).strip()
+        usage = {"prompt_tokens": 0, "completion_tokens": len(ans.split())}
+        if "mistral" in (getattr(effective_llm, "last_model_used", "") or getattr(effective_llm, "model_id", "") or "").lower():
+            try:
+                db.record_mistral_usage(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
+            except Exception:
+                pass
+        _settle_tokens(owner, reserved, usage, req.intent, meter=meter)
+        yield f"event: done\ndata: {json.dumps({'answer': ans, 'citations': citations}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        _gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
 
 
 class MeOut(BaseModel):
@@ -3869,7 +4066,14 @@ def admin_overview(since: str = "30d", owner: str = Depends(_require_admin)):
         "usage": db.usage_health(cutoff),
         "concurrency": db.usage_concurrency(cutoff),
         "revenue": db.revenue_summary(cutoff),
+        "mistral_budget": db.get_mistral_budget_status(),
     }
+
+
+@app.get("/admin/mistral-budget")
+def admin_mistral_budget(owner: str = Depends(_require_admin)):
+    """Current cumulative Mistral usage, spend, and internal $9.00 budget ceiling status."""
+    return db.get_mistral_budget_status()
 
 
 @app.get("/admin/usage-by-owner")
@@ -4703,13 +4907,14 @@ def _continue_query_work(session_id: str, req: QueryRequest, history: list[Turn]
 def create_session(req: QueryRequest, owner: str = Depends(current_owner),
                    x_user_llm_key: str | None = Header(default=None, alias="X-User-LLM-Key"),
                    x_user_llm_base_url: str | None = Header(default=None, alias="X-User-LLM-Base-URL"),
-                   x_user_llm_model: str | None = Header(default=None, alias="X-User-LLM-Model")):
+                   x_user_llm_model: str | None = Header(default=None, alias="X-User-LLM-Model"),
+                   x_user_llm_preset: str | None = Header(default=None, alias="X-User-LLM-Preset")):
     """Create a new session and run the first query (synchronous — fine for quick Q&A; use
     /sessions/async for a long lesson that would outlast a proxy timeout)."""
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
     reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key,
-                                                    x_user_llm_base_url, x_user_llm_model)
+                                                    x_user_llm_base_url, x_user_llm_model, x_user_llm_preset)
 
     # Lock the chat's mode to the intent chosen on this first turn; every follow-up stays in it.
     with _release_on_error(owner, reserved, req.intent, meter):
@@ -4723,17 +4928,174 @@ def create_session(req: QueryRequest, owner: str = Depends(current_owner),
 def session_query(session_id: str, req: QueryRequest, owner: str = Depends(current_owner),
                   x_user_llm_key: str | None = Header(default=None, alias="X-User-LLM-Key"),
                   x_user_llm_base_url: str | None = Header(default=None, alias="X-User-LLM-Base-URL"),
-                  x_user_llm_model: str | None = Header(default=None, alias="X-User-LLM-Model")):
+                  x_user_llm_model: str | None = Header(default=None, alias="X-User-LLM-Model"),
+                  x_user_llm_preset: str | None = Header(default=None, alias="X-User-LLM-Preset")):
     """Continue an existing session (synchronous)."""
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
     reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key,
-                                                    x_user_llm_base_url, x_user_llm_model)
+                                                    x_user_llm_base_url, x_user_llm_model, x_user_llm_preset)
     with _release_on_error(owner, reserved, req.intent, meter):
         history, intent = _prepare_continue(session_id, req, owner)
     return _metered(owner, reserved, req.intent,
                     lambda: _continue_query_work(session_id, req, history, intent, owner, llm=llm),
                     req, meter=meter)()
+
+
+def _stream_query_generator(session_id: str, req: QueryRequest, history: list[Turn],
+                            intent: str, owner: str, reserved, llm, meter):
+    t0 = time.monotonic()
+    augmented_q = _augment_question(req.question, req.attachments)
+    pipeline = _get_pipeline()
+    effective_llm = llm or pipeline.llm
+
+    # 1. Greetings & conversational acknowledgements
+    if is_pure_greeting(augmented_q):
+        resp = _greeting_response(req.lang, intent)
+        _save_assistant(session_id, resp)
+        _settle_tokens(owner, reserved, {}, intent, meter=meter)
+        yield f"event: token\ndata: {json.dumps({'text': resp.answer}, ensure_ascii=False)}\n\n"
+        yield f"event: done\ndata: {json.dumps({'session_id': session_id, 'answer': resp.answer, 'citations': []}, ensure_ascii=False)}\n\n"
+        return
+
+    if is_conversational_acknowledgement(augmented_q):
+        resp = _acknowledgement_response(req.lang, intent, augmented_q)
+        _save_assistant(session_id, resp)
+        _settle_tokens(owner, reserved, {}, intent, meter=meter)
+        yield f"event: token\ndata: {json.dumps({'text': resp.answer}, ensure_ascii=False)}\n\n"
+        yield f"event: done\ndata: {json.dumps({'session_id': session_id, 'answer': resp.answer, 'citations': []}, ensure_ascii=False)}\n\n"
+        return
+
+    # 2. Distill & Planner
+    dist_res = classify_and_distill(augmented_q, history=history, intent=intent)
+    if dist_res.action == "chitchat" and dist_res.answer:
+        clean_ans = strip_control_codes(strip_mudgash_label(dist_res.answer))
+        resp = QueryResponse(answer=clean_ans, citations=[], grounded=False, intent=intent or "qa", files=[])
+        _save_assistant(session_id, resp)
+        _settle_tokens(owner, reserved, {}, intent, meter=meter)
+        yield f"event: token\ndata: {json.dumps({'text': clean_ans}, ensure_ascii=False)}\n\n"
+        yield f"event: done\ndata: {json.dumps({'session_id': session_id, 'answer': clean_ans, 'citations': []}, ensure_ascii=False)}\n\n"
+        return
+
+    parsed_intent = None
+    if intent:
+        try:
+            parsed_intent = Intent(intent)
+        except ValueError:
+            parsed_intent = None
+
+    q = Query(
+        text=augmented_q,
+        lang=req.lang or None,
+        intent=parsed_intent,
+        distilled_text=dist_res.distilled_query or None,
+        search_text=dist_res.distilled_query or None,
+        rerank=True,
+    )
+
+    try:
+        raw_stream, hits = pipeline.ask_stream(q, history=history, llm=effective_llm)
+    except Exception as exc:
+        _log.exception("streaming ask_stream failed: %s", exc)
+        he = (req.lang or "") != "en"
+        err_msg = ("אירעה שגיאה בעיבוד הבקשה — נסו שוב." if he else "An error occurred processing the request — please try again.")
+        yield f"event: token\ndata: {json.dumps({'text': err_msg}, ensure_ascii=False)}\n\n"
+        yield f"event: done\ndata: {json.dumps({'session_id': session_id, 'answer': err_msg, 'citations': []}, ensure_ascii=False)}\n\n"
+        _settle_tokens(owner, reserved, {}, intent, meter=meter)
+        return
+
+    full_text_chunks = []
+    seen_citations = []
+    seen_markers = set()
+
+    for event_str in stream_with_marker_transformation(raw_stream, hits):
+        yield event_str
+        if event_str.startswith("event: token"):
+            try:
+                data_line = event_str.strip().split("\n")[1].replace("data: ", "")
+                chunk = json.loads(data_line).get("text", "")
+                full_text_chunks.append(chunk)
+            except Exception:
+                pass
+        elif event_str.startswith("event: citation"):
+            try:
+                data_line = event_str.strip().split("\n")[1].replace("data: ", "")
+                cdata = json.loads(data_line)
+                m = cdata.get("marker")
+                if m and m not in seen_markers:
+                    seen_markers.add(m)
+                    seen_citations.append(cdata)
+            except Exception:
+                pass
+
+    final_text = "".join(full_text_chunks).strip()
+    citations_payload = [
+        {"ref": c.get("ref", ""), "ref_he": c.get("ref_he", ""), "text_he": c.get("text_he", ""),
+         "commentator": c.get("commentator", ""), "deep_link": c.get("deep_link", ""), "marker": c.get("marker", "")}
+        for c in seen_citations
+    ]
+    resp_obj = QueryResponse(
+        answer=final_text,
+        citations=citations_payload,
+        grounded=bool(seen_citations),
+        intent=intent or "qa",
+    )
+    _save_assistant(session_id, resp_obj)
+    usage = {"prompt_tokens": 0, "completion_tokens": len(final_text.split())}
+    if "mistral" in (getattr(effective_llm, "last_model_used", "") or getattr(effective_llm, "model_id", "") or "").lower():
+        try:
+            db.record_mistral_usage(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
+        except Exception:
+            pass
+    _settle_tokens(owner, reserved, usage, intent, meter=meter)
+    _record_event(owner, intent, req, usage, resp_obj, None, ms=int((time.monotonic() - t0) * 1000))
+    yield f"event: done\ndata: {json.dumps({'session_id': session_id, 'answer': final_text, 'citations': citations_payload}, ensure_ascii=False)}\n\n"
+
+
+@app.post("/sessions/{session_id}/stream")
+def session_query_stream(session_id: str, req: QueryRequest, owner: str = Depends(current_owner),
+                         x_user_llm_key: str | None = Header(default=None, alias="X-User-LLM-Key"),
+                         x_user_llm_base_url: str | None = Header(default=None, alias="X-User-LLM-Base-URL"),
+                         x_user_llm_model: str | None = Header(default=None, alias="X-User-LLM-Model"),
+                         x_user_llm_preset: str | None = Header(default=None, alias="X-User-LLM-Preset")):
+    """Continue an existing session with real-time SSE streaming.
+    Streams tokens and structured citation events via sliding-window filtering."""
+    if not req.question.strip():
+        raise HTTPException(status_code=422, detail="question must not be empty")
+    reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key,
+                                                    x_user_llm_base_url, x_user_llm_model, x_user_llm_preset)
+    with _release_on_error(owner, reserved, req.intent, meter):
+        history, intent = _prepare_continue(session_id, req, owner)
+
+    gen = _stream_query_generator(session_id, req, history, intent, owner, reserved, llm, meter)
+    return StreamingResponse(
+        gen,
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/sessions/stream")
+def session_create_stream(req: QueryRequest, owner: str = Depends(current_owner),
+                          x_user_llm_key: str | None = Header(default=None, alias="X-User-LLM-Key"),
+                          x_user_llm_base_url: str | None = Header(default=None, alias="X-User-LLM-Base-URL"),
+                          x_user_llm_model: str | None = Header(default=None, alias="X-User-LLM-Model"),
+                          x_user_llm_preset: str | None = Header(default=None, alias="X-User-LLM-Preset")):
+    """Create a new session and stream the first answer via SSE."""
+    if not req.question.strip():
+        raise HTTPException(status_code=422, detail="question must not be empty")
+    reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key,
+                                                    x_user_llm_base_url, x_user_llm_model, x_user_llm_preset)
+    with _release_on_error(owner, reserved, req.intent, meter):
+        sid = db.create_session(req.question.strip(), mode=req.intent or None, owner_id=owner)
+        db.save_message(sid, "user", req.question)
+
+    gen = _stream_query_generator(sid, req, [], req.intent, owner, reserved, llm, meter)
+    return StreamingResponse(
+        gen,
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
 
 
 # ── Async generation (job queue) ──────────────────────────────────────────────

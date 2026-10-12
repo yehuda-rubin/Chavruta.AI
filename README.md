@@ -10,7 +10,7 @@ Torah": every claim is anchored in a retrieved source, the way a *chavruta* (stu
 straight from the text.
 
 > Built for the **Nebius Serverless AI Builders Challenge**. Retrieval + embedding run **locally**;
-> generation is served by the **Nebius API** (`Qwen3-235B`) — or fully self-contained via the
+> generation is served by the **Nebius API** (`DeepSeek-V4-Pro`) — or fully self-contained via the
 > **bridge** backend (no external LLM API). One config switch.
 
 ---
@@ -57,14 +57,14 @@ question (he / en)
 |------------|-----------------------------------|-----------------------------------------|
 | embedding  | `bge-m3` on CPU (query only)      | `bge-m3` GPU (bulk index)               |
 | vector DB  | Qdrant **embedded** (small sets)  | Qdrant **server** (hybrid, full index)  |
-| LLM        | Nebius API (`Qwen3-235B`) — or `bridge` (Claude in-session, no API) | Nebius API (`Qwen3-235B`) |
+| LLM        | Nebius API (`DeepSeek-V4-Pro`) — or `bridge` (Claude in-session, no API) | Nebius API (`DeepSeek-V4-Pro`) |
 | reranker   | off (RAM budget)                  | `bge-reranker-v2-m3`                    |
 
 Retrieval and embedding run **locally**; generation goes to the **Nebius API** (default) or the
 **bridge** backend (Claude answering in-session, no external LLM API). The serving setup
 ([scripts/serve.ps1](scripts/serve.ps1)) runs **hybrid** retrieval against a Qdrant **server**
 (embedded mode cannot do hybrid at this scale) with generation on Nebius
-(`Qwen/Qwen3-235B-A22B-Instruct-2507`) — the **default even locally** (`CHAVRUTA_LLM_BACKEND=nebius`,
+(`deepseek-ai/DeepSeek-V4-Pro`, preset `deepseek-v4-pro`) — the **default even locally** (`CHAVRUTA_LLM_BACKEND=nebius`,
 key from `.env`; `CHAVRUTA_QUERY_PLANNER=heuristic`). The no-API path is
 [scripts/serve_bridge.ps1](scripts/serve_bridge.ps1). The local DictaLM/Ollama backend was **removed**.
 Every knob is a `CHAVRUTA_*` env var (see `src/chavruta/config/profile.py` and the full reference in `docs/CONFIGURATION.md`).
@@ -226,7 +226,7 @@ docker compose --profile server up -d qdrant
 python scripts\create_payload_indexes.py
 
 # 2. Backend (FastAPI on :8080). Two serving modes:
-#    • DEFAULT — Nebius API (Qwen3-235B-A22B-Instruct), reads NEBIUS_API_KEY from .env. Local infra
+#    • DEFAULT — Nebius API (DeepSeek-V4-Pro), reads NEBIUS_API_KEY from .env. Local infra
 #      (CPU embedding + local Qdrant) + generation on the API; CHAVRUTA_QUERY_PLANNER=heuristic:
 powershell -ExecutionPolicy Bypass -File scripts\serve.ps1
 #    • Bridge mode — NO external API; the model is Claude answering the grounded jobs written to
@@ -269,7 +269,7 @@ python scripts\bootstrap_rag.py --repo Yehuda-Rubin/chavruta-index-yerushalmi --
 
 | backend | how | notes |
 |---------|-----|-------|
-| Nebius API (default) | `scripts\serve.ps1` | Qwen3-235B; needs `NEBIUS_API_KEY` in `.env` |
+| Nebius API (default) | `scripts\serve.ps1` | DeepSeek-V4-Pro; needs `NEBIUS_API_KEY` in `.env` |
 | Bridge (no external API) | `scripts\serve_bridge.ps1` | Claude answers `data/llm_bridge/pending/` in-session |
 
 **Stop everything:** Ctrl-C (or kill) the backend + frontend, then `docker compose stop qdrant`.
@@ -337,7 +337,7 @@ commentators (incl. supercommentary anchor chains), and structured lesson prep �
 config-swappable backends, with a test suite and a versioned evaluation harness. The corpus has
 grown from the validated Tanakh baseline (126k chunks) to the full Sefaria bookshelf — **~2.4M points
 across 15 tiers, incl. the Talmud Yerushalmi, all commercially licensed** — served from a hybrid Qdrant index with generation on
-the Nebius API (Qwen3-235B). The **static offline UI** ([app/frontend/public/ui/chavruta.html](app/frontend/public/ui/chavruta.html);
+the Nebius API (DeepSeek-V4-Pro). The **static offline UI** ([app/frontend/public/ui/chavruta.html](app/frontend/public/ui/chavruta.html);
 the React SPA is deprecated) + FastAPI app ship with persistent SQLite chat history and full
 Hebrew/English UI. Halachic *rulings* remain advisory only, never a substitute for a competent rav
 (Constitution Principle VIII).

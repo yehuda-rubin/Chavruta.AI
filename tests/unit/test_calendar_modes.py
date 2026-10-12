@@ -294,3 +294,20 @@ def test_run_daf_yomi_fetches_boundary_segments_and_rashi(monkeypatch):
     assert any("Rashi_on_Chullin.245.1" in t for t in targets)
     assert not any("Tosafot_on_Chullin" in t for t in targets)
 
+
+def test_wants_full_lesson_requires_lesson_keywords():
+    # User's actual question that falsely triggered lesson generation in production:
+    assert not api._wants_full_lesson("מה הקריאה היום ולמה קוראים אותה?")
+    assert not api._wants_full_lesson("מה הפרשה השבוע?")
+    assert not api._wants_full_lesson("מה הדף היומי היום?")
+    assert not api._wants_full_lesson("ספר לי על רש״י על הפסוק הראשון")
+
+    # Questions that do contain lesson keywords should proceed to LLM:
+    class FakeLLM:
+        def generate(self, prompt, **kwargs):
+            return __import__("types").SimpleNamespace(text="כן")
+
+    assert api._wants_full_lesson("תבנה לי שיעור על הפרשה", llm=FakeLLM())
+    assert api._wants_full_lesson("אני רוצה מערך שיעור על הדף", llm=FakeLLM())
+    assert api._wants_full_lesson("תכין דף מקורות לשבת", llm=FakeLLM())
+

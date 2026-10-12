@@ -537,6 +537,17 @@ def _migrate(conn: sqlite3.Connection) -> None:
             created_at        TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_referral_rewards_referrer ON referral_rewards(referrer_owner_id, status);
+
+        -- Mistral internal budget tracking (default $9.00 USD ceiling)
+        CREATE TABLE IF NOT EXISTS mistral_budget (
+            id                INTEGER PRIMARY KEY CHECK (id = 1),
+            budget_limit_usd  REAL NOT NULL DEFAULT 9.0,
+            spent_usd         REAL NOT NULL DEFAULT 0.0,
+            prompt_tokens     INTEGER NOT NULL DEFAULT 0,
+            completion_tokens INTEGER NOT NULL DEFAULT 0,
+            calls             INTEGER NOT NULL DEFAULT 0,
+            updated_at        TEXT NOT NULL
+        );
     """)
 
     # Forward migrations for databases created by an older schema version.
@@ -2853,4 +2864,120 @@ def record_referral_reward(referrer_owner_id: str, referred_owner_id: str,
             (referrer_owner_id, referred_owner_id, float(amount), reward_ils, status, now_iso)
         )
     return True
+
+
+# ── Mistral Budget Accounting ($9.00 USD internal ceiling) ────────────────────
+
+MISTRAL_PROMPT_PRICE_PER_M = 0.50       # $0.50 per 1M input tokens
+MISTRAL_COMPLETION_PRICE_PER_M = 1.50   # $1.50 per 1M output tokens
+
+
+def get_mistral_budget_limit() -> float:
+    """The configured Mistral budget ceiling in USD (default $9.00)."""
+    raw = os.environ.get("CHAVRUTA_MISTRAL_BUDGET_USD", "").strip()
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    conn = get_conn()
+    with _LOCK:
+        row = conn.execute("SELECT budget_limit_usd FROM mistral_budget WHERE id = 1").fetchone()
+        if row and row["budget_limit_usd"] is not None:
+            return float(row["budget_limit_usd"])
+    return 9.0
+
+
+def get_mistral_budget_status() -> dict[str, Any]:
+    """Return the current cumulative Mistral usage, spend, and whether the limit is exceeded."""
+    limit = get_mistral_budget_limit()
+    conn = get_conn()
+    now_iso = _now()
+    with _LOCK, _tx(conn):
+        conn.execute(
+            "INSERT OR IGNORE INTO mistral_budget (id, budget_limit_usd, spent_usd, prompt_tokens, completion_tokens, calls, updated_at) "
+            "VALUES (1, ?, 0.0, 0, 0, 0, ?)",
+            (limit, now_iso),
+        )
+        row = conn.execute(
+            "SELECT budget_limit_usd, spent_usd, prompt_tokens, completion_tokens, calls, updated_at "
+            "FROM mistral_budget WHERE id = 1"
+        ).fetchone()
+        if not row:
+            return {
+                "budget_limit_usd": limit,
+                "spent_usd": 0.0,
+                "remaining_usd": limit,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "calls": 0,
+                "is_exceeded": False,
+                "updated_at": now_iso,
+            }
+        spent = float(row["spent_usd"])
+        p_tok = int(row["prompt_tokens"])
+        c_tok = int(row["completion_tokens"])
+        calls = int(row["calls"])
+        updated_at = str(row["updated_at"])
+        return {
+            "budget_limit_usd": limit,
+            "spent_usd": round(spent, 6),
+            "remaining_usd": max(0.0, round(limit - spent, 6)),
+            "prompt_tokens": p_tok,
+            "completion_tokens": c_tok,
+            "calls": calls,
+            "is_exceeded": spent >= limit,
+            "updated_at": updated_at,
+        }
+
+
+def record_mistral_usage(prompt_tokens: int, completion_tokens: int) -> dict[str, Any]:
+    """Record one Mistral call's token usage, compute its USD cost, and update the persistent ledger.
+    Mistral Large 3: $0.50 / 1M prompt, $1.50 / 1M completion."""
+    p = max(0, int(prompt_tokens or 0))
+    c = max(0, int(completion_tokens or 0))
+    if p == 0 and c == 0:
+        return get_mistral_budget_status()
+
+    cost_usd = (p * MISTRAL_PROMPT_PRICE_PER_M + c * MISTRAL_COMPLETION_PRICE_PER_M) / 1_000_000.0
+    now_iso = _now()
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        conn.execute(
+            "INSERT OR IGNORE INTO mistral_budget (id, budget_limit_usd, spent_usd, prompt_tokens, completion_tokens, calls, updated_at) "
+            "VALUES (1, ?, 0.0, 0, 0, 0, ?)",
+            (get_mistral_budget_limit(), now_iso),
+        )
+        conn.execute(
+            "UPDATE mistral_budget "
+            "SET spent_usd = spent_usd + ?, "
+            "    prompt_tokens = prompt_tokens + ?, "
+            "    completion_tokens = completion_tokens + ?, "
+            "    calls = calls + 1, "
+            "    updated_at = ? "
+            "WHERE id = 1",
+            (cost_usd, p, c, now_iso),
+        )
+    return get_mistral_budget_status()
+
+
+def is_mistral_budget_exceeded(budget_limit: float | None = None) -> bool:
+    """Return True if the internal $9.00 Mistral budget limit has been reached or exceeded."""
+    status = get_mistral_budget_status()
+    limit = budget_limit if budget_limit is not None else status["budget_limit_usd"]
+    return status["spent_usd"] >= limit
+
+
+def reset_mistral_budget() -> None:
+    """Reset the Mistral spend tracking to $0.00."""
+    now_iso = _now()
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        conn.execute(
+            "UPDATE mistral_budget "
+            "SET spent_usd = 0.0, prompt_tokens = 0, completion_tokens = 0, calls = 0, updated_at = ? "
+            "WHERE id = 1",
+            (now_iso,),
+        )
+
 

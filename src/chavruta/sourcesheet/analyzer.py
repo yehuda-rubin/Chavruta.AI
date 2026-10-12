@@ -1232,6 +1232,9 @@ def _classify_item(
     """
     canonical = item.canonical_sefaria_ref or ""
     corpus_text = _find_corpus_text(lookup, ref, canonical)
+    if not corpus_text:
+        # Commentary the sheet only pointed at, fetched and matched by dibbur (see pick_commentary).
+        corpus_text = lookup.get(str((item.metadata or {}).get("corpus_key") or "")) or None
     quoted = str((item.metadata or {}).get("quoted_text") or "").strip()
     has_body = _has_source_body(item)
     if quoted:
@@ -1449,6 +1452,55 @@ def _normalize_for_match(text: str) -> str:
     return " ".join(text.split())
 
 
+COMMENTATOR_LABEL_HE = {"Rashi": "רש״י", "Tosafot": "תוספות"}
+_MAX_COMMENT_CHARS = 1500
+
+
+def _comment_head(text: str) -> str:
+    """A comment's dibbur: Sefaria files Rashi/Tosafot as "<dibbur> - <comment>"."""
+    return _normalize_for_match(re.split(r"\s[-–—]\s", text or "", maxsplit=1)[0])
+
+
+def pick_commentary(dhs: list[str], comments: list[tuple[str, str]]) -> list[tuple[str, str, str]]:
+    """Match the dibburim a sheet names to the commentator's actual comments → [(dibbur, ref, text)].
+
+    A match is the whole dibbur, or — for a multi-word dibbur only — one that begins the other. A
+    single word ("דנין") matches nothing unless a comment's dibbur is exactly that word: it would
+    otherwise attach whichever comment happens to start with it, and a wrong Rashi is worse than none.
+    Each comment is used once, and a dibbur with no match simply yields nothing.
+    """
+    picked: list[tuple[str, str, str]] = []
+    used: set[str] = set()
+    for dh in dhs:
+        want = _normalize_for_match(dh)
+        if not want:
+            continue
+        for ref, text in comments:
+            if ref in used:
+                continue
+            head = _comment_head(text)
+            multiword = len(want.split()) >= 2
+            if head == want or (multiword and (head.startswith(want + " ") or (len(head.split()) >= 2 and want.startswith(head + " ")))):
+                picked.append((dh, ref, (text or "")[:_MAX_COMMENT_CHARS]))
+                used.add(ref)
+                break
+    return picked
+
+
+def _build_match_haystack(texts: list[str]) -> str:
+    """Normalized source text, in every reading of an editor's correction.
+
+    Printed sources mark a variant as "(הענן) [בענן]": round brackets hold the text to drop, square
+    brackets the text to read. A model quoting the corrected reading ("משה נתקדש בענן") is faithful,
+    but it is a substring of neither the raw text nor the one with brackets simply removed, so the
+    haystack holds the raw text, the corrected reading, and the uncorrected one.
+    """
+    joined = "\n".join(texts)
+    read_square = re.sub(r"\([^()]*\)", " ", joined)             # drop (…), keep […]
+    read_round = re.sub(r"\[[^\[\]]*\]", " ", joined)            # drop […], keep (…)
+    return "\n".join(_normalize_for_match(t) for t in (joined, read_square, read_round))
+
+
 def _scrub_unverified_quotes(text: str, haystack: str) -> tuple[str, int]:
     """Replace each quotation that is not in the sheet or the corpus text with a visible marker.
 
@@ -1509,6 +1561,8 @@ def _synthesize_with_llm(
    בטקסט ב-XML כלשונו, ואם אינו מופיע שם אל תכתוב אותו.
 6. הסיכום, שאלת היסוד, טבלת השיטות ושאלות החברותא נשענים אך ורק על מקורות שיש להם טקסט (לא MISSING_REF).
    מקור שסומן MISSING_REF מותר להזכיר רק כמראה מקום שהדף מפנה אליו, בלי לתאר את תוכנו ובלי לצטט אותו.
+   אם הדף רק מפנה למפרש או לספר ("עיינו ברש״י ד״ה …", "תוס׳ ישנים ד״ה …") ולשונו אינה ב-XML, אין לתאר מה כתב
+   ואין לייחס לו דעה; מותר לומר רק שהדף מפנה אליו.
 7. חלק מהמקורות כוללים את הערות המרצה של הדף ולא רק את לשון המקור. ביאור המקור צריך להתבסס על לשון המקור עצמה.
 {request_block}
 החזר פלט מובנה בפורמט JSON בלבד (עטוף ב-```json ... ``` או JSON ישיר בלבד):
@@ -1568,9 +1622,7 @@ def _synthesize_with_llm(
         raw_topic = data.get("topic") or topic_hint or (items[0].header if items else "סוגיה תורנית")
         topic = _clean_topic_text(raw_topic) or "סוגיה תורנית"
 
-        haystack = _normalize_for_match(
-            "\n".join([it.raw_text for it in items] + list(corpus_lookup.values()))
-        )
+        haystack = _build_match_haystack([it.raw_text for it in items] + list(corpus_lookup.values()))
         scrubbed = 0
 
         def _clean_checked(text: str) -> str:

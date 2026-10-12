@@ -398,3 +398,51 @@ def test_apostrophe_quotations_are_checked_and_abbreviation_geresh_is_not():
     assert n_bad == 1 and UNVERIFIED_QUOTE_MARK in bad
     good = "ביאר 'ואימא צוה צוה' ור' אליעזר ותוס' שם"
     assert _scrub_unverified_quotes(good, _HAY) == (good, 0)
+
+
+def test_editors_bracket_correction_is_matched_in_either_reading():
+    from chavruta.sourcesheet.analyzer import _build_match_haystack
+
+    hay = _build_match_haystack(["משה נתקדש (הענן) [בענן] כל שבעה וקדש את אהרן"])
+    corrected = "נתקדש ״משה נתקדש בענן כל שבעה״ בסוגיה"
+    uncorrected = "נתקדש ״משה נתקדש הענן כל שבעה״ בסוגיה"
+    assert _scrub_unverified_quotes(corrected, hay)[1] == 0
+    assert _scrub_unverified_quotes(uncorrected, hay)[1] == 0
+    assert _scrub_unverified_quotes("״משה נתקדש בלילה כל שבעה״", hay)[1] == 1
+
+
+# ── Matching the commentary a sheet points at ────────────────────────────────────────────────────
+
+from chavruta.sourcesheet.analyzer import pick_commentary  # noqa: E402
+
+_COMMENTS = [
+    ("Rashi_on_Yoma.5.3.1", "דנין פר אחד ואיל אחד - עבודת מוסף יום הכפורים פר אחד ואיל אחד"),
+    ("Rashi_on_Yoma.5.6.1", "דנין פר שלו - דמלואים משלו הוא דכתיב קח לך עגל"),
+    ("Rashi_on_Yoma.6.6.1", "דנין פר לחטאת ואיל לעולה - ביוה\"כ יש פר לחטאת"),
+]
+
+
+def test_pick_commentary_matches_the_named_dibbur_exactly_in_order():
+    got = pick_commentary(["דנין פר אחד ואיל אחד", "דנין פר שלו"], _COMMENTS)
+    assert [(dh, ref) for dh, ref, _ in got] == [
+        ("דנין פר אחד ואיל אחד", "Rashi_on_Yoma.5.3.1"),
+        ("דנין פר שלו", "Rashi_on_Yoma.5.6.1"),
+    ]
+    assert got[0][2].startswith("דנין פר אחד ואיל אחד -")
+
+
+def test_a_one_word_dibbur_never_attaches_whichever_comment_starts_with_it():
+    assert pick_commentary(["דנין"], _COMMENTS) == []
+
+
+def test_a_dibbur_that_begins_a_longer_one_matches_but_an_unrelated_one_does_not():
+    assert len(pick_commentary(["דנין פר לחטאת"], _COMMENTS)) == 1
+    assert pick_commentary(["אילימא תחלה בכהן גדול"], _COMMENTS) == []
+
+
+def test_commentary_found_for_a_pointer_item_becomes_its_corpus_text():
+    items = parse_source_sheet("א. עיינו ברש\"י ד\"ה \"דנין פר שלו\"")
+    items[0].metadata["corpus_key"] = "__commentary__1"
+    guide = analyze_source_sheet(items, corpus_lookup={"__commentary__1": "[רש״י ד״ה דנין פר שלו] דמלואים משלו"})
+    assert guide.sections[0].status == STATUS_VERIFIED_CORPUS
+    assert "דמלואים משלו" in guide.sections[0].source_snippet
