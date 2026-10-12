@@ -3744,8 +3744,30 @@ def _resolve_llm_for_request(owner: str, lang: str, intent: str, user_key: str |
     if res.used_byok:
         return res, _byok_llm(key, _hstr(base_url), _hstr(model)), db.BYOK_TOKENS
 
-    # Mistral integration completely disabled per user instruction.
+    # Only admin users (or local dev) can route to Mistral Large 3 with automatic Nebius fallback.
+    # Regular users always stay on the default backend (Nebius).
+    if _is_admin(owner) or owner == "local":
+        m_key = key or os.environ.get("CHAVRUTA_MISTRAL_API_KEY") or os.environ.get("MISTRAL_API_KEY")
+        if m_key:
+            from chavruta.llm.presets import PRESETS
+            from chavruta.llm.cloud import CloudLLM
+            from chavruta.llm.fallback import FallbackLLM
+
+            mistral_p = PRESETS.get("mistral-large-3")
+            pipeline = _get_pipeline()
+            mistral_llm = CloudLLM(
+                mistral_p.model if mistral_p else "mistral-large-2512",
+                mistral_p.base_url if mistral_p else "https://api.mistral.ai/v1",
+                m_key,
+                timeout_s=getattr(pipeline.profile, "llm_timeout_s", 60.0),
+                max_retries=getattr(pipeline.profile, "llm_max_retries", 2),
+            )
+            fallback_llm = FallbackLLM(primary=mistral_llm, secondary=pipeline.llm)
+            pipeline.wire_source_fetcher(fallback_llm)
+            return res, fallback_llm, db.TOKENS
+
     return res, None, db.TOKENS
+
 
 
 
