@@ -63,13 +63,10 @@ def test_resolve_llm_mistral_override(monkeypatch):
     res, llm, meter = api_mod._resolve_llm_for_request("local", "he", "qa", None)
     assert llm is None
 
-    # Opt-in user passing mistral-large-3 preset gets FallbackLLM (Mistral primary -> Nebius secondary)
-    from chavruta.llm.fallback import FallbackLLM
+    # Mistral is disabled; requests requesting mistral preset fall back to default shared backend (None)
     res, llm, meter = api_mod._resolve_llm_for_request("local", "he", "qa", None, preset="mistral-large-3")
-    assert isinstance(llm, FallbackLLM)
-    assert llm.primary.model_id == "mistral-large-2512"
-    assert "mistral.ai" in llm.primary.base_url
-    assert llm.secondary == mock_pipeline.llm
+    assert llm is None
+
 
 
 def test_fallback_llm_streaming_behavior():

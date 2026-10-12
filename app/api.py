@@ -3744,39 +3744,9 @@ def _resolve_llm_for_request(owner: str, lang: str, intent: str, user_key: str |
     if res.used_byok:
         return res, _byok_llm(key, _hstr(base_url), _hstr(model)), db.BYOK_TOKENS
 
-    # Check for per-user / opt-in preset or admin model override
-    preset_name = _hstr(preset).lower()
-    admin_override = os.environ.get("CHAVRUTA_ADMIN_LLM_PRESET", "").strip().lower()
-    target_preset = preset_name or (admin_override if (_is_admin(owner) or owner == "local") else "")
-
-    if target_preset == "mistral-large-3" or _hstr(model) in ("mistral-large-2512", "mistral-large-3"):
-        if db.is_mistral_budget_exceeded():
-            m_status = db.get_mistral_budget_status()
-            _log.warning(
-                "Mistral internal budget ceiling ($%.2f) reached (spent: $%.4f). Bypassing Mistral and routing directly to Nebius.",
-                m_status["budget_limit_usd"], m_status["spent_usd"],
-            )
-            return res, None, db.TOKENS
-
-        from chavruta.llm.presets import PRESETS
-        from chavruta.llm.cloud import CloudLLM
-        from chavruta.llm.fallback import FallbackLLM
-        mistral_p = PRESETS.get("mistral-large-3")
-        pipeline = _get_pipeline()
-        m_key = key or os.environ.get("CHAVRUTA_MISTRAL_API_KEY") or os.environ.get("MISTRAL_API_KEY") or "mstrl_8BxNXitCaqHULPBrsB0UBt87plDfmbrL_0iQmI9"
-        mistral_llm = CloudLLM(
-            mistral_p.model if mistral_p else "mistral-large-2512",
-            mistral_p.base_url if mistral_p else "https://api.mistral.ai/v1",
-            m_key,
-            timeout_s=getattr(pipeline.profile, "llm_timeout_s", 60.0),
-            max_retries=getattr(pipeline.profile, "llm_max_retries", 2),
-        )
-        # Automatic fallback to the deployment's default Nebius backend
-        fallback_llm = FallbackLLM(primary=mistral_llm, secondary=pipeline.llm)
-        pipeline.wire_source_fetcher(fallback_llm)
-        return res, fallback_llm, db.TOKENS
-
+    # Mistral integration completely disabled per user instruction.
     return res, None, db.TOKENS
+
 
 
 class QueryRequest(BaseModel):
