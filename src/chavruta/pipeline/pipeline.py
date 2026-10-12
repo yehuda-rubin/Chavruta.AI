@@ -70,8 +70,8 @@ def _max_tokens_for(intent, profile: Profile) -> int:
 # small per chunk), so a lesson spanning a whole sugya needs many more chunks than a short
 # Q&A. Falls back to the profile's top_k for any other intent.
 _INTENT_TOP_K = {
-    Intent.QA: 8,
-    Intent.EXPLAIN: 16,
+    Intent.QA: 16,            # raised 8 -> 16 so halachic Q&A has room for Poskim and Rishonim
+    Intent.EXPLAIN: 20,       # raised 16 -> 20
     Intent.COMPARE: 24,
     # Lowered 48 -> 32 on 2026-08-13 (user decision), to match responsa. Measured over the first 11
     # days: INPUT is 93.7% of every token spent — 4.81M in against 326K out — and lessons are the
@@ -173,12 +173,9 @@ def build_backends(profile: Profile):
 
     from chavruta.retrieval.rerank import Reranker
 
-    if profile.rerank:
-        backend = "api" if (profile.rerank_model or "").startswith("@cf/") else "auto"
-        reranker = Reranker(profile.rerank_model, device=profile.embedding_device, backend=backend)
-    else:
-        # Cloudflare Workers AI API Reranker (available for admin/user-gated queries)
-        reranker = Reranker("@cf/baai/bge-reranker-base", backend="api")
+    model_name = profile.rerank_model or "@cf/baai/bge-reranker-base"
+    backend = "api" if model_name.startswith("@cf/") else "auto"
+    reranker = Reranker(model_name, device=profile.embedding_device, backend=backend)
 
     # Prefer the corpus-derived, corpus-aligned graph on disk (LinkStore + ref index — O(1) RAM);
     # fall back to the legacy in-memory links.jsonl if it isn't built yet.
@@ -823,17 +820,21 @@ class ChavrutaPipeline:
                     break
         return out
 
-    def ask_stream(self, request: Query, *, history: list[Turn] | None = None) -> Iterator[str]:
-        query = self._resolve_query(request)
+    def ask_stream(self, request: Query, *, history: list[Turn] | None = None, llm=None) -> tuple[Iterator[str], list[RankedHit]]:
+        """Streaming generation returning (raw_token_stream, retrieved_hits).
+        Allows passing per-request LLM override (e.g. Mistral Large 3 / BYOK)."""
+        llm = llm or self.llm
+        query = self._anchor_followup(self._resolve_query(request, history=history), history)
         result = self.retriever.retrieve(query, top_k=_top_k_for(query.intent, self.profile))
         if result.is_empty:
-            yield grounded.no_source_answer(query.lang, query.intent).text
-            return
+            def _empty_stream() -> Iterator[str]:
+                yield grounded.no_source_answer(query.lang, query.intent).text
+            return _empty_stream(), []
         prompt, _ = grounded.build_prompt(
             query.text, result.hits, intent=query.intent, history=history, lang=query.lang
         )
-        yield from self.llm.stream(
+        return llm.stream(
             prompt, lang=query.lang,
             max_tokens=_max_tokens_for(query.intent, self.profile),
             temperature=self.profile.llm_temperature,
-        )
+        ), result.hits

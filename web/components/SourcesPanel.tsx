@@ -1,9 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import type { Attachment, Citation, Lang, Message } from "@/lib/types";
 import { tr } from "@/lib/i18n";
-import { commentatorTag, isHe } from "@/lib/format";
+import { isHe } from "@/lib/format";
+import { citeText, useCiteLabels } from "@/lib/labels";
 import { fileKind } from "@/lib/files";
 import { Icon } from "./Icon";
 
@@ -67,7 +67,6 @@ export function SourcesPanel({
   messages,
   userSources,
   srcDefaultOpen,
-  isAdmin,
   onRemoveSource,
   onAddSource,
   onCollapse,
@@ -76,26 +75,10 @@ export function SourcesPanel({
   messages: Message[];
   userSources: Attachment[];
   srcDefaultOpen: boolean;
-  isAdmin?: boolean;
   onRemoveSource: (i: number) => void;
   onAddSource: () => void;
   onCollapse: () => void;
 }) {
-  const [isBetaTester, setIsBetaTester] = useState(false);
-  useEffect(() => {
-    try {
-      if (
-        typeof window !== "undefined" &&
-        (new URLSearchParams(window.location.search).has("beta") ||
-          localStorage.getItem("chavruta_beta_tester") === "true")
-      ) {
-        setIsBetaTester(true);
-      }
-    } catch {}
-  }, []);
-
-  const canAccessSearch = Boolean(isAdmin || isBetaTester);
-
   // When "sources open by default", membership in `toggled` means "collapsed" (inverted).
   const [toggled, setToggled] = useState<Set<string>>(new Set());
 
@@ -113,6 +96,8 @@ export function SourcesPanel({
       }
     }
   }
+
+  const labels = useCiteLabels(order);
 
   // Show the evidence, not just a list of titles: when a new source arrives, its card opens (the
   // panel only exists because there is something to read). Keyed on the newest ref so a re-render
@@ -165,6 +150,7 @@ export function SourcesPanel({
             .map(({ c, n }) => {
               const open = isOpen(c.ref);
               const full = lang === "en" ? c.text_en || c.text_he : c.text_he || c.text_en;
+              const cite = citeText(c, lang, labels);
               return (
                 <div
                   key={c.ref}
@@ -180,10 +166,10 @@ export function SourcesPanel({
                         <span className="inline-grid place-items-center h-5 w-5 rounded-full bg-indigo text-white text-[11px] font-bold tabular-nums shrink-0">
                           {n}
                         </span>
-                        {commentatorTag(c)}
+                        {cite.who}
                       </p>
                       <h4 className="text-[17px] font-bold text-ink mt-1.5 leading-tight break-words">
-                        {(lang !== "en" && c.ref_he) || c.ref}
+                        {cite.title}
                       </h4>
                     </div>
                     <Icon name={open ? "expand_less" : "expand_more"} className="text-ink/40 shrink-0" />
@@ -223,15 +209,6 @@ export function SourcesPanel({
             </div>
           );
         })}
-        {canAccessSearch && (
-          <Link
-            href="/search"
-            className="w-full py-2.5 rounded-full glass text-tekhelet font-bold text-sm text-center hover:ring-2 hover:ring-gold/30 transition flex items-center justify-center gap-2"
-          >
-            <Icon name="search" className="text-[18px]" />
-            {tr(lang, "searchLibrary")}
-          </Link>
-        )}
         <button
           onClick={onAddSource}
           className="w-full min-h-11 rounded-full bg-cream-2 text-indigo font-semibold text-sm hover:bg-indigo hover:text-white transition-colors"

@@ -13,7 +13,7 @@ the point is that there is one place to read, not an archive to search.
 | Host specs | Nebius Non-GPU AMD Epyc Genoa, 4 vCPUs, 16 GiB RAM, 8 GiB Swap (resized 2026-09-18) |
 | Concurrency gate | `CHAVRUTA_MAX_CONCURRENT_RETRIEVALS=2` (tuned for 4 vCPUs; agentic rounds have priority) |
 | Collection | `chavruta_commercial`, 2.4M points, on-disk (`CHAVRUTA_MEM_TIER=ssd`) |
-| Generation | Nebius, `Qwen/Qwen3-235B-A22B-Instruct-2507` |
+| Generation | Nebius, `deepseek-ai/DeepSeek-V4-Pro` (preset: `deepseek-v4-pro`) |
 | Last backup | `/app-data/backup-pre-resize-20260918.db` (18.2 MB, local copy saved) |
 
 Background sweepers, both started at API boot and running hourly:
@@ -49,6 +49,13 @@ running containers, so do those first and put the final activity check right bef
 block, so `.env` only fills `${...}` placeholders. A variable with no placeholder is never passed and
 nothing warns. `CHAVRUTA_COST_PER_M_TOKENS` sat in `.env` for a day doing nothing this way. Adding a
 new setting means adding it in **both** places.
+
+**Recreating `search` or `ui` takes the whole site down until `web` is restarted.** nginx resolves its
+upstreams once, at start, so after `docker compose up -d --no-deps search ui` it keeps dialling the old
+container IPs and answers **502 on every path, the home page included** (2026-10-07: the library
+deploy, ~10 minutes). Run `docker compose restart web` straight after, and verify `/`,
+`/reader/catalog` and `/reader/unit?ref=Genesis%201:1` all return 200 before calling it done. The
+`api` service is reached the same way, so the same applies if it is ever recreated.
 
 **`nginx.conf` changes need `--force-recreate web`.** A single-file bind mount on a running container
 keeps pointing at the old inode after `git pull` replaces the file. Documented at the `web` service

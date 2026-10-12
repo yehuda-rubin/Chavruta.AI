@@ -103,6 +103,14 @@ PRESETS: dict[str, Preset] = {
         min_output_tokens=3_072,
         note="DeepSeek-V4-Pro on Nebius: $1.75/$3.50 per 1M tokens, 5.3s total latency, 100% Torah accuracy",
     ),
+    # Mistral Large 3 via Mistral API (endpoint: https://api.mistral.ai/v1).
+    # $0.50 / 1M prompt ($0.05 cached), $1.50 / 1M completion.
+    # Benchmarked 20 runs 2026-10-07: 0% marker hallucination, structured & legible responses.
+    "mistral-large-3": Preset(
+        "https://api.mistral.ai/v1",
+        "mistral-large-2512",
+        note="Mistral Large 3 ($0.50/$1.50 per 1M, $0.05 cached): 20-run eval showed zero marker hallucinations and highly structured answers",
+    ),
 }
 
 

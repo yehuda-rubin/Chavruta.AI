@@ -5,6 +5,10 @@ export interface SearchQueryParams {
   offset?: number;
   limit?: number;
   work_id?: string;
+  /** Time period: tanakh | chazal | geonim | rishonim | acharonim | modern | other (comma-separated). */
+  era?: string;
+  /** Search inside one book (its English title). */
+  book?: string;
 }
 
 export const CANONICAL_CATEGORIES = [
@@ -73,8 +77,14 @@ export async function fetchSearch(params: SearchQueryParams): Promise<SearchResp
   if (params.limit !== undefined && params.limit > 0) {
     sp.set("limit", String(params.limit));
   }
+  if (params.era && params.era.trim()) {
+    sp.set("era", params.era.trim());
+  }
   if (params.work_id && params.work_id.trim()) {
     sp.set("work_id", params.work_id.trim());
+  }
+  if (params.book && params.book.trim()) {
+    sp.set("book", params.book.trim());
   }
 
   const res = await fetch(`/search/query?${sp.toString()}`, {

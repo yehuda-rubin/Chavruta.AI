@@ -167,6 +167,37 @@
 **מאגר המקור (chunks גולמיים — `gemara_chunks.jsonl`, `yerushalmi_chunks.jsonl`, … + דאטה לאימון LoRA):**
 [🤗 chavruta-torah-mixed](https://huggingface.co/datasets/Yehuda-Rubin/chavruta-torah-mixed).
 
+### 6.1 ספרים שהוסרו בכוונה — למחוק שוב אחרי כל שחזור מ-HF
+
+שלושה ספרים הוסרו מהקורפוס ב-**2026-10-07** כי אינם מקובלים על אף אחת מהקהילות (חרדים ודתיים):
+**ספר היובלים** (1,758 קטעים), **צוואות השבטים** (1,002) ו**מלחמות השם** של הרב יחיא קאפח (254).
+הרשימה, עם הסיבה לכל ספר, ב-`src/chavruta/corpus/data/excluded_works.json`.
+
+**המאגרים ב-HF לא נערכו**: ה-snapshot של `chavruta-commercial-index` הוא קובץ בינארי של Qdrant
+שאי אפשר לערוך במקום, ולכן הוא ומאגרי `chavruta-index-*` עדיין מכילים את שלושת הספרים. כלומר:
+
+> **כל טעינה, שחזור או העלאה מחדש מ-HF מחזירה אותם. אחרי כל שחזור הרץ שוב, על המארח:**
+> ```
+> cd ~/chavruta && python3 scripts/purge_excluded_books.py            # ספירה בלבד
+> python3 scripts/purge_excluded_books.py --apply                     # מחיקה מ-Qdrant ומ-search_index.db
+> docker compose restart search web
+> ```
+> הסקריפט מוחק לפי הרשימה ב-`excluded_works.json` משני המקומות (Qdrant ו-`data/search_index.db`).
+> ספר חדש שמוסיפים לרשימה נמחק באותה דרך; ספריית הספרים (`scripts/build_catalog.py`) מדלגת על הרשימה.
+
+### 6.2 סדר התוצאות בחיפוש תוכן
+
+תוצאות חיפוש התוכן ב-`/library` ממוינות לפי **סדר הלימוד** ולא אלפביתית: תנ"ך (תורה, נביאים, כתובים) ← חז"ל
+(משנה, תוספתא, גמרא בבלי, ירושלמי, מדרש) ← גאונים ← ראשונים ← אחרונים ← בני זמננו; בתוך כל תקופה לפי סוגה
+(פירוש על התנ"ך, משנה, תלמוד, הלכה, שו"ת, מחשבה, מוסר, קבלה, חסידות, תפילה). **מפרש ממוקם לפי התקופה שלו**, לא לפי
+הספר שהוא מפרש: רש"י על התורה יושב עם הראשונים, המלבי"ם עם האחרונים, ושניהם אחרי המשנה והגמרא. בתוך ספר — לפי
+`rowid` (סדר הטעינה, שהוא הסדר הקנוני: בראשית→דברים, סדרי משנה, דפים ופסוקים ברצף).
+
+הדירוג לכל קטגוריה ב-`src/chavruta/corpus/data/layer_rank.json`, שנבנה ע"י `scripts/build_layer_rank.py` מהקטלוג
+ומשדה ה-`era` של Sefaria (נשמר ב-`title_eras.json`; ל-92 משפחות בלי תקופה יש טבלה ידנית בתוך הסקריפט).
+ה-API טוען אותו לטבלה זמנית בחיבור (`_load_layer_rank` ב-`app/search_service.py`) — המסד עצמו לא משתנה.
+אחרי הוספת ספרים לקטלוג: `build_layer_rank.py --no-fetch` (או בלי הדגל כדי למשוך תקופות לספרים חדשים).
+
 ## 7. Serving prerequisites — payload indexes & ref format
 
 After loading the collection into a Qdrant **server** (the full-scale hybrid mode), two things are

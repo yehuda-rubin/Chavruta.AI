@@ -71,7 +71,19 @@ class FallbackLLM:
 
     def _is_primary_open(self) -> bool:
         with self._lock:
-            return time.monotonic() < self._primary_open_until
+            if time.monotonic() < self._primary_open_until:
+                return True
+        # Automatic budget guard: if primary is Mistral and budget is exceeded, failover to secondary
+        primary_model = (getattr(self.primary, "model_id", "") or "").lower()
+        if "mistral" in primary_model:
+            try:
+                from app import db
+                if db.is_mistral_budget_exceeded():
+                    _log.warning("Primary LLM (%s) internal budget ($9.00) reached. Routing directly to fallback.", primary_model)
+                    return True
+            except Exception:
+                pass
+        return False
 
     def _trip_primary_circuit(self, duration_s: float, reason: str = "") -> None:
         with self._lock:
@@ -123,6 +135,10 @@ class FallbackLLM:
                 res = self.primary.generate(
                     prompt, lang=lang, max_tokens=max_tokens, temperature=temperature
                 )
+                if not getattr(res, "text", "").strip():
+                    raise LLMTransientError(
+                        f"Primary ({getattr(self.primary, 'model_id', 'primary')}) returned empty answer text"
+                    )
                 if not getattr(res, "model_used", ""):
                     res.model_used = getattr(self.primary, "model_id", "primary")
                 self.last_model_used = res.model_used
@@ -155,17 +171,23 @@ class FallbackLLM:
     ) -> Iterator[str]:
         if not self._is_primary_open():
             try:
-                it = self.primary.stream(
+                primary_gen = self.primary.stream(
                     prompt, lang=lang, max_tokens=max_tokens, temperature=temperature
                 )
-                self.last_model_used = getattr(self.primary, "model_id", "primary")
-                return it
+                yielded_any = False
+                for token in primary_gen:
+                    yielded_any = True
+                    self.last_model_used = getattr(self.primary, "model_id", "primary")
+                    yield token
+                if yielded_any:
+                    return
+                _log.warning("Primary LLM stream produced empty output. Falling back to secondary.")
             except Exception as exc:
                 _log.warning("Primary LLM stream failed (%s). Falling back to secondary.", exc)
                 self._handle_primary_failure(exc)
 
         self.last_model_used = getattr(self.secondary, "model_id", "secondary")
-        return self.secondary.stream(
+        yield from self.secondary.stream(
             prompt, lang=lang, max_tokens=max_tokens, temperature=temperature
         )
 

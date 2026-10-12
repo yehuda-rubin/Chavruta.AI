@@ -35,50 +35,8 @@ function ReaderInner() {
   const searchParams = useSearchParams();
   const { user, loading: authLoading } = useAuth();
 
-  // ── Access Gate: Admin or Private Beta Check ──────────────────────────────
-  const [accessAllowed, setAccessAllowed] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    // 1. Check URL query parameter `?beta=true`
-    if (searchParams.get("beta") === "true") {
-      try {
-        localStorage.setItem("chavruta_beta_tester", "true");
-      } catch {}
-      setAccessAllowed(true);
-      return;
-    }
-
-    // 2. Check localStorage flag
-    try {
-      if (localStorage.getItem("chavruta_beta_tester") === "true") {
-        setAccessAllowed(true);
-        return;
-      }
-    } catch {}
-
-    // 3. Check user admin status from /me API
-    let isMounted = true;
-    api
-      .me()
-      .then((me) => {
-        if (isMounted) {
-          if (me.is_admin) {
-            setAccessAllowed(true);
-          } else {
-            setAccessAllowed(false);
-          }
-        }
-      })
-      .catch(() => {
-        if (isMounted) {
-          setAccessAllowed(false);
-        }
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [searchParams]);
+  // The reader is open to everyone (it was admin / private-beta only until 2026-10-07).
+  const accessAllowed = true as boolean | null;
 
   // ── URL & Ref Resolution ──────────────────────────────────────────────────
   const refParts = Array.isArray(params?.ref)
@@ -287,7 +245,7 @@ function ReaderInner() {
 
   const handleSearchPhrase = (phrase: string) => {
     const clean = phrase.trim().slice(0, 80);
-    router.push(`/search?q=${encodeURIComponent(clean)}`);
+    router.push(`/library?mode=content&q=${encodeURIComponent(clean)}`);
   };
 
   const handleCopyCitation = (
@@ -295,7 +253,7 @@ function ReaderInner() {
     selectedText?: string
   ) => {
     const textToCopy = selectedText || segment.text_he;
-    const citation = `${textToCopy}\n(${formatHebrewRef(segment.ref)})`;
+    const citation = `${textToCopy}\n(${segment.ref_he || formatHebrewRef(segment.ref)})`;
 
     if (navigator.clipboard) {
       navigator.clipboard
@@ -365,7 +323,7 @@ function ReaderInner() {
             </Link>
 
             <Link
-              href="/search"
+              href="/library"
               className="w-full sm:w-auto px-6 py-2.5 rounded-xl glass text-ink/80 hover:text-tekhelet font-semibold text-sm transition text-center flex items-center justify-center gap-2"
             >
               <Icon name="search" className="text-[18px]" />
@@ -400,7 +358,7 @@ function ReaderInner() {
                 if (typeof window !== "undefined" && window.history.length > 1) {
                   router.back();
                 } else {
-                  router.push("/search");
+                  router.push("/library");
                 }
               }}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl glass hover:bg-tekhelet/10 text-xs sm:text-sm font-bold text-tekhelet border border-tekhelet/20 transition shrink-0 cursor-pointer shadow-xs"
@@ -431,7 +389,7 @@ function ReaderInner() {
               className="flex items-center gap-1.5 text-xs sm:text-sm font-serif truncate"
             >
               <Link
-                href="/search"
+                href="/library"
                 className="text-ink/65 hover:text-tekhelet transition shrink-0"
               >
                 ספרייה
@@ -441,7 +399,7 @@ function ReaderInner() {
               {unit?.category && (
                 <>
                   <Link
-                    href={`/search?work_id=${encodeURIComponent(unit.category)}`}
+                    href="/library"
                     className="text-ink/65 hover:text-tekhelet transition shrink-0 hidden sm:inline"
                   >
                     {unit.category === "tanakh"
@@ -454,9 +412,19 @@ function ReaderInner() {
                 </>
               )}
 
-              <span className="font-bold text-tekhelet truncate">
-                {(unit?.book_he || unit?.book || rawRef.split(".")[0] || "").replace(/^[•.\s]+/, "")}
-              </span>
+              {unit?.book ? (
+                <Link
+                  href={`/library?book=${encodeURIComponent(unit.book)}`}
+                  className="font-bold text-tekhelet truncate hover:underline"
+                  title="לעמוד הספר"
+                >
+                  {(unit.book_he || unit.book).replace(/^[•.\s]+/, "")}
+                </Link>
+              ) : (
+                <span className="font-bold text-tekhelet truncate">
+                  {(rawRef.split(".")[0] || "").replace(/^[•.\s]+/, "")}
+                </span>
+              )}
 
               {unit?.section_name && (
                 <>
@@ -640,7 +608,7 @@ function ReaderInner() {
                 ייתכן שמראה המקום אינו קיים במאגר או שיש שגיאת תקשורת עם השרת.
               </p>
               <Link
-                href="/search"
+                href="/library"
                 className="px-5 py-2 rounded-xl grad text-white text-sm font-semibold shadow-md hover:opacity-95 transition"
               >
                 חזרה לחיפוש בספרייה
@@ -698,9 +666,12 @@ function ReaderInner() {
                             {seg.label}
                           </span>
 
-                          <span className="text-xs font-serif text-ink/40 font-medium">
-                            {formatHebrewRef(seg.ref)}
-                          </span>
+                          {/* a label that repeats the previous segment's (every line of a daf) adds nothing */}
+                          {(seg.ref_he || formatHebrewRef(seg.ref)) !== (unit.segments[idx - 1]?.ref_he ?? "") && (
+                            <span className="text-xs font-serif text-ink/40 font-medium">
+                              {seg.ref_he || formatHebrewRef(seg.ref)}
+                            </span>
+                          )}
                         </div>
 
                         {/* Hover Actions & 3-dots Menu Button */}
@@ -748,7 +719,12 @@ function ReaderInner() {
                           className="mt-3 pt-3 border-t border-line/40 font-sans text-sm sm:text-base text-ink/75 leading-relaxed selection:bg-indigo/20 italic"
                         >
                           {seg.text_en ? (
-                            seg.text_en
+                            <>
+                              <span className="block not-italic text-[11px] text-ink/40 font-medium mb-1">
+                                {seg.ref_en || seg.ref}
+                              </span>
+                              {seg.text_en}
+                            </>
                           ) : (
                             <span className="text-ink/40 text-xs font-sans not-italic">
                               (אין תרגום לאנגלית זמין עבור מקור זה)

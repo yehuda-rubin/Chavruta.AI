@@ -110,6 +110,11 @@ export interface SearchHit {
   version_he: string;
   version_en: string | null;
   category_path: string;
+  /** Hebrew citation / category, built by the search service from the catalogue. */
+  ref_he?: string;
+  ref_en?: string;
+  category_he?: string;
+  era?: string;
 }
 
 export interface SearchResponse {
@@ -120,4 +125,6 @@ export interface SearchResponse {
   limit: number;
   hits: SearchHit[];
   facets: Record<string, number>;
+  /** Matches per time period, from the search service. */
+  eras?: Record<string, number>;
 }

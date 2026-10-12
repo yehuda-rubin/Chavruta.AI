@@ -735,7 +735,6 @@ export default function Home() {
       messages={messages}
       userSources={userSources}
       srcDefaultOpen={srcDefaultOpen}
-      isAdmin={me?.is_admin}
       onRemoveSource={(i) => setUserSources((prev) => prev.filter((_, j) => j !== i))}
       onAddSource={() => setShowAddSource(true)}
       onCollapse={() => (mobile ? setMobileSources(false) : setSourcesCollapsed(true))}

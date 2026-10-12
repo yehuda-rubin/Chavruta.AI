@@ -27,7 +27,7 @@ Production: https://chavrutaai.org.
 - bge-m3 embeddings, Qdrant vector store (local embedded / server / cloud), hybrid retrieval
   (dense + sparse, optional rerank).
 - Generation: two backends switched by `CHAVRUTA_LLM_BACKEND` — `nebius` (default; Nebius API,
-  Qwen3-235B) or `bridge` (an LLM answers grounded jobs in-session, no external API call).
+  DeepSeek-V4-Pro) or `bridge` (an LLM answers grounded jobs in-session, no external API call).
 - Frontend: `web/` — a Next.js app (App Router, Tailwind, Supabase auth) that is what
   chavrutaai.org actually serves; nginx proxies `/` to it and specific prefixes to FastAPI. A
   separate static offline UI lives at `app/frontend/public/ui/chavruta.html`; the old React SPA

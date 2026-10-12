@@ -2,6 +2,8 @@ import type { Lang } from "./types";
 
 export interface ReaderSegment {
   ref: string;                 // e.g. "Genesis.1.1" or "Berakhot.2a.1"
+  ref_he?: string;             // citation in Hebrew, e.g. "בראשית א׳, א׳"
+  ref_en?: string;             // citation in English, e.g. "Genesis 1:1"
   label: string;               // e.g. "א", "1", "פסוק א"
   text_he: string;             // Hebrew text (vocalized or plain)
   text_en?: string | null;     // English translation if available
@@ -29,6 +31,8 @@ export interface CommentaryItem {
   commentator: string;         // e.g. "רש\"י", "רמב\"ן", "אבן עזרא", "ספורנו", "תוספות"
   commentator_en?: string;
   ref: string;                 // e.g. "Rashi on Genesis 1:1:1"
+  ref_he?: string;             // e.g. "רש\"י על בראשית א׳, א׳"
+  ref_en?: string;             // e.g. "Rashi on Genesis 1:1"
   type: "commentary" | "parallel" | "halacha" | "midrash" | "other";
   text_he: string;
   text_en?: string | null;
@@ -290,7 +294,21 @@ export async function fetchReaderLinks(segmentRef: string): Promise<ReaderLinksR
     });
 
     if (res.ok) {
-      return (await res.json()) as ReaderLinksResponse;
+      const raw = await res.json();
+      // the API names the fields author_he / source_ref; the sidebar cards read commentator / id
+      const norm = (it: any, kind: CommentaryItem["type"]): CommentaryItem => ({
+        ...it,
+        id: it.id || it.source_ref || it.ref,
+        commentator: it.commentator || it.author_he || it.book || "",
+        type: it.type === "parallel" || kind === "parallel" ? "parallel" : kind,
+        text_he: it.text_he || "",
+      });
+      const parallels = raw.parallels ?? raw.related ?? [];
+      return {
+        ref: raw.ref,
+        commentaries: (raw.commentaries ?? []).map((x: any) => norm(x, "commentary")),
+        parallels: parallels.map((x: any) => norm(x, "parallel")),
+      };
     }
   } catch {}
 

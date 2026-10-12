@@ -61,40 +61,54 @@ class Reranker:
             import os
             import urllib.request
 
-            cf_account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
+            cf_account = os.environ.get("CLOUDFLARE_ACCOUNT_ID") or "fb7545ed5add9650d7d881375fefb335"
             cf_token = os.environ.get("CLOUDFLARE_API_TOKEN", "")
             if not cf_token or not cf_account:
+                logging.getLogger("chavruta.retrieval.rerank").warning(
+                    "Cloudflare Reranker skipped: CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID is not configured in environment"
+                )
                 return hits
+
             cf_model = self.model_id if self.model_id.startswith("@cf/") else "@cf/baai/bge-reranker-base"
             cf_url = f"https://api.cloudflare.com/client/v4/accounts/{cf_account}/ai/run/{cf_model}"
 
-            to_rank = hits[:12]
-            contexts = [
-                {"id": str(i), "text": (getattr(h, "text", "") or "")[:1000]}
-                for i, h in enumerate(to_rank)
-            ]
-            try:
-                body = json.dumps({"query": query, "contexts": contexts}).encode("utf-8")
-                req = urllib.request.Request(
-                    cf_url,
-                    data=body,
-                    headers={
-                        "Authorization": f"Bearer {cf_token}",
-                        "Content-Type": "application/json",
-                    },
-                    method="POST",
-                )
-                with urllib.request.urlopen(req, timeout=12.0) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                response_items = data.get("result", {}).get("response", [])
-                for item in response_items:
-                    idx = int(item["id"])
-                    if 0 <= idx < len(to_rank):
-                        to_rank[idx].score = float(item["score"])
-                to_rank.sort(key=lambda h: h.score, reverse=True)
-                hits = to_rank + hits[12:]
-            except Exception as exc:
-                logging.getLogger("chavruta.retrieval.rerank").warning("Cloudflare Reranker API error: %s", exc)
+            # Score ALL candidates in batches of up to 32 to stay within Cloudflare request bounds
+            batch_size = 32
+            scored_count = 0
+            for start_idx in range(0, len(hits), batch_size):
+                batch = hits[start_idx : start_idx + batch_size]
+                contexts = [
+                    {"id": str(i), "text": (getattr(h, "text", "") or "")[:1000]}
+                    for i, h in enumerate(batch)
+                ]
+                try:
+                    body = json.dumps({"query": query, "contexts": contexts}).encode("utf-8")
+                    req = urllib.request.Request(
+                        cf_url,
+                        data=body,
+                        headers={
+                            "Authorization": f"Bearer {cf_token}",
+                            "Content-Type": "application/json",
+                        },
+                        method="POST",
+                    )
+                    with urllib.request.urlopen(req, timeout=15.0) as resp:
+                        data = json.loads(resp.read().decode("utf-8"))
+                    response_items = data.get("result", {}).get("response", [])
+                    for item in response_items:
+                        idx = int(item["id"])
+                        if 0 <= idx < len(batch):
+                            batch[idx].score = float(item["score"])
+                            scored_count += 1
+                except Exception as exc:
+                    logging.getLogger("chavruta.retrieval.rerank").warning(
+                        "Cloudflare Reranker API error on batch %d: %s", start_idx, exc
+                    )
+            logging.getLogger("chavruta.retrieval.rerank").info(
+                "Cloudflare Reranker scored %d of %d candidates", scored_count, len(hits)
+            )
+            hits.sort(key=lambda h: h.score, reverse=True)
+            return hits
         elif self.backend == "onnx":
             import numpy as np
 

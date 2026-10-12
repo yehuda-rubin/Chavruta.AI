@@ -98,6 +98,144 @@ HE_HALACHA_SECTIONS: dict[str, str] = {
 }
 
 
+# Commentators that exist only on the Talmud. Handing one of these a Tanakh base ("Tosafot on
+# Leviticus.8") is never right, so such a ref is not inherited from a neighbouring pasuk.
+_TALMUD_ONLY_COMMENTATORS = frozenset({
+    "Tosafot", "Tosafot Yeshanim", "Rashba", "Ritva", "Ran", "Rosh", "Rif", "Meiri",
+})
+_TALMUD_REF_RE = re.compile(r"\s\d+[ab]$")
+
+# Lines that are about the shiur, not the sources: a start time, "בס״ד", a venue. They sit between the
+# outline and the first source and otherwise get glued onto the last outline entry.
+_LOGISTICS_LINE_RE = re.compile(
+    r"^(?:בס\"ד|בס״ד|בעזרת\s+ה['׳]?)\b|\b\d{1,2}[:.]\d{2}\b|^שיעור\s+[א-ת]\b",
+)
+_FILENAME_HEADER_RE = re.compile(r"^\s*###\s+[^\n]+\.(?:docx|pdf|txt|doc)\s*\n?", re.IGNORECASE)
+_HE_TRACTATE_MENTION_RE = re.compile(rf"מסכת\s+(?P<tractate>{_book_alt(HE_TRACTATES)})")
+_GEMARA_CUE_RE = re.compile(r"גמרא|סוגיית|סוגיה")
+# A daf given the way a teacher writes a "station": "ב, א" / "ג', ב'" (daf letter, comma, amud letter).
+_STATION_RE = re.compile(r"(?<![א-ת])([א-ת])['׳]?\s*,\s*([אב])['׳]?(?![א-ת])")
+_VERSE_RANGE_RE = re.compile(
+    rf"פסוקים?\s+(?P<v1>{_NUM}|[א-ת]{{1,3}})\s*(?:[-–—]|עד)\s*(?P<v2>{_NUM}|[א-ת]{{1,3}})"
+)
+_MAX_RANGE_AMUDIM = 8
+
+
+def extract_sheet_title(text: str) -> str:
+    """The sheet's own title — its first prose line after any attachment-filename header.
+
+    A user's instruction ("summarize the flow") says what to do, not what the sheet is about; the
+    topic hint was falling back on it. The title line ("פרישת כהן גדול ביום הכפורים – שיעור ראשון")
+    is the better label. Empty when the first line is a bullet or a bare reference.
+    """
+    body = _FILENAME_HEADER_RE.sub("", (text or "").replace("\r\n", "\n"), count=1).strip()
+    for line in body.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        if _BULLET_RE.match(line) or len(line) > 90:
+            return ""
+        return line
+    return ""
+
+
+def _default_tractate(text: str) -> str | None:
+    """A tractate the sheet announces once ("לומדים מסכת יומא") so a later "סוגיית הגמרא" can use it."""
+    m = _HE_TRACTATE_MENTION_RE.search(text or "")
+    return HE_TRACTATES.get(m.group("tractate")) if m else None
+
+
+def _amud_linear(daf: int, amud: str) -> int:
+    return daf * 2 + (1 if amud == "b" else 0)
+
+
+def _gemara_stations(segment: str, tractate: str) -> list[str]:
+    """Every amud from the first to the last "station" the segment names, e.g. ב,א … ג,ב → 2a,2b,3a,3b.
+
+    Returns [] when fewer than one valid station is found or the span is implausibly wide.
+    """
+    points: list[int] = []
+    for m in _STATION_RE.finditer(segment):
+        daf = _daf_value(m.group(1))
+        if daf and 2 <= daf <= 180:
+            points.append(_amud_linear(daf, "a" if m.group(2) == "א" else "b"))
+    if not points:
+        return []
+    lo, hi = min(points), max(points)
+    if hi - lo + 1 > _MAX_RANGE_AMUDIM:
+        return []
+    return [f"{tractate} {n // 2}{'b' if n % 2 else 'a'}" for n in range(lo, hi + 1)]
+
+
+def _verse_range(header: str, book: str, chapter: int) -> list[str]:
+    """"ויקרא ח' פסוקים לג – לו" → [Leviticus.8.33 … Leviticus.8.36]; [] if no verse range is named."""
+    m = _VERSE_RANGE_RE.search(header)
+    if not m:
+        return []
+    v1, v2 = _daf_value(m.group("v1")), _daf_value(m.group("v2"))
+    if not v1 or not v2 or v2 < v1 or v2 - v1 > 40:
+        return []
+    return [f"{book}.{chapter}.{v}" for v in range(v1, v2 + 1)]
+
+
+def _quoted_text(raw_seg: str) -> str:
+    """The sheet's own quotations: lines that open with a quotation mark and run long enough to be a source.
+
+    A segment with such text carries the source itself, so the analysis must use THAT text and not
+    whatever the corpus holds for the item's base reference (a Rishonim excerpt filed under "Yoma 3b"
+    is not the gemara on Yoma 3b).
+    """
+    quoted = [
+        line.strip() for line in raw_seg.split("\n")
+        if line.strip().startswith(('"', "“", "״")) and len(line.strip()) >= 40
+    ]
+    return "\n".join(quoted)
+
+
+_COMMENTATOR_NAMES_LONGEST_FIRST = sorted(HE_COMMENTATORS, key=len, reverse=True)
+# A commentator's name, with the one-letter prefix a sentence puts on it ("ברש״י", "מתוס׳"). Longest
+# names first so "תוספות ישנים" is not read as "תוספות".
+_COMMENTATOR_RE = re.compile(
+    r"(?<![א-ת])[בלמוהכש]?(" + "|".join(re.escape(n) for n in _COMMENTATOR_NAMES_LONGEST_FIRST) + r")(?![א-ת])"
+)
+_ACRONYM_QUOTE_RE = re.compile(r'(?<=[א-ת])"(?=[א-ת])')
+_QUOTED_DH_RE = re.compile(r'"([^"]{2,80}?)"')
+_MAX_DH_WORDS = 6
+_TALMUD_BASE_RE = re.compile(r"^[A-Za-z_ ]+ \d+[ab]$")
+
+
+def _commentary_requests(raw_seg: str) -> list[dict[str, Any]]:
+    """The commentators a segment POINTS at and the dibbur hamatchil it names for each.
+
+    "עיינו ברש״י ד״ה "דנין פר אחד ואיל אחד" "דנין פר שלו", תוס׳ ישנים ד״ה דנין" is a pointer, not text:
+    the sheet carries none of what Rashi wrote. Returns [{"commentator": "Rashi", "dh": [...]}, ...] so
+    the caller can fetch that commentary and match it by dibbur. Quoted lines (the sheet's own
+    quotations) are skipped: a quotation of Sefer HaYashar is not a pointer to anyone.
+    """
+    prose = " ".join(
+        ln.strip() for ln in raw_seg.split("\n")
+        if ln.strip() and not ln.strip().startswith(('"', "“", "״")) and len(ln.strip()) < 600
+    )
+    prose = _ACRONYM_QUOTE_RE.sub("״", prose)         # רש"י → רש״י, so the remaining " are real quotes
+    matches = list(_COMMENTATOR_RE.finditer(prose))
+    found: dict[str, list[str]] = {}
+    for i, m in enumerate(matches):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(prose)
+        # The pointer ends at its sentence: what follows ("ספר הישר … סימן שג: "ואע״ג …"") is the next
+        # source, and its opening words are not a dibbur of this commentator.
+        span = re.split(r"\.\s", prose[m.end():end], maxsplit=1)[0]
+        dhs = [d.strip() for d in _QUOTED_DH_RE.findall(span) if len(d.split()) <= _MAX_DH_WORDS]
+        if not dhs:
+            plain = re.search(r'(?:ד״ה|דיבור המתחיל)\s+([^\n.,:;–—"]+)', span)
+            if plain and len(plain.group(1).split()) <= _MAX_DH_WORDS:
+                dhs = [plain.group(1).strip()]
+        if not dhs:
+            continue
+        bucket = found.setdefault(HE_COMMENTATORS[m.group(1)], [])
+        bucket.extend(d for d in dhs if d not in bucket)
+    return [{"commentator": name, "dh": dhs} for name, dhs in found.items()]
+
+
 @dataclass
 class ParsedSourceItem:
     index: int
@@ -203,6 +341,11 @@ def parse_source_sheet(text: str) -> list[ParsedSourceItem]:
     clean_text = re.sub(r"^\s*###\s+[^\n]+\.(?:docx|pdf|txt|doc)\s*\n?", "", clean_text, flags=re.IGNORECASE)
     clean_text = re.sub(r"^\s*###\s+(?:מקור|source)\s*\d*\s*\n?", "", clean_text, flags=re.IGNORECASE)
     clean_text = clean_text.strip()
+    default_tractate = _default_tractate(clean_text)
+    clean_text = "\n".join(
+        line for line in clean_text.split("\n")
+        if not (len(line.strip()) < 60 and _LOGISTICS_LINE_RE.search(line.strip()))
+    )
 
     # Split text into segments
     matches = list(_BULLET_RE.finditer(clean_text))
@@ -234,11 +377,9 @@ def parse_source_sheet(text: str) -> list[ParsedSourceItem]:
                 if k not in merged_by_key:
                     merged_by_key[k] = seg
                 else:
-                    prev = merged_by_key[k]
-                    if len(seg) > len(prev):
-                        merged_by_key[k] = f"{prev}\n\n{seg}"
-                    else:
-                        merged_by_key[k] = f"{seg}\n\n{prev}"
+                    # The outline entry stays first: its line is the item's title. Putting the
+                    # longer half first made a source's quoted body its header.
+                    merged_by_key[k] = f"{merged_by_key[k]}\n\n{seg}"
             raw_segments = list(merged_by_key.values())
         else:
             raw_segments = [s for _, s in raw_tuples]
@@ -252,6 +393,7 @@ def parse_source_sheet(text: str) -> list[ParsedSourceItem]:
     items: list[ParsedSourceItem] = []
     last_known_ref: str | None = None
     last_known_book: str | None = None
+    last_talmud_base: list[str] = []
 
     for idx, raw_seg in enumerate(raw_segments, start=1):
         lines = [line.strip() for line in raw_seg.split("\n") if line.strip()]
@@ -284,10 +426,48 @@ def parse_source_sheet(text: str) -> list[ParsedSourceItem]:
             dh=dh,
         )
 
-        if detected_ref:
-            last_known_ref = detected_ref
-        if book_id:
-            last_known_book = book_id
+        if not detected_ref:
+            # A header that opens with a book and a bare Hebrew-letter chapter ("במדבר יט"). The strict
+            # prose matcher rejects an unmarked numeral; right after a bullet it is unambiguous.
+            lead = _BULLET_RE.sub("", header, count=1).strip()
+            hb = re.match(rf"(?P<book>{_book_alt(HE_BOOKS)})\s+(?P<ch>[א-ת]{{1,3}})(?![א-ת])", lead)
+            ch = _daf_value(hb.group("ch")) if hb else None
+            if hb and ch and ch <= 150:
+                detected_ref = f"{HE_BOOKS[hb.group('book')]}.{ch}"
+                canonical_sefaria = canonical_ref(detected_ref)
+                book_id = HE_BOOKS[hb.group("book")]
+
+        ref_range: list[str] = []
+        if detected_ref and re.fullmatch(r"[A-Za-z_]+\.\d+", detected_ref):
+            # "ויקרא ח' פסוקים לג – לו" must anchor on those verses, not on the whole chapter.
+            book, chapter = detected_ref.rsplit(".", 1)
+            ref_range = _verse_range(header, book, int(chapter))
+            if ref_range:
+                detected_ref = ref_range[0]
+                canonical_sefaria = canonical_ref(detected_ref)
+        elif not detected_ref and default_tractate and _GEMARA_CUE_RE.search(header):
+            ref_range = _gemara_stations(raw_seg, default_tractate)
+            if ref_range:
+                detected_ref = ref_range[0]
+                canonical_sefaria = canonical_ref(detected_ref)
+                book_id = default_tractate
+
+        # Context for "שם" / a bare "רש״י" carries over only from the item right before this one, and
+        # only when that item named ONE place. Carried further it attached a Tosafot to a pasuk.
+        last_known_ref = None if ref_range and len(ref_range) > 1 and " " in (detected_ref or "") else detected_ref
+        last_known_book = book_id if last_known_ref else None
+
+        # A pointer to a commentator with no base of its own ("עיינו ברש״י ד״ה …") takes the gemara the
+        # sheet was last on — unlike "שם", which only reaches back one item, because a sheet states the
+        # sugya once and then points at commentary on it. Kept as a request, never as a ref: what the
+        # commentator wrote is fetched and matched by dibbur, not assumed.
+        commentary_requests: list[dict[str, Any]] = []
+        if not detected_ref and last_talmud_base:
+            commentary_requests = _commentary_requests(raw_seg)
+        elif detected_ref and not ref_range and _TALMUD_BASE_RE.match(detected_ref):
+            last_talmud_base = [detected_ref]
+        if ref_range and detected_ref and _TALMUD_BASE_RE.match(detected_ref):
+            last_talmud_base = list(ref_range)
 
         item = ParsedSourceItem(
             index=idx,
@@ -299,7 +479,15 @@ def parse_source_sheet(text: str) -> list[ParsedSourceItem]:
             dibur_hamatchil=dh,
             is_author_note=is_pure_note,
             author_note_text=author_note,
-            metadata={"lines_count": len(lines)},
+            metadata={
+                "lines_count": len(lines),
+                **({"ref_range": ref_range} if len(ref_range) > 1 else {}),
+                **({"quoted_text": _quoted_text(raw_seg)} if _quoted_text(raw_seg) else {}),
+                **(
+                    {"commentary_requests": commentary_requests, "commentary_base": list(last_talmud_base)}
+                    if commentary_requests else {}
+                ),
+            },
         )
         items.append(item)
 
@@ -372,6 +560,8 @@ def _resolve_segment_ref(
                 base_ref = last_known_ref
                 if " on " in base_ref:
                     base_ref = base_ref.split(" on ", 1)[1]
+                if comm_en in _TALMUD_ONLY_COMMENTATORS and not _TALMUD_REF_RE.search(base_ref):
+                    continue
                 target_ref = f"{comm_en} on {base_ref}"
                 return target_ref, canonical_ref(target_ref), last_known_book
 

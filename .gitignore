@@ -140,6 +140,8 @@ app/frontend/dist/
 # ---- Scratch / diagnostics output ----
 diag_*.txt
 /null
+.scratch/
+*.docx
 
 # ---- Generated sample lessons (local artifacts, not for the repo) ----
 sample_lessons/

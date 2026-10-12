@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { Lang, SearchHit } from "@/lib/types";
 import { tr } from "@/lib/i18n";
 import { CATEGORY_LABELS } from "@/lib/search";
+import { ERA_CHIPS } from "@/lib/library";
 import { Icon } from "@/components/Icon";
 
 const LICENSE_LABEL: Record<Lang, Record<string, string>> = {
@@ -34,9 +35,12 @@ export interface ResultCardProps {
 export function ResultCard({ hit, lang }: { hit: SearchHit; lang: Lang }) {
   const [isExpanded, setIsExpanded] = useState(false);
 
-  const categoryName = CATEGORY_LABELS[lang]?.[hit.work_id] || hit.work_id;
+  const eraChip = ERA_CHIPS.find((e) => e.id === hit.era);
+  const categoryName = eraChip ? (lang === "he" ? eraChip.he : eraChip.en) : CATEGORY_LABELS[lang]?.[hit.work_id] || hit.work_id;
   const license = hit.license_he || hit.license_en || "";
-  const version = hit.version_he || hit.version_en || "";
+  // the edition's name and the author are always shown: the reader's language when we have it, otherwise whatever we have
+  const version = (lang === "he" ? hit.version_he || hit.version_en : hit.version_en || hit.version_he) || "";
+  const authorName = (lang === "he" ? hit.author_he || hit.book : hit.book || hit.author_he) || "";
 
   return (
     <article className="glass rounded-2xl p-5 sm:p-6 transition-all duration-200 hover:shadow-md hover:shadow-tekhelet/5 flex flex-col gap-3">
@@ -44,14 +48,14 @@ export function ResultCard({ hit, lang }: { hit: SearchHit; lang: Lang }) {
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="flex flex-col">
           <h2 className="font-serif text-xl sm:text-2xl font-bold text-tekhelet leading-snug">
-            {hit.ref}
+            {lang === "he" ? hit.ref_he || hit.ref : hit.ref_en || hit.ref}
           </h2>
-          {(hit.author_he || hit.book) && (
+          {authorName && (
             <p className="text-sm text-ink/70 font-medium">
-              {hit.author_he || hit.book}
+              {authorName}
               {hit.category_path && (
                 <span className="text-ink/40 text-xs mr-2 ml-2">
-                  ({hit.category_path})
+                  ({lang === "he" && hit.category_he ? hit.category_he : hit.category_path})
                 </span>
               )}
             </p>

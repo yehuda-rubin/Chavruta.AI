@@ -271,8 +271,15 @@ class CloudLLM:
         )
         # The single metering point for this backend: every provider call passes through here, so the
         # agentic loop's extra rounds are counted without any caller having to know they happened.
-        metering.record(getattr(usage, "prompt_tokens", 0), getattr(usage, "completion_tokens", 0),
-                        model=self.model_id)
+        p_tok = getattr(usage, "prompt_tokens", 0)
+        c_tok = getattr(usage, "completion_tokens", 0)
+        metering.record(p_tok, c_tok, model=self.model_id)
+        if "mistral" in (self.model_id or "").lower():
+            try:
+                from app import db
+                db.record_mistral_usage(p_tok, c_tok)
+            except Exception:
+                pass
         return choice, usage
 
     def generate(self, prompt: GroundedPrompt, *, lang: str, max_tokens: int,

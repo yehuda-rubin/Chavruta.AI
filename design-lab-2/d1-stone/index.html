@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>חברותא · כיוון 1 — אבן</title>
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;700;900&family=Assistant:wght@300;400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --canvas:#e4e2db; --paper:#f7f6f2; --side:#dcd9d0; --margin:#eeece6; --white:#fff;
+  --ink:#1b2320; --mute:#62665c; --line:#cfccc1; --olive:#3d5a2a; --olive2:#2f4620; --olive-soft:#e1e9d4; --mark:#f1e1a0;
+  --serif:"Frank Ruhl Libre",serif; --sans:"Assistant",system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0}
+html{scroll-behavior:smooth}
+body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:17px;line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+a{color:inherit;text-decoration:none}button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+h1,h2,h3{text-wrap:balance}p{text-wrap:pretty}
+:focus-visible{outline:2px solid var(--olive);outline-offset:3px}
+.view{display:none}.view.on{display:block}
+.wrap{max-width:1160px;margin:0 auto;padding:0 28px}
+.logo{display:inline-flex;align-items:center;gap:10px;font-family:var(--serif);font-weight:900;font-size:28px;line-height:1}
+.logo svg{width:34px;height:34px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 24px;border-radius:10px;font-weight:700;font-size:16px;transition:background-color .15s,transform .15s,border-color .15s}
+.btn:active{transform:scale(.97)}
+.btn.o{background:var(--olive);color:#fff}.btn.o:hover{background:var(--olive2)}
+.btn.l{border:1px solid var(--ink)}.btn.l:hover{background:var(--ink);color:var(--paper)}
+.btn.big{min-height:52px;padding:0 30px;font-size:18px}
+/* landing */
+nav.top{display:flex;align-items:center;justify-content:space-between;height:84px}
+nav.top ul{display:flex;gap:34px;list-style:none;padding:0;font-weight:600;color:var(--mute)}
+nav.top ul a:hover{color:var(--olive)}
+.hero{display:grid;grid-template-columns:1.1fr 1fr;gap:64px;align-items:center;padding:40px 0 96px}
+h1{font-family:var(--serif);font-weight:900;font-size:clamp(46px,6.4vw,84px);line-height:1.04;letter-spacing:-.01em}
+.lead{font-family:var(--serif);font-size:24px;line-height:1.6;color:#39413a;margin:26px 0 34px;max-width:520px}
+.cta{display:flex;gap:12px;flex-wrap:wrap}
+.leaf{background:var(--white);border:1px solid var(--line);border-radius:6px;padding:34px 34px 30px;box-shadow:0 30px 60px -36px rgba(27,35,32,.45);position:relative}
+.leaf .q{font-family:var(--serif);font-weight:700;font-size:25px;line-height:1.3;padding-bottom:16px;border-bottom:1px solid var(--line);margin-bottom:16px}
+.leaf p{font-family:var(--serif);font-size:19px;line-height:1.85}
+sup.c{font-family:var(--sans);font-weight:700;font-size:12px;color:var(--olive);background:var(--olive-soft);border-radius:4px;padding:1px 6px;margin-inline:2px;vertical-align:5px}
+.leaf .note{margin-top:20px;padding:12px 16px;border-inline-start:3px solid var(--olive);background:var(--margin);font-family:var(--serif);font-size:16px;color:#39413a}
+.leaf .note b{display:block;font-family:var(--sans);font-size:13px;color:var(--olive);margin-bottom:2px}
+section.s{padding:84px 0;border-top:1px solid var(--line)}
+h2{font-family:var(--serif);font-weight:900;font-size:clamp(34px,4.4vw,56px);line-height:1.08}
+.cols{display:grid;grid-template-columns:repeat(3,1fr);gap:48px;margin-top:48px}
+.cols h3{font-family:var(--serif);font-size:26px;font-weight:700;border-top:3px solid var(--olive);padding-top:16px;margin-bottom:8px}
+.cols p{color:#444b43}
+.toc{margin-top:40px;max-width:760px}
+.toc li{list-style:none;display:flex;align-items:baseline;gap:12px;padding:12px 0;font-family:var(--serif);font-size:24px}
+.toc li::after{content:"";order:1;flex:1;border-bottom:2px dotted #b7b3a6;transform:translateY(-5px)}
+.toc li span:first-child{order:0;font-weight:700}.toc li span:last-child{order:2;font-family:var(--sans);font-size:16px;color:var(--mute)}
+.toc .beta{font-size:12px;background:var(--mark);padding:1px 8px;border-radius:4px;margin-inline-start:8px;font-family:var(--sans);font-weight:700}
+.prices{margin-top:40px;border-top:2px solid var(--ink)}
+.prices>div{display:grid;grid-template-columns:1.1fr 1fr 2fr auto;gap:24px;align-items:center;padding:22px 0;border-bottom:1px solid var(--line)}
+.prices h3{font-family:var(--serif);font-size:28px;font-weight:700}
+.prices .p{font-family:var(--serif);font-size:38px;font-weight:900;font-variant-numeric:tabular-nums}.prices .p small{font-family:var(--sans);font-size:15px;font-weight:400;color:var(--mute)}
+.prices span.d{color:var(--mute)}
+.inst{margin-top:18px;color:var(--mute)}.inst a{color:var(--olive);font-weight:700;border-bottom:1px solid}
+details{border-bottom:1px solid var(--line);padding:20px 0}
+summary{cursor:pointer;font-family:var(--serif);font-size:23px;font-weight:700;list-style:none;display:flex;justify-content:space-between}
+summary::after{content:"+";color:var(--olive);font-size:28px;line-height:1}details[open] summary::after{content:"−"}
+details p{margin-top:8px;color:#444b43;max-width:680px}
+.final{background:var(--olive);color:#fff;padding:90px 0;text-align:center}
+.final h2{color:#fff}.final .btn{margin-top:30px;background:#fff;color:var(--olive2)}
+footer{padding:30px 0;color:var(--mute);font-size:15px}footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:14px}footer nav{display:flex;gap:20px}
+/* auth */
+.auth{min-height:100vh;display:grid;grid-template-columns:1fr 1fr}
+.auth .art{background:var(--olive);color:#fff;padding:56px;display:flex;flex-direction:column;justify-content:space-between}
+.auth .art .logo{color:#fff}
+.auth .art q{font-family:var(--serif);font-weight:700;font-size:clamp(32px,4vw,52px);line-height:1.2;quotes:none}
+.auth .art small{display:block;margin-top:14px;font-size:16px;opacity:.8}
+.auth form{max-width:440px;margin:auto;padding:40px 28px;width:100%}
+.auth h2{font-size:46px;margin-bottom:6px}
+label{display:block;font-weight:700;font-size:15px;margin:20px 0 6px}
+input{width:100%;min-height:48px;padding:0 14px;border-radius:8px;border:1px solid #b9b6aa;background:#fff;font:inherit;outline:0;transition:border-color .15s,box-shadow .15s}
+input:focus{border-color:var(--olive);box-shadow:0 0 0 3px rgba(61,90,42,.18)}
+.auth .btn{width:100%;margin-top:26px}.sw{margin-top:20px;text-align:center;color:var(--mute)}.sw a{color:var(--olive);font-weight:700}
+/* ===== app ===== */
+.app{display:grid;grid-template-columns:272px minmax(0,1fr) 352px;height:100vh;background:var(--paper)}
+.app[data-src="off"]{grid-template-columns:272px minmax(0,1fr) 0}
+.side{background:var(--side);border-inline-end:1px solid var(--line);display:flex;flex-direction:column;padding:18px 14px;min-height:0}
+.side .logo{font-size:24px;padding:4px 8px 16px}
+.side .new{justify-content:flex-start;background:var(--paper);border:1px solid var(--line);min-height:44px;padding:0 14px;border-radius:10px;font-weight:700;width:100%}
+.side .new:hover{border-color:var(--olive)}
+.hist{flex:1;overflow:auto;margin-top:14px}
+.hist h4{font-size:13px;font-weight:700;color:var(--mute);padding:14px 10px 6px}
+.hist a{display:block;padding:9px 10px;border-radius:8px;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hist a:hover{background:rgba(255,255,255,.55)}.hist a.on{background:var(--paper);font-weight:700;box-shadow:inset -3px 0 0 var(--olive)}
+.side .foot{border-top:1px solid var(--line);padding-top:10px;display:grid}
+.side .foot a{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;color:#39413a;font-size:15px}.side .foot a:hover{background:rgba(255,255,255,.55)}
+.ic{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.mainc{display:flex;flex-direction:column;min-width:0;min-height:0;position:relative}
+.bar{height:60px;display:flex;align-items:center;justify-content:space-between;padding:0 32px;border-bottom:1px solid var(--line);font-weight:600;color:var(--mute);font-size:15px}
+.bar button{display:flex;align-items:center;gap:8px;min-height:40px;padding:0 12px;border-radius:8px}.bar button:hover{background:var(--margin)}
+.scroll{flex:1;overflow:auto;padding:44px 32px 24px}
+.col{max-width:700px;margin:0 auto}
+.qh{font-family:var(--serif);font-weight:900;font-size:38px;line-height:1.22;margin-bottom:26px}
+.ans p{font-family:var(--serif);font-size:21px;line-height:1.95;margin-bottom:18px}
+.ans .cite{font-family:var(--sans);font-weight:700;font-size:13px;color:var(--olive);background:var(--olive-soft);border-radius:4px;padding:1px 7px;margin-inline:2px;vertical-align:4px;cursor:pointer;transition:background-color .15s,color .15s}
+.ans .cite:hover,.ans .cite.on{background:var(--olive);color:#fff}
+.acts{display:flex;gap:6px;margin-top:6px;color:var(--mute)}
+.acts button{display:flex;align-items:center;gap:6px;min-height:40px;padding:0 10px;border-radius:8px;font-size:14px}.acts button:hover{background:var(--margin);color:var(--ink)}
+.followups{margin-top:22px;display:grid;gap:8px}
+.followups button{text-align:start;font-family:var(--serif);font-size:18px;padding:12px 16px;border:1px solid var(--line);border-radius:8px;background:var(--white);transition:border-color .15s}.followups button:hover{border-color:var(--olive)}
+.empty{text-align:center;padding-top:7vh}
+.empty h1{font-size:54px;margin-bottom:10px}.empty p.s{font-family:var(--serif);font-size:22px;color:var(--mute);margin-bottom:34px}
+.sug{display:grid;grid-template-columns:1fr 1fr;gap:12px;text-align:start;margin-top:30px}
+.sug button{font-family:var(--serif);font-size:18px;line-height:1.45;padding:18px 20px;border:1px solid var(--line);border-radius:8px;background:var(--white);min-height:92px;transition:border-color .15s,transform .15s}.sug button:hover{border-color:var(--olive);transform:translateY(-2px)}
+.sug small{display:block;font-family:var(--sans);font-size:13px;font-weight:700;color:var(--olive);margin-bottom:4px}
+[data-state=empty] .only-chat,[data-state=chat] .only-empty{display:none}
+.dock{padding:8px 32px 20px;position:relative}
+.composer{max-width:700px;margin:0 auto;background:var(--white);border:1px solid #b9b6aa;border-radius:12px;transition:border-color .15s,box-shadow .15s}
+.composer:focus-within{border-color:var(--olive);box-shadow:0 0 0 3px rgba(61,90,42,.15)}
+.composer textarea{width:100%;border:0;outline:0;resize:none;background:none;font:inherit;font-family:var(--serif);font-size:19px;padding:16px 18px 6px;min-height:58px}
+.crow{display:flex;align-items:center;justify-content:space-between;padding:6px 10px 10px 12px}
+.mode{display:flex;align-items:center;gap:8px;min-height:40px;padding:0 12px;border-radius:8px;font-weight:700;color:var(--olive);font-size:15px}.mode:hover,.mode[aria-expanded=true]{background:var(--olive-soft)}
+.send{width:44px;height:44px;border-radius:10px;background:var(--olive);color:#fff;display:grid;place-items:center}.send:hover{background:var(--olive2)}
+.fine{text-align:center;font-size:13px;color:var(--mute);margin-top:10px}
+.menu{position:absolute;bottom:calc(100% - 4px);inset-inline-start:calc(50% - 350px + 10px);width:360px;background:var(--white);border:1px solid #b9b6aa;border-radius:12px;padding:6px;box-shadow:0 24px 50px -20px rgba(27,35,32,.5);opacity:0;visibility:hidden;transform:translateY(6px);transition:opacity .14s,transform .14s,visibility 0s .14s;z-index:20}
+.menu.open{opacity:1;visibility:visible;transform:none;transition:opacity .14s,transform .14s}
+.menu button{display:flex;align-items:center;gap:12px;width:100%;text-align:start;min-height:52px;padding:6px 12px;border-radius:8px}
+.menu button:hover,.menu button:focus-visible,.menu button[aria-checked=true]{background:var(--olive-soft)}
+.menu b{display:block;font-family:var(--serif);font-size:18px;line-height:1.2}.menu small{display:block;line-height:1.35;color:var(--mute);font-size:13px}
+.menu .tick{margin-inline-start:auto;color:var(--olive);opacity:0}.menu button[aria-checked=true] .tick{opacity:1}
+.menu .sep{font-size:12px;font-weight:700;color:var(--mute);padding:10px 12px 4px;border-top:1px solid var(--line);margin-top:4px}
+.menu .bt{font-size:11px;font-weight:700;background:var(--mark);padding:0 7px;border-radius:4px;margin-inline-start:6px}
+.margin{background:var(--margin);border-inline-start:1px solid var(--line);overflow:auto;padding:22px 22px 30px;min-width:0}
+.app[data-src="off"] .margin{display:none}
+.margin .mh{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;font-weight:700}
+.margin .mh button{width:40px;height:40px;border-radius:8px;display:grid;place-items:center;color:var(--mute)}.margin .mh button:hover{background:var(--side)}
+.src{background:var(--white);border:1px solid var(--line);border-radius:6px;padding:18px 18px 14px;margin-bottom:14px;transition:border-color .15s,box-shadow .15s}
+.src.on{border-color:var(--olive);box-shadow:0 0 0 3px rgba(61,90,42,.12)}
+.src h5{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700;color:var(--olive);margin-bottom:8px}
+.src h5 i{font-style:normal;background:var(--olive);color:#fff;border-radius:4px;width:22px;height:22px;display:grid;place-items:center;font-size:12px}
+.src blockquote{font-family:var(--serif);font-size:19px;line-height:1.8;border-inline-start:3px solid var(--mark);padding-inline-start:12px}
+.src .meta{margin-top:12px;padding-top:10px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:10px;font-size:13px;color:var(--mute)}
+.src .meta a{color:var(--olive);font-weight:700}
+.addsrc{width:100%;border:1px dashed #a9a597;border-radius:8px;min-height:48px;color:var(--mute);font-weight:700}.addsrc:hover{border-color:var(--olive);color:var(--olive)}
+@media(max-width:1100px){.app,.app[data-src="off"]{grid-template-columns:240px 1fr}.margin{display:none}}
+@media(max-width:860px){.hero,.auth{grid-template-columns:1fr}.cols{grid-template-columns:1fr;gap:30px}.prices>div{grid-template-columns:1fr 1fr}.prices>div span.d{grid-column:1/-1}.auth .art{display:none}nav.top ul{display:none}.app,.app[data-src="off"]{grid-template-columns:1fr}.side{display:none}.sug{grid-template-columns:1fr}.qh{font-size:30px}.scroll,.dock,.bar{padding-inline:18px}.menu{inset-inline-start:18px;width:calc(100% - 36px)}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+.back{position:fixed;bottom:14px;left:14px;z-index:50;font-size:13px;background:var(--white);border:1px solid var(--line);padding:6px 12px;border-radius:8px}
+.view.on#v-app~.back{display:none}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute"><defs>
+ <symbol id="mark" viewBox="0 0 48 48"><path d="M5 44V22a10 10 0 0 1 20 0v22Z" fill="#3d5a2a"/><path d="M27 44V22a10 10 0 0 1 16 -8v30Z" fill="none" stroke="#3d5a2a" stroke-width="3.5" stroke-linejoin="round"/><path d="M27 44V22a10 10 0 0 1 3.2 -7.3" fill="none" stroke="#3d5a2a" stroke-width="3.5"/><circle cx="15" cy="23" r="3" fill="#f7f6f2"/></symbol>
+ <symbol id="markw" viewBox="0 0 48 48"><path d="M5 44V22a10 10 0 0 1 20 0v22Z" fill="#fff"/><path d="M27 44V22a10 10 0 0 1 16 -8v30Z" fill="none" stroke="#fff" stroke-width="3.5" stroke-linejoin="round"/><circle cx="15" cy="23" r="3" fill="#3d5a2a"/></symbol>
+ <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+ <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2ZM4 19V5"/></symbol>
+ <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></symbol>
+ <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 1-1 1.7M12 17h.01"/></symbol>
+ <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></symbol>
+ <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></symbol>
+ <symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+ <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
+ <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></symbol>
+ <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+</defs></svg>
+
+<!-- LANDING -->
+<div class="view on" id="v-landing">
+ <div class="wrap">
+  <nav class="top"><a class="logo" href="#/"><svg><use href="#mark"/></svg>חברותא</a>
+   <ul><li><a href="#how">עקרונות</a></li><li><a href="#modes">מצבי לימוד</a></li><li><a href="#pricing">מחירים</a></li><li><a href="#faq">שאלות</a></li></ul>
+   <div style="display:flex;gap:10px"><a class="btn l" href="#/signup">כניסה</a><a class="btn o" href="#/signup">התחילו ללמוד</a></div></nav>
+  <header class="hero">
+   <div><h1>ללמוד תורה, עם הספר פתוח לפניך</h1>
+    <p class="lead">חברותא עונה על שאלות מתוך מאגר של מקורות יהודיים, ומראה בדיוק מאיפה כל משפט נלקח. מה שאין לו מקור, לא נכתב.</p>
+    <div class="cta"><a class="btn o big" href="#/signup">התחילו ללמוד, חינם</a><a class="btn l big" href="#/app">הצצה למוצר</a></div></div>
+   <div class="leaf"><div class="q">מה ההבדל בין בית שמאי לבית הלל בהדלקת נרות חנוכה?</div>
+    <p>לפי בית שמאי מדליקים ביום הראשון שמונה נרות ופוחתים והולכים, ולפי בית הלל מדליקים אחד ומוסיפים והולכים.<sup class="c">1</sup></p>
+    <div class="note"><b>1 · שבת כא ע״ב</b>בית שמאי אומרים: יום ראשון מדליק שמונה, מכאן ואילך פוחת והולך; ובית הלל אומרים: יום ראשון מדליק אחת, מכאן ואילך מוסיף והולך.</div></div>
+  </header>
+ </div>
+ <section class="s" id="how"><div class="wrap"><h2>שלושה עקרונות</h2>
+  <div class="cols"><div><h3>כל משפט עם מקור</h3><p>לצד כל תשובה מופיעים הספר, הפרק והטקסט המקורי, עם קישור לפתיחה מלאה.</p></div><div><h3>״לא מצאתי״ היא תשובה</h3><p>כשהמקורות לא עונים, חברותא אומרת זאת במפורש, ולא ממציאה.</p></div><div><h3>רישיון נקי לשימוש</h3><p>המאגר כולו ממקורות שמותר להשתמש בהם גם מסחרית, יותר מ־2.4 מיליון קטעים.</p></div></div></div></section>
+ <section class="s" id="modes"><div class="wrap"><h2>מצבי לימוד</h2>
+  <ul class="toc" style="padding:0"><li><span>שיעור</span><span>מערך מלא למורים</span></li><li><span>הסבר</span><span>פסוק או סוגיה, עם מפרשים</span></li><li><span>שאלה ותשובה</span><span>רק מהמקורות</span></li><li><span>הלכה ושו״ת</span><span>שולחן ערוך ונושאי כליו</span></li><li><span>חברותא</span><span>לימוד בדיאלוג</span></li><li><span>פרשת השבוע<b class="beta">בטא</b></span><span>לימוד הפרשה</span></li><li><span>דף יומי<b class="beta">בטא</b></span><span>הדף של היום</span></li></ul></div></section>
+ <section class="s" id="pricing"><div class="wrap"><h2>מחירים</h2>
+  <div class="prices"><div><h3>חינם</h3><div class="p">₪0</div><span class="d">כל המקורות והציטוטים, מכסה יומית</span><a class="btn l" href="#/signup">להתחיל</a></div>
+   <div><h3>בסיסי</h3><div class="p">₪75<small> / חודש</small></div><span class="d">פי כמה מהמכסה החינמית</span><a class="btn o" href="#/signup">לבחור</a></div>
+   <div><h3>מקצועי</h3><div class="p">₪200<small> / חודש</small></div><span class="d">למורים ולמדריכים</span><a class="btn l" href="#/signup">לבחור</a></div></div>
+  <p class="inst">מוסד לימוד או ישיבה? <a href="#/signup">דברו איתנו</a>.</p></div></section>
+ <section class="s" id="faq"><div class="wrap" style="max-width:820px"><h2 style="margin-bottom:20px">שאלות נפוצות</h2>
+  <details><summary>האם חברותא מחליפה רב?</summary><p>לא. היא כלי לימוד שמראה מקורות. לשאלות הלכה למעשה, פונים לרב.</p></details>
+  <details><summary>מאיפה המקורות?</summary><p>ממאגר ברישיון שמאפשר שימוש מסחרי, בהם ספריא ופרויקטים פתוחים אחרים.</p></details>
+  <details><summary>מה קורה כשאין תשובה במקורות?</summary><p>חברותא אומרת שלא נמצא מקור, ולא מנסה לנחש.</p></details></div></section>
+ <div class="final"><div class="wrap"><h2>הספר פתוח. נתחיל?</h2><a class="btn big" href="#/signup">הרשמה חינם</a></div></div>
+ <footer><div class="wrap"><a class="logo" style="font-size:20px" href="#/"><svg style="width:26px;height:26px"><use href="#mark"/></svg>חברותא</a><nav><a>תנאי שימוש</a><a>פרטיות</a><a>נגישות</a></nav></div></footer>
+</div>
+
+<!-- SIGNUP -->
+<div class="view" id="v-signup"><div class="auth">
+ <div class="art"><a class="logo" href="#/"><svg><use href="#markw"/></svg>חברותא</a><div><q>עשה לך רב, וקנה לך חבר.</q><small>אבות א׳:ו׳</small></div></div>
+ <form onsubmit="location.hash='#/app';return false"><h2>פתיחת חשבון</h2><p style="color:var(--mute)">חצי דקה, ואפשר ללמוד.</p>
+  <label>אימייל</label><input type="email" dir="ltr" placeholder="name@example.com"><label>סיסמה</label><input type="password" dir="ltr" placeholder="לפחות 8 תווים">
+  <button class="btn o big">יצירת חשבון</button><p class="sw">כבר רשומים? <a href="#/signup">כניסה</a></p></form></div></div>
+
+<!-- APP -->
+<div class="view" id="v-app">
+<div class="app" id="app" data-state="chat" data-src="on">
+ <aside class="side">
+  <a class="logo" href="#/"><svg><use href="#mark"/></svg>חברותא</a>
+  <button class="new" id="newchat"><svg class="ic"><use href="#i-plus"/></svg>דיון חדש</button>
+  <div class="hist"><h4>היום</h4><a class="on">מחלוקת בית שמאי ובית הלל</a><a>דין שבת בבישול</a><h4>השבוע</h4><a>הקדמת הרמב״ם לספר המדע</a><a>מערך שיעור: פרשת נח</a><a>סוגיית אלו מציאות</a></div>
+  <div class="foot"><a href="#"><svg class="ic"><use href="#i-book"/></svg>השיעורים שלי</a><a href="#"><svg class="ic"><use href="#i-gear"/></svg>הגדרות</a><a href="#"><svg class="ic"><use href="#i-help"/></svg>עזרה ומשוב</a></div>
+ </aside>
+ <main class="mainc">
+  <div class="bar"><span class="only-chat">מחלוקת בית שמאי ובית הלל</span><span class="only-empty">דיון חדש</span>
+   <button id="togsrc" title="מקורות"><svg class="ic"><use href="#i-panel"/></svg><span>מקורות</span></button></div>
+  <div class="scroll"><div class="col">
+   <div class="only-empty empty"><h1>במה נעסוק היום?</h1><p class="s">שאל על כל ספר או סוגיה, וחברותא תענה מתוך המקורות.</p>
+    <div class="sug"><button data-q><small>הסבר</small>מחלוקת בית שמאי ובית הלל בהדלקת נרות חנוכה</button><button data-q><small>שיעור</small>בנה שיעור על סוגיית ״שניים אוחזין בטלית״</button><button data-q><small>שאלה</small>מה אומר הרמב״ם על מצוות תלמוד תורה?</button><button data-q><small>שאלה</small>מהו המקור לאיסור לשון הרע?</button></div></div>
+   <div class="only-chat">
+    <h1 class="qh">מה ההבדל בין בית שמאי לבית הלל בהדלקת נרות חנוכה?</h1>
+    <div class="ans">
+     <p>המחלוקת נוגעת לסדר ההדלקה במהלך שמונת הימים. לפי בית שמאי מדליקים ביום הראשון שמונה נרות, ומכאן ואילך פוחתים והולכים. לפי בית הלל מדליקים ביום הראשון נר אחד, ומכאן ואילך מוסיפים והולכים.<button class="cite on" data-s="1">1</button></p>
+     <p>הגמרא מביאה שני טעמים. בית שמאי: כנגד ימים הנכנסים, ובית הלל: כנגד ימים היוצאים. ועוד: טעמם של בית הלל הוא ״מעלין בקודש ואין מורידין״.<button class="cite" data-s="2">2</button></p>
+    </div>
+    <div class="acts"><button><svg class="ic"><use href="#i-copy"/></svg>העתק</button></div>
+    <div class="followups"><button>מה הלכה כבית הלל, ומה המנהג?</button><button>בנה שיעור על המחלוקת הזו</button></div>
+   </div>
+  </div></div>
+  <div class="dock">
+   <div class="menu" id="menu" role="menu">
+    <button role="menuitemradio" aria-checked="false"><span><b>שיעור</b><small>מערך מלא למורים</small></span><svg class="ic tick"><use href="#i-check"/></svg></button>
+    <button role="menuitemradio" aria-checked="false"><span><b>הסבר</b><small>פסוק או סוגיה, עם מפרשים</small></span><svg class="ic tick"><use href="#i-check"/></svg></button>
+    <button role="menuitemradio" aria-checked="true"><span><b>שאלה ותשובה</b><small>רק מהמקורות</small></span><svg class="ic tick"><use href="#i-check"/></svg></button>
+    <button role="menuitemradio" aria-checked="false"><span><b>הלכה ושו״ת</b><small>שולחן ערוך ונושאי כליו</small></span><svg class="ic tick"><use href="#i-check"/></svg></button>
+    <button role="menuitemradio" aria-checked="false"><span><b>חברותא</b><small>לימוד בדיאלוג</small></span><svg class="ic tick"><use href="#i-check"/></svg></button>
+    <div class="sep">בבדיקה</div>
+    <button role="menuitemradio" aria-checked="false"><span><b>פרשת השבוע<span class="bt">בטא</span></b><small>לימוד הפרשה</small></span><svg class="ic tick"><use href="#i-check"/></svg></button>
+    <button role="menuitemradio" aria-checked="false"><span><b>דף יומי<span class="bt">בטא</span></b><small>הדף של היום</small></span><svg class="ic tick"><use href="#i-check"/></svg></button>
+   </div>
+   <div class="composer"><textarea id="ta" rows="1" placeholder="שאל את חברותא…"></textarea>
+    <div class="crow"><button class="mode" id="modebtn" aria-haspopup="menu" aria-expanded="false"><span id="modelabel">שאלה ותשובה</span><svg class="ic"><use href="#i-chev"/></svg></button><button class="send" id="send" aria-label="שלח"><svg class="ic"><use href="#i-send"/></svg></button></div></div>
+   <p class="fine">נבנה ביראת שמיים · אינו פוסק הלכה למעשה</p>
+  </div>
+ </main>
+ <aside class="margin"><div class="mh"><span>מקורות בתשובה</span><button id="closesrc" aria-label="סגור"><svg class="ic"><use href="#i-x"/></svg></button></div>
+  <div class="src on" id="src1"><h5><i>1</i>שבת כא ע״ב</h5><blockquote>בית שמאי אומרים: יום ראשון מדליק שמונה, מכאן ואילך פוחת והולך; ובית הלל אומרים: יום ראשון מדליק אחת, מכאן ואילך מוסיף והולך.</blockquote><div class="meta"><span>נחלת הכלל</span><a href="#">פתח בספריא</a></div></div>
+  <div class="src" id="src2"><h5><i>2</i>שבת כא ע״ב</h5><blockquote>טעמא דבית שמאי כנגד ימים הנכנסין, וטעמא דבית הלל כנגד ימים היוצאין. וחד אמר: טעמא דבית שמאי כנגד פרי החג, וטעמא דבית הלל — מעלין בקודש ואין מורידין.</blockquote><div class="meta"><span>נחלת הכלל</span><a href="#">פתח בספריא</a></div></div>
+  <button class="addsrc">+ הוסף מקור משלך</button></aside>
+</div></div>
+<a class="back" href="../index.html">← חזרה להשוואה</a>
+<script>
+function route(){const h=(location.hash||'#/').replace('#','');const id=h.startsWith('/signup')?'v-signup':h.startsWith('/app')?'v-app':'v-landing';
+ document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id===id));
+ if(h&&h[0]!=='/'){const e=document.getElementById(h);e&&e.scrollIntoView()}else window.scrollTo(0,0);
+ const app=document.getElementById('app');if(h==='/app/new')app.dataset.state='empty';else if(id==='v-app')app.dataset.state=h==='/app/new'?'empty':app.dataset.state}
+addEventListener('hashchange',route);route();
+(function(){const app=document.getElementById('app');if(!app)return;
+ const b=document.getElementById('modebtn'),m=document.getElementById('menu'),l=document.getElementById('modelabel');
+ const set=o=>{m.classList.toggle('open',o);b.setAttribute('aria-expanded',o)};
+ b.onclick=e=>{e.stopPropagation();set(!m.classList.contains('open'));if(m.classList.contains('open'))m.querySelector('[aria-checked=true]').focus()};
+ m.onclick=e=>{const t=e.target.closest('button');if(!t)return;m.querySelectorAll('button').forEach(x=>x.setAttribute('aria-checked',x===t));l.textContent=t.querySelector('b').firstChild.textContent;set(false);b.focus()};
+ document.addEventListener('click',e=>{if(!m.contains(e.target))set(false)});
+ document.addEventListener('keydown',e=>{if(e.key==='Escape'){set(false)}});
+ document.getElementById('newchat').onclick=()=>app.dataset.state='empty';
+ const toChat=()=>app.dataset.state='chat';
+ document.getElementById('send').onclick=toChat;document.querySelectorAll('[data-q]').forEach(x=>x.onclick=toChat);
+ const src=on=>app.dataset.src=on?'on':'off';
+ document.getElementById('togsrc').onclick=()=>src(app.dataset.src!=='on');document.getElementById('closesrc').onclick=()=>src(false);
+ document.querySelectorAll('.cite').forEach(c=>c.onclick=()=>{src(true);document.querySelectorAll('.cite').forEach(x=>x.classList.toggle('on',x===c));document.querySelectorAll('.src').forEach(s=>s.classList.toggle('on',s.id==='src'+c.dataset.s))});
+ if(location.hash.includes('menu'))setTimeout(()=>b.click(),100);
+})();
+</script>
+</body></html>

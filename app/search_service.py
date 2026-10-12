@@ -7,6 +7,7 @@ with canonical ordering, language isolation, facet aggregation, and rate limitin
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import sqlite3
@@ -25,7 +26,10 @@ from pydantic import BaseModel, Field
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from chavruta.corpus.cite_labels import cite_labels, section_he
 from chavruta.corpus.normalize import deuphemize_he, normalize_he
+from chavruta.corpus.source_lookup import SourceIndex, parse as parse_source
+from chavruta.intents.hebrew_refs import HE_TRACTATES
 from chavruta.corpus.refs import (
     canonical_ref,
     commentator_title,
@@ -68,6 +72,10 @@ class SearchHit(BaseModel):
     version_he: str = ""
     version_en: str | None = None
     category_path: str = ""
+    ref_en: str = ""
+    ref_he: str = ""            # the citation in Hebrew ('תוספתא ביכורים ב׳, י׳')
+    category_he: str = ""       # category_path in Hebrew
+    era: str = ""               # time period: tanakh, chazal, geonim, rishonim, acharonim, modern, other
 
 
 class SearchResponse(BaseModel):
@@ -78,10 +86,13 @@ class SearchResponse(BaseModel):
     limit: int
     hits: list[SearchHit]
     facets: dict[str, int]
+    eras: dict[str, int] = {}     # matches per time period: tanakh, chazal, geonim, rishonim, acharonim, modern, other
 
 
 class ReaderSegment(BaseModel):
     ref: str
+    ref_he: str = ""      # 'בראשית א, א' — the citation in Hebrew, next to the Hebrew text
+    ref_en: str = ""      # 'Genesis 1:1' — the citation in English, next to the English text
     text_he: str = ""
     text_en: str | None = None
     segment_num: int
@@ -107,6 +118,8 @@ class ReaderUnitResponse(BaseModel):
 
 class ReaderLinkItem(BaseModel):
     ref: str
+    ref_he: str = ""
+    ref_en: str = ""
     source_ref: str = ""
     category: str = ""
     type: str = ""
@@ -213,6 +226,7 @@ def get_db() -> sqlite3.Connection:
             uri = f"file:{Path(path).resolve().as_posix()}?mode=ro"
             conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
             conn.row_factory = sqlite3.Row
+            _load_layer_rank(conn)
             _db_connection = conn
         return _db_connection
 
@@ -385,6 +399,35 @@ async def health():
     }
 
 
+# ── Content-search ordering ───────────────────────────────────────────────────
+# Results come back in the order a learner meets the sources, not alphabetically: Tanakh (Torah,
+# Prophets, Writings), then Chazal (Mishnah, Tosefta, Gemara, Midrash), then the commentators and later
+# literature by THEIR era — a Rishon beside the Rishonim, an Acharon beside the Acharonim. The rank of
+# each category comes from data/layer_rank.json (scripts/build_layer_rank.py); ties fall back to `rowid`,
+# the load order, which is canonical inside a book (Genesis → Deuteronomy, verses and dapim in sequence).
+_LAYER_RANK_PATH = Path(__file__).resolve().parent.parent / "src" / "chavruta" / "corpus" / "data" / "layer_rank.json"
+_UNRANKED = 800        # rows with no category (e.g. the Hebrew-Wikisource additions) go after the ranked works
+
+
+# the time period of a row, from its layer rank (scripts/build_layer_rank.py: <20 Tanakh, <200 Chazal, 2xx Geonim ...)
+_ERA_SQL = (
+    "CASE WHEN COALESCE(lr.rank, 800) < 20 THEN 'tanakh' WHEN lr.rank < 200 THEN 'chazal' WHEN lr.rank < 300 THEN 'geonim' "
+    "WHEN lr.rank < 400 THEN 'rishonim' WHEN lr.rank < 500 THEN 'acharonim' WHEN lr.rank < 800 THEN 'modern' ELSE 'other' END"
+)
+
+
+def _load_layer_rank(conn: sqlite3.Connection) -> None:
+    """Put the ranks in a TEMP table of this connection, so the ordering is a join and the read-only
+    database file is never touched."""
+    import json
+    conn.execute("CREATE TEMP TABLE IF NOT EXISTS layer_rank (category_path TEXT PRIMARY KEY, rank INTEGER)")
+    try:
+        ranks = json.loads(_LAYER_RANK_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        ranks = {}
+    conn.executemany("INSERT OR REPLACE INTO layer_rank VALUES (?, ?)", list(ranks.items()))
+
+
 @app.get("/search/query", response_model=SearchResponse)
 async def search_query(
     request: Request,
@@ -392,6 +435,8 @@ async def search_query(
     offset: int = Query(0, ge=0, le=10000, description="Offset for pagination"),
     limit: int = Query(20, ge=1, le=100, description="Number of results per page"),
     work_id: str | None = Query(None, description="Optional work_id filter, comma-separated"),
+    era: str | None = Query(None, max_length=120, description="Optional time-period filter, comma-separated (tanakh, chazal, geonim, rishonim, acharonim, modern, other)"),
+    book: str | None = Query(None, max_length=200, description="Optional: search inside one book (its English title)"),
 ):
     # 0. Rate limiting (120 req/min)
     client_key = _get_client_key(request)
@@ -451,30 +496,45 @@ async def search_query(
     # Connect to database
     db = get_db()
 
-    # 5. Facet counts aggregation (computed on all matches matching language and query)
-    facets_sql = """
-        SELECT c.work_id, COUNT(*) as cnt
+    # Inside one book: its rows carry the title in `book` — exactly, or as "<title>, <section>" for the
+    # works whose sections are recorded in the book name.
+    book_sql, book_params = "", []
+    if book and book.strip():
+        book_sql = " AND (c.book = ? OR c.book LIKE ? ESCAPE '\\')"
+        book_params = [book.strip(), like_escape(book.strip()) + ", %"]
+
+    eras_wanted = [e.strip().lower() for e in (era or "").split(",") if e.strip()]
+
+    # 5. Facet counts aggregation (computed on all matches matching language and query), by work and by period
+    facets_sql = f"""
+        SELECT c.work_id, {_ERA_SQL} AS era, COUNT(*) as cnt
         FROM search_fts f
         JOIN chunks c ON c.rowid = f.rowid
-        WHERE search_fts MATCH ?
-        GROUP BY c.work_id
+        LEFT JOIN layer_rank lr ON lr.category_path = c.category_path
+        WHERE search_fts MATCH ?{book_sql}
+        GROUP BY c.work_id, era
     """
-    facet_rows = db.execute(facets_sql, (match_expr,)).fetchall()
-    facets = {row["work_id"]: row["cnt"] for row in facet_rows}
-
-    # Total matching hits (filtered by work_ids if specified)
-    if work_ids:
-        total = sum(facets.get(w, 0) for w in work_ids)
-    else:
-        total = sum(facets.values())
+    facet_rows = db.execute(facets_sql, (match_expr, *book_params)).fetchall()
+    facets: dict[str, int] = {}
+    eras: dict[str, int] = {}
+    total = 0
+    for row in facet_rows:
+        facets[row["work_id"]] = facets.get(row["work_id"], 0) + row["cnt"]
+        eras[row["era"]] = eras.get(row["era"], 0) + row["cnt"]
+        # total of the hits that pass the work and period filters
+        if (not work_ids or row["work_id"].lower() in work_ids) and (not eras_wanted or row["era"] in eras_wanted):
+            total += row["cnt"]
 
     # 6. Fetch paginated search hits
-    params: list[Any] = [match_expr]
+    params: list[Any] = [match_expr, *book_params]
     where_extra = ""
     if work_ids:
         placeholders = ",".join("?" for _ in work_ids)
         where_extra = f"AND LOWER(c.work_id) IN ({placeholders})"
         params.extend(work_ids)
+    if eras_wanted:
+        where_extra += f" AND {_ERA_SQL} IN ({','.join('?' for _ in eras_wanted)})"
+        params.extend(eras_wanted)
 
     query_sql = f"""
         SELECT c.ref,
@@ -488,12 +548,14 @@ async def search_query(
                c.license_en,
                c.version_he,
                c.version_en,
-               c.category_path
+               c.category_path,
+               {_ERA_SQL} AS era
         FROM search_fts f
         JOIN chunks c ON c.rowid = f.rowid
-        WHERE search_fts MATCH ?
+        LEFT JOIN layer_rank lr ON lr.category_path = c.category_path
+        WHERE search_fts MATCH ?{book_sql}
         {where_extra}
-        ORDER BY c.canon_order, c.sort_title, c.ref
+        ORDER BY COALESCE(lr.rank, {_UNRANKED}), c.rowid
         LIMIT ? OFFSET ?
     """
     params.extend([limit, offset])
@@ -519,6 +581,10 @@ async def search_query(
                 version_he=r["version_he"] or "",
                 version_en=r["version_en"],
                 category_path=r["category_path"] or "",
+                ref_he=ref_labels(r["ref"] or "", r["author_he"] or "")[0],
+                ref_en=ref_labels(r["ref"] or "")[1],
+                category_he=category_labels(r["category_path"] or ""),
+                era=r["era"],
             )
         )
 
@@ -530,6 +596,7 @@ async def search_query(
         limit=limit,
         hits=hits,
         facets=facets,
+        eras=eras,
     )
 
 
@@ -842,6 +909,211 @@ def format_section_name(clean_ref: str) -> str:
 
 
 # ── Reader Endpoints ──────────────────────────────────────────────────────────
+_CATALOG_PATH = Path(__file__).resolve().parent.parent / "src" / "chavruta" / "corpus" / "data" / "catalog.json"
+_BOOK_ORDER_PATH = _CATALOG_PATH.with_name("book_order.json")   # scripts/lookup_book_order.py
+_catalog_cache: bytes | None = None
+_category_he: dict[str, str] | None = None             # "Tosefta/Vilna Edition" -> Hebrew name of the last part
+_title_index: dict[str, tuple[str, str]] | None = None   # English title -> (Hebrew title, category path)
+_REF_PARTS = re.compile(r"^(?P<title>.+?) (?P<nums>\d+(?::\d+)*)$")
+
+
+def _titles() -> dict[str, tuple[str, str]]:
+    global _title_index, _category_he
+    if _title_index is None:
+        import json
+        try:
+            cat = json.loads(_CATALOG_PATH.read_text(encoding="utf-8"))
+            books = cat["books"]
+            _category_he = {k: v.get("he", "") for k, v in cat.get("categories", {}).items()}
+        except (OSError, ValueError, KeyError):
+            books, _category_he = [], {}
+        _title_index = {b["title_en"]: (b.get("title_he") or "", b.get("path") or "") for b in books}
+    return _title_index
+
+
+def _is_bavli_title(title: str) -> bool:
+    """A Bavli tractate or a commentary on one: their reader refs count amudim linearly (N = 2*daf -/+ 1)."""
+    t = _titles()
+    he_path = t.get(title, ("", ""))[1]
+    if he_path.startswith("Talmud/Bavli"):
+        return True
+    if " on " in title and not he_path.startswith(("Tosefta", "Talmud/Yerushalmi", "Mishnah")):
+        base = title.split(" on ", 1)[1]
+        return t.get(base, ("", ""))[1].startswith("Talmud/Bavli")
+    return False
+
+
+def category_labels(path: str) -> str:
+    """'Tosefta / Vilna Edition / Seder Zeraim' -> 'תוספתא / מהדורת וילנא / סדר זרעים' (unknown parts stay English)."""
+    _titles()
+    parts = [p for p in (path or "").split(" / ") if p]
+    return " / ".join((_category_he or {}).get("/".join(parts[: i + 1])) or p for i, p in enumerate(parts))
+
+
+def ref_labels(ref: str, author_he: str = "", full: bool = False) -> tuple[str, str]:
+    """(Hebrew, English) citation for a ref: one language each, chapter and section only (corpus.cite_labels).
+    The Hebrew is empty when no Hebrew name for the work is known."""
+    cl = cite_labels(ref, title_he=author_he, full=full)
+    return cl["he"], cl["en"]
+
+
+@app.get("/reader/catalog")
+async def reader_catalog() -> Response:
+    """The library page's book list: every commercially-licensed work with its Hebrew title and
+    category path. Static package data (scripts/build_catalog.py), so no database is touched and
+    the response is cacheable; the client does all filtering and searching."""
+    global _catalog_cache
+    if _catalog_cache is None:
+        import json
+        try:
+            cat = json.loads(_CATALOG_PATH.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            raise HTTPException(status_code=503, detail="Library catalogue not built (scripts/build_catalog.py).")
+        try:
+            ranks = json.loads(_LAYER_RANK_PATH.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            ranks = {}
+        try:
+            order = json.loads(_BOOK_ORDER_PATH.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            order = {}
+        for b in cat.get("books", []):
+            b["order"] = order.get(b["title_en"], 10**9)     # load order: Genesis -> Deuteronomy, Seder Zeraim -> ...      # learning order, so book search lists Torah before Rashi before the Malbim
+            b["rank"] = ranks.get(" / ".join((b.get("path") or "").split("/")), _UNRANKED)
+        _catalog_cache = json.dumps(cat, ensure_ascii=False).encode("utf-8")
+    return Response(content=_catalog_cache, media_type="application/json",
+                    headers={"Cache-Control": "public, max-age=300"})
+
+
+def _unit_where(clean_ref: str) -> tuple[str, list[Any]]:
+    """WHERE clause + params selecting the rows of one reader unit (a chapter, a daf, a siman…)."""
+    clauses: list[str] = []
+    params: list[Any] = []
+    for p in get_unit_query_prefixes(clean_ref):
+        pattern = f"{like_escape(p)}%"
+        clauses.append("ref LIKE ? ESCAPE '\\'")
+        params.append(pattern)
+        clauses.append("chunk_id LIKE ? ESCAPE '\\'")
+        params.append(pattern)
+    clauses.append("ref = ?")
+    params.append(clean_ref)
+    clauses.append("chunk_id = ?")
+    params.append(clean_ref)
+    return " OR ".join(clauses), params
+
+
+def _unit_exists(db: sqlite3.Connection, clean_ref: str) -> bool:
+    where_sql, params = _unit_where(clean_ref)
+    return db.execute(f"SELECT 1 FROM chunks WHERE {where_sql} LIMIT 1", params).fetchone() is not None
+
+
+_source_index: SourceIndex | None = None
+
+
+def _get_source_index() -> SourceIndex:
+    global _source_index
+    if _source_index is None:
+        import json
+        books = json.loads(_CATALOG_PATH.read_text(encoding="utf-8"))["books"]
+        _source_index = SourceIndex(books)
+    return _source_index
+
+
+@app.get("/reader/resolve")
+async def reader_resolve(request: Request, q: str = Query(..., min_length=1, max_length=120)):
+    """Library source search: a typed citation ("בראשית א א", "ברכות ב ע״ב") → readable units.
+
+    Only citations that exist in the reader's index are returned, so a link from here never 404s.
+    A verse-level citation opens its whole chapter and the reader scrolls to the verse."""
+    if not _rate_limiter.allow(_get_client_key(request)):
+        return JSONResponse(status_code=429, content={"detail": "rate limit exceeded — please slow down"},
+                            headers={"Retry-After": "60"})
+    db = get_db()
+    out = []
+    for src in parse_source(q, _get_source_index()):
+        link = None
+        # The reader widens "Genesis 1:9" to the whole chapter even when verse 9 does not exist, so the
+        # verse itself is checked exactly; otherwise the chapter opens without a scroll target.
+        if src.target and db.execute("SELECT 1 FROM chunks WHERE ref = ? LIMIT 1", (src.target,)).fetchone():
+            link = src.target
+        elif _unit_exists(db, src.ref):
+            link = src.ref
+        if link:
+            out.append({"ref": link, "book_he": src.book_he, "book_en": src.book_en, "nums": list(src.nums)})
+    return {"query": q, "matches": out}
+
+
+_UNIT_RE = re.compile(r"^(?P<head>.+?)\.(?P<first>\d+[ab]?)(?:\.\d+[ab]?)*$")
+_toc_cache: dict[str, dict] = {}
+_TOC_MAX_ROWS = 60000
+
+
+def _book_units(db: sqlite3.Connection, title_en: str) -> dict:
+    """The units of one book (chapters, dapim, simanim…), derived from the reader's own index.
+
+    chunk_id is '<corpus ref>_<work_id>' and UNIQUE-indexed, so a book is two cheap prefix ranges:
+    '<stem>.' (its numbered refs) and '<stem>,' (works that record a section name before the number,
+    like 'Chizkuni,_Genesis.17'). A unit is a ref cut after its first number. Bavli refs are amud-linear
+    (N = 2·daf ∓ 1, so Berakhot.3 is 2a and Berakhot.4 is 2b) and are turned back into dapim here.
+    """
+    stem = title_en.replace(" ", "_")
+    is_bavli = title_en in HE_TRACTATES.values()
+    ranges = [(stem + ".", stem + "/"), (stem + ",", stem + "-")]
+    units: dict[tuple[str, int, str], int] = {}
+    first_row: dict[str, int] = {}     # section → first rowid: rows were loaded in canonical order
+    for lo, hi in ranges:
+        for rowid, chunk_id, work_id in db.execute(
+                "SELECT rowid, chunk_id, work_id FROM chunks WHERE chunk_id >= ? AND chunk_id < ? LIMIT ?",
+                (lo, hi, _TOC_MAX_ROWS)):
+            suffix = "_" + (work_id or "")
+            ref = chunk_id[: -len(suffix)] if suffix != "_" and chunk_id.endswith(suffix) else chunk_id
+            m = _UNIT_RE.match(ref)
+            if not m:
+                continue
+            head, first = m.group("head"), m.group("first")
+            side = ""
+            if first[-1] in "ab":
+                n, side = int(first[:-1]), first[-1]
+            else:
+                n = int(first)
+                if is_bavli:
+                    n, side = (n + 1) // 2, "a" if n % 2 else "b"
+            key = (head, n, side)
+            units[key] = units.get(key, 0) + 1
+            first_row[head] = min(first_row.get(head, rowid), rowid)
+    out = []
+    for (head, n, side), count in sorted(units.items(), key=lambda kv: (first_row[kv[0][0]], kv[0][1], kv[0][2])):
+        section = head[len(stem) + 1:] if head.startswith(stem + ",") else ""
+        out.append({"ref": f"{head}.{n}{side}", "section": section.lstrip("_").replace("_", " "),
+                    "n": n, "side": side, "count": count})
+    return {"book": title_en, "kind": "daf" if is_bavli else "chapter", "units": out}
+
+
+@app.get("/reader/toc")
+async def reader_toc(request: Request, book: str = Query(..., min_length=1, max_length=200)):
+    """Table of contents for the library's book page: the chapters / dapim a book actually has."""
+    if not _rate_limiter.allow(_get_client_key(request)):
+        return JSONResponse(status_code=429, content={"detail": "rate limit exceeded — please slow down"},
+                            headers={"Retry-After": "60"})
+    title = book.strip()
+    if title not in _toc_cache:
+        data = _book_units(get_db(), title)
+        if not data["units"]:
+            raise HTTPException(status_code=404, detail=f"No units for: {title}")
+        if len(_toc_cache) > 512:
+            _toc_cache.clear()
+        _toc_cache[title] = data
+    return JSONResponse(_toc_cache[title], headers={"Cache-Control": "public, max-age=3600"})
+
+
+@app.get("/reader/labels")
+async def reader_labels(ref: list[str] = Query(..., max_length=80)) -> JSONResponse:
+    """One-language citation labels for refs the chat cites (corpus spelling): {ref: {he, en, who_he, who_en}}.
+    Pure string work on static tables, so no database and cacheable."""
+    out = {r: cite_labels(r) for r in ref[:80]}
+    return JSONResponse(out, headers={"Cache-Control": "public, max-age=86400"})
+
+
 @app.get("/reader/unit", response_model=ReaderUnitResponse)
 async def reader_unit(
     request: Request,
@@ -864,23 +1136,7 @@ async def reader_unit(
     if not clean_ref:
         raise HTTPException(status_code=404, detail="Unit not found")
     db = get_db()
-    prefixes = get_unit_query_prefixes(clean_ref)
-
-    clauses: list[str] = []
-    params: list[Any] = []
-    for p in prefixes:
-        pattern = f"{like_escape(p)}%"
-        clauses.append("ref LIKE ? ESCAPE '\\'")
-        params.append(pattern)
-        clauses.append("chunk_id LIKE ? ESCAPE '\\'")
-        params.append(pattern)
-
-    clauses.append("ref = ?")
-    params.append(clean_ref)
-    clauses.append("chunk_id = ?")
-    params.append(clean_ref)
-
-    where_sql = " OR ".join(clauses)
+    where_sql, params = _unit_where(clean_ref)
     query_sql = f"""
         SELECT rowid, chunk_id, ref, book, author_he, work_id, category_path,
                text_he, text_en, license_he, license_en, version_he, version_en
@@ -897,9 +1153,12 @@ async def reader_unit(
     segments: list[ReaderSegment] = []
     for idx, r in enumerate(rows):
         seg_num = extract_segment_num(r["ref"] or "", idx + 1)
+        ref_he, ref_en = ref_labels(r["ref"] or "", r["author_he"] or "", full=True)
         segments.append(
             ReaderSegment(
                 ref=r["ref"] or "",
+                ref_he=ref_he,
+                ref_en=ref_en,
                 text_he=r["text_he"] or "",
                 text_en=r["text_en"],
                 segment_num=seg_num,
@@ -916,7 +1175,7 @@ async def reader_unit(
     raw_book_he = rows[0]["author_he"] or rows[0]["book"] or ""
     clean_book_he = re.sub(r"^[•.\s]+", "", raw_book_he).strip()
     clean_book = re.sub(r"^[•.\s]+", "", rows[0]["book"] or "").strip()
-    sec_name = format_section_name(clean_ref)
+    sec_name = section_he(rows[0]["ref"] or "") or format_section_name(clean_ref)
 
     return ReaderUnitResponse(
         ref=clean_ref,
@@ -930,6 +1189,82 @@ async def reader_unit(
         prev_ref=prev_ref,
         next_ref=next_ref,
     )
+
+
+# ── Parallels ─────────────────────────────────────────────────────────────────
+# The corpus carries commentary→text edges but no parallel edges (Tosefta ↔ Mishnah ↔ Gemara ↔ Midrash), and
+# Sefaria's links dataset has no commercial licence we can rely on. So parallels are derived from the texts we
+# already hold: passages of the primary literature that share runs of words with this one. Probe the FTS index
+# with a few 4-word phrases from the segment, then score each candidate by the 3-word shingles it shares.
+_PARALLEL_BASES = {"Mishnah", "Tosefta", "Talmud", "Midrash", "Halakhah"}
+_PARALLEL_SKIP_TOP = {"Tanakh", "Reference"}          # a verse quoted in a passage is not a parallel of it
+_PARALLEL_MIN_WORDS = 6
+_PARALLEL_MIN_SHARED = 3
+_PARALLEL_MIN_SCORE = 0.3
+_PARALLEL_MAX = 8
+_parallels_cache: dict[str, list] = {}
+
+
+def _shingles(words: list[str], n: int) -> set[str]:
+    return {" ".join(words[i:i + n]) for i in range(len(words) - n + 1)}
+
+
+def _is_commentary_path(path: str) -> bool:
+    return any(" on " in part or part == "Commentary" for part in path.split(" / "))
+
+
+def _parallels(ref: str) -> list[ReaderLinkItem]:
+    if ref in _parallels_cache:
+        return _parallels_cache[ref]
+    out: list[ReaderLinkItem] = []
+    db = get_db()
+    m = _REF_PARTS.match(ref)
+    me = None
+    if m:   # chunk_id is '<corpus ref>_<work_id>' and UNIQUE-indexed: a range lookup, not a table scan
+        corpus_ref = m.group("title").replace(" ", "_") + "." + m.group("nums").replace(":", ".")
+        me = db.execute(
+            "SELECT rowid, search_he, book, category_path FROM chunks WHERE chunk_id >= ? AND chunk_id < ? LIMIT 1",
+            (corpus_ref + "_", corpus_ref + "`"),
+        ).fetchone()
+    path = (me["category_path"] if me else "") or ""
+    words = ((me["search_he"] if me else "") or "").split()
+    if me is None or len(words) < _PARALLEL_MIN_WORDS or path.split(" / ")[0] not in _PARALLEL_BASES             or _is_commentary_path(path):
+        _parallels_cache[ref] = out
+        return out
+
+    mine = _shingles(words, 3)
+    probes = sorted(_shingles(words, 4))
+    probes = probes[:: max(1, len(probes) // 10)][:10]
+    match = "search_he : (" + " OR ".join('"%s"' % p.replace('"', '""') for p in probes) + ")"
+    rows = db.execute(
+        """SELECT c.ref, c.book, c.author_he, c.category_path, c.work_id, c.search_he, c.text_he, c.text_en
+           FROM search_fts f JOIN chunks c ON c.rowid = f.rowid
+           WHERE search_fts MATCH ? AND c.rowid != ? LIMIT 400""",
+        (match, me["rowid"]),
+    ).fetchall()
+    scored = []
+    for r in rows:
+        cpath = r["category_path"] or ""
+        if r["book"] == me["book"] or cpath.split(" / ")[0] in _PARALLEL_SKIP_TOP or _is_commentary_path(cpath):
+            continue
+        theirs = _shingles((r["search_he"] or "").split(), 3)
+        if not theirs:
+            continue
+        shared = len(mine & theirs)
+        score = shared / min(len(mine), len(theirs))
+        if shared >= _PARALLEL_MIN_SHARED and score >= _PARALLEL_MIN_SCORE:
+            scored.append((score, r))
+    scored.sort(key=lambda x: -x[0])
+    for _, r in scored[:_PARALLEL_MAX]:
+        out.append(ReaderLinkItem(
+            ref=r["ref"] or "", source_ref=r["ref"] or "", category=r["category_path"] or r["work_id"] or "parallel",
+            type="parallel", author_he=r["author_he"] or r["book"] or "", book=r["book"] or "",
+            text_he=r["text_he"], text_en=r["text_en"],
+        ))
+    if len(_parallels_cache) > 2000:
+        _parallels_cache.clear()
+    _parallels_cache[ref] = out
+    return out
 
 
 @app.get("/reader/links", response_model=ReaderLinksResponse)
@@ -1080,6 +1415,8 @@ async def reader_links(
                 book_part = m_base.group(1).strip()
                 cv_part = m_base.group(2).strip().replace(".", ":")
 
+            if book_part and book_part.startswith("Tosefta"):
+                book_part = None      # the corpus holds no commentary keyed to the Vilna Tosefta's numbering
             if book_part and cv_part:
                 # book_part/cv_part come from caller text: escape LIKE
                 # metacharacters so only the template's own '%' are wildcards.
@@ -1104,6 +1441,8 @@ async def reader_links(
                 c_rows = search_db.execute(sql, (p1, p2, p3, p4, p5, p6, p7, clean_ref)).fetchall()
                 seen_books: set[str] = set()
                 for r in c_rows:
+                    if (r["category_path"] or "").startswith("Tosefta"):
+                        continue      # Lieberman's Tosefta commentary is numbered differently; never match it to Gemara
                     b_name = r["book"] or r["author_he"] or r["ref"]
                     if b_name in seen_books:
                         continue
@@ -1126,6 +1465,12 @@ async def reader_links(
                         related.append(link_item)
         except Exception:
             pass
+
+    if not related:
+        related = await asyncio.to_thread(_parallels, clean_ref)
+
+    for item in commentaries + related:
+        item.ref_he, item.ref_en = ref_labels(item.ref, item.author_he)
 
     return ReaderLinksResponse(
         ref=clean_ref,

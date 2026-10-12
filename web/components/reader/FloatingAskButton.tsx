@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { Citation, Lang } from "@/lib/types";
 import { api } from "@/lib/api";
-import { commentatorTag, isHe } from "@/lib/format";
+import { isHe } from "@/lib/format";
+import { citeText, useCiteLabels } from "@/lib/labels";
 import { Icon } from "@/components/Icon";
 
 export interface ActiveSourceContext {
@@ -71,6 +72,7 @@ export function FloatingAskButton({
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [expandedCitation, setExpandedCitation] = useState<string | null>(null);
+  const labels = useCiteLabels(messages.flatMap((m) => (m.citations || []).map((c) => c.ref)));
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -373,8 +375,8 @@ export function FloatingAskButton({
                                   className="flex items-center justify-between text-tekhelet font-semibold hover:underline"
                                 >
                                   <span className="truncate">
-                                    {(lang !== "en" && c.ref_he) || c.ref}
-                                    {commentatorTag(c) && ` · ${commentatorTag(c)}`}
+                                    {citeText(c, lang, labels).title}
+                                    {citeText(c, lang, labels).who && ` · ${citeText(c, lang, labels).who}`}
                                   </span>
                                   <Icon
                                     name={isExpanded ? "expand_less" : "expand_more"}

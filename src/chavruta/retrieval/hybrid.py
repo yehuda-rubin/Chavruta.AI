@@ -304,10 +304,11 @@ class HybridRetriever:
         wanted = {c.lower() for c in (query.commentator_ids or ())}
 
         filters = self._filters(query)
+        candidate_k = max(top_k * 4, 48)
         try:
             with _timed(t, "search"):
                 raw = self.store.search(
-                    self.profile.collection, hquery, top_k=top_k * 3, filters=filters
+                    self.profile.collection, hquery, top_k=candidate_k, filters=filters
                 )
             if not raw and filters is not None:
                 # A SCOPED search (work_ids / commentator_ids) came back empty. That scope can be wrong
@@ -317,7 +318,7 @@ class HybridRetriever:
                 # surface. (The floors below also key off query.work_ids, so clear the scope for them.)
                 logger.info("scoped retrieval empty; falling back to unscoped semantic search")
                 with _timed(t, "search"):
-                    raw = self.store.search(self.profile.collection, hquery, top_k=top_k * 3,
+                    raw = self.store.search(self.profile.collection, hquery, top_k=candidate_k,
                                             filters=None)
                 query = replace(query, work_ids=None, commentator_ids=None)
         except Exception as exc:
@@ -338,7 +339,7 @@ class HybridRetriever:
             try:
                 with _timed(t, "dense_probe"):
                     dense_map = self.store.dense_scores(
-                        self.profile.collection, emb.dense, self._filters(query), top_k=top_k * 3)
+                        self.profile.collection, emb.dense, self._filters(query), top_k=candidate_k)
                 thr = self.profile.relevance_threshold
                 pruned = [h for h in hits
                           if not (h.chunk_id in dense_map and dense_map[h.chunk_id] < thr)]
@@ -494,7 +495,7 @@ class HybridRetriever:
         do_rerank = self.profile.rerank or getattr(query, "rerank", False)
         if self.reranker is not None and do_rerank and hits:
             with _timed(t, "rerank"):
-                hits = self.reranker.rerank(query.text, hits)
+                hits = self.reranker.rerank(query.search_text or query.text, hits)
 
         # Optional link-based expansion (chain of transmission / supercommentary). This is an
         # ENRICHMENT step — if it fails (e.g. a Qdrant scroll timeout on the large collection) it
