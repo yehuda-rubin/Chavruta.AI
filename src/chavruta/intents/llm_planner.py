@@ -179,10 +179,16 @@ _DISTILL_SYSTEM = (
     "- WWW: השיעור המלא בלבד\n"
     "- PPP: חוברת ליווי להדפסה ו-PDF\n"
     "If the user asks for a combination of two or more files, write their codes separated by space (e.g. 'XXX YYY').\n"
-    "After the file code(s), write the single distilled core question/topic in Hebrew in 1 concise sentence.\n\n"
+    "After the file code(s), write the single distilled core question/topic in Hebrew in 1 concise sentence.\n"
+    "CRITICAL FOR RETRIEVAL & HALACHIC TERMS:\n"
+    "The distilled query is used directly to search the classical Torah & Halacha library. "
+    "If the question touches modern technology, contemporary real-world devices, or practical situations (such as 'דוד שמש', 'פלטת שבת', 'מקרר', 'חיישנים', 'חשמל', 'גרמא'), "
+    "you MUST append the underlying Talmudic sugyot and classical halachic categories so retrieval finds the foundational sources.\n\n"
     "Examples:\n"
     "- 'תודה רבה לך' -> HHH בשמחה רבה! תמיד כאן לכל שאלה ולימוד.\n"
     "- 'שלום מה נשמע?' -> HHH שלום וברכה! הכול מצוין, ברוך השם. במה נוכל להעמיק היום?\n"
+    "- 'האם מותר להשתמש בדוד שמש בשבת?' -> NNN דוד שמש בשבת: בישול בחמה ובתולדות חמה, חמי טבריא, כניסת מים קרים לדוד\n"
+    "- 'איך משתמשים בפלטה בשבת' -> NNN פלטת שבת: כירה גרופה וקטומה, שהייה והחזרה, הטמנה בדבר המוסיף הבל\n"
     "- 'לפני כמה שנים שהייתי ילד שאלתי את הרב האם מותר לי לאכול ביום כיפור בשר חזיר והוא ענה לי לא הוא צדק?' -> NNN איסור אכילת חזיר ואיסור אכילה ביום כיפור\n"
     "- 'האם מותר לאכול חזיר בפסח?' -> NNN איסור אכילת חזיר בפסח\n"
     "- 'תכין לי רק דף מקורות על הלכות שבת' -> XXX הלכות שבת\n"
@@ -207,6 +213,10 @@ def _is_short_and_direct(text: str, history=None) -> bool:
     clean = text.strip()
     if is_conversational_acknowledgement(clean):
         return True
+    # Questions, halachic queries, or contemporary device terms require distillation and expansion
+    halachic_triggers = ("האם", "מותר", "אסור", "מה הדין", "כיצד", "איך", "למה", "מדוע", "שבת", "הלכה", "?", "דוד", "פלטה", "חשמל", "גרמא", "כשר")
+    if any(trig in clean for trig in halachic_triggers):
+        return False
     words = clean.split()
     if not words or len(words) > 10:
         return False

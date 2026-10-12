@@ -70,8 +70,8 @@ def _max_tokens_for(intent, profile: Profile) -> int:
 # small per chunk), so a lesson spanning a whole sugya needs many more chunks than a short
 # Q&A. Falls back to the profile's top_k for any other intent.
 _INTENT_TOP_K = {
-    Intent.QA: 8,
-    Intent.EXPLAIN: 16,
+    Intent.QA: 16,            # raised 8 -> 16 so halachic Q&A has room for Poskim and Rishonim
+    Intent.EXPLAIN: 20,       # raised 16 -> 20
     Intent.COMPARE: 24,
     # Lowered 48 -> 32 on 2026-08-13 (user decision), to match responsa. Measured over the first 11
     # days: INPUT is 93.7% of every token spent — 4.81M in against 326K out — and lessons are the
@@ -173,12 +173,9 @@ def build_backends(profile: Profile):
 
     from chavruta.retrieval.rerank import Reranker
 
-    if profile.rerank:
-        backend = "api" if (profile.rerank_model or "").startswith("@cf/") else "auto"
-        reranker = Reranker(profile.rerank_model, device=profile.embedding_device, backend=backend)
-    else:
-        # Cloudflare Workers AI API Reranker (available for admin/user-gated queries)
-        reranker = Reranker("@cf/baai/bge-reranker-base", backend="api")
+    model_name = profile.rerank_model or "@cf/baai/bge-reranker-base"
+    backend = "api" if model_name.startswith("@cf/") else "auto"
+    reranker = Reranker(model_name, device=profile.embedding_device, backend=backend)
 
     # Prefer the corpus-derived, corpus-aligned graph on disk (LinkStore + ref index — O(1) RAM);
     # fall back to the legacy in-memory links.jsonl if it isn't built yet.
