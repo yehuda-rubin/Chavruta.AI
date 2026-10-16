@@ -8,6 +8,7 @@ path that never sets it — and any thread that does not inherit the context —
 """
 from __future__ import annotations
 
+import os
 from contextlib import contextmanager
 from contextvars import ContextVar
 
@@ -25,3 +26,14 @@ def improved_for(on: bool):
         yield
     finally:
         _improved.reset(token)
+
+
+def enabled_for(is_admin: bool) -> bool:
+    """Who gets the improved path. CHAVRUTA_IMPROVED_SCOPE: "all" (default) | "admin" | "off".
+    Setting it to "admin" and recreating the api container is the fast rollback (no image build)."""
+    scope = os.environ.get("CHAVRUTA_IMPROVED_SCOPE", "all").strip().lower()
+    if scope == "off":
+        return False
+    if scope == "admin":
+        return bool(is_admin)
+    return True

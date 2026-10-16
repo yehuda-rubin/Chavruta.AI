@@ -34,3 +34,12 @@ def test_job_text_differs_by_mode():
         new = api._chavruta_job_md("שאלה", hits, "he", [])
     assert old != new
     assert "{{S" in new and "{{S" not in old
+
+
+def test_scope_env(monkeypatch):
+    monkeypatch.delenv("CHAVRUTA_IMPROVED_SCOPE", raising=False)
+    assert rollout.enabled_for(False) is True            # default: everyone
+    monkeypatch.setenv("CHAVRUTA_IMPROVED_SCOPE", "admin")
+    assert rollout.enabled_for(False) is False and rollout.enabled_for(True) is True
+    monkeypatch.setenv("CHAVRUTA_IMPROVED_SCOPE", "off")
+    assert rollout.enabled_for(True) is False

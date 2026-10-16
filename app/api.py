@@ -2919,8 +2919,8 @@ def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
         _in_flight_count += 1
         _concurrency_at_start.set(_in_flight_count)
     try:
-        # The improved chavruta path is on for the operator's own account only (config/rollout.py).
-        with rollout.improved_for(_is_admin(owner_id)):
+        # The improved chavruta path: scope set by CHAVRUTA_IMPROVED_SCOPE (config/rollout.py).
+        with rollout.improved_for(rollout.enabled_for(_is_admin(owner_id))):
             return _run_query_impl(question, lang, intent_str, history, audience, grade_band, length,
                                    owner_id, llm)
     except HTTPException:

@@ -119,6 +119,7 @@ services:
 
       # Admin dashboard (see app/api.py::_is_admin) — a dedicated allowlist, no wildcard.
       CHAVRUTA_ADMIN_OWNERS: ${CHAVRUTA_ADMIN_OWNERS:-}
+      CHAVRUTA_IMPROVED_SCOPE: ${CHAVRUTA_IMPROVED_SCOPE:-all}
       # Backend error tracking (see app/api.py::_configure_sentry) — no-op unless set.
       SENTRY_DSN: ${SENTRY_DSN:-}
 
