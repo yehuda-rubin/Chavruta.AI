@@ -15,6 +15,7 @@ import logging
 from collections.abc import Iterator
 from dataclasses import replace
 
+from chavruta.config import rollout
 from chavruta.config.profile import Profile
 from chavruta.corpus.links import LinkGraph
 from chavruta.corpus.refs import canon_corpus_ref, with_ref_variants
@@ -249,14 +250,18 @@ class ChavrutaPipeline:
         def fetch(queries: list[str]) -> list[SourceBlock]:
             out: list[SourceBlock] = []
             seen: set[str] = set()
-            for q in (queries or [])[:5]:
+            improved = rollout.improved()
+            # Improved path: few queries, few sources per query, short total — the model asks again
+            # with new wording instead of getting one big dump (see config/rollout.py).
+            n_queries, per_query_k, cap = (2, 6, 12) if improved else (5, 8, 24)
+            for q in (queries or [])[:n_queries]:
                 if not (q or "").strip():
                     continue
                 try:
                     rq = self._resolve_query(Query(text=q, intent=Intent.QA))
                     # priority=True: this is an in-flight answer CONTINUING (the model already
                     # spent a round and real tokens on it) — see hybrid.py::_PriorityGate.
-                    hits = self.retriever.retrieve(rq, top_k=8, priority=True).hits
+                    hits = self.retriever.retrieve(rq, top_k=per_query_k, priority=True).hits
                 except Exception:
                     continue
                 for h in hits:
@@ -274,9 +279,9 @@ class ChavrutaPipeline:
                                                deep_link=getattr(h, "deep_link", "") or "",
                                                license=getattr(h, "license", "") or "",
                                                version_title=getattr(h, "version_title", "") or ""))
-                if len(out) >= 24:
+                if len(out) >= cap:
                     break
-            return out[:24]
+            return out[:cap]
 
         return fetch
 

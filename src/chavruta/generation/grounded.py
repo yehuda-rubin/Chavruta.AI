@@ -40,6 +40,96 @@ def marker_numbers_in(text: str) -> list[int]:
     return nums
 
 
+# ── quote references ─────────────────────────────────────────────────────────────────────────
+# The model never types a quotation. It writes {{S3: first words … last words}} and WE paste the
+# verbatim span from the cited source, so a quote cannot be paraphrased, abbreviation-expanded, or
+# attached to the wrong source (the three slips the judge kept finding in free-typed quotes).
+_QREF_RE = re.compile(r"\{\{\s*S(\d+)\s*[:：]\s*(.+?)\s*\}\}", re.DOTALL)
+_QREF_SPLIT_RE = re.compile(r"\s*(?:\.{3}|…)\s*")
+QUOTE_MAX_CHARS = 600
+
+
+def _norm_with_map(s: str) -> tuple[str, list[int]]:
+    """Matching form of `s` plus, for every kept character, its index in `s`. Drops niqqud,
+    cantillation and quote/gershayim marks (so ק"ש matches קש) and turns every other
+    non-alphanumeric run into one space (so maqaf, commas and spacing never block a match)."""
+    out: list[str] = []
+    idx: list[int] = []
+    prev_space = True
+    for i, ch in enumerate(s):
+        if "֑" <= ch <= "ׇ" or ch in "\"'״׳“”‘’":
+            continue
+        if ch.isalnum():
+            out.append(ch)
+            idx.append(i)
+            prev_space = False
+        elif not prev_space:
+            out.append(" ")
+            idx.append(i)
+            prev_space = True
+    return "".join(out), idx
+
+
+def _span_in(src: str, start: str, end: str) -> str | None:
+    """The verbatim slice of `src` from `start` through `end` (or just `start` when `end` is
+    empty), or None when the anchors are not in `src`."""
+    ns, imap = _norm_with_map(src)
+    a, _ = _norm_with_map(start)
+    a = a.strip()
+    if len(a) < 2:
+        return None
+    p = ns.find(a)
+    if p < 0:
+        return None
+    last = p + len(a) - 1
+    if end:
+        b, _ = _norm_with_map(end)
+        b = b.strip()
+        if b:
+            q = ns.find(b, p)
+            if q < 0:
+                return None
+            last = q + len(b) - 1
+    stop = imap[last] + 1
+    while stop < len(src) and "֑" <= src[stop] <= "ׇ":   # niqqud riding on the last letter
+        stop += 1
+    span = src[imap[p]: stop].strip()
+    if len(span) > QUOTE_MAX_CHARS:
+        cut = span.rfind(" ", 0, QUOTE_MAX_CHARS)
+        span = span[: cut if cut > 0 else QUOTE_MAX_CHARS].rstrip() + " …"
+    return span
+
+
+def expand_quote_refs(text: str, sources: dict[int, str]) -> tuple[str, dict[str, int]]:
+    """Replace every {{S#: start … end}} in `text` with `"verbatim span" [S#]`.
+
+    `sources` maps marker number → the exact source text the model was shown. If the anchors are
+    not in the cited source but ARE in another one, the quote is re-attributed to that source. If
+    they are in none, the words are kept WITHOUT quotation marks and WITHOUT a marker — it reads as
+    the model's own words, never as a quote it could not back. Returns (text, stats)."""
+    stats = {"ok": 0, "moved": 0, "unmatched": 0}
+
+    def repl(m: re.Match) -> str:
+        n = int(m.group(1))
+        parts = [p for p in _QREF_SPLIT_RE.split(m.group(2).strip()) if p.strip()]
+        if not parts:
+            stats["unmatched"] += 1
+            return ""
+        start, end = parts[0], (parts[-1] if len(parts) > 1 else "")
+        span = _span_in(sources[n], start, end) if n in sources else None
+        if span is not None:
+            stats["ok"] += 1
+            return f'"{span}" [S{n}]'
+        for k, body in sources.items():
+            if k != n and (span := _span_in(body, start, end)) is not None:
+                stats["moved"] += 1
+                return f'"{span}" [S{k}]'
+        stats["unmatched"] += 1
+        return " … ".join(parts)
+
+    return _QREF_RE.sub(repl, text or ""), stats
+
+
 def source_body(text: str) -> str:
     """Drop the internal "[label] Ref daf:seg" header line a stored document carries, leaving
     the source's actual text. The header is prompt scaffolding (and may hold a pre-correction
@@ -188,6 +278,11 @@ SYSTEM_LESSON_WALKTHROUGH_HE = SYSTEM_BASE_HE + (
     "הקשת שנמסרה לך: פַתֵּחַ כל כיוון מתוך לשון מקורו (הבא את דברי הפרשן עצמו, ייחס נכון), "
     "הראה את הקושיות והתירוצים, וסכם למסקנות או השאר את הסוגיא פתוחה אם כך היא. זה הטקסט "
     "שהמגיד-שיעור אומר בפועל — לא רשימת מקורות. "
+    "בסוגיות תלמודיות ולמדניות (בפרט ברמת בית מדרש / ישיבה) — השתת את השיעור בראש ובראשונה "
+    "על המנגנונים המשפטיים-למדניים של הסוגיה (מוחזקות ותפיסה, גדרי שבועה, תקנת חכמים, אנן סהדי, "
+    "ספק וחלוקה); לעולם אל תדלג על השקלא וטריא ההלכתית היישר אל דרשנות, מוסר או ממד קיומי-מופשט — "
+    "כל רעיון מחשבתי או משמעות קיומית חייבים לצמוח באופן אורגני מתוך ההגדרות הלמדניות המדויקות "
+    "של הגמרא והראשונים. "
     "אל תפתח בחזרה על השאלה או הנושא — המשתמש שאל זה עתה; גש ישירות אל המקור והדיון. "
     "כל טענה עם [S#], אך ורק מן המקורות שסופקו. התאם את האורך למטרת השיעור, בלי מילוי."
 )

@@ -15,11 +15,25 @@ import os
 import re
 from collections.abc import Callable
 
+from chavruta.config import rollout
 from chavruta.llm.base import GroundedPrompt, SourceBlock
 
 _log = logging.getLogger("chavruta.llm.agentic")
 
 MAX_RETRIEVAL_ROUNDS = int(os.environ.get("CHAVRUTA_BRIDGE_MAX_ROUNDS", "4"))
+# The improved chavruta path (config/rollout.py) allows the job's own retrieval (turn 1) plus up to 4
+# self-requested ones, 5 model turns in all, with at most 2 queries per request; the last turn is
+# forced to write an answer (_FINAL_ANSWER_NOTE).
+IMPROVED_MAX_RETRIEVAL_ROUNDS = int(os.environ.get("CHAVRUTA_IMPROVED_MAX_ROUNDS", "5"))
+IMPROVED_MAX_QUERIES = 2
+
+
+def max_rounds() -> int:
+    return IMPROVED_MAX_RETRIEVAL_ROUNDS if rollout.improved() else MAX_RETRIEVAL_ROUNDS
+
+
+def max_queries() -> int:
+    return IMPROVED_MAX_QUERIES if rollout.improved() else 5
 
 # Instruction (added to every job) telling the model it may pull more sources itself.
 SOURCE_REQUEST_INSTRUCTION = (
@@ -123,7 +137,7 @@ def parse_need_sources(text: str) -> list[str]:
         if s.startswith("==="):        # a following delimiter ends the block
             break
         queries.append(s)
-    return queries[:5]
+    return queries[:max_queries()]
 
 
 def strip_source_request_marker(text: str) -> str:
@@ -173,8 +187,9 @@ def run_agentic_loop(send: Callable[[str], str | None], job_md: str,
     fetched sources are in [S#] order (continuing after the job's original markers) so the caller can
     align its citation mapping. `send(job_md)` returns the model's answer text, or None on timeout."""
     fetched: list[SourceBlock] = []
-    for round_i in range(MAX_RETRIEVAL_ROUNDS):
-        last_round = round_i == MAX_RETRIEVAL_ROUNDS - 1
+    n_rounds = max_rounds()
+    for round_i in range(n_rounds):
+        last_round = round_i == n_rounds - 1
         # On the FINAL round, append a hard instruction so a model that keeps over-asking commits to
         # writing from the sources it already has — otherwise it dead-ends in a "couldn't get sources"
         # degrade even though good sources were retrieved (observed with strong models on scattered

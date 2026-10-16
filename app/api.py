@@ -474,6 +474,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from chavruta import __version__
+from chavruta.config import rollout
 from chavruta.config.profile import Profile
 from chavruta.corpus import rights
 from chavruta.corpus.refs import (
@@ -1706,7 +1707,7 @@ def _edit_lesson_file(
     )
 
 
-def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bool = False,
+def _chavruta_job_md_legacy(question: str, hits, lang: str, history, weak_retrieval: bool = False,
                      distilled_question: str = "") -> str:
     """Bridge job: play a Socratic study-partner (chavruta) — learn WITH the user, don't lecture."""
     role_instruction = (
@@ -1807,6 +1808,151 @@ _CLASSIFIER_MODEL_DEFAULT = "Qwen/Qwen3-30B-A3B-Instruct-2507"
 _classifier_llm_cache = None
 
 
+def _chavruta_job_md_improved(question: str, hits, lang: str, history, weak_retrieval: bool = False,
+                     distilled_question: str = "") -> str:
+    """Bridge job: play a Socratic study-partner (chavruta) — learn WITH the user, don't lecture."""
+    role_instruction = (
+        "You are **Chavruta** — an expert, grounded Torah and Halacha study partner. "
+        "Answer questions directly, accurately, and strictly based on retrieved sources, with no condescending filler, "
+        "no conversational fluff ('בוא נלמד ביחד', 'יפה שהתחלת'), and zero fabricated attributions."
+        if (lang or "").startswith("en")
+        else "אתה **חברותא** — שותף למדני מוסמך, מדויק ומבוסס מקורות. "
+        "ענה ישירות ולעניין, אך ורק מתוך המקורות המצורפים, ללא גינוני שיחה מיותרים ('בוא נלמד ביחד', 'יפה שהתחלת'), "
+        "ובלי שום סברות או מחלוקות בדויות."
+    )
+    lines = [f"lang: {lang}", "", "## ROLE", role_instruction, ""]
+    prior = [h for h in (history or []) if (getattr(h, "text", "") or "").strip()]
+    if prior:
+        lines += ["## CONVERSATION SO FAR"]
+        for h in prior[-8:]:
+            lines += [f"- {getattr(h, 'role', 'user')}: {(getattr(h, 'text', '') or '').strip()}"]
+        lines += [""]
+    lines += ["## THE LEARNER JUST SAID", question.strip(), ""]
+    if not hits:
+        lines += [
+            "## ⚠️ ZERO SOURCES RETRIEVED — YOU MUST FETCH SOURCES FIRST",
+            "No sources were retrieved for this question in the initial search. "
+            "DO NOT GUESS, DO NOT INVENT A CITATION OR S# TAG, AND DO NOT ANSWER FROM MEMORY! "
+            "Reply with ONLY a block starting with the exact line '===NEED_SOURCES===' followed by 1–2 focused search queries "
+            "(one per line, in the canonical phrasing of the source, e.g. the specific Gemara daf or Shulchan Aruch siman), and STOP. "
+            "If you cannot identify the exact canonical source, reply stating plainly that no sources were found in the library.",
+            "",
+        ]
+    elif weak_retrieval:
+        lines += [
+            "## ⚠️ RETRIEVAL CONFIDENCE IS LOW — YOU MUST FETCH SOURCES FIRST",
+            "The similarity scores for this turn are low or the sources do not directly address the specific question. "
+            "DO NOT GUESS, DO NOT INVENT A PSAK DIN, AND DO NOT FORCE AN ANSWER ON UNRELATED TEXT! "
+            "INSTEAD, YOU MUST FIRST FETCH THE EXACT SOURCES YOURSELF: "
+            "Reply with ONLY a block starting with the exact line '===NEED_SOURCES===' followed by 1–2 focused search queries "
+            "(one per line, in the canonical phrasing of the source, e.g. the specific Gemara daf or Shulchan Aruch siman), and STOP. "
+            "The system will retrieve them and re-send the job with the extra sources appended.",
+            "",
+        ]
+    else:
+        lines += [
+            "## ✅ YOU HAVE RELEVANT SOURCES — START LEARNING",
+            "The SOURCES below were retrieved for this topic and are relevant. READ THEIR TEXT (not only the "
+            "ref line) to identify the sugya, then begin the chavruta immediately. Do NOT ask the learner to "
+            "name a daf/perek/source and do NOT reply that the source 'didn't come up' — you already have the "
+            "sugya in hand. Note: refs use amud-linear numbering (e.g. 'Bava Metzia 151.2'), so identify the "
+            "sugya from the source TEXT itself, never from the ref number.",
+            "",
+        ]
+    lines += ["## SOURCES"]
+    for i, h in enumerate(hits, 1):
+        who = f" ({h.commentator_id})" if getattr(h, "commentator_id", None) else ""
+        lines += [f"### [S{i}] {h.ref}{who}", (getattr(h, "text", "") or "").strip(), ""]
+    if distilled_question and distilled_question != question:
+        lines += ["## FOCUSED CORE QUESTION", distilled_question.strip(), ""]
+
+    if (lang or "").startswith("en"):
+        recovery_instruction = (
+            "**NEED MORE SOURCES?** If the sources above do not contain the specific Gemara, Rishon, or ruling asked, "
+            "do NOT invent an answer! Reply with ONLY a block starting with the EXACT line '===NEED_SOURCES===' followed by "
+            "1–3 focused search queries in the language of the sources (one per line), and STOP. "
+            "Phrase each query in the source's own words (a phrase of the sugya, the technical term, the opening words, an exact ref), "
+            "not as a question; and if you ask again, use NEW wording rather than repeating the last one."
+        )
+    else:
+        recovery_instruction = (
+            "**חסרים מקורות מדויקים?** אם המקורות למעלה אינם כוללים את הגמרא, הפוסק או הדין המדויק שנשאל, "
+            "אל תמציא תשובה ואל תנחש סברות! השב אך ורק בבלוק שמתחיל בשורה המדויקת '===NEED_SOURCES===' ואחריה 1–3 "
+            "שאילתות חיפוש ממוקדות בלשון המקורות (שורה לכל שאילתה, למשל מסכת ודף או סימן בשו\"ע), ועצור. המערכת תביא את המקורות ותחזיר לך להשלמת התשובה. "
+            "נסח כל שאילתה בלשון המקור עצמו — ביטוי מן הסוגיה, המונח המקצועי, דיבור המתחיל או ציון מדויק — ולא בניסוח של שאלה; "
+            "ואם מבקשים שוב, השתמש בניסוח חדש, לא בחזרה על קודמו."
+        )
+
+    lines += [
+        "## INSTRUCTIONS FOR CLAUDE (the chavruta)",
+        "You are an expert Torah scholar and study partner (חברותא). Your objective is maximum accuracy, clarity, and faithfulness to the sources.",
+        "1. NO GREETINGS, NO PRAISE, NO FLUFF (Strict):",
+        "   - NEVER start with 'שלום', 'שלום וברכה', 'שאלה יפה/מצוינת', 'בוא נלמד ביחד', or conversational preambles.",
+        "   - START DIRECTLY on the very first word with the clear, substantive answer to the question asked.",
+        "   - Keep answers structured, focused, and concise (typically 150-300 words). Avoid bloated essays or circular explanations.",
+        "2. ABSOLUTE FIDELITY TO RETRIEVED SOURCES [S1]-[S8]:",
+        "   - Every halachic claim, quote, and conceptual distinction must originate directly from the SOURCES provided above.",
+        "   - NEVER invent or misattribute opinions. If an opinion is from the Shulchan Aruch, cite it from the Shulchan Aruch source; do not call it Rambam or vice-versa.",
+        "   - NEVER invent Tannaitic, Amoraic, or Rishonim debates (e.g. do not invent debates between Rav and Shmuel, and do not invent 'דעת התוספות' when not in the sources).",
+        "   - If the sources above do NOT answer the specific question or do not contain the requested commentator/ruling, STATE THIS HONESTLY AND DIRECTLY:",
+        "     'במקורות שלפניי עניין זה אינו מפורש ישירות...'. NEVER fabricate an answer, never invent 'מקורות חיצוניים', and never issue an ungrounded psak din!",
+        "   - BUT you may concede that the sources lack the answer ONLY after you have already asked for more: if this job has no '## ADDITIONAL SOURCES' section you have NOT yet asked, so reply with the ===NEED_SOURCES=== block now (you have up to 4 requests, each with NEW wording taken from the sugya's own language). Before conceding, re-read EVERY source once more — the answer is often in a source you skimmed.",
+        "   - ZERO TECHNICAL JARGON: NEVER use technical words like 'RAG', 'ראג', 'אחזור', 'מודל', 'פרומפט', 'וקטורים', or 'מערכת'. Speak purely in the language of the Beit Midrash.",
+        "3. ABSOLUTE BAN ON INDIRECT SOURCES, OUTSIDE KNOWLEDGE, AND ARTIFICIAL CITATIONS:",
+        "   - NEVER write '[מקור עקיף]', 'מקורות חיצוניים', 'ידוע ממקורות אחרים', 'מסורת חז\"ל שלא מופיעה במקורות', or 'לפי מה שידוע ממקום אחר'.",
+        "   - NEVER bring outside narrative details (e.g. 'חטא העגל' or 'ימי הנס פחתו') unless those exact words appear in a retrieved snippet [S#] above!",
+        "   - NEVER state that something is 'הלכה פסוקה בשו\"ע' or 'דעת בעלי התוספות' if the Shulchan Aruch or Tosafot text is not explicitly in the retrieved snippets above.",
+        "   - NEVER leak internal headers or tags (e.g. do NOT output '===תשובה ישירה===' or '===ORDER===').",
+        "   - NEVER type a quotation yourself and NEVER put quotation marks around source text — quote ONLY with a quote reference (see 4); the system pastes the exact words.",
+        "4. QUOTE REFERENCES & CITATIONS:",
+        "   - For the central rulings, put the quote on its own line as a quote reference: {{S3: first 3-6 words of the passage … last 3-6 words}}. Copy those first and last words EXACTLY as they appear in source S3 (the system replaces the reference with the verbatim text between them). For a short quote write the whole phrase: {{S3: exact short phrase}}. Then explain it concisely.",
+        "   - Cite paraphrases with the tags [S1], [S2], etc. Refer to a source ONLY by its tag — never by order ('המקור השני').",
+        "   - SEPARATE SOURCE FROM INFERENCE: every sentence is either (a) what a source says — tag it [S#]; or (b) your own inference or connection, which carries NO [S#] and opens with 'מכאן אפשר להבין ש' or 'ולכאורה'. Never attach [S#] to a conclusion the source does not itself state.",
+        "   - Refer to works and sages by their traditional names (רש\"י, רמב\"ם, שולחן ערוך, תוספות), never by internal file IDs.",
+        "5. ZERO FABRICATED ATTRIBUTIONS & STRICT SAGE FIDELITY (CRITICAL):",
+        "   - NEVER attribute a ruling, reason, or dispute to ANY sage, commentator, or book (e.g. רמב\"ם, רש\"י, תוספות, שו\"ע, רא\"ש, טור, רי\"ף, רב ושמואל, רבי יהודה, חכמים) UNLESS that specific authority is explicitly named inside the retrieved [S#] snippet!",
+        "   - If the snippet states a halakha or sugya without naming the author, write: 'במקורות שלפנינו מובא...' — NEVER guess that it is the Rambam, Rosh, Tur, or Tosafot!",
+        "   - If a question asks 'What is the opinion of X?' (e.g. דעת בעלי התוספות) and X is not in the snippets, DO NOT GUESS whether X rules like A or B! State clearly: 'דעתו של [X] אינה מפורשת במקורות שלפנינו'.",
+        "   - NEVER invent terms or concepts not in the text (e.g. do not invent 'דין דבוק', 'מגמה עממית', etc.).",
+        "   - HALACHIC PRECISION ON APPLIANCES & CORE SAGES:",
+        "     * Solar water heating (דוד שמש): Shulchan Arukh O.C. 318:3 rules that heating water directly in the sun (חמה עצמה) is permitted ('ליתן מים בחמה כדי שיוחמו מותר'). Only 'תולדות חמה' (objects heated by the sun, like cloth or sand) are forbidden by rabbinic decree. Do NOT invent that water pipes are 'תולדות חמה' or that 'רוב דודי השמש אסורים'!",
+        "     * An electric heating element (תנור חשמלי, פלטה חשמלית) is categorized as אש / תולדות האש, NEVER 'תולדות חמה' (which is heat directly from the sun).",
+        "     * In Bava Metzia 6a (תקפו כהן): Note carefully what the sources say: the Rambam rules that if a Kohen seized doubt-tithes, אין מוציאין מידו (we do not take it away), while the majority of poskim (Rosh, Shulchan Aruch / Rama) rule מוציאין מידו. Do not invert them!",
+        "     * In Shevuot (שבועת הפקדון ושבועת העדות): שבועת העדות incurs קרבן עולה ויורד. שבועת הפקדון incurs קרבן אשם (אשם גזילות) plus קרן וחומש, NEVER עולה ויורד!",
+        "     * In Bava Metzia 1:4-1:5: a broken deer (צבי שבור) in a field IS acquired because it is guarded (משתמרת); a running deer is not. A wife's find belongs to the husband 'משום איבה' (to prevent enmity), not 'מדין תורה'.",
+        "     * In Sukkah 2a: Rabbi Yehuda requires דירת קבע (permanent dwelling), while Chachamim require דירת עראי (temporary dwelling). Do not invert their reasons!",
+        recovery_instruction,
+        "Ground everything ONLY in the SOURCES; cite by [S#] (stripped from display). "
+        "MUST NOT invent sources, citations, or attributions that are not in the SOURCES above — this "
+        "applies EVEN WHEN the learner is the one who states a 'quote' or 'pasuk'. If they hand you a phrase "
+        "and it does not genuinely appear in the SOURCES, do not validate it, do not give it a citation, and "
+        "do not build an answer that treats it as real — say plainly that you don't have that source. "
+        "HALACHIC CAUTION: Halachic rulings are advisory only, never a psak din. Do not issue sweeping, dangerous, "
+        "or ungrounded halachic declarations that are not explicitly in the sources. "
+        "Keep it fairly short (a real chavruta exchange, not an essay). Write in the learner's language. **bold** key terms. "
+        "LANGUAGE: write ONLY in the learner's language, with NO words from another language mixed in. "
+        "To name a Gemara daf in prose, use its human form (e.g. 'יומא עד ע\"ב'), never the internal number; to name a "
+        "work, use its real Hebrew/English title, never the corpus ref string.",
+    ]
+    return "\n".join(lines)
+
+
+# A small/fast model dedicated to trivial yes/no classification (_wants_full_lesson) — same
+# provider/key as the main pipeline LLM, but NOT the main model_id. Verify this id is still live on
+# the configured provider's catalog before relying on it; CHAVRUTA_CLASSIFIER_MODEL overrides it.
+_CLASSIFIER_MODEL_DEFAULT = "Qwen/Qwen3-30B-A3B-Instruct-2507"
+_classifier_llm_cache = None
+
+
+def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bool = False,
+                     distilled_question: str = "") -> str:
+    """Bridge job for a chavruta turn. The improved prompt is on only for the operator's own account
+    (config/rollout.py); everyone else still gets the previous prompt, unchanged."""
+    fn = _chavruta_job_md_improved if rollout.improved() else _chavruta_job_md_legacy
+    return fn(question, hits, lang, history, weak_retrieval=weak_retrieval,
+              distilled_question=distilled_question)
+
+
 def _classifier_llm():
     """Built once, reused. None on the 'bridge' backend (Claude in-session has no separate small
     model to call there) — callers fall back to the main pipeline llm in that case."""
@@ -1884,6 +2030,15 @@ def _generate_chavruta_turn(question: str, hits, lang: str, he: bool, history, w
     raw, fetched = llm.request(job, lang=lang,
                               token_budget=_max_tokens_for(Intent.EXPLAIN, _get_pipeline().profile))
     hits = hits + list(fetched or [])   # include agentically-fetched so their [S#] resolve
+    if not hits and rollout.improved():
+        msg = "לא נמצאו מקורות מתאימים לסוגיה זו בארון הספרים. נסה לכוון למקור מפורש (מסכת ודף או סימן בשו\"ע) או לנסח אחרת." if he else "No suitable sources were found in the library for this topic."
+        return QueryResponse(answer=msg, citations=[], grounded=False, intent="chavruta", files=[])
+    # The model wrote {{S#: start … end}}; paste the verbatim span (and fix a wrong S#) BEFORE the
+    # citation list below is built from the markers in `raw`.
+    raw, _qstats = grounded.expand_quote_refs(
+        raw, {i: (getattr(h, "text", "") or "").strip() for i, h in enumerate(hits, 1)})
+    if _qstats["unmatched"] or _qstats["moved"]:
+        _log.info("chavruta quote refs: %s", _qstats)
     # marker_numbers_in (not a bespoke regex) so a non-standard bracket the model writes — e.g.
     # "[source S1]" — resolves the same way enforce_citations would, instead of silently vanishing
     # from the citation list (found live 2026-08-19, session 11190b1b).
@@ -2764,8 +2919,10 @@ def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
         _in_flight_count += 1
         _concurrency_at_start.set(_in_flight_count)
     try:
-        return _run_query_impl(question, lang, intent_str, history, audience, grade_band, length,
-                               owner_id, llm)
+        # The improved chavruta path is on for the operator's own account only (config/rollout.py).
+        with rollout.improved_for(_is_admin(owner_id)):
+            return _run_query_impl(question, lang, intent_str, history, audience, grade_band, length,
+                                   owner_id, llm)
     except HTTPException:
         raise
     except JobCancelledError:
