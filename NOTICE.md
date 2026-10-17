@@ -8,7 +8,7 @@ not per work and not per author. Two Hebrew editions of the same tractate can di
 
 ## What the shipped corpus contains
 
-The production collection (`chavruta_commercial`, ~2.4M chunks across 15 tiers) was built by asking
+The production collection (`chavruta_commercial`, ~2.5M chunks across 15 tiers) was built by asking
 Sefaria which editions exist for each source and keeping only those that positively grant
 commercial reproduction. Verified 2026-07-20:
 

@@ -621,7 +621,7 @@ def _quoted_spans(masked: str) -> list[tuple[int, int]]:
 # was actually handed.
 
 # Sefaria/corpus commentator ids are the join key on both sides: the source side derives its id from
-# the ref (`commentator_from_ref` — the payload field is empty on all 2.4M points), and the prose side
+# the ref (`commentator_from_ref` — the payload field is empty on all 2.5M points), and the prose side
 # resolves a Hebrew/English NAME to the same id. Two name tables already exist and neither alone is
 # enough: refs.COMMENTATOR_HE is broad (tosafot, ran, meiri, bartenura…) but holds one spelling each,
 # while router.COMMENTATOR_ALIASES carries the gershayim-less and English variants a model actually
