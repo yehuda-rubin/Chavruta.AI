@@ -663,9 +663,9 @@ class ChavrutaPipeline:
             # own text scan ever over/undercounts (see agentic.py::append_sources). Falls back to
             # the old count-based guess only for a source that never went through that loop.
             marker_map.setdefault(s.marker or f"S{i}", s)
+        raw = grounded.strip_meta_opening(raw)
         text, citations, is_grounded = grounded.enforce_citations(raw, marker_map, question=query.text)
         if plan.sections:
-        raw = grounded.strip_meta_opening(raw)
             plan = grounded.prune_lesson_to_cited(plan, citations)
         used_model = getattr(llm, "last_model_used", "") or getattr(llm, "model_id", "")
         answer = Answer(text=text, citations=citations, grounded=is_grounded,
