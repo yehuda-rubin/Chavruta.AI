@@ -740,10 +740,34 @@ export function SettingsModal({
                     recurring charge (app/accounts.py::stop_billing) — which is what a paying user
                     wants, but it is not reversible by cancelling the deletion, and the immediate
                     path additionally forfeits the period already paid for. */}
-                {plan && plan !== "free" && !cancelAtPeriodEnd && (
-                  <p className="text-[11px] text-ink/60 leading-relaxed">
-                    {tr(lang, "deletePaidNotice")}
-                  </p>
+                {/* What is still paid for and would be lost, in one warning, with the way out next
+                    to it: a user who only wants the charges to stop can cancel the subscription and
+                    keep the account (terms §10 — deletion forfeits an unused card balance). */}
+                {((plan && plan !== "free" && !cancelAtPeriodEnd) || !!credits) && (
+                  <div className="p-2.5 rounded-xl bg-amber-500/10 ring-1 ring-amber-500/25 flex flex-col gap-1.5">
+                    <p className="text-[11px] font-semibold text-amber-700">{tr(lang, "deleteWarnTitle")}</p>
+                    {plan && plan !== "free" && !cancelAtPeriodEnd && (
+                      <p className="text-[11px] text-ink/70 leading-relaxed">{tr(lang, "deletePaidNotice")}</p>
+                    )}
+                    {!!credits && (
+                      <p className="text-[11px] text-ink/70 leading-relaxed">
+                        {tr(lang, "deleteCreditsNotice").replace("{n}", String(credits))}
+                      </p>
+                    )}
+                    {plan && plan !== "free" && !cancelAtPeriodEnd && onCancelSubscription && (
+                      <button
+                        onClick={() => {
+                          if (window.confirm(tr(lang, "cancelSubscriptionConfirm"))) {
+                            onCancelSubscription();
+                            setConfirmDelete(false);
+                          }
+                        }}
+                        className="mt-0.5 py-1.5 px-3 rounded-xl glass text-ink font-semibold text-xs hover:bg-white/60 transition text-start"
+                      >
+                        {tr(lang, "deleteCancelSubInstead")}
+                      </button>
+                    )}
+                  </div>
                 )}
 
                 <button
@@ -761,7 +785,8 @@ export function SettingsModal({
                     it can be taken back, and it sits one tap from the reversible option above. */}
                 <button
                   onClick={() => {
-                    if (window.confirm(tr(lang, "deleteNowConfirm"))) runDelete(true);
+                    const lost = credits ? " " + tr(lang, "deleteCreditsNotice").replace("{n}", String(credits)) : "";
+                    if (window.confirm(tr(lang, "deleteNowConfirm") + lost)) runDelete(true);
                   }}
                   className="py-2 px-3 rounded-2xl glass text-red-500 font-semibold text-sm hover:bg-red-500/10 transition text-start"
                 >

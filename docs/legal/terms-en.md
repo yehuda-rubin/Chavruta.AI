@@ -6,7 +6,12 @@
 
 # Terms of Use — Chavruta AI
 
-**Version 1.14 · Effective 22 September 2026**
+**Version 1.15 · Effective 18 October 2026**
+
+Changes in version 1.15: section 10 updated for the new products - **prepaid question cards that do not
+expire**, a monthly subscription, an annual plan billed in monthly instalments, and institutional packages - and a
+**no-refund-beyond-what-the-law-requires** policy: no refunds except as required by law, and the
+cancellation rights in the Consumer Protection Law are preserved in full.
 
 Changes in version 1.14:
 1. **Flexibility in selecting infrastructure and AI providers:** section 12 updated — the operator may
@@ -226,14 +231,31 @@ received in it afterward**. See Privacy Policy sections 2, 5 and 12.
 The Service includes a free tier with a daily quota and paid subscription tiers. The operator may update
 quotas and prices from time to time with reasonable advance notice. Displayed prices include VAT.
 
-- **Monthly billing:** all subscriptions (including the discounted annual plan) are billed in recurring
-  monthly instalments, with no prepayment for future unused periods.
-- **Cancellation at any time:** you may cancel a subscription at any time with one click in account
-  settings. Billing ceases immediately and access continues until the end of the billed month.
-- **14-day statutory cancellation right:** on a distance contract, you may cancel within 14 days of
-  purchase for a refund, less the statutory fee (5% or ₪100, whichever is lower), refunded to the
-  payment method within 14 days of receiving notice.
-- **Account deletion stops subscriptions:** requesting account deletion halts recurring billing at once.
+- **Products:** (a) a monthly subscription, renewing each month; (b) an annual plan at an annual rate, billed in twelve
+  monthly instalments; (c) prepaid question cards in packs of 50, 120 or 280 questions; (d) monthly
+  packages for institutions (price plus VAT). The operator may change packs and prices on reasonable
+  advance notice; a change does not affect a period already paid for.
+- **Question cards do not expire:** the remaining balance on a card is not time-limited and stays in
+  the account for as long as the account is active. A card is non-transferable and has no cash value.
+  Deleting the account forfeits the balance (see below).
+- **Cancellation at any time:** you may cancel a monthly or annual subscription at any time with one
+  click in account settings. Cancelling prevents renewal and further charges and operates in line with
+  section 13D of the Consumer Protection Law (continuing transaction); you may choose to keep access
+  until the end of the period already paid for.
+- **14-day statutory cancellation right:** on a distance contract, you may cancel within 14 days of the
+  transaction (or of receiving the transaction details document, if later) for a refund, less the
+  statutory fee (5% or ₪100, whichever is lower), refunded to the payment method within 14 days of
+  receiving notice. Questions actually used before cancellation (from a card or plan) and service
+  actually provided until then are not refunded, to the extent the law permits.
+- **No refunds beyond what the law requires:** except as stated above, and except where the law requires
+  a refund (for example a defect or our breach, or the extended cancellation rights of senior
+  citizens, people with disabilities and new immigrants), payments made are non-refundable -
+  including unused question-card balance after the 14 days have passed, and a paid period of a
+  cancelled subscription or annual plan. Nothing here limits rights that cannot be waived under the
+  Consumer Protection Law.
+- **Account deletion stops subscriptions:** requesting account deletion halts recurring billing at once
+  and forfeits any unused question-card balance, subject to the 14-day cancellation right and any right
+  that cannot be waived.
 - **Stop Generation:** stopping an in-progress response does not entitle you to a quota or credit
   refund, as model processing is consumed at the initiation of the request.
 
