@@ -665,6 +665,7 @@ class ChavrutaPipeline:
             marker_map.setdefault(s.marker or f"S{i}", s)
         text, citations, is_grounded = grounded.enforce_citations(raw, marker_map, question=query.text)
         if plan.sections:
+        raw = grounded.strip_meta_opening(raw)
             plan = grounded.prune_lesson_to_cited(plan, citations)
         used_model = getattr(llm, "last_model_used", "") or getattr(llm, "model_id", "")
         answer = Answer(text=text, citations=citations, grounded=is_grounded,

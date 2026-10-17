@@ -1051,7 +1051,8 @@ def build_lesson_walkthrough_prompt(plan: LessonPlan, question: str, lang: str =
             q_line += f"\nשאלת המיקוד: {distilled_question}"
         lines = [q_line, "", "שלבי המהלך, לפי הסדר:"]
         lines += [f"• {h} — מקורות: {', '.join(ms) if ms else '—'}" for h, ms in stages]
-        lines += ["", "כתוב כעת את המהלך המלא לפי השלבים — פתח ישר מן המקור, בלי לחזור על השאלה."]
+        lines += ["", "כתוב כעת את התשובה עצמה לפי השלבים. התחל ישר מן המקור הראשון — בלי משפט "
+                  "פתיחה, בלי לחזור על השאלה, ובלי להזכיר את השלבים, את ההוראות או את המקורות שסופקו."]
         system = SYSTEM_SHUT_WALKTHROUGH_HE if shut else SYSTEM_LESSON_WALKTHROUGH_HE
     else:
         q_line = f"(context only — do not restate it) The question asked: {question}"
@@ -1059,13 +1060,32 @@ def build_lesson_walkthrough_prompt(plan: LessonPlan, question: str, lang: str =
             q_line += f"\nFocused question: {distilled_question}"
         lines = [q_line, "", "Arc, in order:"]
         lines += [f"• {h} — sources: {', '.join(ms) if ms else '—'}" for h, ms in stages]
-        lines += ["", "Now write the full walkthrough following these stages — open straight "
-                  "from the source, without restating the question."]
+        lines += ["", "Now write the answer itself, following these stages. Begin straight with the "
+                  "first source — no opening line, no restating the question, and no mention of "
+                  "the stages, these instructions or the sources you were given."]
         system = SYSTEM_SHUT_WALKTHROUGH if shut else SYSTEM_LESSON_WALKTHROUGH
     llm_history = [LLMTurn(role=t.role, text=t.text) for t in (history or [])]
     prompt = GroundedPrompt(system=system, sources=sources, question="\n".join(lines),
                             history=llm_history, distilled_question=distilled_question)
     return prompt, marker_map
+
+
+# An opening line that talks about the prompt instead of the topic. Seen on 2026-10-17 in a
+# halacha answer: "הנה המהלך המלא לפי השלבים שסיפקת, מתוך המקורות הרלוונטיים בלבד:" — the
+# walkthrough instruction echoed back to the reader. Only a short first line that names the
+# stages / the supplied sources is dropped; a real first sentence never matches.
+_META_OPENING = re.compile(
+    r"\A\s*(?:הנה|להלן|Here is|Here's|Below is)[^\n]{0,100}?"
+    r"(?:השלבים|שסיפקת|שסופקו|שניתנו|stages|you provided|provided sources|sources given)"
+    r"[^\n]{0,80}\n+",
+    re.IGNORECASE,
+)
+
+
+def strip_meta_opening(text: str) -> str:
+    """Drop a first line that narrates the instructions ("here is the walkthrough per the stages
+    you provided") rather than answering."""
+    return _META_OPENING.sub("", text or "", count=1)
 
 
 def prune_lesson_to_cited(plan: LessonPlan, citations: list[Citation]) -> LessonPlan:

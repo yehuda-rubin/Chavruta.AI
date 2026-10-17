@@ -54,7 +54,7 @@ services:
       CHAVRUTA_COLLECTION: ${CHAVRUTA_COLLECTION:-chavruta_commercial}
       CHAVRUTA_MEM_TIER: ${CHAVRUTA_MEM_TIER:-ssd}
       CHAVRUTA_HYBRID: "true"
-      CHAVRUTA_RERANK: "true"
+      CHAVRUTA_RERANK: "false"          # reranker off for good (2026-10-17): Cloudflare 429s on every query
       CHAVRUTA_RERANK_MODEL: "@cf/baai/bge-reranker-base"
       CHAVRUTA_RELEVANCE_THRESHOLD: "0.0"
       CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-fb7545ed5add9650d7d881375fefb335}
