@@ -204,7 +204,7 @@ html_content = """<!DOCTYPE html>
 <body>
 
 <div class="cover">
-  <div class="badge">מסמך אסטרטגי וניהולי פנימי · אוקטובר 2026 (מהדורה v14)</div>
+  <div class="badge">מסמך אסטרטגי וניהולי פנימי · אוקטובר 2026 (מהדורה v15)</div>
   <h1>תוכנית עסקית ומודל תמחור – חברותא (Chavruta.AI)</h1>
   <div class="subtitle">הקשר מקורות מלא (ללא Reranker), תקרת 60K טוקנים בשרת להגנה ממדרגות מחיר, וניתוח רגישות מחמיר</div>
   
@@ -550,8 +550,34 @@ html_content = """<!DOCTYPE html>
       <td><em>+1,808 ₪</em></td>
       <td><em>+5,421 ₪</em></td>
     </tr>
+    <tr class="highlight-row" style="background:#ebf8ff; font-weight:700; color:#2a4365;">
+      <td><strong>נטו לשותף אחרי מס, בחודש</strong> (35% מס הכנסה + 18% ביטוח לאומי ובריאות)</td>
+      <td><strong>−233 ₪</strong> (אחרי קיזוז מול השכר)</td>
+      <td><strong>+291 ₪</strong></td>
+      <td><strong>+1,188 ₪</strong></td>
+      <td><strong>+3,229 ₪</strong></td>
+    </tr>
+    <tr style="color:#2a4365; background:#ebf8ff;">
+      <td>נטו לשותף אחרי מס, בשנה</td>
+      <td>−2,800 ₪</td>
+      <td>+3,487 ₪</td>
+      <td>+14,262 ₪</td>
+      <td>+38,742 ₪</td>
+    </tr>
   </tbody>
 </table>
+
+<div class="callout">
+  <strong>מס הכנסה וביטוח לאומי לשותף (הערכה, לא ייעוץ מס):</strong>
+  <ul>
+    <li><strong>מס הכנסה רק על הרווח</strong> (הכנסות פחות הוצאות מוכרות), גם בעוסק פטור. כל ההוצאות בטבלה מוכרות: שרת, רואה חשבון, גיבוי, מסוף, סליקה ומחשוב.</li>
+    <li><strong>מדרגה שולית של 35%</strong>, כי הרווח מתווסף למשכורת שלו. ביטוח לאומי ומס בריאות כנראה <strong>18%</strong> על כל הרווח, כי המשכורת כבר ניצלה את המדרגה המופחתת. 52% מדמי הביטוח הלאומי מנוכים מההכנסה החייבת.</li>
+    <li><strong>שיעור כולל אפקטיבי: כ-50.7%.</strong> מכל שקל רווח נשארות לשותף כ-49 אגורות.</li>
+    <li><strong>הפסד:</strong> לפי סעיף 28(א) אפשר לקזז הפסד מהעסק מול המשכורת באותה שנה, ולכן הפסד של 359 ₪ בחודש עולה לו בפועל כ-233 ₪.</li>
+    <li><strong>⚠️ סיכון לא פתור, הכנסה מזערית:</strong> ביטוח לאומי גובה מעצמאי לפי הכנסה מינימלית של 3,442 ₪ בחודש. לא ברור אם שכיר עם עסק צדדי פטור מזה. אם לא, נוספים <strong>כ-265 עד 620 ₪ בחודש</strong>, והתרחיש המתון עלול להפוך להפסד.</li>
+  </ul>
+  <strong>לבדוק עם רואה החשבון של השותף:</strong> (1) האם הכנסה מזערית חלה עליו; (2) האם הניכוי של 52% כולל מס בריאות; (3) תקרת עוסק פטור ל-2026 (כ-122,833 ₪); (4) קיזוז ההפסד מול השכר בפועל; (5) מע"מ על מחשוב מספק זר, ופטור מול מורשה מול מוסדות; (6) המדרגה השולית שלו בפועל.
+</div>
 
 <div class="callout">
   <strong>מה התרחיש השמרני אומר:</strong> בלי אף מוסד, ובקצב השימוש של היום, יש הפסד של כ-360 ₪ בחודש, בעיקר בגלל ההוצאות הקבועות.
@@ -605,7 +631,7 @@ html_content = """<!DOCTYPE html>
 </html>
 """
 
-temp_html_path = r"C:\Users\rubin\AppData\Local\Temp\chavruta_business_plan_v14.html"
+temp_html_path = r"C:\Users\rubin\AppData\Local\Temp\chavruta_business_plan_v15.html"
 target_pdf_path = r"C:\Users\rubin\Downloads\תוכנית_עסקית_חדשה_חברותא_AI.pdf"
 
 with open(temp_html_path, "w", encoding="utf-8") as f:
@@ -621,11 +647,11 @@ cmd = [
     temp_html_path
 ]
 
-print(f"Generating v14 PDF at: {target_pdf_path}")
+print(f"Generating v15 PDF at: {target_pdf_path}")
 res = subprocess.run(cmd, capture_output=True, text=True)
 
 if os.path.exists(target_pdf_path):
     size_kb = os.path.getsize(target_pdf_path) / 1024
-    print(f"SUCCESS: v14 PDF created at {target_pdf_path} (Size: {size_kb:.1f} KB)")
+    print(f"SUCCESS: v15 PDF created at {target_pdf_path} (Size: {size_kb:.1f} KB)")
 else:
     print(f"ERROR: PDF not created. Returncode: {res.returncode}")
