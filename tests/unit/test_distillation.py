@@ -31,7 +31,7 @@ def _mock_client(return_content: str = "מה דין חמץ בפסח?", p_tokens:
 def test_distill_query_short_and_direct_bypasses_llm():
     """Short and direct query (<= 10 words) should return text directly without an LLM call."""
     client = _mock_client()
-    text = "מה דין חמץ שעבר עליו הפסח?"
+    text = "חמץ שעבר עליו הפסח"
     assert len(text.split()) <= 10
 
     with metering.meter() as usage:
