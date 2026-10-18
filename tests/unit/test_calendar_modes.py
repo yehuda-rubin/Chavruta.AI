@@ -65,7 +65,29 @@ def test_calendar_modes_wildcard_enables_everyone(monkeypatch):
     assert api._calendar_modes_enabled("local") is True
 
 
-@pytest.mark.parametrize("intent_str", ["parsha", "dafyomi"])
+def test_daf_yomi_is_open_to_everyone_but_parsha_is_still_beta(monkeypatch):
+    monkeypatch.delenv("CHAVRUTA_CALENDAR_BETA_OWNERS", raising=False)
+    assert api._calendar_modes_enabled("not-listed", "dafyomi") is True
+    assert api._calendar_modes_enabled("not-listed", "parsha") is False
+    assert api._calendar_modes_enabled("not-listed") is False      # what /me reports: the parsha beta
+
+
+def test_unlisted_owner_reaches_daf_yomi(monkeypatch):
+    monkeypatch.delenv("CHAVRUTA_CALENDAR_BETA_OWNERS", raising=False)
+    called = {}
+
+    def _fake(question, lang, history=None, owner_id="local", llm=None):
+        called["ok"] = True
+        return api.QueryResponse(answer="ok", citations=[], grounded=True, intent="dafyomi", files=[])
+
+    monkeypatch.setattr(api, "_run_daf_yomi", _fake)
+    monkeypatch.setattr(api, "classify_and_distill", lambda *a, **k: __import__("types").SimpleNamespace(
+        action="study", answer="", distilled_query="", requested_files=[]))
+    res = api._run_query_impl("מה הדף היום?", "he", "dafyomi", [], owner_id="not-listed")
+    assert called.get("ok") and res.answer == "ok"
+
+
+@pytest.mark.parametrize("intent_str", ["parsha"])
 def test_unlisted_owner_gets_a_friendly_message_not_the_pipeline(monkeypatch, intent_str):
     """The gate must short-circuit BEFORE touching _get_pipeline()/_run_parsha/_run_daf_yomi —
     an unlisted owner's request must never reach the (real, heavy) generation path at all."""

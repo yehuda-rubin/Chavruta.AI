@@ -3126,8 +3126,12 @@ def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
         llm_base.reset_source_note(_note_token)
 
 
-def _calendar_modes_enabled(owner_id: str) -> bool:
-    """Parshat HaShavua / Daf Yomi's rollout gate."""
+def _calendar_modes_enabled(owner_id: str, intent: str | None = None) -> bool:
+    """Parshat HaShavua's rollout gate (the calendar-modes beta). Daf Yomi left the beta on
+    2026-10-18 and is open to everyone; `intent` lets the gate say so per mode, while the no-argument
+    form (what /me reports to the picker) still means the parsha beta."""
+    if intent == "dafyomi":
+        return True
     if _is_admin(owner_id):
         return True
     raw = os.environ.get("CHAVRUTA_CALENDAR_BETA_OWNERS", "").strip()
@@ -3214,7 +3218,7 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
     if intent_str == "chavruta":      # Socratic study-partner mode (its own path)
         return _run_chavruta(question, lang, history=history, llm=llm)
     if intent_str in ("parsha", "dafyomi"):   # beta — see _calendar_modes_enabled
-        if not _calendar_modes_enabled(owner_id):
+        if not _calendar_modes_enabled(owner_id, intent_str):
             msg = ("המצב הזה עוד לא זמין לכולם." if he else "This mode isn't available to everyone yet.")
             return QueryResponse(answer=msg, citations=[], grounded=False, intent=intent_str, files=[])
         fn = _run_parsha if intent_str == "parsha" else _run_daf_yomi
