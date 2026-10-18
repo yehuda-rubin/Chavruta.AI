@@ -180,3 +180,10 @@ variants/
 temp_*/
 temp_corpora_staging/
 
+
+# Eval / agent run outputs: the whole folder, never commit
+eval_results/
+
+# One-off local probes: they read real users data or are generated lesson output
+scripts/view_last_chat.py
+specs/001-chavruta-redesign/lesson_fixed_full.txt

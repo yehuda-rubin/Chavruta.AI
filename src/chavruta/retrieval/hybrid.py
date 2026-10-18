@@ -262,8 +262,6 @@ class HybridRetriever:
         f: Filter = {}
         if query.work_ids:
             f["work_id"] = list(query.work_ids)
-        if query.commentator_ids:
-            f["commentator_id"] = list(query.commentator_ids)
         return f or None
 
     def _work_filter(self, query: Query) -> Filter | None:
@@ -304,7 +302,7 @@ class HybridRetriever:
         wanted = {c.lower() for c in (query.commentator_ids or ())}
 
         filters = self._filters(query)
-        candidate_k = max(top_k * 4, 48)
+        candidate_k = max(top_k * 2, 20)
         try:
             with _timed(t, "search"):
                 raw = self.store.search(
@@ -491,8 +489,8 @@ class HybridRetriever:
                 except Exception as exc:
                     logger.warning("quotation floor failed (%s)", exc)
 
-        # Optional reranking (heavy in cloud / optional local / user-gated)
-        do_rerank = self.profile.rerank or getattr(query, "rerank", False)
+        # Optional reranking (disabled per user directive — Cloudflare rate-limits & inferior rabbinic ranking)
+        do_rerank = False
         if self.reranker is not None and do_rerank and hits:
             with _timed(t, "rerank"):
                 hits = self.reranker.rerank(query.search_text or query.text, hits)

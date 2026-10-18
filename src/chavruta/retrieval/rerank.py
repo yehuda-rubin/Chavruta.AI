@@ -72,57 +72,58 @@ class Reranker:
             cf_model = self.model_id if self.model_id.startswith("@cf/") else "@cf/baai/bge-reranker-base"
             cf_url = f"https://api.cloudflare.com/client/v4/accounts/{cf_account}/ai/run/{cf_model}"
 
-            # Score ALL candidates in batches of up to 32 to stay within Cloudflare request bounds
-            batch_size = 32
+            # Score top candidates (up to 32) to stay strictly within Cloudflare quota limits and latency budget
+            max_to_rerank = min(len(hits), 32)
+            batch = hits[:max_to_rerank]
+            contexts = []
+            for i, h in enumerate(batch):
+                ref_str = getattr(h, "ref", "") or ""
+                comm_str = getattr(h, "commentator_id", "") or ""
+                raw_text = (getattr(h, "text_he", "") or getattr(h, "text", "") or "")[:1000]
+                header = f"[{ref_str}] " if ref_str else ""
+                if comm_str:
+                    header = f"[{comm_str} על {ref_str}] "
+                contexts.append({"id": str(i), "text": (header + raw_text)[:1200]})
+
             scored_count = 0
-            for start_idx in range(0, len(hits), batch_size):
-                batch = hits[start_idx : start_idx + batch_size]
-                contexts = []
-                for i, h in enumerate(batch):
-                    ref_str = getattr(h, "ref", "") or ""
-                    comm_str = getattr(h, "commentator_id", "") or ""
-                    raw_text = (getattr(h, "text_he", "") or getattr(h, "text", "") or "")[:1000]
-                    # Prepend ref and commentator context so the reranker recognizes classical halachic sources
-                    header = f"[{ref_str}] " if ref_str else ""
-                    if comm_str:
-                        header = f"[{comm_str} על {ref_str}] "
-                    contexts.append({"id": str(i), "text": (header + raw_text)[:1200]})
-                try:
-                    body = json.dumps({"query": query, "contexts": contexts}).encode("utf-8")
-                    req = urllib.request.Request(
-                        cf_url,
-                        data=body,
-                        headers={
-                            "Authorization": f"Bearer {cf_token}",
-                            "Content-Type": "application/json",
-                        },
-                        method="POST",
-                    )
-                    with urllib.request.urlopen(req, timeout=15.0) as resp:
-                        data = json.loads(resp.read().decode("utf-8"))
-                    response_items = data.get("result", {}).get("response", [])
-                    for item in response_items:
-                        idx = int(item["id"])
-                        if 0 <= idx < len(batch):
-                            batch[idx].score = float(item["score"])
-                            scored_count += 1
-                except Exception as exc:
-                    logging.getLogger("chavruta.retrieval.rerank").warning(
-                        "Cloudflare Reranker API error on batch %d: %s", start_idx, exc
-                    )
+            try:
+                body = json.dumps({"query": query, "contexts": contexts}).encode("utf-8")
+                req = urllib.request.Request(
+                    cf_url,
+                    data=body,
+                    headers={
+                        "Authorization": f"Bearer {cf_token}",
+                        "Content-Type": "application/json",
+                    },
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=12.0) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                response_items = data.get("result", {}).get("response", [])
+                for item in response_items:
+                    idx = int(item["id"])
+                    if 0 <= idx < len(batch):
+                        batch[idx].score = float(item["score"])
+                        scored_count += 1
+            except Exception as exc:
+                logging.getLogger("chavruta.retrieval.rerank").warning(
+                    "Cloudflare Reranker API unavailable (%s); using heuristic ranking", exc
+                )
+
             logging.getLogger("chavruta.retrieval.rerank").info(
                 "Cloudflare Reranker scored %d of %d candidates", scored_count, len(hits)
             )
-            # Prioritize classical halacha/Talmud over academic/secondary works when scores are comparable
+
+            # Prioritize classical foundational Torah/Halacha/Talmud over secondary or off-topic works
             for h in hits:
                 ref_low = (getattr(h, "ref", "") or "").lower()
                 work_low = (getattr(h, "work_id", "") or "").lower()
-                # If it's modern academic commentary (e.g. Mishnat Eretz Yisrael), slightly penalize
+                # Penalize modern academic commentary
                 if "mishnat_eretz_yisrael" in ref_low or "mishnat_eretz_yisrael" in work_low:
                     h.score -= 0.15
-                # Boost classical Shulchan Aruch, Mishnah Berurah, Tur, Rambam, Gemara, Rishonim
-                elif any(k in ref_low for k in ("shulchan_arukh", "shulchan_aruch", "mishnah_berurah", "mishnah_torah", "shabbat.", "pesachim.")):
-                    h.score += 0.05
+                # Boost classical foundational works: Shulchan Aruch, Rambam, Gemara, Tur, Mishnah Berurah
+                elif any(k in ref_low for k in ("shulchan_arukh", "shulchan_aruch", "mishnah_berurah", "mishnah_torah", "bava_metzia", "shabbat", "pesachim", "berakhot", "chulin", "sanhedrin")):
+                    h.score += 0.08
             hits.sort(key=lambda h: h.score, reverse=True)
             return hits
 

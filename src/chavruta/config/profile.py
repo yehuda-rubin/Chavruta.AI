@@ -180,7 +180,7 @@ def _cloud_preset() -> Profile:
         embedding_device=_env("CHAVRUTA_EMBEDDING_DEVICE", "cuda"),
         qdrant_mode="server",
         qdrant_url=_env("CHAVRUTA_QDRANT_URL", "http://localhost:6333"),
-        rerank=True,                          # compute available — sharpen ranking
+        rerank=False,                         # Cloudflare reranker disabled (rate limits & unaligned ranking)
         llm_backend="nebius",
         # The prompts are tuned and verified against 235B-Instruct — the cloud path must not silently
         # fall back to a smaller model when CHAVRUTA_LLM_MODEL is unset.
