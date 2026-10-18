@@ -1287,7 +1287,8 @@ def _split_lesson(text: str) -> tuple[str, str, str, str]:
 
 def _run_lesson(question: str, lang: str, history=None, audience: str = "",
                 grade_band: str = "", length: str = "", owner_id: str = "local",
-                llm=None, target_files: list[str] | None = None) -> QueryResponse:
+                llm=None, target_files: list[str] | None = None,
+                seed_hits: list | None = None) -> QueryResponse:
     """Dedicated LESSON path: resolve audience/grade → pick a template from the template RAG →
     real source retrieval → Claude writes the 3 files at the right register (or asks clarifying
     questions first) via the bridge → 3 Word files + only-cited sources (in discussion order).
@@ -1347,6 +1348,8 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
     if floor:
         fset = {b.ref for b in floor}
         hits = floor + [h for h in hits if h.ref not in fset]
+    if seed_hits:       # a scoped caller (daf yomi) pre-seeds its boundary; RAG fills in the rest
+        hits = _cap_hits(_dedup_hits(list(seed_hits) + hits), _LESSON_HIT_CAP, min_commentaries=15)
     return _generate_lesson_from_hits(topic, hits, lang, he, audience=aud, grade_band=band,
                                       length=length, tpl=tpl, history=history, owner_id=owner_id, llm=llm,
                                       target_files=target_files)
@@ -2415,79 +2418,262 @@ def _parsha_context_note(info, he: bool) -> str:
     return note + ")"
 
 
-def _run_daf_yomi(question: str, lang: str, history=None, owner_id: str = "local",
-                  llm=None) -> QueryResponse:
-    """Daf Yomi: resolve today's daf from Sefaria's calendar (cached). Upfront, provide the bounding
-    scope (תיחום): opening boundary segments of amud a and amud b + Rashi. When the user asks a
-    substantive question, retrieve targeted sources matching the question, with agentic
-    ===NEED_SOURCES=== on demand. Mirrors Parshat HaShavua: defaults to direct Q&A, or full lesson if
-    requested."""
+from chavruta.intents.hebrew_refs import HE_TRACTATES as _HE_TRACTATES  # noqa: E402
+
+_EN_TRACTATES = sorted(set(_HE_TRACTATES.values()), key=len, reverse=True)
+_EN_DAF_RE = re.compile(
+    r"\b(?P<t>" + "|".join(re.escape(t) for t in _EN_TRACTATES) + r")\s+(?:daf\s+)?(?P<daf>\d{1,3})(?P<amud>[ab])?\b",
+    re.IGNORECASE)
+_DAF_REF_RE = re.compile(r"^(?P<t>[A-Za-z_ ]+)\.(?P<daf>\d+)(?P<amud>[ab])$")
+_MACHLOKET_RE = re.compile(
+    r"מחלוקת|חולק|חולקים|לעומת|קושיית|קושיה|מקשה|תירוץ|הבדל|\bvs\b|differ|dispute|disagree", re.IGNORECASE)
+# The daf is small (a few dozen gemara segments), so a whole-daf fetch of the commentators a question
+# names — or of Rashi+Tosafot when it asks about a dispute — is cheap, and is what makes "what is the
+# machloket between Rashi and Tosafot" answerable; the 3-segment opening alone never could.
+_DAF_DEFAULT_DISPUTE_COMMENTATORS = ["rashi", "tosafot"]
+# "Learn the daf with me" has no specific question for RAG to aim at, and the opening boundary alone
+# is only the first segment of each amud — so THAT request (and only that one) reads the daf itself.
+_DAF_STUDY_RE = re.compile(
+    r"תלמד|למד|נלמד|ללמוד|לימוד|סוגי|מה\s+הדף|מה\s+בדף|על\s+מה\s+הדף|סכם|סקירה|learn|study|teach|walk me|summar", re.IGNORECASE)
+_DAF_MAX_SEGMENTS = 45
+
+
+def _requested_daf(question: str):
+    """The daf a daf-yomi message is ABOUT: (tractate, daf, amudim, explicit), or None when the
+    message names none (the caller then uses today's). A bare daf ("דף עט בחולין") names both
+    amudim — the sugya does not stop at the page turn."""
+    found: dict[tuple[str, int], set] = {}
+    for r in detect_hebrew_refs(question or ""):
+        m = _DAF_REF_RE.match(r)
+        if m:
+            found.setdefault((m.group("t"), int(m.group("daf"))), set()).add(m.group("amud"))
+    if not found:
+        # English: "Bava Metzia 2a", "Sanhedrin 25" (no amud → both sides)
+        for m in _EN_DAF_RE.finditer(question or ""):
+            name = next((t for t in _EN_TRACTATES if t.lower() == m.group("t").lower()), None)
+            daf = int(m.group("daf"))
+            if name and 2 <= daf <= 180:
+                found.setdefault((name, daf), set()).update([m.group("amud").lower()] if m.group("amud") else ["a", "b"])
+    if not found:
+        return None
+    (tract, daf), amudim = next(iter(found.items()))
+    return tract, daf, sorted(amudim), True
+
+
+def _daf_hits(tract: str, daf: int, amudim: list[str], commentators: list[str], *, whole: bool):
+    """Hits for one daf. whole=False → the opening boundary (first segments of each amud);
+    whole=True → every gemara segment of the requested amudim. Commentary is looked up from the
+    base segments that actually exist (exact-ref lookups), not guessed per candidate segment."""
     from chavruta.corpus.refs import daf_amud_to_corpus_n
 
+    t = tract.replace(" ", "_")
+    ns = [daf_amud_to_corpus_n(daf, a) for a in amudim]
+    if whole:
+        cand = [f"{t}.{n}.{i}" for n in ns for i in range(1, _DAF_MAX_SEGMENTS + 1)]
+    else:
+        cand = [f"{t}.{n}.1" for n in ns] + [f"{t}.{ns[0]}.2"]
+    base = _fetch_ranked_hits(with_ref_variants(cand), limit=len(cand) * 2)
+    base_refs = sorted({h.ref for h in base if h.ref and " " not in h.ref},
+                       key=lambda r: [int(x) if x.isdigit() else x for x in re.split(r"[._]", r)])
+    if commentators and base_refs:
+        base += _fetch_ranked_hits(commentary_refs(base_refs, commentators), limit=400)
+    return base
+
+
+def _daf_phrase_he(tract: str, daf: int, amudim: list[str] | None) -> str:
+    """"על דף כה ב<מסכת>" — the Hebrew spelling the ref detector reads, so a lesson request anchors on the
+    daf (both amudim unless one was named)."""
+    from chavruta.corpus.refs import hebrew_numeral
+    from chavruta.intents.hebrew_refs import HE_TRACTATES
+
+    he_name = next((k for k, v in HE_TRACTATES.items() if v == tract), tract)
+    amud = (' ע״א' if amudim == ["a"] else ' ע״ב' if amudim == ["b"] else "")
+    # Plain letters for the number (no gershayim inside it): the detector's daf-first form reads
+    # "דף כה", not "דף כ״ה".
+    return f"על דף {hebrew_numeral(daf).replace(chr(34), '')}{amud} ב{he_name}"
+
+
+def _interleave_by_commentator(hits: list) -> list:
+    """Base text first, then commentary round-robin across commentators — so a cap that has to cut
+    cannot drop a whole commentator (47 Rashi comments ahead of 7 Tosafot cut the Tosafot, which is
+    exactly what a "Rashi vs Tosafot" question needs)."""
+    base = [h for h in hits if not getattr(h, "commentator_id", None)]
+    by: dict[str, list] = {}
+    for h in hits:
+        if getattr(h, "commentator_id", None):
+            by.setdefault(h.commentator_id, []).append(h)
+    mixed: list = []
+    queues = list(by.values())
+    while any(queues):
+        for q in queues:
+            if q:
+                mixed.append(q.pop(0))
+    return base + mixed
+
+
+def _in_daf_search(pipeline, question: str, tract: str, daf: int, amudim: list[str], *, k: int = 8) -> list:
+    """The k gemara segments OF THIS DAF closest to the question (plus Rashi and Tosafot on them).
+
+    General RAG scoped to the tractate returns the best match anywhere in it, so a question about a
+    specific point on the daf kept citing the Responsa and other tractates instead of the daf's own
+    text. The daf is small (a few dozen segments), so ranking its own segments against the question
+    is cheap and puts the right ones first. Best-effort: any failure returns nothing and the rest of
+    the pipeline carries on."""
+    try:
+        from chavruta.lessons.templates import _cosine
+
+        segs = [h for h in _daf_hits(tract, daf, amudim, [], whole=True) if h.text]
+        if not segs:
+            return []
+        emb = pipeline.embedding
+        qv = emb.embed_query(question).dense
+        vecs = emb.embed_batch([h.text[:1200] for h in segs])
+        ranked = sorted(zip(segs, vecs), key=lambda sv: _cosine(qv, sv[1].dense), reverse=True)[:k]
+        top = [h for h, _ in ranked]
+        refs = [h.ref for h in top if h.ref and " " not in h.ref]
+        return top + (_fetch_ranked_hits(commentary_refs(refs, ["rashi", "tosafot"]), limit=200) if refs else [])
+    except Exception:
+        _log.warning("in-daf search failed; continuing without it", exc_info=True)
+        return []
+
+
+def _prefer_tractate(hits: list, tract: str, *, other_cap: int = 4) -> list:
+    """RAG hits from the daf's own tractate first; at most `other_cap` from elsewhere. A daf-yomi
+    question is about THIS daf — unscoped halachic literature is welcome as a follow-through, not as
+    the bulk of the sources (a question on Sanhedrin 25a was being answered from Responsa)."""
+    key = tract.replace(" ", "_")
+    same = [h for h in hits if key in (h.ref or "")]
+    other = [h for h in hits if key not in (h.ref or "")]
+    return same + other[:other_cap]
+
+
+def _has_specific_ask(text: str) -> bool:
+    """A question that aims at something inside the daf ("why did Ila get paid", "what is the
+    difference...") rather than at the daf as a whole — those are RAG's job, not a full read."""
+    return bool(re.search(r"למה|מדוע|מה\s+(?:ההבדל|הטעם|הדין|הסברא|הכוונה|פירוש)|איך|האם|why|how|what\s+is\s+the\s+difference", text or "", re.IGNORECASE))
+
+
+def _run_daf_yomi(question: str, lang: str, history=None, owner_id: str = "local",
+                  llm=None) -> QueryResponse:
+    """Daf Yomi: today's daf from Sefaria's calendar (cached), or ANY daf the message names.
+
+    Every message gets (1) the daf's opening boundary (תיחום) as a floor — Gemara + Rashi + Tosafot —
+    and (2) ordinary RAG for the question, scoped to the tractate, so a daf-yomi turn is never poorer
+    than a regular one. A question about a dispute or a named commentator additionally pulls that
+    commentary across the WHOLE daf. A lesson request is handed to the regular lesson path (`_run_lesson`)
+    seeded with the boundary — the same lesson as anywhere else, scoped to the daf."""
     pipeline = _get_pipeline()
     llm = llm or pipeline.llm
     lang = lang or "he"
     he = lang != "en"
-    info = _resolve_daf_yomi_cached()
-    if info is None:
-        msg = ("לא הצלחנו לזהות את הדף היומי כרגע — נסו שוב בעוד רגע." if he
-               else "Couldn't resolve today's daf yomi right now — please try again shortly.")
-        return QueryResponse(answer=msg, citations=[], grounded=False, intent="dafyomi", files=[])
-
-    n_a = daf_amud_to_corpus_n(info.daf, "a")
-    n_b = daf_amud_to_corpus_n(info.daf, "b")
-    t_clean = info.tractate.replace(" ", "_")
-
-    # ── Boundary scope (תיחום): opening boundary segments of amud a and amud b + Rashi ──
-    boundary_refs = [f"{t_clean}.{n_a}.1", f"{t_clean}.{n_a}.2", f"{t_clean}.{n_b}.1"]
-    ref_variants = with_ref_variants(boundary_refs)
-    targets = ref_variants + commentary_refs(ref_variants, ["rashi"])
-    boundary_hits = _fetch_ranked_hits(targets, limit=20)
-
-    topic = f"{info.tractate} {info.daf}"
     raw_question = question
     clean_q = " ".join((raw_question or "").split()).strip()
 
-    # ── Substantive question: retrieve targeted sources matching user's question ──
-    specific_hits: list = []
-    if clean_q and not _is_generic_calendar_query(clean_q) and hasattr(pipeline, "retriever"):
+    req = _requested_daf(clean_q)
+    if req:
+        tract, daf, amudim, explicit = req
+    else:
+        info = _resolve_daf_yomi_cached()
+        if info is None:
+            msg = ("לא הצלחנו לזהות את הדף היומי כרגע — נסו שוב בעוד רגע." if he
+                   else "Couldn't resolve today's daf yomi right now — please try again shortly.")
+            return QueryResponse(answer=msg, citations=[], grounded=False, intent="dafyomi", files=[])
+        tract, daf, amudim, explicit = info.tractate, info.daf, ["a", "b"], False
+
+    topic = f"{tract} {daf}" + (amudim[0] if explicit and len(amudim) == 1 else "")
+    wants_lesson = _wants_full_lesson(raw_question)
+
+    # (1) floor: the opening boundary with the two commentators every daf has.
+    boundary_hits = _daf_hits(tract, daf, amudim, ["rashi", "tosafot"], whole=False)
+
+    # (2) whole-daf commentary the question asks for by name or by "dispute".
+    named = [c for c in detect_commentators(clean_q) if c]
+    if not named and _MACHLOKET_RE.search(clean_q):
+        named = list(_DAF_DEFAULT_DISPUTE_COMMENTATORS)
+    study = not named and (_is_generic_calendar_query(clean_q)
+                           or bool(_DAF_STUDY_RE.search(clean_q) and not _has_specific_ask(clean_q)))
+    deep_hits: list = []
+    if named:
+        deep_hits = _daf_hits(tract, daf, amudim, named[:4], whole=True)
+    elif study:
+        deep_hits = _daf_hits(tract, daf, amudim, ["rashi"], whole=True)
+
+    if wants_lesson:
+        # A daf-yomi lesson IS a regular lesson (audience/length asked or read from the prompt, template
+        # RAG, source RAG across every category) — only scoped to the daf: the boundary is its floor and
+        # the daf is named in the topic so the regular path anchors on it.
+        return _run_lesson(f"{raw_question} ({_daf_phrase_he(tract, daf, amudim if explicit else None)})",
+                           lang, history=history, owner_id=owner_id, llm=llm,
+                           seed_hits=_dedup_hits(deep_hits + boundary_hits))
+
+    # (2b) a question about a specific point: rank the daf's OWN segments against it.
+    if not deep_hits and clean_q and not _is_generic_calendar_query(clean_q):
+        deep_hits = _in_daf_search(pipeline, clean_q, tract, daf, amudim) if hasattr(pipeline, "embedding") else []
+
+    # (3) ordinary RAG for every message (a generic one falls back to the daf itself as the query).
+    rag_hits: list = []
+    if hasattr(pipeline, "retriever"):
         try:
-            q = Query(text=f"{topic} {clean_q}", lang=lang, intent=Intent.QA, tractates=[info.tractate])
+            text = topic if _is_generic_calendar_query(clean_q) else f"{topic} {clean_q}"
+            q = Query(text=text, lang=lang, intent=Intent.QA, tractates=[tract])
             rq = pipeline._resolve_query(q, history=history) if hasattr(pipeline, "_resolve_query") else q
-            res = pipeline.retriever.retrieve(rq, top_k=15)
-            specific_hits = list(res.hits)
+            rag_hits = list(pipeline.retriever.retrieve(rq, top_k=15).hits)
         except Exception:
-            _log.warning("retrieval for daf yomi specific question failed; falling back to boundary hits", exc_info=True)
+            _log.warning("retrieval for daf yomi failed; falling back to the daf's own sources", exc_info=True)
 
-    all_hits = _dedup_hits(specific_hits + boundary_hits)
+    if not wants_lesson:
+        rag_hits = _prefer_tractate(rag_hits, tract)
 
-    if _wants_full_lesson(raw_question):
-        tpl = _select_template(topic, "yeshiva", "", lang=lang)
-        return _generate_lesson_from_hits(topic, _cap_hits(all_hits, _LESSON_HIT_CAP, min_commentaries=15),
-                                          lang, he, audience="yeshiva", grade_band="", length="medium",
-                                          tpl=tpl, history=history, owner_id=owner_id, llm=llm)
+    # The daf's own sources lead (they are what the question is ABOUT); RAG fills in after them, so
+    # neither the [S#] numbering nor the cap puts unrelated retrieval ahead of the daf.
+    all_hits = _dedup_hits(_interleave_by_commentator(_dedup_hits(deep_hits + boundary_hits)) + rag_hits)
 
-    hits = _cap_hits(all_hits, _CHAVRUTA_HIT_CAP, min_commentaries=15)
-    prompt = f"{_daf_yomi_context_note(info.tractate, info.daf, he)}\n{raw_question}"
+    hits = _cap_hits(all_hits, 60 if deep_hits else _CHAVRUTA_HIT_CAP, min_commentaries=15)
+    prompt = f"{_daf_yomi_context_note(tract, daf, he, amudim if explicit else None, dispute=bool(named) and bool(_MACHLOKET_RE.search(clean_q)), study=study)}\n{raw_question}"
     return _generate_qa_turn_from_hits(prompt, hits, lang, he, history, llm=llm)
 
 
-def _daf_yomi_context_note(tractate: str, daf: int, he: bool) -> str:
+def _daf_yomi_context_note(tractate: str, daf: int, he: bool, amudim: list[str] | None = None,
+                           dispute: bool = False, study: bool = False) -> str:
     """Caught live (2026-08-05): asked "what daf are we on", the model answered with the CORPUS's
     internal amud-linear chunk number (e.g. "194") instead of the real daf (97) — it has no way to
     tell the two apart from the citation refs alone (fetch_by_refs/with_ref_variants deliberately
     convert daf+amud INTO that linear form for lookup; nothing converts it back for display here).
-    We already know the real daf from Sefaria, so just tell the model directly rather than making
-    it infer a fact it structurally cannot get right from what it's shown."""
+    We already know the real daf, so tell the model directly rather than making it infer a fact it
+    structurally cannot get right from what it's shown. `amudim` is set when the user NAMED the daf
+    (not today's), so the note says "the daf you asked about" instead of "today's daf"."""
+    where = f"{tractate} {daf}" + (amudim[0] if amudim and len(amudim) == 1 else "")
+    # Spell the internal numbering out: told only that it "is not the daf number", the model sometimes
+    # concluded the sources were about a different daf (57-58) and refused (seen live, 2026-10-17).
+    na, nb = daf_amud_to_corpus_n(daf, "a"), daf_amud_to_corpus_n(daf, "b")
+    t = tractate.replace(" ", "_")
+    mapping = f"{t}.{na}.* = {tractate} {daf}a, {t}.{nb}.* = {tractate} {daf}b"
+    extra_he = (" נשאלת על מחלוקת: עבור על כל הערות המפרשים שסופקו והצג כל נקודה שבה הם באמת חולקים (עד שלוש), "
+                "לא רק אחת." if dispute else "")
+    extra_en = (" You were asked about a dispute: go through ALL the commentary supplied and present every point "
+                "where they really differ (up to three), not just one." if dispute else "")
+    study_he = (" המשתמש ביקש ללמוד את הדף: התחל ללמד מיד, לפי סדר הדף מהמשנה או מפתיחת הסוגיה, ואל תשאל "
+                "'במה להתחיל' ואל תסתפק בהזמנה להמשיך." if study else "")
+    study_en = (" The user asked to learn the daf: start teaching right away, in the daf's order from its opening "
+                "mishnah or sugya — do not ask where to begin and do not just invite them to continue." if study else "")
     if he:
-        return (f"(לעיונך: הדף האמיתי של היום הוא {tractate} דף {daf}. קיבלת את תיחום פתיחת הדף ומקורות ממוקדים לשאלת המשתמש — "
-               f"אם את/ה צריך/ה מקטעים נוספים, פירוש רש\"י, תוספות או מפרשים נוספים, בקש/י אותם דרך ===NEED_SOURCES===. "
+        subject = "הדף שהמשתמש ביקש" if amudim else "הדף האמיתי של היום"
+        return (f"(לעיונך: {subject} הוא {where}. קיבלת את תיחום פתיחת הדף, מקורות ממוקדים לשאלת המשתמש, "
+               f"ובשאלה על מחלוקת או על מפרש מסוים את המפרשים לאורך הדף כולו. אם את/ה צריך/ה מקטעים נוספים, "
+               f"רש\"י, תוספות או מפרשים נוספים, בקש/י אותם דרך ===NEED_SOURCES===. "
                f"אם המשתמש שואל על מספר הדף, ענה {daf} ולא מספר אחר — המספרים שמופיעים ברפרנסים של "
-               f"המקורות למטה הם מספור פנימי של מסד הנתונים, לא מספר הדף האמיתי.)")
-    return (f"(For reference: today's real daf is {tractate} {daf}. You were given the daf boundary and sources focused on the user's question — "
+               f"המקורות למטה הם מספור פנימי של מסד הנתונים, לא מספר הדף האמיתי ({mapping}) — המקורות שלמטה עם המספרים האלה הם הדף עצמו. לעולם אל תכתוב מספר פנימי "
+               f"כזה בתשובה, ואל תשאיר סוגריים ריקים במקום מקור. סמן כל טענה וכל ציטוט במרקר [S#] של המקור שממנו הוא לקוח. "
+               f"אם השאלה אינה עוסקת בדף הזה, אמור זאת במשפט אחד בתחילת התשובה ואז ענה מהמקורות.{extra_he}{study_he})")
+    subject = "the daf the user asked about" if amudim else "today's real daf"
+    return (f"(For reference: {subject} is {where}. You were given the daf's opening boundary, sources focused on the "
+           f"user's question and, for a dispute or a named commentator, that commentary across the whole daf — "
            f"if you need additional segments, Rashi, Tosafot or other commentaries, request them via ===NEED_SOURCES===. "
            f"If asked which daf this is, answer {daf} — the numbers in the source refs below are the "
-           f"database's internal numbering, not the real daf number.)")
+           f"database's internal numbering, not the real daf number ({mapping}) — sources carrying those numbers ARE the daf. Never print such an internal number, "
+           f"and never leave empty parentheses where a source belongs. Mark every claim and quotation with the [S#] "
+           f"marker of the source it comes from. If the question is not about this daf, say so in one sentence "
+           f"at the start and then answer from the sources.{extra_en}{study_en})")
 
 
 # ── Source Sheet Companion Path (Spec 008) ───────────────────────────────────
