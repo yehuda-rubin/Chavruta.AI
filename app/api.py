@@ -35,6 +35,9 @@ except Exception:  # noqa: BLE001
 # to citations, then we strip them from the DISPLAYED text so the answer reads cleanly.
 _MARKER_BODY = r"[\[(（【]\s*S\d+(?:\s*,\s*S\d+)*\s*[\])）】]"
 _MARKER_RE = re.compile(rf"\s*{_MARKER_BODY}")
+# A marker the model ANNOTATED — "[S4 מצטט מדרש רבה]", "[S4 בשם מדרש שמואל]" — which the plain pattern above
+# does not match; it leaked into a lesson's flow file (seen 2026-10-18). Dropped whole.
+_ANNOTATED_MARKER_RE = re.compile(r"\s*\[S\d+\s+[^\]\n]{1,80}\]")
 
 # A marker the model used as a NOUN rather than as a trailing footnote — "ב[S2] יש דיון" ("in
 # [source 2] there is a discussion"), "את [S3]: שם נאמר". Deleting only the marker strands the
@@ -273,7 +276,8 @@ _MD_BLOCKQUOTE_RE = re.compile(r"^[ \t]{0,3}>[ \t]?", re.M)
 
 def _strip_markers(text: str, he: bool = False) -> str:
     # Load-bearing markers first ("ב[S2]" → nothing, not "ב"), then every remaining plain marker.
-    t = _CARRIER_MARKER_RE.sub("", text or "")
+    t = _ANNOTATED_MARKER_RE.sub("", text or "")
+    t = _CARRIER_MARKER_RE.sub("", t)
     t = _MARKER_RE.sub("", t)
     t = _STRAY_ESCAPE_RE.sub("", t)           # drop a leaked escape backslash before a quote mark
     t = _strip_foreign(t)                    # drop stray foreign-script tokens (model multilingual bleed)

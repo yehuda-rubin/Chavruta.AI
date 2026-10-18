@@ -461,3 +461,9 @@ def test_segments_are_ordered_numerically_not_alphabetically(monkeypatch):
     api._daf_hits("Chullin", 123, ["a"], ["rashi"], whole=True)
     second = seen["second"]
     assert second.index("Rashi_on_Chullin.245.2.1") < second.index("Rashi_on_Chullin.245.10.1")
+
+
+def test_annotated_markers_are_stripped_whole():
+    out = api._strip_markers('המדרש על קין והבל [S4 מצטט מדרש רבה]: "קשה הדבר" וכן [S5 בשם מדרש שמואל]: עוד', he=True)
+    assert "[S" not in out and "מצטט" not in out
+    assert 'המדרש על קין והבל: "קשה הדבר"' in out
