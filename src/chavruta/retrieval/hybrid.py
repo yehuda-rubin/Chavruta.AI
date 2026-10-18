@@ -75,9 +75,9 @@ def _to_hit(h) -> RankedHit:
         # and the 464 CC-BY / 87 CC-BY-SA sources are reproduced with no credit, which is the
         # condition their licence is granted on.
         license=(p.get("license") or p.get(f"license_{suffix}")
-                 or license_for_ref(p.get("ref"), lang)[0]),
+                 or license_for_ref(p.get("ref"), lang, p.get("deep_link") or "")[0]),
         version_title=(p.get("version_title") or p.get(f"version_{suffix}")
-                       or license_for_ref(p.get("ref"), lang)[1]),
+                       or license_for_ref(p.get("ref"), lang, p.get("deep_link") or "")[1]),
     )
 
 

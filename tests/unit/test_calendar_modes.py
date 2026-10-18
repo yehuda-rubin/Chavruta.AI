@@ -472,7 +472,11 @@ def test_annotated_markers_are_stripped_whole():
 def test_hebrew_wikisource_tier_is_cc_by_sa_not_unknown():
     from chavruta.corpus.refs import license_for_ref
 
+    wiki = "https://he.wikisource.org/wiki/%D7%A1"
     for ref in ("ספר תולדות אדם, אות 192", "ברטנורא על בבא מציעא א, אות 1", 'רמב"ם הלכות תשובה ה ה'):
-        assert license_for_ref(ref, "he") == ("CC-BY-SA", "ויקיטקסט העברי")
+        assert license_for_ref(ref, "he", wiki) == ("CC-BY-SA", "ויקיטקסט העברי")
+        # a Hebrew label alone is NOT evidence of Wikisource — fail closed (unknown)
+        assert license_for_ref(ref, "he") == ("", "")
+        assert license_for_ref(ref, "he", "https://example.org/x") == ("", "")
     assert license_for_ref("Genesis.1.1", "he")[0] == "Public Domain"        # Sefaria refs untouched
     assert license_for_ref("Totally_Unknown_Work.1.1", "he") == ("", "")     # an English unknown stays unknown

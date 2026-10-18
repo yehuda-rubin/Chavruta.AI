@@ -232,14 +232,14 @@ def _widen_citations_from_note(result, note: str, owner_id: str = "",
     for ref, payload in found.items():
         from chavruta.corpus.refs import license_for_ref
 
-        lic = payload.get("license") or payload.get("license_he") or license_for_ref(ref, "he")[0]
-        ver = payload.get("version_title") or payload.get("version_he") or license_for_ref(ref, "he")[1]
+        lic = payload.get("license") or payload.get("license_he") or license_for_ref(ref, "he", payload.get("deep_link") or "")[0]
+        ver = payload.get("version_title") or payload.get("version_he") or license_for_ref(ref, "he", payload.get("deep_link") or "")[1]
         result.citations.append(CitationOut(
             ref=ref, ref_he=(hebrew_display_ref(ref) or "") if he else "",
             text_he=payload.get("text_he") or payload.get("text") or "",
             text_en=payload.get("text_en") or "",
             # Derived from the ref, not read from the payload:  is EMPTY on all
-            # 2.4M points of the commercial corpus and is recovered at read time everywhere else
+            # 2.5M points of the commercial corpus and is recovered at read time everywhere else
             # (see retrieval/hybrid.py::_to_hit). Reading the payload alone is why a widened
             # citation rendered as a bare "Chizkuni,_Deuteronomy.10.6.1" chip beside "rashbam".
             commentator=(payload.get("commentator_id") or commentator_from_ref(ref) or ""),
@@ -1425,8 +1425,8 @@ def _generate_lesson_from_hits(topic: str, hits, lang: str, he: bool, *, audienc
 
             ref_he = hebrew_display_ref(h.ref) or talmud_hebrew_display_ref(h.ref) or ""
             ref_en = talmud_english_display_ref(h.ref) or h.ref
-            lic = getattr(h, "license", "") or license_for_ref(h.ref, "he" if he else "en")[0]
-            ver = getattr(h, "version_title", "") or license_for_ref(h.ref, "he" if he else "en")[1]
+            lic = getattr(h, "license", "") or license_for_ref(h.ref, "he" if he else "en", getattr(h, "deep_link", "") or "")[0]
+            ver = getattr(h, "version_title", "") or license_for_ref(h.ref, "he" if he else "en", getattr(h, "deep_link", "") or "")[1]
             used.append(CitationOut(ref=ref_en if not he else h.ref,
                                     ref_he=ref_he if he else (ref_he or ""),
                                     text_he=he_text, text_en=en_text,
@@ -2059,8 +2059,8 @@ def _generate_chavruta_turn(question: str, hits, lang: str, he: bool, history, w
             h = hits[i - 1]
             from chavruta.corpus.refs import license_for_ref
 
-            lic = getattr(h, "license", "") or license_for_ref(h.ref, "he" if he else "en")[0]
-            ver = getattr(h, "version_title", "") or license_for_ref(h.ref, "he" if he else "en")[1]
+            lic = getattr(h, "license", "") or license_for_ref(h.ref, "he" if he else "en", getattr(h, "deep_link", "") or "")[0]
+            ver = getattr(h, "version_title", "") or license_for_ref(h.ref, "he" if he else "en", getattr(h, "deep_link", "") or "")[1]
             used.append(CitationOut(ref=h.ref, ref_he=(hebrew_display_ref(h.ref) or "") if he else "",
                                     text_he=(getattr(h, "text", "") or ""),
                                     text_en=(getattr(h, "text_en", "") or ""),
@@ -2109,8 +2109,8 @@ def _generate_qa_turn_from_hits(question: str, hits, lang: str, he: bool, histor
     def _cite(c) -> CitationOut:
         from chavruta.corpus.refs import license_for_ref
 
-        lic = getattr(c, "license", "") or license_for_ref(c.ref, "he" if he else "en")[0]
-        ver = getattr(c, "version_title", "") or license_for_ref(c.ref, "he" if he else "en")[1]
+        lic = getattr(c, "license", "") or license_for_ref(c.ref, "he" if he else "en", getattr(c, "deep_link", "") or "")[0]
+        ver = getattr(c, "version_title", "") or license_for_ref(c.ref, "he" if he else "en", getattr(c, "deep_link", "") or "")[1]
         return CitationOut(
             ref=c.ref,
             ref_he=(hebrew_display_ref(c.ref) or "") if he else "",
@@ -3332,8 +3332,8 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
     def _cite(c) -> CitationOut:
         from chavruta.corpus.refs import license_for_ref
 
-        lic = getattr(c, "license", "") or license_for_ref(c.ref, "he" if he else "en")[0]
-        ver = getattr(c, "version_title", "") or license_for_ref(c.ref, "he" if he else "en")[1]
+        lic = getattr(c, "license", "") or license_for_ref(c.ref, "he" if he else "en", getattr(c, "deep_link", "") or "")[0]
+        ver = getattr(c, "version_title", "") or license_for_ref(c.ref, "he" if he else "en", getattr(c, "deep_link", "") or "")[1]
         return CitationOut(
             ref=c.ref,
             ref_he=(hebrew_display_ref(c.ref) or "") if he else "",

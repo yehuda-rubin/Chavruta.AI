@@ -399,7 +399,7 @@ def work_title_for_ref(ref: str | None) -> str | None:
     return None
 
 
-def license_for_ref(ref: str | None, lang: str = "he") -> tuple[str, str]:
+def license_for_ref(ref: str | None, lang: str = "he", deep_link: str = "") -> tuple[str, str]:
     """(license, version_title) for a ref, per LANGUAGE — ('', '') when unknown.
 
     Rights are per edition, and a work can be Public Domain in Hebrew while its English translation
@@ -409,11 +409,12 @@ def license_for_ref(ref: str | None, lang: str = "he") -> tuple[str, str]:
     if not title:
         # The Hebrew Wikisource tier (chunk ids "ws:…", deep links on he.wikisource.org) is stored under
         # its own Hebrew label — "ברטנורא על בבא מציעא א, אות 1", "רמב\"ם הלכות תשובה ה ה" — so no
-        # Sefaria work title can match it, and every such source printed "licence unknown". Its licence
-        # is CC-BY-SA (docs/COMMERCIAL_CORPUS.md: the commercial corpus took Wikisource text because it
-        # is CC-BY-SA); the text itself is public domain. Sefaria refs are English, so a Hebrew-labelled
-        # ref with no " on " work prefix is this tier.
-        if ref and _HEB.search(ref) and " on " not in ref:
+        # Sefaria work title can match it, and every such source printed "licence unknown". Its
+        # transcription is CC-BY-SA (docs/COMMERCIAL_CORPUS.md). ONLY when the caller can show the source
+        # is Wikisource (its deep link): a Hebrew label alone is not evidence, and anything else stays
+        # unknown, which the rights module treats as all-rights-reserved (fail closed). The copyright of
+        # the UNDERLYING text is a separate question — see docs/WIKISOURCE_LICENSE_AUDIT.md.
+        if ref and _HEB.search(ref) and " on " not in ref and "wikisource.org" in (deep_link or ""):
             return "CC-BY-SA", ("ויקיטקסט העברי" if (lang or "he").lower().startswith("he") else "Hebrew Wikisource")
         return "", ""
     entry = _load_licenses().get(title) or {}
