@@ -103,11 +103,22 @@ _CONTROL_CODES_PREFIX_RE = re.compile(
 )
 
 
+# A routing code standing on its own anywhere in the text (start of a line, or between spaces). The
+# prefix pattern above only catches one at the very start — a classifier that wrote a greeting FIRST
+# and its real classification on a second line leaked "NNN <question>" into the visible answer.
+_STRAY_CODE_RE = re.compile(r"(?:(?<=\s)|^)\[?(?:HHH|ZZZ|XXX|YYY|WWW|PPP|NNN)\]?(?=\s|$|[:\-])[:\-]?", re.MULTILINE)
+# A work-order code that starts a LINE after other text: the model classified the message as a real
+# question even though it opened with a greeting.
+_LATER_WORK_CODE_RE = re.compile(r"(?<=\s)\[?(?:NNN|ZZZ|XXX|YYY|WWW|PPP)\]?(?=\s|$)")
+
+
 def strip_control_codes(text: str) -> str:
     """Completely hide/strip internal routing and file control codes from user-facing text."""
     if not text:
         return ""
     clean = _CONTROL_CODES_PREFIX_RE.sub("", text.strip()).strip()
+    clean = _STRAY_CODE_RE.sub("", clean)
+    clean = re.sub(r"[ \t]{2,}", " ", clean)
     # Strip any residual prompt headers that leaked at the start
     clean = re.sub(
         r"^(?:(?:TORAH|HALACHA|STUDY|QUERY)\s*[/:\-]*\s*)+",
@@ -145,6 +156,11 @@ def parse_distiller_output(raw: str, original_query: str) -> DistillerResult:
     # Check for HHH (Chitchat / Idle / Greeting / Thanks)
     first_token = clean.split()[0].strip("[]:-,. ").upper() if clean.split() else ""
     if first_token == "HHH":
+        later = _LATER_WORK_CODE_RE.search(clean, pos=len(clean.split()[0]))
+        if later:
+            # Greeting AND a classified question in one output: the user asked something. Re-parse
+            # from the work-order line and drop the greeting rather than show either code.
+            return parse_distiller_output(clean[later.start():].strip(), original_query)
         # SAFETY NET: Only override HHH to study if the user's input actually contains
         # explicit halachic/Torah inquiry keywords (e.g. מותר, אסור, חזיר, כיפור, שבת, כשר, הלכה, דין, רב...).
         # Casual non-Torah questions (e.g. "אתה אוהב שוקולד?", "מה שלומך?", "איך קוראים לך?") remain HHH!
@@ -258,7 +274,30 @@ def _is_short_and_direct(text: str, history=None) -> bool:
 def classify_and_distill(
     text: str, history=None, intent=None, *, client=None, model: str = DISTILLER_MODEL
 ) -> DistillerResult:
-    """Classify user intent, determine file generation codes, and distill question in Hebrew."""
+    """Classify user intent, determine file generation codes, and distill question in Hebrew.
+
+    In daf-yomi / parsha every message is about the daf or the parsha, so a classifier verdict of
+    "chitchat" there is always wrong — it answered "what is today's daf?" with a greeting. Pure
+    greetings and thanks are caught before this point; anything the classifier calls chitchat in
+    those modes is turned back into a question."""
+    res = _classify_and_distill(text, history=history, intent=intent, client=client, model=model)
+    if (res.action == "chitchat"
+            and str(getattr(intent, "value", intent) or "").lower() in ("dafyomi", "parsha")
+            and not _is_calendar_pleasantry(text)):
+        return DistillerResult(action="study", distilled_query=(text or "").strip(), raw=res.raw)
+    return res
+
+
+def _is_calendar_pleasantry(text: str) -> bool:
+    from chavruta.intents.router import is_conversational_acknowledgement, is_pure_greeting
+
+    t = (text or "").strip()
+    return is_pure_greeting(t) or is_conversational_acknowledgement(t)
+
+
+def _classify_and_distill(
+    text: str, history=None, intent=None, *, client=None, model: str = DISTILLER_MODEL
+) -> DistillerResult:
     if not text or not text.strip():
         return DistillerResult(action="study", distilled_query="", raw="")
     clean = text.strip()
