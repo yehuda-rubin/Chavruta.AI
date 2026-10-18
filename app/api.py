@@ -292,6 +292,8 @@ def _strip_markers(text: str, he: bool = False) -> str:
     # Clean up punctuation collisions left where citation markers were stripped (e.g. ",." -> "." or ",," -> ",")
     t = re.sub(r",\s*\.", ".", t)
     t = re.sub(r",\s*,+", ",", t)
+    # An empty "()" / "(,)" left where a citation marker sat inside parentheses ("חכמים חולקים ():")
+    t = re.sub(r"[ \t]*\(\s*[,;]?\s*\)", "", t)
     t = re.sub(r"[ \t]{2,}", " ", t)
     return t.strip()
 

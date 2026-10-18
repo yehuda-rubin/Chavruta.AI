@@ -1112,10 +1112,21 @@ _META_OPENING = re.compile(
 )
 
 
+# "I see that the sources provided include most of the segments…" — the model talking about its own
+# prompt before it starts. Seen 2026-10-18 opening a daf-yomi answer. Only a first line that names the
+# supplied sources is dropped; "אני רואה ש" followed by real content never mentions them.
+_META_SEES_SOURCES = re.compile(
+    r"\A\s*(?:אני\s+רואה\s+ש|אני\s+מבין\s+ש|I\s+see\s+that)[^\n]{0,160}?"
+    r"(?:המקורות\s+ש(?:סופקו|ניתנו|סיפקת)|sources\s+(?:provided|you\s+gave|given))[^\n]{0,240}\n+",
+    re.IGNORECASE,
+)
+
+
 def strip_meta_opening(text: str) -> str:
     """Drop a first line that narrates the instructions ("here is the walkthrough per the stages
     you provided") rather than answering."""
-    return _META_OPENING.sub("", text or "", count=1)
+    text = _META_OPENING.sub("", text or "", count=1)
+    return _META_SEES_SOURCES.sub("", text, count=1)
 
 
 def prune_lesson_to_cited(plan: LessonPlan, citations: list[Citation]) -> LessonPlan:

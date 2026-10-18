@@ -24,6 +24,16 @@ def test_keeps_a_stage_word_deep_in_a_long_first_line():
     assert strip_meta_opening(raw) == raw
 
 
+def test_drops_an_opening_that_talks_about_the_supplied_sources():
+    raw = "אני רואה שהמקורות שסופקו כוללים את רוב הקטעים מהדף. נתחיל בלימוד המשנה.\n\n---\n\nהמשנה פותחת [S1]."
+    assert strip_meta_opening(raw).startswith("---")
+
+
+def test_keeps_an_opening_that_merely_starts_with_i_see():
+    raw = "אני רואה שרש\"י מפרש כאן את המילה בדרך אחרת.\nוהתוספות חולקים."
+    assert strip_meta_opening(raw) == raw
+
+
 def test_empty():
     assert strip_meta_opening("") == ""
 

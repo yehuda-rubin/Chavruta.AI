@@ -431,6 +431,13 @@ def test_follow_up_without_a_daf_stays_on_the_daf_of_the_conversation():
     assert api._daf_from_history([Turn(role="assistant", text="x", refs=["Genesis.1.1"])]) is None
 
 
+def test_empty_parentheses_left_by_stripped_markers_are_removed():
+    assert api._strip_markers("חכמים חולקים [S1] (): עד חצות", he=True) == "חכמים חולקים: עד חצות"
+    out = api._strip_markers("מבאר (,[S1]) ועוד ([S2]) וכן (רש\"י) שם", he=True)
+    assert "()" not in out and "(,)" not in out
+    assert '(רש"י)' in out          # a parenthesis with real content is untouched
+
+
 def test_requested_daf_reads_english_references():
     assert api._requested_daf("Explain Bava Metzia 2a please")[:3] == ("Bava Metzia", 2, ["a"])
     assert api._requested_daf("what is Sanhedrin 25 about")[:3] == ("Sanhedrin", 25, ["a", "b"])
