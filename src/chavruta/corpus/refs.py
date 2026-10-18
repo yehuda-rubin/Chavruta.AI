@@ -407,6 +407,14 @@ def license_for_ref(ref: str | None, lang: str = "he") -> tuple[str, str]:
     """
     title = work_title_for_ref(ref)
     if not title:
+        # The Hebrew Wikisource tier (chunk ids "ws:…", deep links on he.wikisource.org) is stored under
+        # its own Hebrew label — "ברטנורא על בבא מציעא א, אות 1", "רמב\"ם הלכות תשובה ה ה" — so no
+        # Sefaria work title can match it, and every such source printed "licence unknown". Its licence
+        # is CC-BY-SA (docs/COMMERCIAL_CORPUS.md: the commercial corpus took Wikisource text because it
+        # is CC-BY-SA); the text itself is public domain. Sefaria refs are English, so a Hebrew-labelled
+        # ref with no " on " work prefix is this tier.
+        if ref and _HEB.search(ref) and " on " not in ref:
+            return "CC-BY-SA", ("ויקיטקסט העברי" if (lang or "he").lower().startswith("he") else "Hebrew Wikisource")
         return "", ""
     entry = _load_licenses().get(title) or {}
     side = "en" if (lang or "he").lower().startswith("en") else "he"

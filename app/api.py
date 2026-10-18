@@ -1094,8 +1094,9 @@ def _license_table(used: list[CitationOut], he: bool) -> str:
         lic = (c.license or "").strip()
         shown = _LICENSE_HE.get(lic.lower(), lic) if he else lic
         parts = [f"{n}. {(c.ref_he or c.ref) if he else c.ref}"]
-        if c.version_title:
-            parts.append(c.version_title)
+        version = re.sub(r"\s*Unknown Publisher\s*", " ", c.version_title or "").strip()   # Sefaria's placeholder
+        if version:
+            parts.append(version)
         parts.append(shown or ("רישיון לא ידוע" if he else "licence unknown"))
         lines.append(" — ".join(parts))
     return "\n".join(lines)
