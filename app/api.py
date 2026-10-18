@@ -2460,6 +2460,33 @@ def _requested_daf(question: str):
     return tract, daf, sorted(amudim), True
 
 
+_CORPUS_DAF_REF_RE = re.compile(r"^(?:.+_on_)?(?P<t>[A-Z][A-Za-z]*(?:_[A-Za-z]+)*)\.(?P<n>\d+)\.\d+(?:\.\d+)?$")
+
+
+def _daf_from_history(history):
+    """The daf an ongoing daf-yomi conversation is ABOUT, when the current message names none.
+
+    Without this a follow-up such as "what is the dispute between Rashi and Tosafot in the daf?" fell
+    back to TODAY's daf and answered about a different tractate than the one being studied. The most
+    recent turn that settles it wins: a user message that names a daf, or the refs an earlier answer
+    cited (the corpus's own amud-linear numbers, converted back to the real daf)."""
+    from chavruta.corpus.refs import corpus_n_to_daf_amud
+
+    for turn in reversed(list(history or [])):
+        if getattr(turn, "role", "") == "user":
+            found = _requested_daf(getattr(turn, "text", "") or "")
+            if found:
+                return found
+            continue
+        for ref in getattr(turn, "refs", None) or []:
+            m = _CORPUS_DAF_REF_RE.match(ref or "")
+            name = m.group("t").replace("_", " ") if m else ""
+            if name in _EN_TRACTATES:
+                daf, _amud = corpus_n_to_daf_amud(int(m.group("n")))
+                return name, daf, ["a", "b"], True
+    return None
+
+
 def _daf_hits(tract: str, daf: int, amudim: list[str], commentators: list[str], *, whole: bool):
     """Hits for one daf. whole=False → the opening boundary (first segments of each amud);
     whole=True → every gemara segment of the requested amudim. Commentary is looked up from the
@@ -2569,7 +2596,7 @@ def _run_daf_yomi(question: str, lang: str, history=None, owner_id: str = "local
     raw_question = question
     clean_q = " ".join((raw_question or "").split()).strip()
 
-    req = _requested_daf(clean_q)
+    req = _requested_daf(clean_q) or _daf_from_history(history)
     if req:
         tract, daf, amudim, explicit = req
     else:

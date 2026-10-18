@@ -417,6 +417,20 @@ def test_generic_study_request_reads_the_whole_daf_but_a_specific_question_does_
     assert not any(t.startswith("Chullin.245.30") for t in _run("למה רב אומר כך?"))      # boundary only
 
 
+def test_follow_up_without_a_daf_stays_on_the_daf_of_the_conversation():
+    from chavruta.corpus.schema import Turn
+
+    # an earlier answer cited Bava Metzia amud-linear 3 and 4 = daf 2a / 2b
+    hist = [Turn(role="user", text="תלמד אותי את בבא מציעא ב ע\"א"),
+            Turn(role="assistant", text="...", refs=["Bava_Metzia.3.1", "Rashi_on_Bava_Metzia.3.1.1"])]
+    assert api._daf_from_history(hist)[:2] == ("Bava Metzia", 2)
+    # refs only (the user turn named nothing): converted back from the corpus numbering
+    hist = [Turn(role="user", text="תלמד אותי"), Turn(role="assistant", text="...", refs=["Sanhedrin.49.5"])]
+    assert api._daf_from_history(hist)[:2] == ("Sanhedrin", 25)
+    assert api._daf_from_history([]) is None
+    assert api._daf_from_history([Turn(role="assistant", text="x", refs=["Genesis.1.1"])]) is None
+
+
 def test_requested_daf_reads_english_references():
     assert api._requested_daf("Explain Bava Metzia 2a please")[:3] == ("Bava Metzia", 2, ["a"])
     assert api._requested_daf("what is Sanhedrin 25 about")[:3] == ("Sanhedrin", 25, ["a", "b"])
