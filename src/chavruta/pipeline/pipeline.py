@@ -381,6 +381,7 @@ class ChavrutaPipeline:
         if not fetched or is_degrade_message(raw):
             return None                                   # nothing fetched, or a timeout/no-fetch degrade
         marker_map = {f"S{i}": s for i, s in enumerate(fetched, 1)}
+        raw, _qrefs = grounded.finalize_raw(raw, marker_map)
         text, citations, is_grounded = grounded.enforce_citations(raw, marker_map, question=query.text)
         if not is_grounded:
             return None                                   # model didn't actually cite a fetched source
@@ -416,9 +417,14 @@ class ChavrutaPipeline:
             lines += ["", "## FOCUSED QUESTION", distilled.strip()]
         lines += ["", "## INSTRUCTIONS"]
         lines += (["ענה אך ורק מהמקורות; צטט כל טענה בסימון [S#]; כתוב בעברית ברורה ומלאה, ללא מילים בשפה "
-                   "זרה; אם אין תשובה במקורות — אמור זאת בפירוש ואל תמציא."] if he else
+                   "זרה; אם אין תשובה במקורות — אמור זאת בפירוש ואל תמציא. ציטוט מילולי: אל תקליד אותו ואל תשים מרכאות "
+                   "סביב לשון מקור — כתוב {{S3: מילים ראשונות … מילים אחרונות}} (העתק את המילים בדיוק כפי שהן "
+                   "במקור S3; לציטוט קצר כתוב את כולו {{S3: הביטוי}}) והמערכת תדביק את הטקסט המדויק."] if he else
                   ["Answer ONLY from the SOURCES; cite every claim by [S#]; write in clear, full English "
-                   "with no foreign-language words; if the sources lack the answer, say so and do not invent."])
+                   "with no foreign-language words; if the sources lack the answer, say so and do not invent. Verbatim "
+                   "quotation: never type it or put quotation marks around source text — write "
+                   "{{S3: first words … last words}} (copy the words EXACTLY from source S3; for a short quote "
+                   "write all of it {{S3: phrase}}) and the system pastes the exact text."])
         lines += [SOURCE_REQUEST_INSTRUCTION]
         return llm.request("\n".join(lines), lang=lang or "he",
                            token_budget=_max_tokens_for(intent, self.profile))
@@ -524,6 +530,7 @@ class ChavrutaPipeline:
             # own text scan ever over/undercounts (see agentic.py::append_sources). Falls back to
             # the old count-based guess only for a source that never went through that loop.
             marker_map.setdefault(s.marker or f"S{i}", s)
+        raw, _qrefs = grounded.finalize_raw(raw, marker_map)
         text, citations, is_grounded = grounded.enforce_citations(raw, marker_map, question=query.text)
         used_model = getattr(llm, "last_model_used", "") or getattr(llm, "model_id", "")
         answer = Answer(
@@ -665,7 +672,7 @@ class ChavrutaPipeline:
             # own text scan ever over/undercounts (see agentic.py::append_sources). Falls back to
             # the old count-based guess only for a source that never went through that loop.
             marker_map.setdefault(s.marker or f"S{i}", s)
-        raw = grounded.strip_meta_opening(raw)
+        raw, _qrefs = grounded.finalize_raw(raw, marker_map)
         text, citations, is_grounded = grounded.enforce_citations(raw, marker_map, question=query.text)
         if plan.sections:
             plan = grounded.prune_lesson_to_cited(plan, citations)
@@ -696,6 +703,7 @@ class ChavrutaPipeline:
             raw, fetched = llm_out.text, getattr(llm_out, "fetched_sources", None) or []
         for i, s in enumerate(fetched or [], len(marker_map) + 1):
             marker_map.setdefault(s.marker or f"S{i}", s)
+        raw, _qrefs = grounded.finalize_raw(raw, marker_map)
         text, citations, is_grounded = grounded.enforce_citations(raw, marker_map, question=query.text)
         used_model = getattr(llm, "last_model_used", "") or getattr(llm, "model_id", "")
         return Answer(
@@ -724,6 +732,7 @@ class ChavrutaPipeline:
             raw, fetched = llm_out.text, getattr(llm_out, "fetched_sources", None) or []
         for i, s in enumerate(fetched or [], len(marker_map) + 1):
             marker_map.setdefault(s.marker or f"S{i}", s)
+        raw, _qrefs = grounded.finalize_raw(raw, marker_map)
         text, citations, is_grounded = grounded.enforce_citations(raw, marker_map, question=query.text)
         return Answer(
             text=text, citations=citations, grounded=is_grounded,

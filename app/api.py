@@ -2663,7 +2663,7 @@ def _daf_yomi_context_note(tractate: str, daf: int, he: bool, amudim: list[str] 
                f"רש\"י, תוספות או מפרשים נוספים, בקש/י אותם דרך ===NEED_SOURCES===. "
                f"אם המשתמש שואל על מספר הדף, ענה {daf} ולא מספר אחר — המספרים שמופיעים ברפרנסים של "
                f"המקורות למטה הם מספור פנימי של מסד הנתונים, לא מספר הדף האמיתי ({mapping}) — המקורות שלמטה עם המספרים האלה הם הדף עצמו. לעולם אל תכתוב מספר פנימי "
-               f"כזה בתשובה, ואל תשאיר סוגריים ריקים במקום מקור. סמן כל טענה וכל ציטוט במרקר [S#] של המקור שממנו הוא לקוח. "
+               f"כזה בתשובה, ואל תשאיר סוגריים ריקים במקום מקור. סמן כל טענה שהמקור עצמו אומר במרקר [S#]; מסקנה שלך עצמך — בלי מרקר, והתחל אותה ב'מכאן אפשר להבין ש'. "
                f"אם השאלה אינה עוסקת בדף הזה, אמור זאת במשפט אחד בתחילת התשובה ואז ענה מהמקורות.{extra_he}{study_he})")
     subject = "the daf the user asked about" if amudim else "today's real daf"
     return (f"(For reference: {subject} is {where}. You were given the daf's opening boundary, sources focused on the "
@@ -2671,8 +2671,8 @@ def _daf_yomi_context_note(tractate: str, daf: int, he: bool, amudim: list[str] 
            f"if you need additional segments, Rashi, Tosafot or other commentaries, request them via ===NEED_SOURCES===. "
            f"If asked which daf this is, answer {daf} — the numbers in the source refs below are the "
            f"database's internal numbering, not the real daf number ({mapping}) — sources carrying those numbers ARE the daf. Never print such an internal number, "
-           f"and never leave empty parentheses where a source belongs. Mark every claim and quotation with the [S#] "
-           f"marker of the source it comes from. If the question is not about this daf, say so in one sentence "
+           f"and never leave empty parentheses where a source belongs. Tag what a source itself says with its [S#]; your own inference carries "
+           f"no marker and opens with 'it follows that'. If the question is not about this daf, say so in one sentence "
            f"at the start and then answer from the sources.{extra_en}{study_en})")
 
 

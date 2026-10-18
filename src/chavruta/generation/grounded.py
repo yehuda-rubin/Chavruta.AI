@@ -130,6 +130,17 @@ def expand_quote_refs(text: str, sources: dict[int, str]) -> tuple[str, dict[str
     return _QREF_RE.sub(repl, text or ""), stats
 
 
+def finalize_raw(raw: str, marker_map: dict) -> tuple[str, dict[str, int]]:
+    """Everything done to the model's raw text BEFORE citations are enforced: drop an opening line
+    that narrates the instructions, then paste every quote reference with the verbatim source text
+    (re-attributing one that names the wrong source). Markers added by the pasting are what
+    `enforce_citations` then turns into citations."""
+    raw = strip_meta_opening(raw)
+    bodies = {int(k[1:]): source_body(getattr(h, "text", "") or getattr(h, "quote", "") or "")
+              for k, h in marker_map.items() if k[1:].isdigit()}
+    return expand_quote_refs(raw, bodies)
+
+
 def source_body(text: str) -> str:
     """Drop the internal "[label] Ref daf:seg" header line a stored document carries, leaving
     the source's actual text. The header is prompt scaffolding (and may hold a pre-correction
@@ -152,6 +163,23 @@ def strip_thinking(text: str) -> str:
         cleaned = cleaned.split("<think>")[0]
     return cleaned.strip()
 
+# The quote-reference rule, in every mode: the model never types a quotation — it marks the span and
+# the system pastes the exact words (see expand_quote_refs). Appended to the English base prompt
+# (SYSTEM_QA, from which explain / compare / lesson / walkthrough derive) and to SYSTEM_BASE_HE.
+QUOTE_REF_RULE = (
+    " QUOTE REFERENCES: never type a quotation yourself and never put quotation marks around source "
+    "text. To quote a source, write a quote reference {{S3: first words … last words}}, copying those "
+    "first and last words EXACTLY as they appear in source S3 — the system replaces it with the "
+    "verbatim text between them. For a short quote write all of it: {{S3: exact phrase}}. Cite "
+    "paraphrases with [S#] as usual."
+)
+QUOTE_REF_RULE_HE = (
+    " הפניות ציטוט: לעולם אל תקליד ציטוט בעצמך ואל תשים מרכאות סביב לשון מקור. כדי לצטט מקור כתוב "
+    "הפניית ציטוט {{S3: מילים ראשונות … מילים אחרונות}} — העתק את המילים הראשונות והאחרונות בדיוק "
+    "כפי שהן מופיעות במקור S3, והמערכת תחליף אותה בטקסט המדויק שביניהן. לציטוט קצר כתוב אותו כולו: "
+    "{{S3: הביטוי המדויק}}. דברים שאינם ציטוט מילולי — סמן ב-[S#] כרגיל."
+)
+
 SYSTEM_QA = (
     "You are Chavruta, a trustworthy Torah study partner. You answer ONLY from the sources "
     "provided to you. Every factual claim MUST cite its source by marker, e.g. [S1]. "
@@ -159,7 +187,7 @@ SYSTEM_QA = (
     "attributions, or content that is not in the provided sources. If the sources do not "
     "answer the question, say so plainly. If any provided sources are irrelevant or off-topic, "
     "silently ignore them completely — NEVER survey irrelevant sources, explain why they do not apply, or list sources in sequence. "
-    "Use quotation marks ONLY when quoting word-for-word from a provided source; never invent or paraphrase inside quotes. "
+    "Quote a source only through a quote reference (see QUOTE REFERENCES below); never invent or paraphrase inside quotes. "
     "Respect halachic chronology and hierarchy (Tannaim, Amoraim, Rishonim, Shulchan Aruch/Rema, Acharonim/Mishna Berurah); "
     "never treat a Tanna and a Rishon as equal opposing opinions. Attribute each statement to the correct commentator. "
     "When a claim characterizes a specific real, identifiable person (a historical figure, a "
@@ -188,6 +216,7 @@ SYSTEM_QA = (
     "(this conversation and its sources) if that genuinely suffices; ask for more sources if it "
     "doesn't; or, when the request is truly ambiguous and the answer would differ materially "
     "depending on the reading, ask the user one short clarifying question instead of guessing."
+    + QUOTE_REF_RULE
 )
 
 SYSTEM_EXPLAIN = SYSTEM_QA + (
@@ -233,8 +262,8 @@ SYSTEM_BASE_HE = (
     "עיצוב התשובה: השתמש בטקסט רגיל, ירידות שורה, והדגשות בעזרת כוכביות כפולות (לדוגמה: **טקסט מודגש**) בלבד. "
     "לעולם אל תשתמש בכותרות Markdown (#, ##, ###) או בשורת ציטוט שמתחילה ב-'>'. "
     "לעולם אל תכתוב את המילה \"מודגש\" ככותרת, כפתיח או כתווית בתחילת התשובה! "
-    "דיוק בציטוטים: הבא ציטוטים במרכאות רגילות אך ורק כאשר מדובר בציטוט מדויק מילה במילה מתוך המקור שסופק! "
-    "אם אינך מצטט מילה במילה אלא מסכם או מביא את תורף הדברים — כתוב זאת בלשונך ללא מרכאות; לעולם אל תמציא ציטוט. "
+    "דיוק בציטוטים: ציטוט מילה במילה — אך ורק באמצעות הפניית ציטוט (ראה בסוף). "
+    "אם אינך מצטט אלא מסכם או מביא את תורף הדברים — כתוב זאת בלשונך ללא מרכאות; לעולם אל תמציא ציטוט. "
     "אם לשון מקור מסוים כתובה בשפה שונה משפת התשובה (למשל תשובה שתורגמה לאנגלית, בתוך תשובה "
     "בעברית) — תרגם אותה לשפת התשובה במקום לצטט אותה כלשונה בשפה הזרה; סימון ה-[S#] עדיין "
     "מקשר את הקורא למקור המקורי. "
@@ -249,6 +278,7 @@ SYSTEM_BASE_HE = (
     "אל תגרום למשתמש לחזור על עצמו. בכל תור בחר במודע: ענה ממה שכבר יש לך (השיחה הזו והמקורות "
     "שבה) אם זה באמת מספיק; בקש מקורות נוספים אם לא; או, כשהבקשה באמת דו-משמעית והתשובה תשתנה "
     "מהותית לפי הפירוש — שאל את המשתמש שאלת הבהרה אחת קצרה במקום לנחש."
+    + QUOTE_REF_RULE_HE
 )
 
 # QA stays short and direct; explain/lesson must NOT inherit that brevity instruction.
