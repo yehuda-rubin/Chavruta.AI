@@ -15,8 +15,9 @@ const COPY = {
     navWhy: "למה חברותא", navHow: "איך זה עובד", navExamples: "דוגמאות", navPrice: "מחירים", navFaq: "שאלות",
     examplesTitle: "ראו איך זה נראה", examplesSub: "דפים ושיעורים לדוגמה, עם המקורות והרישיונות שלהם.",
     examplesCards: [
-      ["הדף היומי", "ארבעה דפי גמרא עם שאלות ותשובות מבוססות מקורות."],
-      ["שיעורים", "שיעור עיון בגמרא ושיעור באמונה, עם מהלך ודף מקורות."],
+      ["דף יומי", "סנהדרין כה ע״א", "שאלות ותשובות על הדף, כל אחת עם המקורות שעליהם היא נשענת.", "/examples/daf/sanhedrin-25a", "לצפייה בדף"],
+      ["שיעור עיון", "שניים אוחזין בטלית", "טעם החלוקה והשבועה, מהלך השיעור ודף מקורות.", "/examples/lesson/gemara-shnayim-ochazin", "לצפייה בשיעור"],
+      ["שיעור באמונה", "בחירה חופשית וידיעת ה׳", "הרמב״ם בהלכות תשובה והשגת הראב״ד, עם דף מקורות.", "/examples/lesson/emuna-bechira", "לצפייה בשיעור"],
     ],
     examplesBtn: "לכל הדוגמאות",
     signIn: "כניסה", start: "התחילו חינם", langBtn: "English",
@@ -53,8 +54,9 @@ const COPY = {
     navWhy: "Why Chavruta", navHow: "How it works", navExamples: "Examples", navPrice: "Pricing", navFaq: "FAQ",
     examplesTitle: "See what it looks like", examplesSub: "Sample pages and lessons, with their sources and licences.",
     examplesCards: [
-      ["Daf Yomi", "Four Talmud pages with source-grounded questions and answers."],
-      ["Lessons", "A Talmudic analysis lesson and a lesson on faith, with a flow and a source sheet."],
+      ["Daf Yomi", "Sanhedrin 25a", "Questions and answers on the page, each tied to the sources it rests on.", "/examples/daf/sanhedrin-25a", "View the page"],
+      ["Analysis lesson", "Two hold a cloak", "Why the cloak is split and the oath is taken, with a lesson flow and a source sheet.", "/examples/lesson/gemara-shnayim-ochazin", "View the lesson"],
+      ["Lesson on faith", "Free will and God's knowledge", "Rambam on repentance and the Raavad's objection, with a source sheet.", "/examples/lesson/emuna-bechira", "View the lesson"],
     ],
     examplesBtn: "All examples",
     signIn: "Sign in", start: "Start free", langBtn: "עברית",
@@ -195,14 +197,17 @@ export function Landing() {
         <div className="wrap">
           <h2>{c.examplesTitle}</h2>
           <p className="sub">{c.examplesSub}</p>
-          <div className="steps">
-            {c.examplesCards.map(([h, p]) => (
-              <Link className="step" href="/examples" key={h} style={{ display: "block", color: "inherit", textDecoration: "none" }}>
-                <h3>{h}</h3><p>{p}</p>
+          <div className="exgrid">
+            {c.examplesCards.map(([tag, h, p, href, cta]) => (
+              <Link className="excard" href={href} key={href}>
+                <span className="extag">{tag}</span>
+                <h3>{h}</h3>
+                <p>{p}</p>
+                <span className="excta">{cta}</span>
               </Link>
             ))}
           </div>
-          <p style={{ marginTop: 16 }}><Link className="btn w big" href="/examples">{c.examplesBtn}</Link></p>
+          <p className="exmore"><Link className="btn w big" href="/examples">{c.examplesBtn}</Link></p>
         </div>
       </section>
 
