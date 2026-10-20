@@ -12,7 +12,13 @@ const CONTACT_EMAIL = "rubinyehuda8@gmail.com";
 // claims the product can back: every answer cites its source, and "no source" is a valid answer.
 const COPY = {
   he: {
-    navWhy: "למה חברותא", navHow: "איך זה עובד", navPrice: "מחירים", navFaq: "שאלות",
+    navWhy: "למה חברותא", navHow: "איך זה עובד", navExamples: "דוגמאות", navPrice: "מחירים", navFaq: "שאלות",
+    examplesTitle: "ראו איך זה נראה", examplesSub: "דפים ושיעורים לדוגמה, עם המקורות והרישיונות שלהם.",
+    examplesCards: [
+      ["הדף היומי", "ארבעה דפי גמרא עם שאלות ותשובות מבוססות מקורות."],
+      ["שיעורים", "שיעור עיון בגמרא ושיעור באמונה, עם מהלך ודף מקורות."],
+    ],
+    examplesBtn: "לכל הדוגמאות",
     signIn: "כניסה", start: "התחילו חינם", langBtn: "English",
     h1: "החברותא שתמיד מוכנה ללמוד איתך",
     lead: "שואלים בחופשיות על כל ספר ביהדות. מקבלים תשובה ברורה, וכל משפט בה מפנה למקור שאפשר לפתוח.",
@@ -44,7 +50,13 @@ const COPY = {
     terms: "תנאי שימוש", privacy: "פרטיות", access: "נגישות", limits: "מכסות ותוכניות", examples: "דוגמאות", brand: "חברותא",
   },
   en: {
-    navWhy: "Why Chavruta", navHow: "How it works", navPrice: "Pricing", navFaq: "FAQ",
+    navWhy: "Why Chavruta", navHow: "How it works", navExamples: "Examples", navPrice: "Pricing", navFaq: "FAQ",
+    examplesTitle: "See what it looks like", examplesSub: "Sample pages and lessons, with their sources and licences.",
+    examplesCards: [
+      ["Daf Yomi", "Four Talmud pages with source-grounded questions and answers."],
+      ["Lessons", "A Talmudic analysis lesson and a lesson on faith, with a flow and a source sheet."],
+    ],
+    examplesBtn: "All examples",
     signIn: "Sign in", start: "Start free", langBtn: "עברית",
     h1: "The study partner who is always ready to learn with you",
     lead: "Ask freely about any Jewish text. Get a clear answer where every sentence points to a source you can open.",
@@ -115,6 +127,7 @@ export function Landing() {
           <ul>
             <li><a href="#why">{c.navWhy}</a></li>
             <li><a href="#how">{c.navHow}</a></li>
+            <li><a href="#examples">{c.navExamples}</a></li>
             {free && <li><a href="#pricing">{c.navPrice}</a></li>}
             <li><a href="#faq">{c.navFaq}</a></li>
           </ul>
@@ -175,6 +188,21 @@ export function Landing() {
               </div>
             ))}
           </div>
+        </div>
+      </section>
+
+      <section id="examples" style={{ paddingTop: 20 }}>
+        <div className="wrap">
+          <h2>{c.examplesTitle}</h2>
+          <p className="sub">{c.examplesSub}</p>
+          <div className="steps">
+            {c.examplesCards.map(([h, p]) => (
+              <Link className="step" href="/examples" key={h} style={{ display: "block", color: "inherit", textDecoration: "none" }}>
+                <h3>{h}</h3><p>{p}</p>
+              </Link>
+            ))}
+          </div>
+          <p style={{ marginTop: 16 }}><Link className="btn w big" href="/examples">{c.examplesBtn}</Link></p>
         </div>
       </section>
 
