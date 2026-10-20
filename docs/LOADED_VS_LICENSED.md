@@ -1,0 +1,441 @@
+# מה מורשה מול מה טעון בפועל
+
+נוצר מסריקת קריאה-בלבד של `chavruta_commercial` (שם עבודה לפי ה-ref) מול `licenses.json`.
+סה"כ שמות עבודה בסריקה: 108012; כותרות מורשות מסחרית ב-licenses.json: 5762.
+
+| משפחה | מורשות | טעונות (כותרות) | נקודות | מורשות ולא טעונות | לא מורשות | דוגמאות לחסרות | דוגמאות לטעונות |
+|---|---|---|---|---|---|---|---|
+| Beit Yosef | 1 | 2 | 6065 | 0 | 0 |  | Beit Yosef, Introduction; Beit Yosef, Orach Chayim |
+| Tur | 12 | 31 | 16091 | 0 | 0 |  | Abarbanel on Guide for the Perplexed, Strictures to Maimonides' Interpretation of the Account of the Chariot; Al Kapot HaMan'ul; Homilies for the Days of Awe, A Reflection into the Future; Ba'al HaTurim on Genesis; Divrei Emet, Divrei Emet on Torah, A Collection on Sciptures; Kitzur Ba'al HaTurim on Deuteronomy; Kitzur Ba'al HaTurim on Exodus |
+| Turei Zahav | 4 | 6 | 9591 | 0 | 0 |  | Turei Zahav on Shulchan Arukh, Choshen Mishpat; Turei Zahav on Shulchan Arukh, Even HaEzer; Turei Zahav on Shulchan Arukh, Even HaEzer, Seder HaGet; Turei Zahav on Shulchan Arukh, Even HaEzer, Shemot Anashim V'Nashim; Turei Zahav on Shulchan Arukh, Orach Chayim; Turei Zahav on Shulchan Arukh, Yoreh De'ah |
+| Siftei Kohen | 3 | 10 | 17104 | 0 | 0 |  | Siftei Kohen on Shulchan Arukh, Choshen Mishpat; Siftei Kohen on Shulchan Arukh, Choshen Mishpat, Dinei Migo; Siftei Kohen on Shulchan Arukh, Yoreh De'ah; Siftei Kohen on Shulchan Arukh, Yoreh De'ah, S'fek S'feka Summary; Siftei Kohen on Torah, Author's Introduction; Siftei Kohen on Torah, Deuteronomy |
+| Rif | 51 | 51 | 19131 | 0 | 0 |  | Ha'atakat Teshuvat HaRif on Ketubot; Ha'atakat Teshuvat HaRif on Shevuot; Hagahot HaBach on Rif Avodah Zarah; Hagahot HaBach on Rif Bava Batra; Hagahot HaBach on Rif Bava Kamma; Hagahot HaBach on Rif Bava Metzia |
+| Ran on | 96 | 96 | 16145 | 0 | 0 |  | Ran on Avodah Zarah; Ran on Beitzah; Ran on Chullin; Ran on Gittin; Ran on Ketubot; Ran on Kiddushin |
+| Ritva | 19 | 32 | 11482 | 1 | 0 | Teshuvot HaRitva | Commentary of Ritva on Pesach Haggadah, Barech, Third Cup of Wine; Commentary of Ritva on Pesach Haggadah, Magid, Dayenu; Commentary of Ritva on Pesach Haggadah, Magid, First Fruits Declaration; Commentary of Ritva on Pesach Haggadah, Magid, First Half of Hallel; Commentary of Ritva on Pesach Haggadah, Magid, Four Questions; Commentary of Ritva on Pesach Haggadah, Magid, Ha Lachma Anya |
+| Meiri | 13 | 4 | 3400 | 11 | 0 | Meiri on Avodah Zarah; Meiri on Bava Kamma; Meiri on Bava Metzia; Meiri on Berakhot; Meiri on Pesachim; Meiri on Rosh Hashanah; Meiri on Sanhedrin; Meiri on Shabbat; Meiri on Sotah; Meiri on Yevamot; Meiri on Yoma | Meiri on Eruvin; Meiri on Eruvin, Introduction; Meiri on Psalms; Meiri on Psalms, Introduction |
+| Rabbeinu Bahya | 1 | 6 | 5565 | 0 | 0 |  | Rabbeinu Bahya, Bamidbar; Rabbeinu Bahya, Bereshit; Rabbeinu Bahya, Devarim; Rabbeinu Bahya, Introduction; Rabbeinu Bahya, Shemot; Rabbeinu Bahya, Vayikra |
+| Kuzari | 1 | 0 | 0 | 1 | 0 | Kuzari |  |
+| Duties of the Heart | 2 | 22 | 2328 | 1 | 0 | Duties of the Heart (abridged) | Duties of the Heart, Addenda, Ten Sections (Poem); Duties of the Heart, Eighth Treatise on Examining the Soul; Duties of the Heart, Eighth Treatise on Examining the Soul, Introduction; Duties of the Heart, Fifth Treatise on Devotion; Duties of the Heart, Fifth Treatise on Devotion, Introduction; Duties of the Heart, First Treatise on Unity |
+| Derekh Hashem | 1 | 28 | 208 | 0 | 0 |  | Derekh Hashem, Introduction; Derekh Hashem, Part Four, On Blessings; Derekh Hashem, Part Four, On Divine Service; Derekh Hashem, Part Four, On Divine Service and the Calendar; Derekh Hashem, Part Four, On Love and Fear of God; Derekh Hashem, Part Four, On Prayer |
+| Rabbah | 78 | 108 | 98032 | 5 | 0 | Bamidbar Rabbah; Devarim Rabbah; Eliyahu Rabbah on Mishnah Kelim; Eliyahu Rabbah on Mishnah Negaim; Esther Rabbah | Agra DeKala, Insights on Midrash, Targum and Rashi on Bereshit, Noach and Lech Lecha, Midrash Rabbah; Bereshit Rabbah; Eikhah Rabbah; Eikhah Rabbah, Petichta; Eliyah Rabbah on Shulchan Arukh, Orach Chayim; Etz Yosef on Bamidbar Rabbah |
+| Mekhilta | 3 | 8 | 2334 | 1 | 0 | Mekhilta DeRabbi Yishmael | Chafetz Chaim on Sifra, Shemini, Mekhilta DeMiluim II; Chafetz Chaim on Sifra, Tzav, Mekhilta DeMiluim I; Footnotes on Mekhilta DeRabbi Shimon Ben Yochai; Footnotes on Mekhilta DeRabbi Shimon Ben Yochai, Additions; Mekhilta DeRabbi Shimon Ben Yochai; Mekhilta DeRabbi Shimon Ben Yochai, Additions |
+| Abarbanel | 16 | 16 | 4145 | 15 | 1 | Abarbanel on Amos; Abarbanel on Ezekiel; Abarbanel on Hosea; Abarbanel on I Kings; Abarbanel on I Samuel; Abarbanel on II Kings; Abarbanel on II Samuel; Abarbanel on Isaiah; Abarbanel on Jeremiah; Abarbanel on Joel; Abarbanel on Jonah; Abarbanel on Joshua | Abarbanel on Guide for the Perplexed, A Short Treatise on the Secrets of the Guide; Abarbanel on Guide for the Perplexed, Introduction, Letter to R Joseph son of Judah; Abarbanel on Guide for the Perplexed, Introduction, Prefatory Remarks; Abarbanel on Guide for the Perplexed, Part 1; Abarbanel on Guide for the Perplexed, Part 2; Abarbanel on Guide for the Perplexed, Part 3 |
+| Chizkuni | 1 | 6 | 5836 | 0 | 0 |  | Chizkuni, Deuteronomy; Chizkuni, Exodus; Chizkuni, Genesis; Chizkuni, Introduction; Chizkuni, Leviticus; Chizkuni, Numbers |
+| Rashbam | 8 | 8 | 9597 | 0 | 0 |  | Rashbam on Bava Batra; Rashbam on Deuteronomy; Rashbam on Exodus; Rashbam on Genesis; Rashbam on Leviticus; Rashbam on Menachot |
+| Likutei Moharan | 1 | 1 | 1672 | 0 | 0 |  | Likutei Moharan, Part II |
+| Sefat Emet | 1 | 70 | 7163 | 0 | 0 |  | Ma'avar Yabbok, Sefat Emet; Sefat Emet, Deuteronomy, Devarim; Sefat Emet, Deuteronomy, Eikev; Sefat Emet, Deuteronomy, For the Day of Atonement; Sefat Emet, Deuteronomy, For the Month of Elul; Sefat Emet, Deuteronomy, Ha'Azinu |
+| Noam Elimelekh | 1 | 59 | 1555 | 0 | 0 |  | Noam Elimelekh, Additions, A Prayer before Praying; Noam Elimelekh, Additions, Epistles; Noam Elimelekh, Additions, Hanhagot HaAdam; Noam Elimelekh, Additions, Iggeret HaKodesh; Noam Elimelekh, Additions, Iggeret HaKodesh, Introduction; Noam Elimelekh, Additions, Likutei Shoshana |
+| Kedushat Levi | 1 | 85 | 1482 | 0 | 0 |  | Kedushat Levi, Chidushei Agadot; Kedushat Levi, Chidushei Halachot; Kedushat Levi, Deuteronomy, Devarim; Kedushat Levi, Deuteronomy, Eikev; Kedushat Levi, Deuteronomy, For Rosh HaShanah; Kedushat Levi, Deuteronomy, For Shabbat Nachamu |
+| Mishnah Berurah | 1 | 1 | 12912 | 0 | 0 |  | Mishnah Berurah |
+| Mapah | 0 | 0 | 0 | 0 | 0 |  |  |
+| Rema | 1 | 11 | 2313 | 0 | 0 |  | Abarbanel on Guide for the Perplexed, Introduction, Prefatory Remarks; Crescas on Guide for the Perplexed, Prefatory Remarks; Efodi on Guide for the Perplexed, Prefatory Remarks; Guide for the Perplexed, Prefatory Remarks; Responsa of Rema; Responsa of Rema, Index |
+| Sefer HaChinukh | 1 | 2 | 6 | 0 | 0 |  | Sefer HaChinukh, Author's Introduction; Sefer HaChinukh, Opening Letter by the Author |
+| Maharal | 1 | 5 | 141 | 0 | 0 |  | Drashot Maharal, Drush Al HaTorah; Drashot Maharal, Drush Al Hamitzvot; Drashot Maharal, Drush L'Shabbat HaGadol; Drashot Maharal, Drush L'Shabbat T'Shuva; Drashot Maharal, Introduction |
+| Mesilat Yesharim | 0 | 0 | 0 | 0 | 0 |  |  |
+| Orot | 50 | 79 | 15310 | 6 | 2 | English Explanation of Mishnah Bekhorot; English Explanation of Mishnah Tahorot; German Commentary on Mishnah Bekhorot; German Commentary on Mishnah Tahorot; Orot HaTeshuvah; Seder HaDorot | Bartenura on Mishnah Bekhorot; Bartenura on Mishnah Tahorot; Bekhorot; Ben Yehoyada on Bekhorot; Boaz on Mishnah Bekhorot; Boaz on Mishnah Tahorot |
+| Torah Or | 0 | 0 | 0 | 0 | 0 |  |  |
+| Likutei Torah | 0 | 0 | 0 | 0 | 0 |  |  |
+
+## מורשות מסחרית ולא טעונות (כל הכותרות, לפי קטגוריה)
+
+סה"כ: 406 כותרות. 400 הראשונות:
+- Abarbanel on Amos
+- Abarbanel on Ezekiel
+- Abarbanel on Hosea
+- Abarbanel on I Kings
+- Abarbanel on I Samuel
+- Abarbanel on II Kings
+- Abarbanel on II Samuel
+- Abarbanel on Isaiah
+- Abarbanel on Jeremiah
+- Abarbanel on Joel
+- Abarbanel on Jonah
+- Abarbanel on Joshua
+- Abarbanel on Judges
+- Abarbanel on Obadiah
+- Abarbanel on Zechariah
+- Abraham Cohen Footnotes to the English Translation of Masechet Berakhot
+- Adam Min HaAdamah
+- Ahevukha Ad Mavet
+- Akdamut Milin
+- Allegorical Interpretation of Genesis
+- Alon Bakhut on Lamentations
+- Animadversions by Elias Levita on Sefer HaShorashim
+- Ateret Zekeinim
+- Avodat HaKodesh (Ibn Gabbai)
+- BDB
+- BDB Aramaic
+- Baal HaSulam's Introduction to Zohar
+- Baal HaSulam's Preface to Zohar
+- Bamidbar Rabbah
+- Barukh SheAmar on Pesach Haggadah
+- Bat Ayin
+- Beit Yaakov on Torah
+- Ben Porat Yosef
+- Bereshit Rabbati
+- Book of Jubilees
+- Cassuto on Exodus
+- Cassuto on Genesis
+- Ceremony and Celebration Family Edition, The Hagim
+- Chakham Tzvi
+- Chayyim VaChesed
+- Chibbah Yeteirah on Torah
+- Chomat Anakh on Daniel
+- Chomat Anakh on Esther
+- Chomat Anakh on II Samuel
+- Chomat Anakh on Isaiah
+- Chomat Anakh on Joshua
+- Chomat Anakh on Torah
+- Collected Responsa in Wartime
+- Collected Responsa to Chaplains
+- Concerning Noah's Work as a Planter
+- Contemporary Halakhic Problems, Vol I
+- Da'at Tevunot
+- Daf Shevui to Kiddushin
+- Daf Shevui to Megillah
+- Daf Shevui to Sukkah
+- Davar BeItto
+- David Zvi Hoffmann on Leviticus
+- Depths of Yonah
+- Derashot HaRan
+- Derekh HaMelekh
+- Derekh Mitzvotekha
+- Devarim Rabbah
+- Dirshuni I
+- Dirshuni II
+- Duties of the Heart (abridged)
+- Eliyahu Rabbah on Mishnah Kelim
+- Eliyahu Rabbah on Mishnah Negaim
+- English Explanation of Mishnah Arakhin
+- English Explanation of Mishnah Avodah Zarah
+- English Explanation of Mishnah Bava Batra
+- English Explanation of Mishnah Bava Kamma
+- English Explanation of Mishnah Bava Metzia
+- English Explanation of Mishnah Beitzah
+- English Explanation of Mishnah Bekhorot
+- English Explanation of Mishnah Berakhot
+- English Explanation of Mishnah Bikkurim
+- English Explanation of Mishnah Chagigah
+- English Explanation of Mishnah Challah
+- English Explanation of Mishnah Chullin
+- English Explanation of Mishnah Demai
+- English Explanation of Mishnah Eduyot
+- English Explanation of Mishnah Eruvin
+- English Explanation of Mishnah Gittin
+- English Explanation of Mishnah Horayot
+- English Explanation of Mishnah Kelim
+- English Explanation of Mishnah Keritot
+- English Explanation of Mishnah Ketubot
+- English Explanation of Mishnah Kiddushin
+- English Explanation of Mishnah Kilayim
+- English Explanation of Mishnah Kinnim
+- English Explanation of Mishnah Maaser Sheni
+- English Explanation of Mishnah Maasrot
+- English Explanation of Mishnah Makhshirin
+- English Explanation of Mishnah Makkot
+- English Explanation of Mishnah Megillah
+- English Explanation of Mishnah Meilah
+- English Explanation of Mishnah Menachot
+- English Explanation of Mishnah Middot
+- English Explanation of Mishnah Mikvaot
+- English Explanation of Mishnah Moed Katan
+- English Explanation of Mishnah Nazir
+- English Explanation of Mishnah Nedarim
+- English Explanation of Mishnah Negaim
+- English Explanation of Mishnah Niddah
+- English Explanation of Mishnah Oholot
+- English Explanation of Mishnah Oktzin
+- English Explanation of Mishnah Orlah
+- English Explanation of Mishnah Parah
+- English Explanation of Mishnah Peah
+- English Explanation of Mishnah Pesachim
+- English Explanation of Mishnah Rosh Hashanah
+- English Explanation of Mishnah Sanhedrin
+- English Explanation of Mishnah Shabbat
+- English Explanation of Mishnah Shekalim
+- English Explanation of Mishnah Sheviit
+- English Explanation of Mishnah Shevuot
+- English Explanation of Mishnah Sotah
+- English Explanation of Mishnah Sukkah
+- English Explanation of Mishnah Taanit
+- English Explanation of Mishnah Tahorot
+- English Explanation of Mishnah Tamid
+- English Explanation of Mishnah Temurah
+- English Explanation of Mishnah Terumot
+- English Explanation of Mishnah Tevul Yom
+- English Explanation of Mishnah Yadayim
+- English Explanation of Mishnah Yevamot
+- English Explanation of Mishnah Yoma
+- English Explanation of Mishnah Zavim
+- English Explanation of Mishnah Zevachim
+- English Explanation of Pirkei Avot
+- Esh Kodesh
+- Esther Rabbah
+- Flames of Faith
+- Footnotes to Kohelet by Bruce Heitler
+- For the Perplexed of the Generation
+- From David to Destruction
+- Gan Naul (Abulafia)
+- German Commentary on Mishnah Arakhin
+- German Commentary on Mishnah Avodah Zarah
+- German Commentary on Mishnah Bava Batra
+- German Commentary on Mishnah Bava Kamma
+- German Commentary on Mishnah Bava Metzia
+- German Commentary on Mishnah Beitzah
+- German Commentary on Mishnah Bekhorot
+- German Commentary on Mishnah Berakhot
+- German Commentary on Mishnah Bikkurim
+- German Commentary on Mishnah Chagigah
+- German Commentary on Mishnah Challah
+- German Commentary on Mishnah Chullin
+- German Commentary on Mishnah Demai
+- German Commentary on Mishnah Eduyot
+- German Commentary on Mishnah Eruvin
+- German Commentary on Mishnah Gittin
+- German Commentary on Mishnah Horayot
+- German Commentary on Mishnah Kelim
+- German Commentary on Mishnah Keritot
+- German Commentary on Mishnah Ketubot
+- German Commentary on Mishnah Kiddushin
+- German Commentary on Mishnah Kilayim
+- German Commentary on Mishnah Kinnim
+- German Commentary on Mishnah Maaser Sheni
+- German Commentary on Mishnah Maasrot
+- German Commentary on Mishnah Makhshirin
+- German Commentary on Mishnah Makkot
+- German Commentary on Mishnah Megillah
+- German Commentary on Mishnah Meilah
+- German Commentary on Mishnah Menachot
+- German Commentary on Mishnah Middot
+- German Commentary on Mishnah Mikvaot
+- German Commentary on Mishnah Moed Katan
+- German Commentary on Mishnah Nazir
+- German Commentary on Mishnah Nedarim
+- German Commentary on Mishnah Negaim
+- German Commentary on Mishnah Niddah
+- German Commentary on Mishnah Oholot
+- German Commentary on Mishnah Oktzin
+- German Commentary on Mishnah Orlah
+- German Commentary on Mishnah Parah
+- German Commentary on Mishnah Peah
+- German Commentary on Mishnah Pesachim
+- German Commentary on Mishnah Rosh Hashanah
+- German Commentary on Mishnah Sanhedrin
+- German Commentary on Mishnah Shabbat
+- German Commentary on Mishnah Shekalim
+- German Commentary on Mishnah Sheviit
+- German Commentary on Mishnah Shevuot
+- German Commentary on Mishnah Sotah
+- German Commentary on Mishnah Sukkah
+- German Commentary on Mishnah Ta'anit
+- German Commentary on Mishnah Tahorot
+- German Commentary on Mishnah Tamid
+- German Commentary on Mishnah Temurah
+- German Commentary on Mishnah Terumot
+- German Commentary on Mishnah Tevul Yom
+- German Commentary on Mishnah Yadayim
+- German Commentary on Mishnah Yevamot
+- German Commentary on Mishnah Yoma
+- German Commentary on Mishnah Zavim
+- German Commentary on Mishnah Zevachim
+- German Commentary on Pirkei Avot
+- German Commentary, Introduction
+- German Commentary, Introduction to Seder Nezikin
+- Gray Matter I
+- Gray Matter II
+- Gray Matter III
+- Hadran
+- Haggahot Ya'avetz on Eruvin
+- Halakhah and Aggadah
+- Hallel
+- Hasagot HaRa'avad on Mishneh Torah, Slaves
+- Hegyonei Uziel
+- Heikhalot Rabbati
+- Hilkhot Niddah of the Ramban
+- Horeb
+- Hypothetica
+- Idra Zuta
+- Introduction to Sulam Commentary
+- Jastrow
+- Karati Bekhol Lev
+- Kessef Mishneh on Mishneh Torah, Forbidden Intercourse
+- Kessef Mishneh on Mishneh Torah, Sabbath
+- Ketonet Pasim
+- Ketubah Text
+- Kol Dodi Dofek
+- Kuntres Mattan Torah
+- Kuzari
+- LaKelal VeLaPerat
+- Legends of the Jews
+- Likkutei Etzot
+- Likkutei Torah
+- Likutei Halakhot
+- Likutei Tefilot
+- Ma'amar Tzipita LeYeshuah
+- Ma'amar Zohar HaRakia
+- Ma'amar al Yishmael
+- Machzor Rosh Hashanah Sefard
+- Machzor Yom Kippur Ashkenaz
+- Machzor Yom Kippur Sefard
+- Maggid Mishneh on Mishneh Torah, Ownerless Property and Gifts
+- Mahari Bruna
+- Mahari Weil
+- Malbim Beur Hamilot on Psalms
+- Malbim on I Samuel
+- Malbim on Isaiah
+- Mareh Yechezkel on Torah
+- Mashmia Yeshuah
+- Matteh Dan
+- Megillat Antiochus
+- Mei HaShiloach
+- Meiri on Avodah Zarah
+- Meiri on Bava Kamma
+- Meiri on Bava Metzia
+- Meiri on Berakhot
+- Meiri on Pesachim
+- Meiri on Rosh Hashanah
+- Meiri on Sanhedrin
+- Meiri on Shabbat
+- Meiri on Sotah
+- Meiri on Yevamot
+- Meiri on Yoma
+- Mekhilta DeRabbi Yishmael
+- Menot HaLevi on Esther
+- Midrash Mishlei
+- Minchat Ani on Pesach Haggadah
+- Mishnat Eretz Yisrael on Mishnah Sanhedrin
+- Mishnat Eretz Yisrael on Pirkei Avot
+- Mishnat Eretz Yisrael, Preface
+- Mishpetei Uziel
+- Musafia Teshuvot HaGeonim
+- Nachalat Avot on Avot
+- Nehar Misrayim
+- Nishmat HaBayit
+- Notes by Heinrich Guggenheimer on Jerusalem Talmud
+- Notes by Rabbi Yehoshua Hartman on Netzach Yisrael
+- Notes by Rabbi Yehoshua Hartman on Ohr Chadash
+- Ohel Ya'akov on Torah
+- Ohr HaSekhel
+- Olat Reiyah
+- On Abraham
+- On Dreams
+- On Drunkenness
+- On Flight and Finding
+- On Husbandry
+- On Joseph
+- On Mating with the Preliminary Studies
+- On Providence
+- On Resurrection of the Dead
+- On Rewards and Punishments
+- On the Account of the World's Creation
+- On the Birth of Abel and the Sacrifices Offered by him and by his Brother Cain
+- On the Change of Names
+- On the Cherubim
+- On the Confusion of Tongues
+- On the Contemplative Life or Suppliants
+- On the Decalogue
+- On the Eternity of the World
+- On the Giants
+- On the Life of Moses
+- On the Migration of Abraham
+- On the Posterity of Cain and his Exile
+- On the Prayers and Curses Uttered by Noah when he Became Sober
+- On the Special Laws
+- On the Unchangeableness of God
+- On the Virtues
+- Orot HaTeshuvah
+- Paaneach Raza
+- Panekha Avakesh
+- Parashat Derakhim
+- Pe'er HaDor Teshuvot HaRambam
+- Peirush on Mishneh Torah, Foundations of the Torah
+- Peninei Halakhah, Berakhot
+- Peninei Halakhah, Family
+- Peninei Halakhah, Family Purity
+- Peninei Halakhah, Kashrut
+- Peninei Halakhah, Likkutim I
+- Peninei Halakhah, Shemitah and Yovel
+- Peninei Halakhah, The Nation and the Land
+- Pesach Haggadah Edot Hamizrah
+- Petichah LeChokhmat HaKabbalah
+- Piskei HaSiddur
+- Prayer of Manasseh
+- Psalm 151
+- Ptil Tekhelet
+- Radak on Amos
+- Radak on Ezekiel
+- Radak on I Chronicles
+- Radak on I Kings
+- Radak on I Samuel
+- Radak on II Kings
+- Radak on II Samuel
+- Radak on Isaiah
+- Radak on Jeremiah
+- Radak on Jonah
+- Radak on Joshua
+- Radak on Judges
+- Radak on Malachi
+- Radak on Zechariah
+- Ramban on Exodus
+- Rav Hirsch on Torah
+- Redeeming Relevance; Deuteronomy
+- Redeeming Relevance; Exodus
+- Redeeming Relevance; Genesis
+- Reshimot Shiurim on Bava Kamma
+- Reshimot Shiurim on Berakhot
+- Reshimot Shiurim on Sanhedrin
+- Reshit Chokhmah
+- Responsa Benei Banim
+- Saadia Gaon on Deuteronomy
+- Saadia Gaon on Exodus
+- Saadia Gaon on Numbers
+- Seder HaDorot
+- Seder Tisha B'Av (Edot HaMizrach)
+- Sefer Daniel; Opportunity in Exile
+- Sefer HaCheshek
+- Sefer HaMitzvot HaKatzar
+- Sha'ar HaEmunah VeYesod HaChasidut
+- Sheilat Yaavetz
+- Shem HaGedolim, Maarekhet Sefarim
+- Shemirat HaLashon
+- Shemonah Kevatzim
+- Shir HaKavod
+- Shivchei HaRan
+- Shulchan Arukh HaRav
+- Shulchan Arukh, Introduction
+- Sichot HaRan
+- Sifra
+- Sifrei Zuta; Midrashah shel Lod
+- Steinsaltz Introductions to Mishneh Torah
+- Steinsaltz on Bava Metzia
+- Steinsaltz on Berakhot
+- Steinsaltz on Sanhedrin
+- Sulam on Zohar
+- Ta'amei HaMinhagim
+- Talks of Yeshayahu Leibowitz on the Parasha
+- Tanya
+- Targum Neofiti
+- Targum Sheni on Esther
+- Teshuvot HaRashbash
+- Teshuvot HaRitva
+- Teshuvot Rashi
+- That the Worse is wont to Attack the Better
+- The Book of Maccabees I (Kahana Translation)
+- The Gate of Unity
+- The Improvement of the Moral Qualities
+- The Jewish Spiritual Heroes
+- The Testaments of the Twelve Patriarchs
+- The Wars of God
+- Tiferet Yosef
+- Tikkun HaKlali
+- Torah Ohr
+- Treasures Hidden in the Sand
+- Tzafnat Pa'neach on Mishneh Torah, Transmission of the Oral Law
+- Tze'enah Ure'enah
+- Tziyyun LeNefesh Chayyah on Berakhot
+- Tzofnat Paneach
+- Unetaneh Tokef
+- Weekday Siddur Chabad
+- Who is the Heir of Divine Things
+- Yalkut Shimoni on Nach
+- Yalkut Shimoni on Torah
