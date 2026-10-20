@@ -41,7 +41,7 @@ const COPY = {
       ["מה קורה כשאין תשובה במקורות?", "חברותא אומרת שלא נמצא מקור, ולא מנסה לנחש."],
     ],
     finalH: "בואו נלמד ביחד", finalBtn: "הרשמה חינם",
-    terms: "תנאי שימוש", privacy: "פרטיות", access: "נגישות", limits: "מכסות ותוכניות", brand: "חברותא",
+    terms: "תנאי שימוש", privacy: "פרטיות", access: "נגישות", limits: "מכסות ותוכניות", examples: "דוגמאות", brand: "חברותא",
   },
   en: {
     navWhy: "Why Chavruta", navHow: "How it works", navPrice: "Pricing", navFaq: "FAQ",
@@ -73,7 +73,7 @@ const COPY = {
       ["What if the sources have no answer?", "Chavruta says no source was found, and does not guess."],
     ],
     finalH: "Let’s learn together", finalBtn: "Sign up free",
-    terms: "Terms", privacy: "Privacy", access: "Accessibility", limits: "Plans & limits", brand: "Chavruta",
+    terms: "Terms", privacy: "Privacy", access: "Accessibility", limits: "Plans & limits", examples: "Examples", brand: "Chavruta",
   },
 } as const;
 
@@ -238,6 +238,7 @@ export function Landing() {
             <Link href="/privacy">{c.privacy}</Link>
             <Link href="/accessibility">{c.access}</Link>
             <Link href="/limits">{c.limits}</Link>
+            <Link href="/examples">{c.examples}</Link>
           </nav>
         </div>
       </footer>
