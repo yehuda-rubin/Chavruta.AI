@@ -5030,6 +5030,31 @@ def referral_claim(req: ReferralClaimRequest, owner: str = Depends(current_owner
     )
 
 
+@app.get("/account/unsubscribe")
+def marketing_unsubscribe_page(t: str = ""):
+    """The page a marketing email's link opens. It only ASKS: mail scanners follow links on their own,
+    and a GET that unsubscribed would silently drop people who never clicked."""
+    from fastapi.responses import HTMLResponse
+    from app import marketing
+    if marketing.verify_token(t) is None:
+        return HTMLResponse(marketing.page_error(), status_code=400)
+    return HTMLResponse(marketing.page_confirm(t))
+
+
+@app.post("/account/unsubscribe")
+def marketing_unsubscribe(t: str = ""):
+    """Withdraw marketing consent. Public: the signed token in `t` is the credential. Also the target of
+    the `List-Unsubscribe-Post: List-Unsubscribe=One-Click` header (RFC 8058), which mail clients POST to."""
+    from fastapi.responses import HTMLResponse
+    from app import marketing
+    user_id = marketing.verify_token(t)
+    if user_id is None:
+        return HTMLResponse(marketing.page_error(), status_code=400)
+    if not marketing.withdraw_consent(user_id):
+        return HTMLResponse(marketing.page_error(), status_code=502)
+    return HTMLResponse(marketing.page_done())
+
+
 @app.post("/auth/email-hook")
 @app.post("/account/email-hook")
 async def auth_email_hook(request: Request):

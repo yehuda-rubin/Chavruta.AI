@@ -120,6 +120,7 @@ _AUTH_EXEMPT = (
     "/billing/webhook",
     "/auth/email-hook",
     "/account/email-hook",
+    "/account/unsubscribe",   # marketing email link; authenticated by its signed token (app/marketing.py)
     "/api/referral/validate",
     "/referral/validate",
 )

@@ -79,6 +79,8 @@ services:
       # require a signed-in user's JWT on every request instead of treating every caller as 'local'.
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      # Signs the withdrawal link in marketing emails (app/marketing.py). Empty = the link is refused.
+      UNSUBSCRIBE_SECRET: ${UNSUBSCRIBE_SECRET:-}
 
       # Global concurrency cap on generations running at once (see .env.example for the full
       # explanation). Default 2 assumes a 2-vCPU free-tier box.
