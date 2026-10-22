@@ -4,7 +4,7 @@ import type { Lang } from "@/lib/types";
 import { tr } from "@/lib/i18n";
 import { Modal } from "./Modal";
 
-const CONTACT_EMAIL = "hello@chavrutaai.org";
+const CONTACT_EMAIL = "support@chavrutaai.org";
 
 // Support — quick guide, halachic disclaimer, limitations, and contact. Ported from the static UI.
 export function SupportModal({ open, lang, onClose }: { open: boolean; lang: Lang; onClose: () => void }) {
