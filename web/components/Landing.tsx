@@ -5,7 +5,7 @@ import type { Lang } from "@/lib/types";
 import { api, type Tier } from "@/lib/api";
 import "./landing.css";
 
-const CONTACT_EMAIL = "rubinyehuda8@gmail.com";
+const CONTACT_EMAIL = "partners@chavrutaai.org";
 
 // The landing is its own surface (visitors who are not signed in), so its copy lives here rather than
 // in lib/i18n.ts, which is the app's string table. Both languages carry the same claims — and only

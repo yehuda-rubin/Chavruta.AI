@@ -278,4 +278,4 @@ You may exclude a specific conversation or all of your conversations from being 
 
 ## 13. Changes and Contact
 We may update this policy from time to time; the current version is always displayed in the Service. For
-privacy inquiries: rubinyehuda8@gmail.com
+privacy inquiries: privacy@chavrutaai.org

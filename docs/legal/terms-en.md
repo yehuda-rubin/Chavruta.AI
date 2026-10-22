@@ -203,7 +203,7 @@ The code, design, interface, trademarks, and algorithms of the Service belong ex
 The operator respects the intellectual property rights of others and operates under statutory Notice and
 Takedown principles. If you believe in good faith that content appearing on the Service, uploaded to
 it, or retrieved from its sources infringes your copyright, please notify us by email at:
-**rubinyehuda8@gmail.com**.
+**rights@chavrutaai.org**.
 Your notice must include: (a) identification of the copyrighted work claimed to be infringed; (b)
 precise location and identification of the allegedly infringing content on the Service; (c) your
 contact details and evidence or a statement confirming you are the rights holder or authorized to act
@@ -299,4 +299,4 @@ expressly agree in writing to refer a specific dispute for resolution before an 
 Rabbinical court (Beit Din).
 
 ## 15. Contact
-For questions regarding these terms: rubinyehuda8@gmail.com
+For questions regarding these terms: legal@chavrutaai.org

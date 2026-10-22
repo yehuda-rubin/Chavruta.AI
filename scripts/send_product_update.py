@@ -80,7 +80,7 @@ def main() -> None:
     port = int(os.environ.get("AWS_SES_SMTP_PORT", "587"))
     user = os.environ.get("AWS_SES_SMTP_USER", "").strip()
     password = os.environ.get("AWS_SES_SMTP_PASSWORD", "").strip()
-    from_header = os.environ.get("AWS_SES_FROM", "").strip() or "חברותא AI <auth@chavrutaai.org>"
+    from_header = os.environ.get("AWS_SES_FROM", "").strip() or "צוות חברותא AI בית מדרש <hello@chavrutaai.org>"
     live = bool(args.send or args.test_to)
 
     if live:

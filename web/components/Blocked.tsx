@@ -4,7 +4,7 @@ import { tr } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { Icon } from "./Icon";
 
-const CONTACT_EMAIL = "rubinyehuda8@gmail.com";
+const CONTACT_EMAIL = "legal@chavrutaai.org";
 
 // Full-screen block notice — shown when the signed-in account is on the blocklist. The user can read
 // why and until when, appeal by email, and sign out; every other action is 403'd server-side anyway.
