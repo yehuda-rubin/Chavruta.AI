@@ -31,7 +31,7 @@ def _mock_client(return_content: str = "מה דין חמץ בפסח?", p_tokens:
 def test_distill_query_short_and_direct_bypasses_llm():
     """Short and direct query (<= 10 words) should return text directly without an LLM call."""
     client = _mock_client()
-    text = "מה דין חמץ שעבר עליו הפסח?"
+    text = "חמץ שעבר עליו הפסח"
     assert len(text.split()) <= 10
 
     with metering.meter() as usage:
@@ -220,3 +220,41 @@ def test_pipeline_ask_retrieves_with_distilled_search_text():
     assert called_ss.search_text == "דף מקורות על חמץ"
     assert called_ss.distilled_text == "דף מקורות על חמץ"
 
+
+
+# Caught live (2026-10-18): "מה הדף של היום?" in daf-yomi mode was shown as
+#   "שלום וברכה! אשמח לעזור לך בלימוד.\nNNN מה הדף של היום?"
+# — the classifier wrote a greeting AND its real classification; the parser took the HHH as chitchat
+# and printed the whole output, routing code included.
+def test_greeting_plus_work_order_line_is_a_question_not_chitchat():
+    from chavruta.intents.llm_planner import parse_distiller_output
+
+    res = parse_distiller_output("HHH שלום וברכה! אשמח לעזור לך בלימוד.\nNNN מה הדף של היום?", "מה הדף של היום?")
+    assert res.action == "study"
+    assert res.distilled_query == "מה הדף של היום?"
+
+
+def test_control_codes_are_stripped_from_anywhere_in_visible_text():
+    from chavruta.intents.llm_planner import strip_control_codes
+
+    out = strip_control_codes("HHH שלום וברכה!\nNNN מה הדף של היום? ZZZ")
+    for code in ("HHH", "NNN", "ZZZ"):
+        assert code not in out
+    assert "מה הדף של היום?" in out
+
+
+def test_chitchat_verdict_in_calendar_modes_becomes_a_question():
+    from types import SimpleNamespace
+
+    from chavruta.intents.llm_planner import classify_and_distill
+
+    reply = "HHH שלום וברכה! אשמח לעזור לך בלימוד."
+    msg = SimpleNamespace(content=reply)
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(
+        create=lambda **k: SimpleNamespace(choices=[SimpleNamespace(message=msg)], usage=None))))
+
+    for mode in ("dafyomi", "parsha"):
+        res = classify_and_distill("מה הדף של היום?", intent=mode, client=client)
+        assert res.action == "study" and res.distilled_query == "מה הדף של היום?"
+    # outside the calendar modes the verdict still stands
+    assert classify_and_distill("מה הדף של היום?", intent="qa", client=client).action == "chitchat"

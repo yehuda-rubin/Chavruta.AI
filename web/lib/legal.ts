@@ -3,8 +3,8 @@
 // are placeholders to fill before going live.
 import type { Lang } from "./types";
 
-export const TERMS_VERSION = "1.14";
-export const TERMS_EFFECTIVE = "2026-09-22";
+export const TERMS_VERSION = "1.15";
+export const TERMS_EFFECTIVE = "2026-10-18";
 
 interface Section {
   heading: string;
@@ -27,11 +27,11 @@ const HE: Section[] = [
   { heading: "שימוש הוגן",
     body: "חל איסור מוחלט לעשות שימוש לרעה בשירות, לרבות: עקיפת מכסות, גישה אוטומטית בלתי מורשית, גרימת עומס מכוון, הנדסה לאחור, או פגיעה בזמינות ובאבטחת השירות ומשתמשיו." },
   { heading: "קניין רוחני, מקורות ונוהל הודעה והסרה",
-    body: "טקסטים ומקורות מתוך מאגר הספרות היהודית כפופים לרישיונות המקוריים שלהם (לרבות Creative Commons ודרישות ייחוס של מאגרים כגון Sefaria); הייחוס מוצג לצד המקור. הקוד, העיצוב, הממשק, סימני המסחר והאלגוריתמים של השירות שייכים באופן בלעדי למפעיל.\n\nנוהל הודעה והסרה לזכויות יוצרים: המפעיל מכבד את זכויות היוצרים של אחרים ופועל בהתאם לעקרונות הדין (\"הודעה והסרה\"). אם אתה סבור בתום לב כי תוכן מסוים המופיע בשירות, הועלה אליו או נשלף ממקורותיו מפר את זכויות היוצרים שלך, יש לפנות בדואר אלקטרוני לכתובת: rubinyehuda8@gmail.com בצירוף פירוט היצירה, זיהוי המיקום המפר וראיה לבעלותך בזכויות. עם קבלת פנייה מפורטת, המפעיל יבחן אותה ללא דיחוי ויפעל להסרת התוכן המפר בהתאם להוראות הדין." },
+    body: "טקסטים ומקורות מתוך מאגר הספרות היהודית כפופים לרישיונות המקוריים שלהם (לרבות Creative Commons ודרישות ייחוס של מאגרים כגון Sefaria); הייחוס מוצג לצד המקור. הקוד, העיצוב, הממשק, סימני המסחר והאלגוריתמים של השירות שייכים באופן בלעדי למפעיל.\n\nנוהל הודעה והסרה לזכויות יוצרים: המפעיל מכבד את זכויות היוצרים של אחרים ופועל בהתאם לעקרונות הדין (\"הודעה והסרה\"). אם אתה סבור בתום לב כי תוכן מסוים המופיע בשירות, הועלה אליו או נשלף ממקורותיו מפר את זכויות היוצרים שלך, יש לפנות בדואר אלקטרוני לכתובת: rights@chavrutaai.org בצירוף פירוט היצירה, זיהוי המיקום המפר וראיה לבעלותך בזכויות. עם קבלת פנייה מפורטת, המפעיל יבחן אותה ללא דיחוי ויפעל להסרת התוכן המפר בהתאם להוראות הדין." },
   { heading: "פרטיות, שימוש במידע ואימון מודלים",
     body: "אנו שומרים את פרטי החשבון, היסטוריית השיחות, השיעורים ונתוני המדידה. המידע משמש להפעלת השירות, וכן לצורכי מחקר, בקרת איכות, ואימון ופיתוח מודלים על ידי המפעיל ועל ידי ספקי בינה מלאכותית חיצוניים, הכל כמפורט במדיניות הפרטיות.\n\nמתגי החרגה (Opt-Out): ככל שהמשתמש מפעיל מתג החרגה (לשיחה בודדת או לחשבון כולו), ההחרגה מונעת אך ורק שימוש בשיחה לאימון מודלים פנימיים של המפעיל. ההחרגה אינה חלה על ספקי ה-AI החיצוניים (הפועלים לפי תנאיהם שלהם), ואינה מונעת מהמפעיל לעיין בשיחות לצורכי בקרת איכות, שיפור השירות, תמיכה ואבטחה.\n\nלא רטרואקטיבי — תיחום לפי מועד יצירת השיחה: השימוש בתוכן שיחות על ידי המפעיל חל אך ורק על שיחות שנוצרו מ-10.8.2026 ואילך. שיחה שנוצרה לפני מועד זה נשארת מוחרגת משימוש זה לצמיתות — גם אם התקבלה בה הודעה חדשה לאחר מכן." },
   { heading: "מכסות, תוכניות בתשלום וביטול מנוי",
-    body: "השירות כולל תוכנית חינמית בעלת מכסה יומית ותוכניות מנוי בתשלום. המפעיל רשאי לעדכן מכסות ומחירים מעת לעת בהודעה סבירה מראש. המחירים המוצגים כוללים מע\"מ כחוק. כלל המנויים נגבים בתשלומים חודשיים שוטפים. ניתן לבטל מנוי בכל עת בלחיצה אחת (הגדרות → ביטול מנוי): החיוב הבא נפסק מיד והגישה נמשכת עד תום החודש ששולם. בעסקת מכר מרחוק ניתן לבטל תוך 14 יום ולקבל החזר בניכוי דמי ביטול כמותר בדין (5% או 100 ₪ — הנמוך מביניהם). מחיקת חשבון עוצרת את המנוי לאלתר.\n\nעצירת מענה יזומה (Stop Generation): שליחת שאלה או בקשה במערכת צורכת את המכסה או הקרדיט הנדרש עם תחילת הפעולה והעיבוד. עצירת מענה יזומה על ידי המשתמש במהלך הפקתו אינה מזכה בהחזר מכסה או קרדיטים." },
+    body: "השירות כולל תוכנית חינמית בעלת מכסה יומית ותוכניות מנוי בתשלום. המפעיל רשאי לעדכן מכסות ומחירים מעת לעת בהודעה סבירה מראש. המחירים המוצגים כוללים מע\"מ כחוק. המוצרים: מנוי חודשי; תוכנית שנתית הנגבית בשנים-עשר תשלומים חודשיים; כרטיסיות שאלות נטענות מראש (50, 120 או 280 שאלות) שאינן פוקעות ואינן ניתנות להעברה; אריזות חודשיות למוסדות (בתוספת מע\"מ). ניתן לבטל מנוי בכל עת בלחיצה אחת (הגדרות → ביטול מנוי): הביטול מונע חידוש וחיוב נוסף ופועל בהתאם לסעיף 13ד לחוק הגנת הצרכן; ניתן לבחור שהגישה תימשך עד תום התקופה ששולמה. בעסקת מכר מרחוק ניתן לבטל תוך 14 יום ולקבל החזר בניכוי דמי ביטול כמותר בדין (5% או 100 ₪ — הנמוך מביניהם); שאלות ששימשו בפועל ושירות שניתן בפועל עד הביטול אינם מוחזרים, ככל שהדין מתיר. מעבר לכך, ולמעט מקום שבו הדין מחייב החזר, תשלומים אינם מוחזרים (לרבות יתרת שאלות שלא נוצלה לאחר 14 הימים ותקופה ששולמה במנוי שבוטל); אין באמור כדי לפגוע בזכויות שאינן ניתנות להתנאה. מחיקת חשבון עוצרת את המנוי לאלתר ומביאה לאובדן יתרת כרטיסיות שלא נוצלה, בכפוף לזכות הביטול.\n\nעצירת מענה יזומה (Stop Generation): שליחת שאלה או בקשה במערכת צורכת את המכסה או הקרדיט הנדרש עם תחילת הפעולה והעיבוד. עצירת מענה יזומה על ידי המשתמש במהלך הפקתו אינה מזכה בהחזר מכסה או קרדיטים." },
   { heading: "קופונים",
     body: "עשויים להיות מוצעים קופונים מעת לעת. קופון מקנה הטבה מסוימת (דרג תוכנית לתקופה מוגבלת או זיכויים). לקופון יש תאריך תפוגה והוא אינו ניתן להעברה. לקופון אין ערך כספי ואין אפשרות לפדות אותו במזומן. אם עסקה שנעשתה בקופון מבוטלת — ההטבה שניתנה בקופון נשללת." },
   { heading: "עוזרי פיתוח",
@@ -45,7 +45,7 @@ const HE: Section[] = [
   { heading: "קהל היעד, דין וסמכות שיפוט",
     body: "השירות מוצע למשתמשים בישראל לפי הדין הישראלי, ואינו מכוון לתושבי האיחוד האירופי או שטחים אחרים עם דיני הגנת מידע נפרדים. על תנאים אלה, על מדיניות הפרטיות ועל כל סכסוך הנובע מהשירות יחול דין מדינת ישראל בלבד, וסמכות השיפוט הבלעדית תהיה של בתי המשפט המוסמכים במדינת ישראל. מבלי לגרוע מבלעדיות סמכות בתי המשפט, רשאים הצדדים להסכים בהסכמה הדדית ומפורשת בכתב להביא מחלוקת קונקרטית בפני בורר מוסכם או בית דין צדק (דין תורה)." },
   { heading: "יצירת קשר",
-    body: "השירות מופעל על ידי יהודה רובין. לשאלות בנוגע לתנאים אלה: rubinyehuda8@gmail.com" },
+    body: "השירות מופעל על ידי יהודה רובין. לשאלות בנוגע לתנאים אלה: legal@chavrutaai.org" },
 ];
 
 const EN: Section[] = [
@@ -64,11 +64,11 @@ const EN: Section[] = [
   { heading: "Acceptable Use",
     body: "Misuse of the Service is strictly prohibited, including: circumventing quota limits, unauthorized automated access, causing deliberate server load, reverse engineering, or harming the security or availability of the Service or its users." },
   { heading: "Intellectual Property, Sources and Notice and Takedown Procedure",
-    body: "Texts and sources from the Jewish bookshelf are subject to their original licenses (including Creative Commons licenses and attribution requirements of repositories such as Sefaria); applicable attribution is displayed beside each source. The code, design, interface, trademarks, and algorithms of the Service belong exclusively to the operator.\n\nNotice and Takedown procedure for copyright: the operator respects the intellectual property rights of others and operates under statutory Notice and Takedown principles. If you believe in good faith that content appearing on the Service, uploaded to it, or retrieved from its sources infringes your copyright, please notify us by email at rubinyehuda8@gmail.com with details of the copyrighted work, the infringing location on the Service, and proof of rights ownership. Upon receiving a detailed notice, the operator will review it promptly and act to remove or disable access to infringing content in accordance with applicable law." },
+    body: "Texts and sources from the Jewish bookshelf are subject to their original licenses (including Creative Commons licenses and attribution requirements of repositories such as Sefaria); applicable attribution is displayed beside each source. The code, design, interface, trademarks, and algorithms of the Service belong exclusively to the operator.\n\nNotice and Takedown procedure for copyright: the operator respects the intellectual property rights of others and operates under statutory Notice and Takedown principles. If you believe in good faith that content appearing on the Service, uploaded to it, or retrieved from its sources infringes your copyright, please notify us by email at rights@chavrutaai.org with details of the copyrighted work, the infringing location on the Service, and proof of rights ownership. Upon receiving a detailed notice, the operator will review it promptly and act to remove or disable access to infringing content in accordance with applicable law." },
   { heading: "Privacy, Data Usage and Model Training",
     body: "We store account details, conversation history, lessons, and usage metrics. Data is used to operate the Service, and for research, quality control, and model training and development by the operator and external AI providers, as set out in full in the Privacy Policy.\n\nOpt-Out toggles: activating an opt-out toggle (for a single conversation or account-wide) prevents the conversation from being used for training the operator's internal models only. The opt-out toggle does not bind external AI providers (which operate under their own terms), and does not prevent the operator from inspecting conversations for quality control, enhancement, support, and security.\n\nNon-retroactivity — scoped by conversation creation date: use of conversation content by the operator applies strictly to conversations created from 10 August 2026 onward. A conversation created before that date remains permanently excluded from this use — even if a new message is received in it afterward." },
   { heading: "Quotas, Paid Plans and Cancellation",
-    body: "The Service includes a free tier with a daily quota and paid subscription tiers. The operator may update quotas and prices from time to time with reasonable advance notice. Displayed prices include VAT. All subscriptions are billed in recurring monthly instalments. You may cancel at any time in one click (Settings → Cancel subscription): the next charge stops immediately and access continues until the end of the month you paid for. On a distance contract you may cancel within 14 days for a refund less the statutory fee (5% or ₪100, whichever is lower). Account deletion halts recurring billing immediately.\n\nStop Generation: stopping an in-progress response does not entitle you to a quota or credit refund, as model processing is consumed at the initiation of the request." },
+    body: "The Service includes a free tier with a daily quota and paid subscription tiers. The operator may update quotas and prices from time to time with reasonable advance notice. Displayed prices include VAT. Products: a monthly subscription; an annual plan billed in twelve monthly instalments; prepaid question cards (50, 120 or 280 questions) that do not expire and are non-transferable; monthly institutional packages (plus VAT). You may cancel a subscription at any time in one click (Settings → Cancel subscription): cancelling prevents renewal and further charges and operates in line with section 13D of the Consumer Protection Law; you may keep access until the end of the paid period. On a distance contract you may cancel within 14 days for a refund less the statutory fee (5% or ₪100, whichever is lower); questions actually used and service actually provided until cancellation are not refunded, to the extent the law permits. Beyond that, and except where the law requires a refund, payments are non-refundable (including unused question-card balance after the 14 days and a paid period of a cancelled subscription); this does not limit rights that cannot be waived. Account deletion halts recurring billing immediately and forfeits any unused card balance, subject to the cancellation right.\n\nStop Generation: stopping an in-progress response does not entitle you to a quota or credit refund, as model processing is consumed at the initiation of the request." },
   { heading: "Coupons",
     body: "Coupons granted from time to time provide a specific time-limited benefit. Coupons have no cash value, are non-transferable, and cannot be redeemed for cash. Cancelling a transaction revokes coupon benefits." },
   { heading: "Development Helpers",
@@ -82,7 +82,7 @@ const EN: Section[] = [
   { heading: "Intended Audience, Governing Law and Jurisdiction",
     body: "The Service is offered and designed for users in Israel under Israeli law, and is not directed at users in the European Union or other separate regulatory jurisdictions. These terms, the Privacy Policy, and any dispute arising from the use of the Service shall be governed exclusively by the laws of the State of Israel, and exclusive jurisdiction shall lie with the competent courts of the State of Israel. Without derogating from the exclusive jurisdiction of the courts, the parties may mutually and expressly agree in writing to refer a specific dispute for resolution before an agreed arbitrator or a Rabbinical court (Beit Din)." },
   { heading: "Contact",
-    body: "The Service is operated by Yehuda Rubin. Questions about these terms: rubinyehuda8@gmail.com" },
+    body: "The Service is operated by Yehuda Rubin. Questions about these terms: legal@chavrutaai.org" },
 ];
 
 export function termsSections(lang: Lang): Section[] {
@@ -119,7 +119,7 @@ const PRIVACY_HE: Section[] = [
   { heading: "מנגנון החרגת שיחות (Opt-Out)",
     body: "באפשרותך להחריג שיחה ספציפית או את כלל שיחותיך משימוש לצורכי אימון מודלים (באמצעות מתג בשיחה או בהגדרות).\n\nתחולת וגבולות ההחרגה — החרגה פנימית בלבד: הפעלת מתג ההחרגה מונעת אך ורק את הכללת תוכן השיחה במאגרי האימון והכוונון הפנימיים של מודלי הבינה המלאכותית של המפעיל. אינה מונעת אימון או עיבוד ע\"י ספקי ה-AI החיצוניים (הפועלים לפי מדיניותם העצמאית), ואינה גורעת מזכות העיון של המפעיל וצוותו לצורכי בקרת איכות, טיוב, תמיכה טכנית, אבטחת מידע ומניעת שימוש לרעה. בנוסף, שיחה שנוצרה לפני 10.8.2026 נשארת מוחרגת לצמיתות מעצם מועד יצירתה." },
   { heading: "שינויים ויצירת קשר",
-    body: "אנו רשאים לעדכן מדיניות זו מעת לעת; הגרסה העדכנית תוצג תמיד בשירות. לשאלות ופניות בנושא פרטיות: rubinyehuda8@gmail.com" },
+    body: "אנו רשאים לעדכן מדיניות זו מעת לעת; הגרסה העדכנית תוצג תמיד בשירות. לשאלות ופניות בנושא פרטיות: privacy@chavrutaai.org" },
 ];
 
 const PRIVACY_EN: Section[] = [
@@ -148,7 +148,7 @@ const PRIVACY_EN: Section[] = [
   { heading: "Opt-Out Mechanism",
     body: "You may exclude a specific conversation or all of your conversations from being used for model training (via a toggle in the conversation or in Settings).\n\nScope and limits of the exclusion — internal exclusion only: activating the toggle prevents the conversation from being included in the internal training and fine-tuning datasets of the operator's AI models. It does not prevent training or processing by external AI providers (which operate under their own policies), and does not limit the operator and its team from reviewing conversations for quality review, refinement, technical support, information security, and abuse prevention. Conversations created before 10 August 2026 remain excluded permanently by virtue of their creation date." },
   { heading: "Changes and Contact",
-    body: "We may update this policy from time to time; the current version is always displayed in the Service. For privacy inquiries: rubinyehuda8@gmail.com" },
+    body: "We may update this policy from time to time; the current version is always displayed in the Service. For privacy inquiries: privacy@chavrutaai.org" },
 ];
 
 export function privacySections(lang: Lang): Section[] {
@@ -165,7 +165,7 @@ const ACCESSIBILITY_HE: Section[] = [
   { heading: "מצב הנגישות הנוכחי",
     body: "השירות תומך, בין היתר, בניווט מקלדת בסיסי, בתמיכה בטכנולוגיות מסייעות נפוצות, ובתצוגה בעברית (RTL) ובאנגלית (LTR). בנוסף, כפתור הנגישות הצף (בפינת המסך) מאפשר להגדיל את גודל הטקסט, להפעיל ניגודיות גבוהה, להדגיש קישורים בקו תחתון ולעצור אנימציות — וההגדרות נשמרות באופן קבוע במכשיר. זהו מוצר חדש וקטן, ועדיין ייתכנו חלקים שאינם נגישים באופן מלא. אנו פועלים לאתר ולתקן פערים אלה ככל שהמוצר גדל." },
   { heading: "פנייה בנושאי נגישות",
-    body: "נתקלת בבעיית נגישות בשימוש בשירות? נשמח שתפנה אלינו — רכז הנגישות: יהודה רובין, rubinyehuda8@gmail.com — ונשתדל להשיב ולטפל בפנייה בזמן סביר." },
+    body: "נתקלת בבעיית נגישות בשימוש בשירות? נשמח שתפנה אלינו — רכז הנגישות: יהודה רובין, accessibility@chavrutaai.org — ונשתדל להשיב ולטפל בפנייה בזמן סביר." },
   { heading: "שינויים בהצהרה",
     body: "הצהרה זו עשויה להתעדכן מעת לעת ככל שהנגישות משתפרת; הגרסה העדכנית תוצג תמיד בשירות." },
 ];
@@ -176,7 +176,7 @@ const ACCESSIBILITY_EN: Section[] = [
   { heading: "Current Accessibility Status",
     body: "The Service supports, among other things, basic keyboard navigation, support for common assistive technologies, and display in both Hebrew (RTL) and English (LTR). In addition, the floating accessibility button (in the corner of the screen) lets you increase text size, turn on high contrast, underline links, and stop animations — these settings are saved persistently on your device. This is a new, small product, and some parts may not yet be fully accessible. We work to identify and fix such gaps as the product grows." },
   { heading: "Contact Us About Accessibility",
-    body: "Encountered an accessibility issue while using the Service? We'd welcome you contacting us — Accessibility Coordinator: Yehuda Rubin, rubinyehuda8@gmail.com — and we will do our best to respond and address it within a reasonable time." },
+    body: "Encountered an accessibility issue while using the Service? We'd welcome you contacting us — Accessibility Coordinator: Yehuda Rubin, accessibility@chavrutaai.org — and we will do our best to respond and address it within a reasonable time." },
   { heading: "Changes to This Statement",
     body: "This statement may be updated from time to time as accessibility improves; the current version is always shown in the Service." },
 ];

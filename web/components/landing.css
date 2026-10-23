@@ -111,6 +111,21 @@
 
 .lp a:focus-visible, .lp button:focus-visible, .lp summary:focus-visible { outline: 3px solid var(--violet); outline-offset: 3px; }
 
+/* examples band: three sample cards, one per kind of page */
+.lp .exgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; margin-top: 52px; }
+.lp .excard { display: flex; flex-direction: column; gap: 10px; text-decoration: none; color: inherit; background: var(--card); border: 1px solid var(--line); border-radius: 28px; padding: 30px 28px 26px; transition: transform .2s, box-shadow .2s; }
+.lp .excard:hover { transform: translateY(-4px); box-shadow: 0 24px 44px -24px rgba(91,61,245,.45); }
+.lp .extag { align-self: flex-start; font-size: 14px; font-weight: 600; padding: 3px 14px; border-radius: 999px; color: var(--violet); background: var(--bg); border: 1px solid #d8d0ff; }
+.lp .excard:nth-child(2) .extag { color: #0b8f73; border-color: #bdeadf; background: #effbf8; }
+.lp .excard:nth-child(3) .extag { color: #d2463a; border-color: #ffd3cd; background: #fff4f2; }
+.lp .excard h3 { font-size: 25px; font-weight: 700; line-height: 1.25; margin-top: 8px; text-wrap: balance; }
+.lp .excard p { color: var(--mute); font-size: 17px; flex: 1; }
+.lp .excta { color: var(--violet); font-weight: 600; font-size: 16px; margin-top: 8px; }
+.lp .excta::after { content: " ←"; }
+html[dir="ltr"] .lp .excta::after { content: " →"; }
+.lp .exmore { text-align: center; margin-top: 40px; }
+@media (max-width: 960px) { .lp .exgrid { grid-template-columns: 1fr; gap: 16px; } }
+
 @media (max-width: 960px) {
   .lp nav.top ul { display: none; }
   .lp .bento > * { grid-column: span 6 !important; }

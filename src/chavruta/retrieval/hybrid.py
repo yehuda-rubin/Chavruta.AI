@@ -17,6 +17,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 
 from chavruta.corpus.normalize import deuphemize_he, quote_windows
+from chavruta.corpus.quality import is_index_page
 from chavruta.corpus.refs import (
     commentary_refs,
     commentator_from_ref,
@@ -75,9 +76,9 @@ def _to_hit(h) -> RankedHit:
         # and the 464 CC-BY / 87 CC-BY-SA sources are reproduced with no credit, which is the
         # condition their licence is granted on.
         license=(p.get("license") or p.get(f"license_{suffix}")
-                 or license_for_ref(p.get("ref"), lang)[0]),
+                 or license_for_ref(p.get("ref"), lang, p.get("deep_link") or "")[0]),
         version_title=(p.get("version_title") or p.get(f"version_{suffix}")
-                       or license_for_ref(p.get("ref"), lang)[1]),
+                       or license_for_ref(p.get("ref"), lang, p.get("deep_link") or "")[1]),
     )
 
 
@@ -262,8 +263,6 @@ class HybridRetriever:
         f: Filter = {}
         if query.work_ids:
             f["work_id"] = list(query.work_ids)
-        if query.commentator_ids:
-            f["commentator_id"] = list(query.commentator_ids)
         return f or None
 
     def _work_filter(self, query: Query) -> Filter | None:
@@ -304,7 +303,7 @@ class HybridRetriever:
         wanted = {c.lower() for c in (query.commentator_ids or ())}
 
         filters = self._filters(query)
-        candidate_k = max(top_k * 4, 48)
+        candidate_k = max(top_k * 2, 20)
         try:
             with _timed(t, "search"):
                 raw = self.store.search(
@@ -491,8 +490,8 @@ class HybridRetriever:
                 except Exception as exc:
                     logger.warning("quotation floor failed (%s)", exc)
 
-        # Optional reranking (heavy in cloud / optional local / user-gated)
-        do_rerank = self.profile.rerank or getattr(query, "rerank", False)
+        # Optional reranking (disabled per user directive — Cloudflare rate-limits & inferior rabbinic ranking)
+        do_rerank = False
         if self.reranker is not None and do_rerank and hits:
             with _timed(t, "rerank"):
                 hits = self.reranker.rerank(query.search_text or query.text, hits)
@@ -509,6 +508,13 @@ class HybridRetriever:
                 logger.warning("link expansion failed (%s); serving base hits", exc)
 
         hits = self._dedup(hits)
+        # An index page (a book's table of contents, chunked by the Wikisource scan) has nothing to
+        # cite, yet it can match a query by its chapter names — drop it before slots are handed out.
+        content = [h for h in hits if not is_index_page(h.text)]
+        if len(content) != len(hits):
+            logger.info("dropped %d index-page hit(s): %s", len(hits) - len(content),
+                        [h.ref for h in hits if is_index_page(h.text)][:3])
+            hits = content
         hits.sort(key=lambda h: h.score, reverse=True)
         # Actually RESERVE the base-text slots, rather than hoping they rank.
         #

@@ -1,7 +1,7 @@
 """app/search_service.py — Dedicated lightweight SQLite FTS5 search service for Chavruta.AI.
 
 Runs independently on port 8081.
-Provides fast full-text search across the 2.4M-chunk Jewish bookshelf corpus
+Provides fast full-text search across the 2.5M-chunk Jewish bookshelf corpus
 with canonical ordering, language isolation, facet aggregation, and rate limiting.
 """
 
@@ -672,7 +672,7 @@ def compute_prev_next_unit(raw_ref: str) -> tuple[str | None, str | None]:
 # Hard cap on rows a single /reader/unit call may return. A real unit (a
 # chapter, an amud, a siman) is at most a few hundred segments; the cap only
 # bites on a pathological ref and keeps one request from materialising a
-# large slice of the 2.4M-row table on a blocking worker.
+# large slice of the 2.5M-row table on a blocking worker.
 READER_UNIT_MAX_ROWS = 5000
 
 

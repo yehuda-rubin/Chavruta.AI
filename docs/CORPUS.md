@@ -4,7 +4,7 @@
 **בעברית ובאנגלית** (דרישה #5).
 
 > ## ⚠️ קולקציית הפרודקשן החליפה ל-`chavruta_commercial` (2026-07-20)
-> הקולקציה החיה כעת היא **`chavruta_commercial`** — **2,403,599 נקודות**, 15 שכבות, **100% מסחרי**
+> הקולקציה החיה כעת היא **`chavruta_commercial`** — **~2.5M נקודות**, 15 שכבות, **100% מסחרי**
 > (PD/CC0/CC-BY/CC-BY-SA בלבד), on-disk (ssd). היא **דרסה** את `chavruta` הישן (המעורב). המסמך הזה
 > מתאר את הקורפוס המלא/מעורב כ**רפרנס** — פרטי המהדורות המסחריות ב-`docs/COMMERCIAL_CORPUS.md`,
 > והמצב החי ב-[[commercial-corpus-on-hf]].
@@ -86,7 +86,7 @@
 ## 4. היקף (Scale) — מספרים אמיתיים, נמדדו 2026-07-17
 
 > ⚠️ **המספרים בסעיף הזה הם של הקורפוס המעורב-רישיון הישן (`chavruta`), שנמחק ב-2026-07-20.**
-> **האינדקס החי היום הוא `chavruta_commercial` — 2,403,599 נקודות** (ראו הבאנר בראש הקובץ ו-§5).
+> **האינדקס החי היום הוא `chavruta_commercial` — ~2.5M נקודות** (ראו הבאנר בראש הקובץ ו-§5).
 > ההפרש הוא בדיוק המהדורות שאינן מסחריות ולכן הוצאו. הסעיף נשמר כי פילוח הכמויות לפי שכבה עדיין
 > מלמד על יחסי הגודל בין הרבדים.
 
@@ -95,7 +95,7 @@
 | | תנ"ך (מאומת) | כלל הבית מדרש |
 |---|---|---|
 | פסוקים/קטעי-בסיס | 23,206 | מאות אלפים (לפי קטגוריה) |
-| chunks | 126,738 | **2,930,332 בקורפוס הישן שנמחק** (ההלכה לבדה ~594K) · החי: 2,403,599 |
+| chunks | 126,738 | **2,930,332 בקורפוס הישן שנמחק** (ההלכה לבדה ~594K) · החי: ~2.5M |
 | כותרות Sefaria ייחודיות | — | **17,561** |
 
 ### ⚠️ מה נדרש כדי לטעון את זה — קרא לפני שאתה מתחיל
@@ -267,7 +267,7 @@ capitalisation, not naive title-case (`or_hachaim` → `Or_HaChaim`), and Onkelo
 prefix with no `_on_` and no comment index (`Onkelos_Exodus.20.2`) — both handled explicitly.
 
 **Why not backfill the fields?** It was tried. `set_payload` against the on-disk collection sustained
-~5 points/sec — days for 2.4M, to store something a string split already yields. A ref that does not
+~5 points/sec — days for 2.5M, to store something a string split already yields. A ref that does not
 exist simply returns nothing, so a commentator that genuinely has no comment here stays honestly
 absent (Principle I). Verified live across Torah, Nach and Bavli: rashi, ramban, ibn_ezra, rashbam,
 or_hachaim, sforno, malbim, radak, metzudat_david, metzudat_zion and onkelos all resolve.

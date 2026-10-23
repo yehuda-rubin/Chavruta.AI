@@ -7,7 +7,7 @@ import type { Lang } from "@/lib/types";
 import { Modal } from "./Modal";
 
 // Same address used by SupportModal and Blocked — one contact channel, not a new one per feature.
-const CONTACT_EMAIL = "rubinyehuda8@gmail.com";
+const CONTACT_EMAIL = "partners@chavrutaai.org";
 
 /**
  * Plan picker. Shows both usage caps, not just the price — the daily one is what a user feels day

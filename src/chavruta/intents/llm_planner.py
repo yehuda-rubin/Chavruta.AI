@@ -97,9 +97,19 @@ _CONTROL_CODES_MAP = {
 _ALL_CONTROL_CODES = ("HHH", "ZZZ", "XXX", "YYY", "WWW", "PPP", "NNN")
 
 _CONTROL_CODES_PREFIX_RE = re.compile(
-    r"^(?:\[?(?:HHH|ZZZ|XXX|YYY|WWW|PPP|NNN)\]?[\s:\-]*)+",
+    r"^(?:(?:TORAH|HALACHA|STUDY|QUERY)\s*[/:\-]*\s*)*"
+    r"(?:\[?(?:HHH|ZZZ|XXX|YYY|WWW|PPP|NNN)\]?[\s:\-]*)+",
     re.IGNORECASE,
 )
+
+
+# A routing code standing on its own anywhere in the text (start of a line, or between spaces). The
+# prefix pattern above only catches one at the very start — a classifier that wrote a greeting FIRST
+# and its real classification on a second line leaked "NNN <question>" into the visible answer.
+_STRAY_CODE_RE = re.compile(r"(?:(?<=\s)|^)\[?(?:HHH|ZZZ|XXX|YYY|WWW|PPP|NNN)\]?(?=\s|$|[:\-])[:\-]?", re.MULTILINE)
+# A work-order code that starts a LINE after other text: the model classified the message as a real
+# question even though it opened with a greeting.
+_LATER_WORK_CODE_RE = re.compile(r"(?<=\s)\[?(?:NNN|ZZZ|XXX|YYY|WWW|PPP)\]?(?=\s|$)")
 
 
 def strip_control_codes(text: str) -> str:
@@ -107,6 +117,15 @@ def strip_control_codes(text: str) -> str:
     if not text:
         return ""
     clean = _CONTROL_CODES_PREFIX_RE.sub("", text.strip()).strip()
+    clean = _STRAY_CODE_RE.sub("", clean)
+    clean = re.sub(r"[ \t]{2,}", " ", clean)
+    # Strip any residual prompt headers that leaked at the start
+    clean = re.sub(
+        r"^(?:(?:TORAH|HALACHA|STUDY|QUERY)\s*[/:\-]*\s*)+",
+        "",
+        clean,
+        flags=re.IGNORECASE,
+    ).strip()
     return clean
 
 
@@ -123,12 +142,25 @@ def parse_distiller_output(raw: str, original_query: str) -> DistillerResult:
     if not clean:
         return DistillerResult(action="study", distilled_query=original_query, raw=raw)
 
+    # Strip any leading header word like 'TORAH', 'TORAH / HALACHA', etc. before code parsing
+    clean = re.sub(
+        r"^(?:(?:TORAH|HALACHA|STUDY|QUERY)\s*[/:\-]*\s*)+",
+        "",
+        clean,
+        flags=re.IGNORECASE,
+    ).strip()
+
     orig_clean = " ".join((original_query or "").strip().split())
     orig_words = [w.strip("?!.,;:-\"'״`()").lower() for w in orig_clean.split()]
 
     # Check for HHH (Chitchat / Idle / Greeting / Thanks)
     first_token = clean.split()[0].strip("[]:-,. ").upper() if clean.split() else ""
     if first_token == "HHH":
+        later = _LATER_WORK_CODE_RE.search(clean, pos=len(clean.split()[0]))
+        if later:
+            # Greeting AND a classified question in one output: the user asked something. Re-parse
+            # from the work-order line and drop the greeting rather than show either code.
+            return parse_distiller_output(clean[later.start():].strip(), original_query)
         # SAFETY NET: Only override HHH to study if the user's input actually contains
         # explicit halachic/Torah inquiry keywords (e.g. מותר, אסור, חזיר, כיפור, שבת, כשר, הלכה, דין, רב...).
         # Casual non-Torah questions (e.g. "אתה אוהב שוקולד?", "מה שלומך?", "איך קוראים לך?") remain HHH!
@@ -180,23 +212,28 @@ _DISTILL_SYSTEM = (
     "- PPP: חוברת ליווי להדפסה ו-PDF\n"
     "If the user asks for a combination of two or more files, write their codes separated by space (e.g. 'XXX YYY').\n"
     "After the file code(s), write the single distilled core question/topic in Hebrew in 1 concise sentence.\n"
-    "CRITICAL FOR RETRIEVAL & HALACHIC TERMS:\n"
-    "The distilled query is used directly to search the classical Torah & Halacha library. "
-    "Always state the primary Talmudic sugya, tractate, or Shulchan Aruch / Rishonim topic directly so vector search finds the root sources. "
-    "DO NOT invent extraneous keywords or tangential topics. Keep the distilled query focused strictly on the core halachic subject asked.\n\n"
+    "CRITICAL RULES FOR DISTILLATION:\n"
+    "1. SPELLING & LANGUAGE NORMALIZATION ONLY:\n"
+    "   - Fix spelling mistakes, typos, and normalize colloquial Aramaic/Hebrew terms (e.g. 'משמתהא' -> 'שמתא / משמתא', 'ניקל' -> 'מקילין / מיקל', 'דוחקא דסכינא', 'נ\"ט בר נ\"ט', 'כל דאלים גבר').\n"
+    "   - Remove conversational fluff and preamble ('שלום רציתי לשאול...', 'יש לי שאלה לגבי...').\n"
+    "2. STRICT PROHIBITION AGAINST INVENTING OR GUESSING REFS/BOOKS:\n"
+    "   - DO NOT invent, guess, or append tractates, book names, chapters, Shulchan Aruch simanim, or biblical verses that the user did not explicitly mention!\n"
+    "   - DO NOT invent assumptions or halachic conclusions in the query (e.g. do not guess 'ספק דאורייתא לחומרא' if not asked).\n"
+    "   - Let the retrieval search engine find the sources naturally using the clean canonical keywords.\n\n"
     "Examples:\n"
     "- 'תודה רבה לך' -> HHH בשמחה רבה! תמיד כאן לכל שאלה ולימוד.\n"
-    "- 'שלום מה נשמע?' -> HHH שלום וברכה! הכול מצוין, ברוך השם. במה נוכל להעמיק היום?\n"
-    "- 'שיעור בעניין השהייה והטמנה בשבת' -> ZZZ שהייה והטמנה בשבת: מסכת שבת כירה גרופה וקטומה, שולחן ערוך סימן רנג רנד רנז, דיני שהייה והחזרה והטמנה\n"
-    "- 'האם מותר להשתמש בדוד שמש בשבת?' -> NNN דוד שמש בשבת: בישול בחמה ובתולדות חמה, חמי טבריא, כניסת מים קרים לדוד\n"
-    "- 'איך משתמשים בפלטה בשבת' -> NNN פלטת שבת: כירה גרופה וקטומה, שהייה והחזרה, הטמנה בדבר המוסיף הבל\n"
-
-    "- 'לפני כמה שנים שהייתי ילד שאלתי את הרב האם מותר לי לאכול ביום כיפור בשר חזיר והוא ענה לי לא הוא צדק?' -> NNN איסור אכילת חזיר ואיסור אכילה ביום כיפור\n"
-    "- 'האם מותר לאכול חזיר בפסח?' -> NNN איסור אכילת חזיר בפסח\n"
+    "- 'שלום מה נשמע?' -> HHH שלום וברכה! במה נוכל להעמיק היום?\n"
+    "- 'למה רבי עקיבא מחמיר ולמה ניקל במשמתהא' -> NNN למה רבי עקיבא מחמיר ולמה רבנן מקילין בשמתא\n"
+    "- 'בנה שיעור על סוגיית שניים אוחזין בטלית' -> ZZZ סוגיית שנים אוחזין בטלית: חזקת תפיסה, מוחזקות, שבועת חכמים, יחלוקו\n"
+    "- 'שיעור בעניין השהייה והטמנה בשבת' -> ZZZ שהייה והטמנה בשבת: כירה גרופה וקטומה, דיני שהייה והחזרה והטמנה\n"
+    "- 'האם מותר להשתמש בדוד שמש בשבת?' -> NNN שימוש בדוד שמש בשבת: בישול בחמה ובתולדות חמה\n"
+    "- 'לא הבנתי - אז מה אם הבצל נחתך בסכין בשרית?' -> NNN בצל שנחתך בסכין בשרית: דין דבר חריף ודוחקא דסכינא\n"
+    "- 'האם מותר לסחוחט לימון על סלט בשבת?' -> NNN סחיטת לימון על סלט בשבת\n"
+    "- 'מה הדין בהניזק אומר חצי נזק והמזיק כופר הכל' -> NNN הניזק אומר חצי נזק והמזיק כופר הכל\n"
+    "- 'מה סברת רבי מאיר באדם מקנה דבר שלא בא לעולם?' -> NNN סברת רבי מאיר באדם מקנה דבר שלא בא לעולם\n"
     "- 'תכין לי רק דף מקורות על הלכות שבת' -> XXX הלכות שבת\n"
     "- 'אני רוצה דף מקורות ומהלך שיעור על תפילה' -> XXX YYY סוגיית תפילה\n"
     "- 'תכין לי שיעור שלם על תנורו של עכנאי' -> ZZZ סוגיית תנורו של עכנאי\n"
-    "- 'תודה, אבל מה המקור לדין הזה?' -> NNN מקור להלכה שנדונה\n"
 
 )
 
@@ -237,7 +274,30 @@ def _is_short_and_direct(text: str, history=None) -> bool:
 def classify_and_distill(
     text: str, history=None, intent=None, *, client=None, model: str = DISTILLER_MODEL
 ) -> DistillerResult:
-    """Classify user intent, determine file generation codes, and distill question in Hebrew."""
+    """Classify user intent, determine file generation codes, and distill question in Hebrew.
+
+    In daf-yomi / parsha every message is about the daf or the parsha, so a classifier verdict of
+    "chitchat" there is always wrong — it answered "what is today's daf?" with a greeting. Pure
+    greetings and thanks are caught before this point; anything the classifier calls chitchat in
+    those modes is turned back into a question."""
+    res = _classify_and_distill(text, history=history, intent=intent, client=client, model=model)
+    if (res.action == "chitchat"
+            and str(getattr(intent, "value", intent) or "").lower() in ("dafyomi", "parsha")
+            and not _is_calendar_pleasantry(text)):
+        return DistillerResult(action="study", distilled_query=(text or "").strip(), raw=res.raw)
+    return res
+
+
+def _is_calendar_pleasantry(text: str) -> bool:
+    from chavruta.intents.router import is_conversational_acknowledgement, is_pure_greeting
+
+    t = (text or "").strip()
+    return is_pure_greeting(t) or is_conversational_acknowledgement(t)
+
+
+def _classify_and_distill(
+    text: str, history=None, intent=None, *, client=None, model: str = DISTILLER_MODEL
+) -> DistillerResult:
     if not text or not text.strip():
         return DistillerResult(action="study", distilled_query="", raw="")
     clean = text.strip()

@@ -24,7 +24,7 @@ identify and fix such gaps as the product grows.
 
 ## Contact Us About Accessibility
 Encountered an accessibility issue while using the Service? We'd welcome you contacting us —
-**Accessibility Coordinator: Yehuda Rubin, rubinyehuda8@gmail.com** — and we will do our best to
+**Accessibility Coordinator: Yehuda Rubin, accessibility@chavrutaai.org** — and we will do our best to
 respond and address it within a reasonable time.
 
 ## Changes to This Statement

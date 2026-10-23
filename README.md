@@ -129,7 +129,7 @@ Fetched from [Sefaria](https://www.sefaria.org) (free, open API + bulk export). 
 See [docs/CORPUS.md](docs/CORPUS.md) and [docs/NEBIUS_HALACHA_JOB.md](docs/NEBIUS_HALACHA_JOB.md).
 
 > **Production update (2026-07-20):** the live collection is now **`chavruta_commercial`** —
-> **~2.4M points across 15 tiers, 100% commercially-licensed** (PD/CC0/CC-BY/CC-BY-SA), served on-disk
+> **~2.5M points across 15 tiers, 100% commercially-licensed** (PD/CC0/CC-BY/CC-BY-SA), served on-disk
 > (ssd mem tier). It replaced the older mixed-licence `chavruta` collection. Built on a cloud GPU and
 > restored from a Qdrant snapshot on HF (`Yehuda-Rubin/chavruta-commercial-index`). See
 > [docs/COMMERCIAL_CORPUS.md](docs/COMMERCIAL_CORPUS.md). The tier breakdown below describes the full
@@ -197,7 +197,7 @@ docker compose --profile server up -d qdrant          # local Qdrant first
 
 # ⚠️ This builds the OLD MIXED-LICENCE `chavruta` corpus (~2.93M points), which contains CC-BY-NC and
 #    copyrighted editions and MUST NOT be served to users of a paid product (see NOTICE.md). The live
-#    collection is `chavruta_commercial` (~2.4M, 100% commercial) — restore it from its snapshot with
+#    collection is `chavruta_commercial` (~2.5M, 100% commercial) — restore it from its snapshot with
 #    scripts/restore_commercial_tonight.ps1 instead. This path is for research only:
 python scripts/load_all_indexes.py                     # add --fresh to drop + reload from scratch
 
@@ -214,7 +214,7 @@ for the full tier→repo table.
 ### Run EVERYTHING (full stack)
 
 **Prerequisites:** the corpus/index is already embedded and loaded into the local Qdrant
-(`chavruta_commercial`, 15 tiers, ~2.4M points — see "Load the RAG" above if not), and `.env` holds `NEBIUS_API_KEY` (write access not
+(`chavruta_commercial`, 15 tiers, ~2.5M points — see "Load the RAG" above if not), and `.env` holds `NEBIUS_API_KEY` (write access not
 needed for serving). If so, the whole system is just **three commands** — Qdrant → backend → frontend:
 
 ```powershell
@@ -335,7 +335,7 @@ docs/                    CONFIGURATION.md · CORPUS.md · NEBIUS_HALACHA_JOB.md 
 The `src/chavruta/` core implements the MVP capabilities — grounded Q&A, explain/compare
 commentators (incl. supercommentary anchor chains), and structured lesson prep — behind
 config-swappable backends, with a test suite and a versioned evaluation harness. The corpus has
-grown from the validated Tanakh baseline (126k chunks) to the full Sefaria bookshelf — **~2.4M points
+grown from the validated Tanakh baseline (126k chunks) to the full Sefaria bookshelf — **~2.5M points
 across 15 tiers, incl. the Talmud Yerushalmi, all commercially licensed** — served from a hybrid Qdrant index with generation on
 the Nebius API (DeepSeek-V4-Pro). The **static offline UI** ([app/frontend/public/ui/chavruta.html](app/frontend/public/ui/chavruta.html);
 the React SPA is deprecated) + FastAPI app ship with persistent SQLite chat history and full

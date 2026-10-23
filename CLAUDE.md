@@ -23,7 +23,7 @@ dead in production only; `tests/unit/test_api_proxy_coverage.py` derives the lis
 SPA in `app/frontend/src/` is deprecated. Hebrew RTL + English LTR i18n. Governed by
 `.specify/memory/constitution.md` (v1.1.0).
 
-Corpus: the live production collection is **`chavruta_commercial`** (**2,403,599 points**, **15 tiers**,
+Corpus: the live production collection is **`chavruta_commercial`** (**~2.5M points**, **15 tiers**,
 **100% commercially-licensed** — PD/CC0/CC-BY/CC-BY-SA only, fail-closed `rights.allows_commercial_use`),
 served **on-disk** (`CHAVRUTA_MEM_TIER=ssd`: HNSW + dense + sparse + payload all memmapped, ~1–2 GB RAM).
 It **REPLACED** the old mixed-licence `chavruta` collection on **2026-07-20** — `serve.ps1` + `.env` now
@@ -44,7 +44,7 @@ Talmud is amud-linear (`Bava Metzia 2a` → corpus `Bava_Metzia.3.1`, `N=2·daf�
 DOTTED refs, so anchoring MUST emit BOTH spellings via `corpus/refs.py::with_ref_variants` (`_to_sefaria_ref`
 adds the underscore-dot variant + chapter→opening-verse) or the base pasuk/daf silently never anchors
 (this was a real recall bug — retrieval@8 was ~50% until fixed 2026-07-24, now ~83%; see [[ref-format-anchoring]]).
-**`commentator_id` and `anchor_ref` are EMPTY on all 2.4M points too, and are NOT backfilled — they are
+**`commentator_id` and `anchor_ref` are EMPTY on all 2.5M points too, and are NOT backfilled — they are
 derived at READ time** (fixed 2026-07-26/27; `docs/CORPUS.md §7.2b`). A server-side filter on
 `commentator_id` matched nothing, so "what does Rashi say here" answered *"there is no Rashi in the
 corpus"* with `Rashi_on_Genesis.1.1.1` in the index; and with `anchor_ref` empty a ref lookup returns the

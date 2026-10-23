@@ -15,6 +15,7 @@ import logging
 from collections.abc import Iterator
 from dataclasses import replace
 
+from chavruta.config import rollout
 from chavruta.config.profile import Profile
 from chavruta.corpus.links import LinkGraph
 from chavruta.corpus.refs import canon_corpus_ref, with_ref_variants
@@ -171,11 +172,13 @@ def build_backends(profile: Profile):
             f"DictaLM/Ollama backend has been removed."
         )
 
-    from chavruta.retrieval.rerank import Reranker
-
-    model_name = profile.rerank_model or "@cf/baai/bge-reranker-base"
-    backend = "api" if model_name.startswith("@cf/") else "auto"
-    reranker = Reranker(model_name, device=profile.embedding_device, backend=backend)
+    if profile.rerank:
+        from chavruta.retrieval.rerank import Reranker
+        model_name = profile.rerank_model or "@cf/baai/bge-reranker-base"
+        backend = "api" if model_name.startswith("@cf/") else "auto"
+        reranker = Reranker(model_name, device=profile.embedding_device, backend=backend)
+    else:
+        reranker = None
 
     # Prefer the corpus-derived, corpus-aligned graph on disk (LinkStore + ref index — O(1) RAM);
     # fall back to the legacy in-memory links.jsonl if it isn't built yet.
@@ -249,14 +252,18 @@ class ChavrutaPipeline:
         def fetch(queries: list[str]) -> list[SourceBlock]:
             out: list[SourceBlock] = []
             seen: set[str] = set()
-            for q in (queries or [])[:5]:
+            improved = rollout.improved()
+            # Improved path: few queries, few sources per query, short total — the model asks again
+            # with new wording instead of getting one big dump (see config/rollout.py).
+            n_queries, per_query_k, cap = (2, 6, 12) if improved else (5, 8, 24)
+            for q in (queries or [])[:n_queries]:
                 if not (q or "").strip():
                     continue
                 try:
                     rq = self._resolve_query(Query(text=q, intent=Intent.QA))
                     # priority=True: this is an in-flight answer CONTINUING (the model already
                     # spent a round and real tokens on it) — see hybrid.py::_PriorityGate.
-                    hits = self.retriever.retrieve(rq, top_k=8, priority=True).hits
+                    hits = self.retriever.retrieve(rq, top_k=per_query_k, priority=True).hits
                 except Exception:
                     continue
                 for h in hits:
@@ -274,9 +281,9 @@ class ChavrutaPipeline:
                                                deep_link=getattr(h, "deep_link", "") or "",
                                                license=getattr(h, "license", "") or "",
                                                version_title=getattr(h, "version_title", "") or ""))
-                if len(out) >= 24:
+                if len(out) >= cap:
                     break
-            return out[:24]
+            return out[:cap]
 
         return fetch
 
@@ -374,6 +381,7 @@ class ChavrutaPipeline:
         if not fetched or is_degrade_message(raw):
             return None                                   # nothing fetched, or a timeout/no-fetch degrade
         marker_map = {f"S{i}": s for i, s in enumerate(fetched, 1)}
+        raw, _qrefs = grounded.finalize_raw(raw, marker_map)
         text, citations, is_grounded = grounded.enforce_citations(raw, marker_map, question=query.text)
         if not is_grounded:
             return None                                   # model didn't actually cite a fetched source
@@ -409,9 +417,14 @@ class ChavrutaPipeline:
             lines += ["", "## FOCUSED QUESTION", distilled.strip()]
         lines += ["", "## INSTRUCTIONS"]
         lines += (["ענה אך ורק מהמקורות; צטט כל טענה בסימון [S#]; כתוב בעברית ברורה ומלאה, ללא מילים בשפה "
-                   "זרה; אם אין תשובה במקורות — אמור זאת בפירוש ואל תמציא."] if he else
+                   "זרה; אם אין תשובה במקורות — אמור זאת בפירוש ואל תמציא. ציטוט מילולי: אל תקליד אותו ואל תשים מרכאות "
+                   "סביב לשון מקור — כתוב {{S3: מילים ראשונות … מילים אחרונות}} (העתק את המילים בדיוק כפי שהן "
+                   "במקור S3; לציטוט קצר כתוב את כולו {{S3: הביטוי}}) והמערכת תדביק את הטקסט המדויק."] if he else
                   ["Answer ONLY from the SOURCES; cite every claim by [S#]; write in clear, full English "
-                   "with no foreign-language words; if the sources lack the answer, say so and do not invent."])
+                   "with no foreign-language words; if the sources lack the answer, say so and do not invent. Verbatim "
+                   "quotation: never type it or put quotation marks around source text — write "
+                   "{{S3: first words … last words}} (copy the words EXACTLY from source S3; for a short quote "
+                   "write all of it {{S3: phrase}}) and the system pastes the exact text."])
         lines += [SOURCE_REQUEST_INSTRUCTION]
         return llm.request("\n".join(lines), lang=lang or "he",
                            token_budget=_max_tokens_for(intent, self.profile))
@@ -517,6 +530,7 @@ class ChavrutaPipeline:
             # own text scan ever over/undercounts (see agentic.py::append_sources). Falls back to
             # the old count-based guess only for a source that never went through that loop.
             marker_map.setdefault(s.marker or f"S{i}", s)
+        raw, _qrefs = grounded.finalize_raw(raw, marker_map)
         text, citations, is_grounded = grounded.enforce_citations(raw, marker_map, question=query.text)
         used_model = getattr(llm, "last_model_used", "") or getattr(llm, "model_id", "")
         answer = Answer(
@@ -658,6 +672,7 @@ class ChavrutaPipeline:
             # own text scan ever over/undercounts (see agentic.py::append_sources). Falls back to
             # the old count-based guess only for a source that never went through that loop.
             marker_map.setdefault(s.marker or f"S{i}", s)
+        raw, _qrefs = grounded.finalize_raw(raw, marker_map)
         text, citations, is_grounded = grounded.enforce_citations(raw, marker_map, question=query.text)
         if plan.sections:
             plan = grounded.prune_lesson_to_cited(plan, citations)
@@ -688,6 +703,7 @@ class ChavrutaPipeline:
             raw, fetched = llm_out.text, getattr(llm_out, "fetched_sources", None) or []
         for i, s in enumerate(fetched or [], len(marker_map) + 1):
             marker_map.setdefault(s.marker or f"S{i}", s)
+        raw, _qrefs = grounded.finalize_raw(raw, marker_map)
         text, citations, is_grounded = grounded.enforce_citations(raw, marker_map, question=query.text)
         used_model = getattr(llm, "last_model_used", "") or getattr(llm, "model_id", "")
         return Answer(
@@ -716,6 +732,7 @@ class ChavrutaPipeline:
             raw, fetched = llm_out.text, getattr(llm_out, "fetched_sources", None) or []
         for i, s in enumerate(fetched or [], len(marker_map) + 1):
             marker_map.setdefault(s.marker or f"S{i}", s)
+        raw, _qrefs = grounded.finalize_raw(raw, marker_map)
         text, citations, is_grounded = grounded.enforce_citations(raw, marker_map, question=query.text)
         return Answer(
             text=text, citations=citations, grounded=is_grounded,

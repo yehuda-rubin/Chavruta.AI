@@ -40,6 +40,107 @@ def marker_numbers_in(text: str) -> list[int]:
     return nums
 
 
+# ── quote references ─────────────────────────────────────────────────────────────────────────
+# The model never types a quotation. It writes {{S3: first words … last words}} and WE paste the
+# verbatim span from the cited source, so a quote cannot be paraphrased, abbreviation-expanded, or
+# attached to the wrong source (the three slips the judge kept finding in free-typed quotes).
+_QREF_RE = re.compile(r"\{\{\s*S(\d+)\s*[:：]\s*(.+?)\s*\}\}", re.DOTALL)
+_QREF_SPLIT_RE = re.compile(r"\s*(?:\.{3}|…)\s*")
+QUOTE_MAX_CHARS = 600
+
+
+def _norm_with_map(s: str) -> tuple[str, list[int]]:
+    """Matching form of `s` plus, for every kept character, its index in `s`. Drops niqqud,
+    cantillation and quote/gershayim marks (so ק"ש matches קש) and turns every other
+    non-alphanumeric run into one space (so maqaf, commas and spacing never block a match)."""
+    out: list[str] = []
+    idx: list[int] = []
+    prev_space = True
+    for i, ch in enumerate(s):
+        if "֑" <= ch <= "ׇ" or ch in "\"'״׳“”‘’":
+            continue
+        if ch.isalnum():
+            out.append(ch)
+            idx.append(i)
+            prev_space = False
+        elif not prev_space:
+            out.append(" ")
+            idx.append(i)
+            prev_space = True
+    return "".join(out), idx
+
+
+def _span_in(src: str, start: str, end: str) -> str | None:
+    """The verbatim slice of `src` from `start` through `end` (or just `start` when `end` is
+    empty), or None when the anchors are not in `src`."""
+    ns, imap = _norm_with_map(src)
+    a, _ = _norm_with_map(start)
+    a = a.strip()
+    if len(a) < 2:
+        return None
+    p = ns.find(a)
+    if p < 0:
+        return None
+    last = p + len(a) - 1
+    if end:
+        b, _ = _norm_with_map(end)
+        b = b.strip()
+        if b:
+            q = ns.find(b, p)
+            if q < 0:
+                return None
+            last = q + len(b) - 1
+    stop = imap[last] + 1
+    while stop < len(src) and "֑" <= src[stop] <= "ׇ":   # niqqud riding on the last letter
+        stop += 1
+    span = src[imap[p]: stop].strip()
+    if len(span) > QUOTE_MAX_CHARS:
+        cut = span.rfind(" ", 0, QUOTE_MAX_CHARS)
+        span = span[: cut if cut > 0 else QUOTE_MAX_CHARS].rstrip() + " …"
+    return span
+
+
+def expand_quote_refs(text: str, sources: dict[int, str]) -> tuple[str, dict[str, int]]:
+    """Replace every {{S#: start … end}} in `text` with `"verbatim span" [S#]`.
+
+    `sources` maps marker number → the exact source text the model was shown. If the anchors are
+    not in the cited source but ARE in another one, the quote is re-attributed to that source. If
+    they are in none, the words are kept WITHOUT quotation marks and WITHOUT a marker — it reads as
+    the model's own words, never as a quote it could not back. Returns (text, stats)."""
+    stats = {"ok": 0, "moved": 0, "unmatched": 0}
+
+    def repl(m: re.Match) -> str:
+        n = int(m.group(1))
+        parts = [p for p in _QREF_SPLIT_RE.split(m.group(2).strip()) if p.strip()]
+        if not parts:
+            stats["unmatched"] += 1
+            return ""
+        start, end = parts[0], (parts[-1] if len(parts) > 1 else "")
+        span = _span_in(sources[n], start, end) if n in sources else None
+        if span is not None:
+            stats["ok"] += 1
+            return f'"{span}" [S{n}]'
+        for k, body in sources.items():
+            if k != n and (span := _span_in(body, start, end)) is not None:
+                stats["moved"] += 1
+                return f'"{span}" [S{k}]'
+        stats["unmatched"] += 1
+        return " … ".join(parts)
+
+    return _QREF_RE.sub(repl, text or ""), stats
+
+
+def finalize_raw(raw: str, marker_map: dict) -> tuple[str, dict[str, int]]:
+    """Everything done to the model's raw text BEFORE citations are enforced: drop an opening line
+    that narrates the instructions, then paste every quote reference with the verbatim source text
+    (re-attributing one that names the wrong source). Markers added by the pasting are what
+    `enforce_citations` then turns into citations."""
+    raw = strip_meta_opening(raw)
+    bodies = {int(k[1:]): source_body(getattr(h, "text", "") or getattr(h, "quote", "") or "")
+              for k, h in marker_map.items() if k[1:].isdigit()}
+    return expand_quote_refs(raw, bodies)
+
+
 def source_body(text: str) -> str:
     """Drop the internal "[label] Ref daf:seg" header line a stored document carries, leaving
     the source's actual text. The header is prompt scaffolding (and may hold a pre-correction
@@ -62,6 +163,23 @@ def strip_thinking(text: str) -> str:
         cleaned = cleaned.split("<think>")[0]
     return cleaned.strip()
 
+# The quote-reference rule, in every mode: the model never types a quotation — it marks the span and
+# the system pastes the exact words (see expand_quote_refs). Appended to the English base prompt
+# (SYSTEM_QA, from which explain / compare / lesson / walkthrough derive) and to SYSTEM_BASE_HE.
+QUOTE_REF_RULE = (
+    " QUOTE REFERENCES: never type a quotation yourself and never put quotation marks around source "
+    "text. To quote a source, write a quote reference {{S3: first words … last words}}, copying those "
+    "first and last words EXACTLY as they appear in source S3 — the system replaces it with the "
+    "verbatim text between them. For a short quote write all of it: {{S3: exact phrase}}. Cite "
+    "paraphrases with [S#] as usual."
+)
+QUOTE_REF_RULE_HE = (
+    " הפניות ציטוט: לעולם אל תקליד ציטוט בעצמך ואל תשים מרכאות סביב לשון מקור. כדי לצטט מקור כתוב "
+    "הפניית ציטוט {{S3: מילים ראשונות … מילים אחרונות}} — העתק את המילים הראשונות והאחרונות בדיוק "
+    "כפי שהן מופיעות במקור S3, והמערכת תחליף אותה בטקסט המדויק שביניהן. לציטוט קצר כתוב אותו כולו: "
+    "{{S3: הביטוי המדויק}}. דברים שאינם ציטוט מילולי — סמן ב-[S#] כרגיל."
+)
+
 SYSTEM_QA = (
     "You are Chavruta, a trustworthy Torah study partner. You answer ONLY from the sources "
     "provided to you. Every factual claim MUST cite its source by marker, e.g. [S1]. "
@@ -69,7 +187,7 @@ SYSTEM_QA = (
     "attributions, or content that is not in the provided sources. If the sources do not "
     "answer the question, say so plainly. If any provided sources are irrelevant or off-topic, "
     "silently ignore them completely — NEVER survey irrelevant sources, explain why they do not apply, or list sources in sequence. "
-    "Use quotation marks ONLY when quoting word-for-word from a provided source; never invent or paraphrase inside quotes. "
+    "Quote a source only through a quote reference (see QUOTE REFERENCES below); never invent or paraphrase inside quotes. "
     "Respect halachic chronology and hierarchy (Tannaim, Amoraim, Rishonim, Shulchan Aruch/Rema, Acharonim/Mishna Berurah); "
     "never treat a Tanna and a Rishon as equal opposing opinions. Attribute each statement to the correct commentator. "
     "When a claim characterizes a specific real, identifiable person (a historical figure, a "
@@ -98,6 +216,7 @@ SYSTEM_QA = (
     "(this conversation and its sources) if that genuinely suffices; ask for more sources if it "
     "doesn't; or, when the request is truly ambiguous and the answer would differ materially "
     "depending on the reading, ask the user one short clarifying question instead of guessing."
+    + QUOTE_REF_RULE
 )
 
 SYSTEM_EXPLAIN = SYSTEM_QA + (
@@ -143,8 +262,8 @@ SYSTEM_BASE_HE = (
     "עיצוב התשובה: השתמש בטקסט רגיל, ירידות שורה, והדגשות בעזרת כוכביות כפולות (לדוגמה: **טקסט מודגש**) בלבד. "
     "לעולם אל תשתמש בכותרות Markdown (#, ##, ###) או בשורת ציטוט שמתחילה ב-'>'. "
     "לעולם אל תכתוב את המילה \"מודגש\" ככותרת, כפתיח או כתווית בתחילת התשובה! "
-    "דיוק בציטוטים: הבא ציטוטים במרכאות רגילות אך ורק כאשר מדובר בציטוט מדויק מילה במילה מתוך המקור שסופק! "
-    "אם אינך מצטט מילה במילה אלא מסכם או מביא את תורף הדברים — כתוב זאת בלשונך ללא מרכאות; לעולם אל תמציא ציטוט. "
+    "דיוק בציטוטים: ציטוט מילה במילה — אך ורק באמצעות הפניית ציטוט (ראה בסוף). "
+    "אם אינך מצטט אלא מסכם או מביא את תורף הדברים — כתוב זאת בלשונך ללא מרכאות; לעולם אל תמציא ציטוט. "
     "אם לשון מקור מסוים כתובה בשפה שונה משפת התשובה (למשל תשובה שתורגמה לאנגלית, בתוך תשובה "
     "בעברית) — תרגם אותה לשפת התשובה במקום לצטט אותה כלשונה בשפה הזרה; סימון ה-[S#] עדיין "
     "מקשר את הקורא למקור המקורי. "
@@ -159,6 +278,7 @@ SYSTEM_BASE_HE = (
     "אל תגרום למשתמש לחזור על עצמו. בכל תור בחר במודע: ענה ממה שכבר יש לך (השיחה הזו והמקורות "
     "שבה) אם זה באמת מספיק; בקש מקורות נוספים אם לא; או, כשהבקשה באמת דו-משמעית והתשובה תשתנה "
     "מהותית לפי הפירוש — שאל את המשתמש שאלת הבהרה אחת קצרה במקום לנחש."
+    + QUOTE_REF_RULE_HE
 )
 
 # QA stays short and direct; explain/lesson must NOT inherit that brevity instruction.
@@ -188,6 +308,11 @@ SYSTEM_LESSON_WALKTHROUGH_HE = SYSTEM_BASE_HE + (
     "הקשת שנמסרה לך: פַתֵּחַ כל כיוון מתוך לשון מקורו (הבא את דברי הפרשן עצמו, ייחס נכון), "
     "הראה את הקושיות והתירוצים, וסכם למסקנות או השאר את הסוגיא פתוחה אם כך היא. זה הטקסט "
     "שהמגיד-שיעור אומר בפועל — לא רשימת מקורות. "
+    "בסוגיות תלמודיות ולמדניות (בפרט ברמת בית מדרש / ישיבה) — השתת את השיעור בראש ובראשונה "
+    "על המנגנונים המשפטיים-למדניים של הסוגיה (מוחזקות ותפיסה, גדרי שבועה, תקנת חכמים, אנן סהדי, "
+    "ספק וחלוקה); לעולם אל תדלג על השקלא וטריא ההלכתית היישר אל דרשנות, מוסר או ממד קיומי-מופשט — "
+    "כל רעיון מחשבתי או משמעות קיומית חייבים לצמוח באופן אורגני מתוך ההגדרות הלמדניות המדויקות "
+    "של הגמרא והראשונים. "
     "אל תפתח בחזרה על השאלה או הנושא — המשתמש שאל זה עתה; גש ישירות אל המקור והדיון. "
     "כל טענה עם [S#], אך ורק מן המקורות שסופקו. התאם את האורך למטרת השיעור, בלי מילוי."
 )
@@ -526,7 +651,7 @@ def _quoted_spans(masked: str) -> list[tuple[int, int]]:
 # was actually handed.
 
 # Sefaria/corpus commentator ids are the join key on both sides: the source side derives its id from
-# the ref (`commentator_from_ref` — the payload field is empty on all 2.4M points), and the prose side
+# the ref (`commentator_from_ref` — the payload field is empty on all 2.5M points), and the prose side
 # resolves a Hebrew/English NAME to the same id. Two name tables already exist and neither alone is
 # enough: refs.COMMENTATOR_HE is broad (tosafot, ran, meiri, bartenura…) but holds one spelling each,
 # while router.COMMENTATOR_ALIASES carries the gershayim-less and English variants a model actually
@@ -956,7 +1081,8 @@ def build_lesson_walkthrough_prompt(plan: LessonPlan, question: str, lang: str =
             q_line += f"\nשאלת המיקוד: {distilled_question}"
         lines = [q_line, "", "שלבי המהלך, לפי הסדר:"]
         lines += [f"• {h} — מקורות: {', '.join(ms) if ms else '—'}" for h, ms in stages]
-        lines += ["", "כתוב כעת את המהלך המלא לפי השלבים — פתח ישר מן המקור, בלי לחזור על השאלה."]
+        lines += ["", "כתוב כעת את התשובה עצמה לפי השלבים. התחל ישר מן המקור הראשון — בלי משפט "
+                  "פתיחה, בלי לחזור על השאלה, ובלי להזכיר את השלבים, את ההוראות או את המקורות שסופקו."]
         system = SYSTEM_SHUT_WALKTHROUGH_HE if shut else SYSTEM_LESSON_WALKTHROUGH_HE
     else:
         q_line = f"(context only — do not restate it) The question asked: {question}"
@@ -964,13 +1090,43 @@ def build_lesson_walkthrough_prompt(plan: LessonPlan, question: str, lang: str =
             q_line += f"\nFocused question: {distilled_question}"
         lines = [q_line, "", "Arc, in order:"]
         lines += [f"• {h} — sources: {', '.join(ms) if ms else '—'}" for h, ms in stages]
-        lines += ["", "Now write the full walkthrough following these stages — open straight "
-                  "from the source, without restating the question."]
+        lines += ["", "Now write the answer itself, following these stages. Begin straight with the "
+                  "first source — no opening line, no restating the question, and no mention of "
+                  "the stages, these instructions or the sources you were given."]
         system = SYSTEM_SHUT_WALKTHROUGH if shut else SYSTEM_LESSON_WALKTHROUGH
     llm_history = [LLMTurn(role=t.role, text=t.text) for t in (history or [])]
     prompt = GroundedPrompt(system=system, sources=sources, question="\n".join(lines),
                             history=llm_history, distilled_question=distilled_question)
     return prompt, marker_map
+
+
+# An opening line that talks about the prompt instead of the topic. Seen on 2026-10-17 in a
+# halacha answer: "הנה המהלך המלא לפי השלבים שסיפקת, מתוך המקורות הרלוונטיים בלבד:" — the
+# walkthrough instruction echoed back to the reader. Only a short first line that names the
+# stages / the supplied sources is dropped; a real first sentence never matches.
+_META_OPENING = re.compile(
+    r"\A\s*(?:הנה|להלן|Here is|Here's|Below is)[^\n]{0,100}?"
+    r"(?:השלבים|שסיפקת|שסופקו|שניתנו|stages|you provided|provided sources|sources given)"
+    r"[^\n]{0,80}\n+",
+    re.IGNORECASE,
+)
+
+
+# "I see that the sources provided include most of the segments…" — the model talking about its own
+# prompt before it starts. Seen 2026-10-18 opening a daf-yomi answer. Only a first line that names the
+# supplied sources is dropped; "אני רואה ש" followed by real content never mentions them.
+_META_SEES_SOURCES = re.compile(
+    r"\A\s*(?:אני\s+רואה\s+ש|אני\s+מבין\s+ש|I\s+see\s+that)[^\n]{0,160}?"
+    r"(?:המקורות\s+ש(?:סופקו|ניתנו|סיפקת)|sources\s+(?:provided|you\s+gave|given))[^\n]{0,240}\n+",
+    re.IGNORECASE,
+)
+
+
+def strip_meta_opening(text: str) -> str:
+    """Drop a first line that narrates the instructions ("here is the walkthrough per the stages
+    you provided") rather than answering."""
+    text = _META_OPENING.sub("", text or "", count=1)
+    return _META_SEES_SOURCES.sub("", text, count=1)
 
 
 def prune_lesson_to_cited(plan: LessonPlan, citations: list[Citation]) -> LessonPlan:

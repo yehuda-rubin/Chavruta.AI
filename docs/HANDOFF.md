@@ -12,7 +12,7 @@ the point is that there is one place to read, not an archive to search.
 | Live at | `chavrutaai.org` — VM `chavruta@89.169.99.221`, repo at `~/chavruta` |
 | Host specs | Nebius Non-GPU AMD Epyc Genoa, 4 vCPUs, 16 GiB RAM, 8 GiB Swap (resized 2026-09-18) |
 | Concurrency gate | `CHAVRUTA_MAX_CONCURRENT_RETRIEVALS=2` (tuned for 4 vCPUs; agentic rounds have priority) |
-| Collection | `chavruta_commercial`, 2.4M points, on-disk (`CHAVRUTA_MEM_TIER=ssd`) |
+| Collection | `chavruta_commercial`, 2.5M points, on-disk (`CHAVRUTA_MEM_TIER=ssd`) |
 | Generation | Nebius, `deepseek-ai/DeepSeek-V4-Pro` (preset: `deepseek-v4-pro`) |
 | Last backup | `/app-data/backup-pre-resize-20260918.db` (18.2 MB, local copy saved) |
 
@@ -84,7 +84,7 @@ bug more than once.
 - **Ref spellings.** The commercial corpus stores underscore-dot refs (`Bava_Metzia.3.1`), the router
   emits dotted ones. Anchoring must emit **both** via `corpus/refs.py::with_ref_variants` or the base
   pasuk silently never anchors. This was a ~50% → ~83% retrieval@8 swing.
-- **`commentator_id` and `anchor_ref` are empty on all 2.4M points** and are derived at *read* time.
+- **`commentator_id` and `anchor_ref` are empty on all 2.5M points** and are derived at *read* time.
   Do not restore a payload filter on them and do not write a backfill — one was measured at ~5
   points/sec, i.e. days, to store what a string split already yields.
 - **Quota compares an accumulated counter against the *current* limit**, so lowering a limit applies

@@ -5,14 +5,21 @@ import type { Lang } from "@/lib/types";
 import { api, type Tier } from "@/lib/api";
 import "./landing.css";
 
-const CONTACT_EMAIL = "rubinyehuda8@gmail.com";
+const CONTACT_EMAIL = "partners@chavrutaai.org";
 
 // The landing is its own surface (visitors who are not signed in), so its copy lives here rather than
 // in lib/i18n.ts, which is the app's string table. Both languages carry the same claims — and only
 // claims the product can back: every answer cites its source, and "no source" is a valid answer.
 const COPY = {
   he: {
-    navWhy: "למה חברותא", navHow: "איך זה עובד", navPrice: "מחירים", navFaq: "שאלות",
+    navWhy: "למה חברותא", navHow: "איך זה עובד", navExamples: "דוגמאות", navPrice: "מחירים", navFaq: "שאלות",
+    examplesTitle: "ראו איך זה נראה", examplesSub: "דפים ושיעורים לדוגמה, עם המקורות והרישיונות שלהם.",
+    examplesCards: [
+      ["דף יומי", "סנהדרין כה ע״א", "שאלות ותשובות על הדף, כל אחת עם המקורות שעליהם היא נשענת.", "/examples/daf/sanhedrin-25a", "לצפייה בדף"],
+      ["שיעור עיון", "שניים אוחזין בטלית", "טעם החלוקה והשבועה, מהלך השיעור ודף מקורות.", "/examples/lesson/gemara-shnayim-ochazin", "לצפייה בשיעור"],
+      ["שיעור באמונה", "בחירה חופשית וידיעת ה׳", "הרמב״ם בהלכות תשובה והשגת הראב״ד, עם דף מקורות.", "/examples/lesson/emuna-bechira", "לצפייה בשיעור"],
+    ],
+    examplesBtn: "לכל הדוגמאות",
     signIn: "כניסה", start: "התחילו חינם", langBtn: "English",
     h1: "החברותא שתמיד מוכנה ללמוד איתך",
     lead: "שואלים בחופשיות על כל ספר ביהדות. מקבלים תשובה ברורה, וכל משפט בה מפנה למקור שאפשר לפתוח.",
@@ -41,10 +48,17 @@ const COPY = {
       ["מה קורה כשאין תשובה במקורות?", "חברותא אומרת שלא נמצא מקור, ולא מנסה לנחש."],
     ],
     finalH: "בואו נלמד ביחד", finalBtn: "הרשמה חינם",
-    terms: "תנאי שימוש", privacy: "פרטיות", access: "נגישות", limits: "מכסות ותוכניות", brand: "חברותא",
+    terms: "תנאי שימוש", privacy: "פרטיות", access: "נגישות", limits: "מכסות ותוכניות", examples: "דוגמאות", brand: "חברותא",
   },
   en: {
-    navWhy: "Why Chavruta", navHow: "How it works", navPrice: "Pricing", navFaq: "FAQ",
+    navWhy: "Why Chavruta", navHow: "How it works", navExamples: "Examples", navPrice: "Pricing", navFaq: "FAQ",
+    examplesTitle: "See what it looks like", examplesSub: "Sample pages and lessons, with their sources and licences.",
+    examplesCards: [
+      ["Daf Yomi", "Sanhedrin 25a", "Questions and answers on the page, each tied to the sources it rests on.", "/examples/daf/sanhedrin-25a", "View the page"],
+      ["Analysis lesson", "Two hold a cloak", "Why the cloak is split and the oath is taken, with a lesson flow and a source sheet.", "/examples/lesson/gemara-shnayim-ochazin", "View the lesson"],
+      ["Lesson on faith", "Free will and God's knowledge", "Rambam on repentance and the Raavad's objection, with a source sheet.", "/examples/lesson/emuna-bechira", "View the lesson"],
+    ],
+    examplesBtn: "All examples",
     signIn: "Sign in", start: "Start free", langBtn: "עברית",
     h1: "The study partner who is always ready to learn with you",
     lead: "Ask freely about any Jewish text. Get a clear answer where every sentence points to a source you can open.",
@@ -73,7 +87,7 @@ const COPY = {
       ["What if the sources have no answer?", "Chavruta says no source was found, and does not guess."],
     ],
     finalH: "Let’s learn together", finalBtn: "Sign up free",
-    terms: "Terms", privacy: "Privacy", access: "Accessibility", limits: "Plans & limits", brand: "Chavruta",
+    terms: "Terms", privacy: "Privacy", access: "Accessibility", limits: "Plans & limits", examples: "Examples", brand: "Chavruta",
   },
 } as const;
 
@@ -115,6 +129,7 @@ export function Landing() {
           <ul>
             <li><a href="#why">{c.navWhy}</a></li>
             <li><a href="#how">{c.navHow}</a></li>
+            <li><a href="#examples">{c.navExamples}</a></li>
             {free && <li><a href="#pricing">{c.navPrice}</a></li>}
             <li><a href="#faq">{c.navFaq}</a></li>
           </ul>
@@ -178,6 +193,24 @@ export function Landing() {
         </div>
       </section>
 
+      <section id="examples" style={{ paddingTop: 20 }}>
+        <div className="wrap">
+          <h2>{c.examplesTitle}</h2>
+          <p className="sub">{c.examplesSub}</p>
+          <div className="exgrid">
+            {c.examplesCards.map(([tag, h, p, href, cta]) => (
+              <Link className="excard" href={href} key={href}>
+                <span className="extag">{tag}</span>
+                <h3>{h}</h3>
+                <p>{p}</p>
+                <span className="excta">{cta}</span>
+              </Link>
+            ))}
+          </div>
+          <p className="exmore"><Link className="btn w big" href="/examples">{c.examplesBtn}</Link></p>
+        </div>
+      </section>
+
       {/* Pricing is rendered from the live catalogue (/billing/config), never hard-coded, so the
           landing can't drift from what checkout charges. No catalogue (billing off / API down) =
           no pricing section at all, rather than a stale number. */}
@@ -238,6 +271,7 @@ export function Landing() {
             <Link href="/privacy">{c.privacy}</Link>
             <Link href="/accessibility">{c.access}</Link>
             <Link href="/limits">{c.limits}</Link>
+            <Link href="/examples">{c.examples}</Link>
           </nav>
         </div>
       </footer>

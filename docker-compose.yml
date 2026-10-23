@@ -54,7 +54,7 @@ services:
       CHAVRUTA_COLLECTION: ${CHAVRUTA_COLLECTION:-chavruta_commercial}
       CHAVRUTA_MEM_TIER: ${CHAVRUTA_MEM_TIER:-ssd}
       CHAVRUTA_HYBRID: "true"
-      CHAVRUTA_RERANK: "true"
+      CHAVRUTA_RERANK: "false"          # reranker off for good (2026-10-17): Cloudflare 429s on every query
       CHAVRUTA_RERANK_MODEL: "@cf/baai/bge-reranker-base"
       CHAVRUTA_RELEVANCE_THRESHOLD: "0.0"
       CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-fb7545ed5add9650d7d881375fefb335}
@@ -79,6 +79,8 @@ services:
       # require a signed-in user's JWT on every request instead of treating every caller as 'local'.
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      # Signs the withdrawal link in marketing emails (app/marketing.py). Empty = the link is refused.
+      UNSUBSCRIBE_SECRET: ${UNSUBSCRIBE_SECRET:-}
 
       # Global concurrency cap on generations running at once (see .env.example for the full
       # explanation). Default 2 assumes a 2-vCPU free-tier box.
@@ -119,6 +121,7 @@ services:
 
       # Admin dashboard (see app/api.py::_is_admin) — a dedicated allowlist, no wildcard.
       CHAVRUTA_ADMIN_OWNERS: ${CHAVRUTA_ADMIN_OWNERS:-}
+      CHAVRUTA_IMPROVED_SCOPE: ${CHAVRUTA_IMPROVED_SCOPE:-all}
       # Backend error tracking (see app/api.py::_configure_sentry) — no-op unless set.
       SENTRY_DSN: ${SENTRY_DSN:-}
 

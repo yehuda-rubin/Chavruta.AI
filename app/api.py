@@ -35,6 +35,9 @@ except Exception:  # noqa: BLE001
 # to citations, then we strip them from the DISPLAYED text so the answer reads cleanly.
 _MARKER_BODY = r"[\[(（【]\s*S\d+(?:\s*,\s*S\d+)*\s*[\])）】]"
 _MARKER_RE = re.compile(rf"\s*{_MARKER_BODY}")
+# A marker the model ANNOTATED — "[S4 מצטט מדרש רבה]", "[S4 בשם מדרש שמואל]" — which the plain pattern above
+# does not match; it leaked into a lesson's flow file (seen 2026-10-18). Dropped whole.
+_ANNOTATED_MARKER_RE = re.compile(r"\s*\[S\d+\s+[^\]\n]{1,80}\]")
 
 # A marker the model used as a NOUN rather than as a trailing footnote — "ב[S2] יש דיון" ("in
 # [source 2] there is a discussion"), "את [S3]: שם נאמר". Deleting only the marker strands the
@@ -229,14 +232,14 @@ def _widen_citations_from_note(result, note: str, owner_id: str = "",
     for ref, payload in found.items():
         from chavruta.corpus.refs import license_for_ref
 
-        lic = payload.get("license") or payload.get("license_he") or license_for_ref(ref, "he")[0]
-        ver = payload.get("version_title") or payload.get("version_he") or license_for_ref(ref, "he")[1]
+        lic = payload.get("license") or payload.get("license_he") or license_for_ref(ref, "he", payload.get("deep_link") or "")[0]
+        ver = payload.get("version_title") or payload.get("version_he") or license_for_ref(ref, "he", payload.get("deep_link") or "")[1]
         result.citations.append(CitationOut(
             ref=ref, ref_he=(hebrew_display_ref(ref) or "") if he else "",
             text_he=payload.get("text_he") or payload.get("text") or "",
             text_en=payload.get("text_en") or "",
             # Derived from the ref, not read from the payload:  is EMPTY on all
-            # 2.4M points of the commercial corpus and is recovered at read time everywhere else
+            # 2.5M points of the commercial corpus and is recovered at read time everywhere else
             # (see retrieval/hybrid.py::_to_hit). Reading the payload alone is why a widened
             # citation rendered as a bare "Chizkuni,_Deuteronomy.10.6.1" chip beside "rashbam".
             commentator=(payload.get("commentator_id") or commentator_from_ref(ref) or ""),
@@ -273,7 +276,8 @@ _MD_BLOCKQUOTE_RE = re.compile(r"^[ \t]{0,3}>[ \t]?", re.M)
 
 def _strip_markers(text: str, he: bool = False) -> str:
     # Load-bearing markers first ("ב[S2]" → nothing, not "ב"), then every remaining plain marker.
-    t = _CARRIER_MARKER_RE.sub("", text or "")
+    t = _ANNOTATED_MARKER_RE.sub("", text or "")
+    t = _CARRIER_MARKER_RE.sub("", t)
     t = _MARKER_RE.sub("", t)
     t = _STRAY_ESCAPE_RE.sub("", t)           # drop a leaked escape backslash before a quote mark
     t = _strip_foreign(t)                    # drop stray foreign-script tokens (model multilingual bleed)
@@ -292,6 +296,8 @@ def _strip_markers(text: str, he: bool = False) -> str:
     # Clean up punctuation collisions left where citation markers were stripped (e.g. ",." -> "." or ",," -> ",")
     t = re.sub(r",\s*\.", ".", t)
     t = re.sub(r",\s*,+", ",", t)
+    # An empty "()" / "(,)" left where a citation marker sat inside parentheses ("חכמים חולקים ():")
+    t = re.sub(r"[ \t]*\(\s*[,;]?\s*\)", "", t)
     t = re.sub(r"[ \t]{2,}", " ", t)
     return t.strip()
 
@@ -474,6 +480,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from chavruta import __version__
+from chavruta.config import rollout
 from chavruta.config.profile import Profile
 from chavruta.corpus import rights
 from chavruta.corpus.refs import (
@@ -1087,8 +1094,9 @@ def _license_table(used: list[CitationOut], he: bool) -> str:
         lic = (c.license or "").strip()
         shown = _LICENSE_HE.get(lic.lower(), lic) if he else lic
         parts = [f"{n}. {(c.ref_he or c.ref) if he else c.ref}"]
-        if c.version_title:
-            parts.append(c.version_title)
+        version = re.sub(r"\s*Unknown Publisher\s*", " ", c.version_title or "").strip()   # Sefaria's placeholder
+        if version:
+            parts.append(version)
         parts.append(shown or ("רישיון לא ידוע" if he else "licence unknown"))
         lines.append(" — ".join(parts))
     return "\n".join(lines)
@@ -1286,7 +1294,8 @@ def _split_lesson(text: str) -> tuple[str, str, str, str]:
 
 def _run_lesson(question: str, lang: str, history=None, audience: str = "",
                 grade_band: str = "", length: str = "", owner_id: str = "local",
-                llm=None, target_files: list[str] | None = None) -> QueryResponse:
+                llm=None, target_files: list[str] | None = None,
+                seed_hits: list | None = None) -> QueryResponse:
     """Dedicated LESSON path: resolve audience/grade → pick a template from the template RAG →
     real source retrieval → Claude writes the 3 files at the right register (or asks clarifying
     questions first) via the bridge → 3 Word files + only-cited sources (in discussion order).
@@ -1346,6 +1355,8 @@ def _run_lesson(question: str, lang: str, history=None, audience: str = "",
     if floor:
         fset = {b.ref for b in floor}
         hits = floor + [h for h in hits if h.ref not in fset]
+    if seed_hits:       # a scoped caller (daf yomi) pre-seeds its boundary; RAG fills in the rest
+        hits = _cap_hits(_dedup_hits(list(seed_hits) + hits), _LESSON_HIT_CAP, min_commentaries=15)
     return _generate_lesson_from_hits(topic, hits, lang, he, audience=aud, grade_band=band,
                                       length=length, tpl=tpl, history=history, owner_id=owner_id, llm=llm,
                                       target_files=target_files)
@@ -1414,8 +1425,8 @@ def _generate_lesson_from_hits(topic: str, hits, lang: str, he: bool, *, audienc
 
             ref_he = hebrew_display_ref(h.ref) or talmud_hebrew_display_ref(h.ref) or ""
             ref_en = talmud_english_display_ref(h.ref) or h.ref
-            lic = getattr(h, "license", "") or license_for_ref(h.ref, "he" if he else "en")[0]
-            ver = getattr(h, "version_title", "") or license_for_ref(h.ref, "he" if he else "en")[1]
+            lic = getattr(h, "license", "") or license_for_ref(h.ref, "he" if he else "en", getattr(h, "deep_link", "") or "")[0]
+            ver = getattr(h, "version_title", "") or license_for_ref(h.ref, "he" if he else "en", getattr(h, "deep_link", "") or "")[1]
             used.append(CitationOut(ref=ref_en if not he else h.ref,
                                     ref_he=ref_he if he else (ref_he or ""),
                                     text_he=he_text, text_en=en_text,
@@ -1706,7 +1717,7 @@ def _edit_lesson_file(
     )
 
 
-def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bool = False,
+def _chavruta_job_md_legacy(question: str, hits, lang: str, history, weak_retrieval: bool = False,
                      distilled_question: str = "") -> str:
     """Bridge job: play a Socratic study-partner (chavruta) — learn WITH the user, don't lecture."""
     role_instruction = (
@@ -1807,6 +1818,151 @@ _CLASSIFIER_MODEL_DEFAULT = "Qwen/Qwen3-30B-A3B-Instruct-2507"
 _classifier_llm_cache = None
 
 
+def _chavruta_job_md_improved(question: str, hits, lang: str, history, weak_retrieval: bool = False,
+                     distilled_question: str = "") -> str:
+    """Bridge job: play a Socratic study-partner (chavruta) — learn WITH the user, don't lecture."""
+    role_instruction = (
+        "You are **Chavruta** — an expert, grounded Torah and Halacha study partner. "
+        "Answer questions directly, accurately, and strictly based on retrieved sources, with no condescending filler, "
+        "no conversational fluff ('בוא נלמד ביחד', 'יפה שהתחלת'), and zero fabricated attributions."
+        if (lang or "").startswith("en")
+        else "אתה **חברותא** — שותף למדני מוסמך, מדויק ומבוסס מקורות. "
+        "ענה ישירות ולעניין, אך ורק מתוך המקורות המצורפים, ללא גינוני שיחה מיותרים ('בוא נלמד ביחד', 'יפה שהתחלת'), "
+        "ובלי שום סברות או מחלוקות בדויות."
+    )
+    lines = [f"lang: {lang}", "", "## ROLE", role_instruction, ""]
+    prior = [h for h in (history or []) if (getattr(h, "text", "") or "").strip()]
+    if prior:
+        lines += ["## CONVERSATION SO FAR"]
+        for h in prior[-8:]:
+            lines += [f"- {getattr(h, 'role', 'user')}: {(getattr(h, 'text', '') or '').strip()}"]
+        lines += [""]
+    lines += ["## THE LEARNER JUST SAID", question.strip(), ""]
+    if not hits:
+        lines += [
+            "## ⚠️ ZERO SOURCES RETRIEVED — YOU MUST FETCH SOURCES FIRST",
+            "No sources were retrieved for this question in the initial search. "
+            "DO NOT GUESS, DO NOT INVENT A CITATION OR S# TAG, AND DO NOT ANSWER FROM MEMORY! "
+            "Reply with ONLY a block starting with the exact line '===NEED_SOURCES===' followed by 1–2 focused search queries "
+            "(one per line, in the canonical phrasing of the source, e.g. the specific Gemara daf or Shulchan Aruch siman), and STOP. "
+            "If you cannot identify the exact canonical source, reply stating plainly that no sources were found in the library.",
+            "",
+        ]
+    elif weak_retrieval:
+        lines += [
+            "## ⚠️ RETRIEVAL CONFIDENCE IS LOW — YOU MUST FETCH SOURCES FIRST",
+            "The similarity scores for this turn are low or the sources do not directly address the specific question. "
+            "DO NOT GUESS, DO NOT INVENT A PSAK DIN, AND DO NOT FORCE AN ANSWER ON UNRELATED TEXT! "
+            "INSTEAD, YOU MUST FIRST FETCH THE EXACT SOURCES YOURSELF: "
+            "Reply with ONLY a block starting with the exact line '===NEED_SOURCES===' followed by 1–2 focused search queries "
+            "(one per line, in the canonical phrasing of the source, e.g. the specific Gemara daf or Shulchan Aruch siman), and STOP. "
+            "The system will retrieve them and re-send the job with the extra sources appended.",
+            "",
+        ]
+    else:
+        lines += [
+            "## ✅ YOU HAVE RELEVANT SOURCES — START LEARNING",
+            "The SOURCES below were retrieved for this topic and are relevant. READ THEIR TEXT (not only the "
+            "ref line) to identify the sugya, then begin the chavruta immediately. Do NOT ask the learner to "
+            "name a daf/perek/source and do NOT reply that the source 'didn't come up' — you already have the "
+            "sugya in hand. Note: refs use amud-linear numbering (e.g. 'Bava Metzia 151.2'), so identify the "
+            "sugya from the source TEXT itself, never from the ref number.",
+            "",
+        ]
+    lines += ["## SOURCES"]
+    for i, h in enumerate(hits, 1):
+        who = f" ({h.commentator_id})" if getattr(h, "commentator_id", None) else ""
+        lines += [f"### [S{i}] {h.ref}{who}", (getattr(h, "text", "") or "").strip(), ""]
+    if distilled_question and distilled_question != question:
+        lines += ["## FOCUSED CORE QUESTION", distilled_question.strip(), ""]
+
+    if (lang or "").startswith("en"):
+        recovery_instruction = (
+            "**NEED MORE SOURCES?** If the sources above do not contain the specific Gemara, Rishon, or ruling asked, "
+            "do NOT invent an answer! Reply with ONLY a block starting with the EXACT line '===NEED_SOURCES===' followed by "
+            "1–3 focused search queries in the language of the sources (one per line), and STOP. "
+            "Phrase each query in the source's own words (a phrase of the sugya, the technical term, the opening words, an exact ref), "
+            "not as a question; and if you ask again, use NEW wording rather than repeating the last one."
+        )
+    else:
+        recovery_instruction = (
+            "**חסרים מקורות מדויקים?** אם המקורות למעלה אינם כוללים את הגמרא, הפוסק או הדין המדויק שנשאל, "
+            "אל תמציא תשובה ואל תנחש סברות! השב אך ורק בבלוק שמתחיל בשורה המדויקת '===NEED_SOURCES===' ואחריה 1–3 "
+            "שאילתות חיפוש ממוקדות בלשון המקורות (שורה לכל שאילתה, למשל מסכת ודף או סימן בשו\"ע), ועצור. המערכת תביא את המקורות ותחזיר לך להשלמת התשובה. "
+            "נסח כל שאילתה בלשון המקור עצמו — ביטוי מן הסוגיה, המונח המקצועי, דיבור המתחיל או ציון מדויק — ולא בניסוח של שאלה; "
+            "ואם מבקשים שוב, השתמש בניסוח חדש, לא בחזרה על קודמו."
+        )
+
+    lines += [
+        "## INSTRUCTIONS FOR CLAUDE (the chavruta)",
+        "You are an expert Torah scholar and study partner (חברותא). Your objective is maximum accuracy, clarity, and faithfulness to the sources.",
+        "1. NO GREETINGS, NO PRAISE, NO FLUFF (Strict):",
+        "   - NEVER start with 'שלום', 'שלום וברכה', 'שאלה יפה/מצוינת', 'בוא נלמד ביחד', or conversational preambles.",
+        "   - START DIRECTLY on the very first word with the clear, substantive answer to the question asked.",
+        "   - Keep answers structured, focused, and concise (typically 150-300 words). Avoid bloated essays or circular explanations.",
+        "2. ABSOLUTE FIDELITY TO RETRIEVED SOURCES [S1]-[S8]:",
+        "   - Every halachic claim, quote, and conceptual distinction must originate directly from the SOURCES provided above.",
+        "   - NEVER invent or misattribute opinions. If an opinion is from the Shulchan Aruch, cite it from the Shulchan Aruch source; do not call it Rambam or vice-versa.",
+        "   - NEVER invent Tannaitic, Amoraic, or Rishonim debates (e.g. do not invent debates between Rav and Shmuel, and do not invent 'דעת התוספות' when not in the sources).",
+        "   - If the sources above do NOT answer the specific question or do not contain the requested commentator/ruling, STATE THIS HONESTLY AND DIRECTLY:",
+        "     'במקורות שלפניי עניין זה אינו מפורש ישירות...'. NEVER fabricate an answer, never invent 'מקורות חיצוניים', and never issue an ungrounded psak din!",
+        "   - BUT you may concede that the sources lack the answer ONLY after you have already asked for more: if this job has no '## ADDITIONAL SOURCES' section you have NOT yet asked, so reply with the ===NEED_SOURCES=== block now (you have up to 4 requests, each with NEW wording taken from the sugya's own language). Before conceding, re-read EVERY source once more — the answer is often in a source you skimmed.",
+        "   - ZERO TECHNICAL JARGON: NEVER use technical words like 'RAG', 'ראג', 'אחזור', 'מודל', 'פרומפט', 'וקטורים', or 'מערכת'. Speak purely in the language of the Beit Midrash.",
+        "3. ABSOLUTE BAN ON INDIRECT SOURCES, OUTSIDE KNOWLEDGE, AND ARTIFICIAL CITATIONS:",
+        "   - NEVER write '[מקור עקיף]', 'מקורות חיצוניים', 'ידוע ממקורות אחרים', 'מסורת חז\"ל שלא מופיעה במקורות', or 'לפי מה שידוע ממקום אחר'.",
+        "   - NEVER bring outside narrative details (e.g. 'חטא העגל' or 'ימי הנס פחתו') unless those exact words appear in a retrieved snippet [S#] above!",
+        "   - NEVER state that something is 'הלכה פסוקה בשו\"ע' or 'דעת בעלי התוספות' if the Shulchan Aruch or Tosafot text is not explicitly in the retrieved snippets above.",
+        "   - NEVER leak internal headers or tags (e.g. do NOT output '===תשובה ישירה===' or '===ORDER===').",
+        "   - NEVER type a quotation yourself and NEVER put quotation marks around source text — quote ONLY with a quote reference (see 4); the system pastes the exact words.",
+        "4. QUOTE REFERENCES & CITATIONS:",
+        "   - For the central rulings, put the quote on its own line as a quote reference: {{S3: first 3-6 words of the passage … last 3-6 words}}. Copy those first and last words EXACTLY as they appear in source S3 (the system replaces the reference with the verbatim text between them). For a short quote write the whole phrase: {{S3: exact short phrase}}. Then explain it concisely.",
+        "   - Cite paraphrases with the tags [S1], [S2], etc. Refer to a source ONLY by its tag — never by order ('המקור השני').",
+        "   - SEPARATE SOURCE FROM INFERENCE: every sentence is either (a) what a source says — tag it [S#]; or (b) your own inference or connection, which carries NO [S#] and opens with 'מכאן אפשר להבין ש' or 'ולכאורה'. Never attach [S#] to a conclusion the source does not itself state.",
+        "   - Refer to works and sages by their traditional names (רש\"י, רמב\"ם, שולחן ערוך, תוספות), never by internal file IDs.",
+        "5. ZERO FABRICATED ATTRIBUTIONS & STRICT SAGE FIDELITY (CRITICAL):",
+        "   - NEVER attribute a ruling, reason, or dispute to ANY sage, commentator, or book (e.g. רמב\"ם, רש\"י, תוספות, שו\"ע, רא\"ש, טור, רי\"ף, רב ושמואל, רבי יהודה, חכמים) UNLESS that specific authority is explicitly named inside the retrieved [S#] snippet!",
+        "   - If the snippet states a halakha or sugya without naming the author, write: 'במקורות שלפנינו מובא...' — NEVER guess that it is the Rambam, Rosh, Tur, or Tosafot!",
+        "   - If a question asks 'What is the opinion of X?' (e.g. דעת בעלי התוספות) and X is not in the snippets, DO NOT GUESS whether X rules like A or B! State clearly: 'דעתו של [X] אינה מפורשת במקורות שלפנינו'.",
+        "   - NEVER invent terms or concepts not in the text (e.g. do not invent 'דין דבוק', 'מגמה עממית', etc.).",
+        "   - HALACHIC PRECISION ON APPLIANCES & CORE SAGES:",
+        "     * Solar water heating (דוד שמש): Shulchan Arukh O.C. 318:3 rules that heating water directly in the sun (חמה עצמה) is permitted ('ליתן מים בחמה כדי שיוחמו מותר'). Only 'תולדות חמה' (objects heated by the sun, like cloth or sand) are forbidden by rabbinic decree. Do NOT invent that water pipes are 'תולדות חמה' or that 'רוב דודי השמש אסורים'!",
+        "     * An electric heating element (תנור חשמלי, פלטה חשמלית) is categorized as אש / תולדות האש, NEVER 'תולדות חמה' (which is heat directly from the sun).",
+        "     * In Bava Metzia 6a (תקפו כהן): Note carefully what the sources say: the Rambam rules that if a Kohen seized doubt-tithes, אין מוציאין מידו (we do not take it away), while the majority of poskim (Rosh, Shulchan Aruch / Rama) rule מוציאין מידו. Do not invert them!",
+        "     * In Shevuot (שבועת הפקדון ושבועת העדות): שבועת העדות incurs קרבן עולה ויורד. שבועת הפקדון incurs קרבן אשם (אשם גזילות) plus קרן וחומש, NEVER עולה ויורד!",
+        "     * In Bava Metzia 1:4-1:5: a broken deer (צבי שבור) in a field IS acquired because it is guarded (משתמרת); a running deer is not. A wife's find belongs to the husband 'משום איבה' (to prevent enmity), not 'מדין תורה'.",
+        "     * In Sukkah 2a: Rabbi Yehuda requires דירת קבע (permanent dwelling), while Chachamim require דירת עראי (temporary dwelling). Do not invert their reasons!",
+        recovery_instruction,
+        "Ground everything ONLY in the SOURCES; cite by [S#] (stripped from display). "
+        "MUST NOT invent sources, citations, or attributions that are not in the SOURCES above — this "
+        "applies EVEN WHEN the learner is the one who states a 'quote' or 'pasuk'. If they hand you a phrase "
+        "and it does not genuinely appear in the SOURCES, do not validate it, do not give it a citation, and "
+        "do not build an answer that treats it as real — say plainly that you don't have that source. "
+        "HALACHIC CAUTION: Halachic rulings are advisory only, never a psak din. Do not issue sweeping, dangerous, "
+        "or ungrounded halachic declarations that are not explicitly in the sources. "
+        "Keep it fairly short (a real chavruta exchange, not an essay). Write in the learner's language. **bold** key terms. "
+        "LANGUAGE: write ONLY in the learner's language, with NO words from another language mixed in. "
+        "To name a Gemara daf in prose, use its human form (e.g. 'יומא עד ע\"ב'), never the internal number; to name a "
+        "work, use its real Hebrew/English title, never the corpus ref string.",
+    ]
+    return "\n".join(lines)
+
+
+# A small/fast model dedicated to trivial yes/no classification (_wants_full_lesson) — same
+# provider/key as the main pipeline LLM, but NOT the main model_id. Verify this id is still live on
+# the configured provider's catalog before relying on it; CHAVRUTA_CLASSIFIER_MODEL overrides it.
+_CLASSIFIER_MODEL_DEFAULT = "Qwen/Qwen3-30B-A3B-Instruct-2507"
+_classifier_llm_cache = None
+
+
+def _chavruta_job_md(question: str, hits, lang: str, history, weak_retrieval: bool = False,
+                     distilled_question: str = "") -> str:
+    """Bridge job for a chavruta turn. The improved prompt is on only for the operator's own account
+    (config/rollout.py); everyone else still gets the previous prompt, unchanged."""
+    fn = _chavruta_job_md_improved if rollout.improved() else _chavruta_job_md_legacy
+    return fn(question, hits, lang, history, weak_retrieval=weak_retrieval,
+              distilled_question=distilled_question)
+
+
 def _classifier_llm():
     """Built once, reused. None on the 'bridge' backend (Claude in-session has no separate small
     model to call there) — callers fall back to the main pipeline llm in that case."""
@@ -1884,6 +2040,15 @@ def _generate_chavruta_turn(question: str, hits, lang: str, he: bool, history, w
     raw, fetched = llm.request(job, lang=lang,
                               token_budget=_max_tokens_for(Intent.EXPLAIN, _get_pipeline().profile))
     hits = hits + list(fetched or [])   # include agentically-fetched so their [S#] resolve
+    if not hits and rollout.improved():
+        msg = "לא נמצאו מקורות מתאימים לסוגיה זו בארון הספרים. נסה לכוון למקור מפורש (מסכת ודף או סימן בשו\"ע) או לנסח אחרת." if he else "No suitable sources were found in the library for this topic."
+        return QueryResponse(answer=msg, citations=[], grounded=False, intent="chavruta", files=[])
+    # The model wrote {{S#: start … end}}; paste the verbatim span (and fix a wrong S#) BEFORE the
+    # citation list below is built from the markers in `raw`.
+    raw, _qstats = grounded.expand_quote_refs(
+        raw, {i: (getattr(h, "text", "") or "").strip() for i, h in enumerate(hits, 1)})
+    if _qstats["unmatched"] or _qstats["moved"]:
+        _log.info("chavruta quote refs: %s", _qstats)
     # marker_numbers_in (not a bespoke regex) so a non-standard bracket the model writes — e.g.
     # "[source S1]" — resolves the same way enforce_citations would, instead of silently vanishing
     # from the citation list (found live 2026-08-19, session 11190b1b).
@@ -1894,8 +2059,8 @@ def _generate_chavruta_turn(question: str, hits, lang: str, he: bool, history, w
             h = hits[i - 1]
             from chavruta.corpus.refs import license_for_ref
 
-            lic = getattr(h, "license", "") or license_for_ref(h.ref, "he" if he else "en")[0]
-            ver = getattr(h, "version_title", "") or license_for_ref(h.ref, "he" if he else "en")[1]
+            lic = getattr(h, "license", "") or license_for_ref(h.ref, "he" if he else "en", getattr(h, "deep_link", "") or "")[0]
+            ver = getattr(h, "version_title", "") or license_for_ref(h.ref, "he" if he else "en", getattr(h, "deep_link", "") or "")[1]
             used.append(CitationOut(ref=h.ref, ref_he=(hebrew_display_ref(h.ref) or "") if he else "",
                                     text_he=(getattr(h, "text", "") or ""),
                                     text_en=(getattr(h, "text_en", "") or ""),
@@ -1944,8 +2109,8 @@ def _generate_qa_turn_from_hits(question: str, hits, lang: str, he: bool, histor
     def _cite(c) -> CitationOut:
         from chavruta.corpus.refs import license_for_ref
 
-        lic = getattr(c, "license", "") or license_for_ref(c.ref, "he" if he else "en")[0]
-        ver = getattr(c, "version_title", "") or license_for_ref(c.ref, "he" if he else "en")[1]
+        lic = getattr(c, "license", "") or license_for_ref(c.ref, "he" if he else "en", getattr(c, "deep_link", "") or "")[0]
+        ver = getattr(c, "version_title", "") or license_for_ref(c.ref, "he" if he else "en", getattr(c, "deep_link", "") or "")[1]
         return CitationOut(
             ref=c.ref,
             ref_he=(hebrew_display_ref(c.ref) or "") if he else "",
@@ -2260,79 +2425,289 @@ def _parsha_context_note(info, he: bool) -> str:
     return note + ")"
 
 
-def _run_daf_yomi(question: str, lang: str, history=None, owner_id: str = "local",
-                  llm=None) -> QueryResponse:
-    """Daf Yomi: resolve today's daf from Sefaria's calendar (cached). Upfront, provide the bounding
-    scope (תיחום): opening boundary segments of amud a and amud b + Rashi. When the user asks a
-    substantive question, retrieve targeted sources matching the question, with agentic
-    ===NEED_SOURCES=== on demand. Mirrors Parshat HaShavua: defaults to direct Q&A, or full lesson if
-    requested."""
+from chavruta.intents.hebrew_refs import HE_TRACTATES as _HE_TRACTATES  # noqa: E402
+
+_EN_TRACTATES = sorted(set(_HE_TRACTATES.values()), key=len, reverse=True)
+_EN_DAF_RE = re.compile(
+    r"\b(?P<t>" + "|".join(re.escape(t) for t in _EN_TRACTATES) + r")\s+(?:daf\s+)?(?P<daf>\d{1,3})(?P<amud>[ab])?\b",
+    re.IGNORECASE)
+_DAF_REF_RE = re.compile(r"^(?P<t>[A-Za-z_ ]+)\.(?P<daf>\d+)(?P<amud>[ab])$")
+_MACHLOKET_RE = re.compile(
+    r"מחלוקת|חולק|חולקים|לעומת|קושיית|קושיה|מקשה|תירוץ|הבדל|\bvs\b|differ|dispute|disagree", re.IGNORECASE)
+# The daf is small (a few dozen gemara segments), so a whole-daf fetch of the commentators a question
+# names — or of Rashi+Tosafot when it asks about a dispute — is cheap, and is what makes "what is the
+# machloket between Rashi and Tosafot" answerable; the 3-segment opening alone never could.
+_DAF_DEFAULT_DISPUTE_COMMENTATORS = ["rashi", "tosafot"]
+# "Learn the daf with me" has no specific question for RAG to aim at, and the opening boundary alone
+# is only the first segment of each amud — so THAT request (and only that one) reads the daf itself.
+_DAF_STUDY_RE = re.compile(
+    r"תלמד|למד|נלמד|ללמוד|לימוד|סוגי|מה\s+הדף|מה\s+בדף|על\s+מה\s+הדף|סכם|סקירה|learn|study|teach|walk me|summar", re.IGNORECASE)
+_DAF_MAX_SEGMENTS = 45
+
+
+def _requested_daf(question: str):
+    """The daf a daf-yomi message is ABOUT: (tractate, daf, amudim, explicit), or None when the
+    message names none (the caller then uses today's). A bare daf ("דף עט בחולין") names both
+    amudim — the sugya does not stop at the page turn."""
+    found: dict[tuple[str, int], set] = {}
+    for r in detect_hebrew_refs(question or ""):
+        m = _DAF_REF_RE.match(r)
+        if m:
+            found.setdefault((m.group("t"), int(m.group("daf"))), set()).add(m.group("amud"))
+    if not found:
+        # English: "Bava Metzia 2a", "Sanhedrin 25" (no amud → both sides)
+        for m in _EN_DAF_RE.finditer(question or ""):
+            name = next((t for t in _EN_TRACTATES if t.lower() == m.group("t").lower()), None)
+            daf = int(m.group("daf"))
+            if name and 2 <= daf <= 180:
+                found.setdefault((name, daf), set()).update([m.group("amud").lower()] if m.group("amud") else ["a", "b"])
+    if not found:
+        return None
+    (tract, daf), amudim = next(iter(found.items()))
+    return tract, daf, sorted(amudim), True
+
+
+_CORPUS_DAF_REF_RE = re.compile(r"^(?:.+_on_)?(?P<t>[A-Z][A-Za-z]*(?:_[A-Za-z]+)*)\.(?P<n>\d+)\.\d+(?:\.\d+)?$")
+
+
+def _daf_from_history(history):
+    """The daf an ongoing daf-yomi conversation is ABOUT, when the current message names none.
+
+    Without this a follow-up such as "what is the dispute between Rashi and Tosafot in the daf?" fell
+    back to TODAY's daf and answered about a different tractate than the one being studied. The most
+    recent turn that settles it wins: a user message that names a daf, or the refs an earlier answer
+    cited (the corpus's own amud-linear numbers, converted back to the real daf)."""
+    from chavruta.corpus.refs import corpus_n_to_daf_amud
+
+    for turn in reversed(list(history or [])):
+        if getattr(turn, "role", "") == "user":
+            found = _requested_daf(getattr(turn, "text", "") or "")
+            if found:
+                return found
+            continue
+        for ref in getattr(turn, "refs", None) or []:
+            m = _CORPUS_DAF_REF_RE.match(ref or "")
+            name = m.group("t").replace("_", " ") if m else ""
+            if name in _EN_TRACTATES:
+                daf, _amud = corpus_n_to_daf_amud(int(m.group("n")))
+                return name, daf, ["a", "b"], True
+    return None
+
+
+def _daf_hits(tract: str, daf: int, amudim: list[str], commentators: list[str], *, whole: bool):
+    """Hits for one daf. whole=False → the opening boundary (first segments of each amud);
+    whole=True → every gemara segment of the requested amudim. Commentary is looked up from the
+    base segments that actually exist (exact-ref lookups), not guessed per candidate segment."""
     from chavruta.corpus.refs import daf_amud_to_corpus_n
 
+    t = tract.replace(" ", "_")
+    ns = [daf_amud_to_corpus_n(daf, a) for a in amudim]
+    if whole:
+        cand = [f"{t}.{n}.{i}" for n in ns for i in range(1, _DAF_MAX_SEGMENTS + 1)]
+    else:
+        cand = [f"{t}.{n}.1" for n in ns] + [f"{t}.{ns[0]}.2"]
+    base = _fetch_ranked_hits(with_ref_variants(cand), limit=len(cand) * 2)
+    base_refs = sorted({h.ref for h in base if h.ref and " " not in h.ref},
+                       key=lambda r: [int(x) if x.isdigit() else x for x in re.split(r"[._]", r)])
+    if commentators and base_refs:
+        base += _fetch_ranked_hits(commentary_refs(base_refs, commentators), limit=400)
+    return base
+
+
+def _daf_phrase_he(tract: str, daf: int, amudim: list[str] | None) -> str:
+    """"על דף כה ב<מסכת>" — the Hebrew spelling the ref detector reads, so a lesson request anchors on the
+    daf (both amudim unless one was named)."""
+    from chavruta.corpus.refs import hebrew_numeral
+    from chavruta.intents.hebrew_refs import HE_TRACTATES
+
+    he_name = next((k for k, v in HE_TRACTATES.items() if v == tract), tract)
+    amud = (' ע״א' if amudim == ["a"] else ' ע״ב' if amudim == ["b"] else "")
+    # Plain letters for the number (no gershayim inside it): the detector's daf-first form reads
+    # "דף כה", not "דף כ״ה".
+    return f"על דף {hebrew_numeral(daf).replace(chr(34), '')}{amud} ב{he_name}"
+
+
+def _interleave_by_commentator(hits: list) -> list:
+    """Base text first, then commentary round-robin across commentators — so a cap that has to cut
+    cannot drop a whole commentator (47 Rashi comments ahead of 7 Tosafot cut the Tosafot, which is
+    exactly what a "Rashi vs Tosafot" question needs)."""
+    base = [h for h in hits if not getattr(h, "commentator_id", None)]
+    by: dict[str, list] = {}
+    for h in hits:
+        if getattr(h, "commentator_id", None):
+            by.setdefault(h.commentator_id, []).append(h)
+    mixed: list = []
+    queues = list(by.values())
+    while any(queues):
+        for q in queues:
+            if q:
+                mixed.append(q.pop(0))
+    return base + mixed
+
+
+def _in_daf_search(pipeline, question: str, tract: str, daf: int, amudim: list[str], *, k: int = 8) -> list:
+    """The k gemara segments OF THIS DAF closest to the question (plus Rashi and Tosafot on them).
+
+    General RAG scoped to the tractate returns the best match anywhere in it, so a question about a
+    specific point on the daf kept citing the Responsa and other tractates instead of the daf's own
+    text. The daf is small (a few dozen segments), so ranking its own segments against the question
+    is cheap and puts the right ones first. Best-effort: any failure returns nothing and the rest of
+    the pipeline carries on."""
+    try:
+        from chavruta.lessons.templates import _cosine
+
+        segs = [h for h in _daf_hits(tract, daf, amudim, [], whole=True) if h.text]
+        if not segs:
+            return []
+        emb = pipeline.embedding
+        qv = emb.embed_query(question).dense
+        vecs = emb.embed_batch([h.text[:1200] for h in segs])
+        ranked = sorted(zip(segs, vecs), key=lambda sv: _cosine(qv, sv[1].dense), reverse=True)[:k]
+        top = [h for h, _ in ranked]
+        refs = [h.ref for h in top if h.ref and " " not in h.ref]
+        return top + (_fetch_ranked_hits(commentary_refs(refs, ["rashi", "tosafot"]), limit=200) if refs else [])
+    except Exception:
+        _log.warning("in-daf search failed; continuing without it", exc_info=True)
+        return []
+
+
+def _prefer_tractate(hits: list, tract: str, *, other_cap: int = 4) -> list:
+    """RAG hits from the daf's own tractate first; at most `other_cap` from elsewhere. A daf-yomi
+    question is about THIS daf — unscoped halachic literature is welcome as a follow-through, not as
+    the bulk of the sources (a question on Sanhedrin 25a was being answered from Responsa)."""
+    key = tract.replace(" ", "_")
+    same = [h for h in hits if key in (h.ref or "")]
+    other = [h for h in hits if key not in (h.ref or "")]
+    return same + other[:other_cap]
+
+
+def _has_specific_ask(text: str) -> bool:
+    """A question that aims at something inside the daf ("why did Ila get paid", "what is the
+    difference...") rather than at the daf as a whole — those are RAG's job, not a full read."""
+    return bool(re.search(r"למה|מדוע|מה\s+(?:ההבדל|הטעם|הדין|הסברא|הכוונה|פירוש)|איך|האם|why|how|what\s+is\s+the\s+difference", text or "", re.IGNORECASE))
+
+
+def _run_daf_yomi(question: str, lang: str, history=None, owner_id: str = "local",
+                  llm=None) -> QueryResponse:
+    """Daf Yomi: today's daf from Sefaria's calendar (cached), or ANY daf the message names.
+
+    Every message gets (1) the daf's opening boundary (תיחום) as a floor — Gemara + Rashi + Tosafot —
+    and (2) ordinary RAG for the question, scoped to the tractate, so a daf-yomi turn is never poorer
+    than a regular one. A question about a dispute or a named commentator additionally pulls that
+    commentary across the WHOLE daf. A lesson request is handed to the regular lesson path (`_run_lesson`)
+    seeded with the boundary — the same lesson as anywhere else, scoped to the daf."""
     pipeline = _get_pipeline()
     llm = llm or pipeline.llm
     lang = lang or "he"
     he = lang != "en"
-    info = _resolve_daf_yomi_cached()
-    if info is None:
-        msg = ("לא הצלחנו לזהות את הדף היומי כרגע — נסו שוב בעוד רגע." if he
-               else "Couldn't resolve today's daf yomi right now — please try again shortly.")
-        return QueryResponse(answer=msg, citations=[], grounded=False, intent="dafyomi", files=[])
-
-    n_a = daf_amud_to_corpus_n(info.daf, "a")
-    n_b = daf_amud_to_corpus_n(info.daf, "b")
-    t_clean = info.tractate.replace(" ", "_")
-
-    # ── Boundary scope (תיחום): opening boundary segments of amud a and amud b + Rashi ──
-    boundary_refs = [f"{t_clean}.{n_a}.1", f"{t_clean}.{n_a}.2", f"{t_clean}.{n_b}.1"]
-    ref_variants = with_ref_variants(boundary_refs)
-    targets = ref_variants + commentary_refs(ref_variants, ["rashi"])
-    boundary_hits = _fetch_ranked_hits(targets, limit=20)
-
-    topic = f"{info.tractate} {info.daf}"
     raw_question = question
     clean_q = " ".join((raw_question or "").split()).strip()
 
-    # ── Substantive question: retrieve targeted sources matching user's question ──
-    specific_hits: list = []
-    if clean_q and not _is_generic_calendar_query(clean_q) and hasattr(pipeline, "retriever"):
+    req = _requested_daf(clean_q) or _daf_from_history(history)
+    if req:
+        tract, daf, amudim, explicit = req
+    else:
+        info = _resolve_daf_yomi_cached()
+        if info is None:
+            msg = ("לא הצלחנו לזהות את הדף היומי כרגע — נסו שוב בעוד רגע." if he
+                   else "Couldn't resolve today's daf yomi right now — please try again shortly.")
+            return QueryResponse(answer=msg, citations=[], grounded=False, intent="dafyomi", files=[])
+        tract, daf, amudim, explicit = info.tractate, info.daf, ["a", "b"], False
+
+    topic = f"{tract} {daf}" + (amudim[0] if explicit and len(amudim) == 1 else "")
+    wants_lesson = _wants_full_lesson(raw_question)
+
+    # (1) floor: the opening boundary with the two commentators every daf has.
+    boundary_hits = _daf_hits(tract, daf, amudim, ["rashi", "tosafot"], whole=False)
+
+    # (2) whole-daf commentary the question asks for by name or by "dispute".
+    named = [c for c in detect_commentators(clean_q) if c]
+    if not named and _MACHLOKET_RE.search(clean_q):
+        named = list(_DAF_DEFAULT_DISPUTE_COMMENTATORS)
+    study = not named and (_is_generic_calendar_query(clean_q)
+                           or bool(_DAF_STUDY_RE.search(clean_q) and not _has_specific_ask(clean_q)))
+    deep_hits: list = []
+    if named:
+        deep_hits = _daf_hits(tract, daf, amudim, named[:4], whole=True)
+    elif study:
+        deep_hits = _daf_hits(tract, daf, amudim, ["rashi"], whole=True)
+
+    if wants_lesson:
+        # A daf-yomi lesson IS a regular lesson (audience/length asked or read from the prompt, template
+        # RAG, source RAG across every category) — only scoped to the daf: the boundary is its floor and
+        # the daf is named in the topic so the regular path anchors on it.
+        return _run_lesson(f"{raw_question} ({_daf_phrase_he(tract, daf, amudim if explicit else None)})",
+                           lang, history=history, owner_id=owner_id, llm=llm,
+                           seed_hits=_dedup_hits(deep_hits + boundary_hits))
+
+    # (2b) a question about a specific point: rank the daf's OWN segments against it.
+    if not deep_hits and clean_q and not _is_generic_calendar_query(clean_q):
+        deep_hits = _in_daf_search(pipeline, clean_q, tract, daf, amudim) if hasattr(pipeline, "embedding") else []
+
+    # (3) ordinary RAG for every message (a generic one falls back to the daf itself as the query).
+    rag_hits: list = []
+    if hasattr(pipeline, "retriever"):
         try:
-            q = Query(text=f"{topic} {clean_q}", lang=lang, intent=Intent.QA, tractates=[info.tractate])
+            text = topic if _is_generic_calendar_query(clean_q) else f"{topic} {clean_q}"
+            q = Query(text=text, lang=lang, intent=Intent.QA, tractates=[tract])
             rq = pipeline._resolve_query(q, history=history) if hasattr(pipeline, "_resolve_query") else q
-            res = pipeline.retriever.retrieve(rq, top_k=15)
-            specific_hits = list(res.hits)
+            rag_hits = list(pipeline.retriever.retrieve(rq, top_k=15).hits)
         except Exception:
-            _log.warning("retrieval for daf yomi specific question failed; falling back to boundary hits", exc_info=True)
+            _log.warning("retrieval for daf yomi failed; falling back to the daf's own sources", exc_info=True)
 
-    all_hits = _dedup_hits(specific_hits + boundary_hits)
+    if not wants_lesson:
+        rag_hits = _prefer_tractate(rag_hits, tract)
 
-    if _wants_full_lesson(raw_question):
-        tpl = _select_template(topic, "yeshiva", "", lang=lang)
-        return _generate_lesson_from_hits(topic, _cap_hits(all_hits, _LESSON_HIT_CAP, min_commentaries=15),
-                                          lang, he, audience="yeshiva", grade_band="", length="medium",
-                                          tpl=tpl, history=history, owner_id=owner_id, llm=llm)
+    # The daf's own sources lead (they are what the question is ABOUT); RAG fills in after them, so
+    # neither the [S#] numbering nor the cap puts unrelated retrieval ahead of the daf.
+    all_hits = _dedup_hits(_interleave_by_commentator(_dedup_hits(deep_hits + boundary_hits)) + rag_hits)
 
-    hits = _cap_hits(all_hits, _CHAVRUTA_HIT_CAP, min_commentaries=15)
-    prompt = f"{_daf_yomi_context_note(info.tractate, info.daf, he)}\n{raw_question}"
+    hits = _cap_hits(all_hits, 60 if deep_hits else _CHAVRUTA_HIT_CAP, min_commentaries=15)
+    prompt = f"{_daf_yomi_context_note(tract, daf, he, amudim if explicit else None, dispute=bool(named) and bool(_MACHLOKET_RE.search(clean_q)), study=study)}\n{raw_question}"
     return _generate_qa_turn_from_hits(prompt, hits, lang, he, history, llm=llm)
 
 
-def _daf_yomi_context_note(tractate: str, daf: int, he: bool) -> str:
+def _daf_yomi_context_note(tractate: str, daf: int, he: bool, amudim: list[str] | None = None,
+                           dispute: bool = False, study: bool = False) -> str:
     """Caught live (2026-08-05): asked "what daf are we on", the model answered with the CORPUS's
     internal amud-linear chunk number (e.g. "194") instead of the real daf (97) — it has no way to
     tell the two apart from the citation refs alone (fetch_by_refs/with_ref_variants deliberately
     convert daf+amud INTO that linear form for lookup; nothing converts it back for display here).
-    We already know the real daf from Sefaria, so just tell the model directly rather than making
-    it infer a fact it structurally cannot get right from what it's shown."""
+    We already know the real daf, so tell the model directly rather than making it infer a fact it
+    structurally cannot get right from what it's shown. `amudim` is set when the user NAMED the daf
+    (not today's), so the note says "the daf you asked about" instead of "today's daf"."""
+    where = f"{tractate} {daf}" + (amudim[0] if amudim and len(amudim) == 1 else "")
+    # Spell the internal numbering out: told only that it "is not the daf number", the model sometimes
+    # concluded the sources were about a different daf (57-58) and refused (seen live, 2026-10-17).
+    na, nb = daf_amud_to_corpus_n(daf, "a"), daf_amud_to_corpus_n(daf, "b")
+    t = tractate.replace(" ", "_")
+    mapping = f"{t}.{na}.* = {tractate} {daf}a, {t}.{nb}.* = {tractate} {daf}b"
+    extra_he = (" נשאלת על מחלוקת: עבור על כל הערות המפרשים שסופקו והצג כל נקודה שבה הם באמת חולקים (עד שלוש), "
+                "לא רק אחת." if dispute else "")
+    extra_en = (" You were asked about a dispute: go through ALL the commentary supplied and present every point "
+                "where they really differ (up to three), not just one." if dispute else "")
+    study_he = (" המשתמש ביקש ללמוד את הדף: התחל ללמד מיד, לפי סדר הדף מהמשנה או מפתיחת הסוגיה, ואל תשאל "
+                "'במה להתחיל' ואל תסתפק בהזמנה להמשיך." if study else "")
+    study_en = (" The user asked to learn the daf: start teaching right away, in the daf's order from its opening "
+                "mishnah or sugya — do not ask where to begin and do not just invite them to continue." if study else "")
     if he:
-        return (f"(לעיונך: הדף האמיתי של היום הוא {tractate} דף {daf}. קיבלת את תיחום פתיחת הדף ומקורות ממוקדים לשאלת המשתמש — "
-               f"אם את/ה צריך/ה מקטעים נוספים, פירוש רש\"י, תוספות או מפרשים נוספים, בקש/י אותם דרך ===NEED_SOURCES===. "
+        subject = "הדף שהמשתמש ביקש" if amudim else "הדף האמיתי של היום"
+        return (f"(לעיונך: {subject} הוא {where}. קיבלת את תיחום פתיחת הדף, מקורות ממוקדים לשאלת המשתמש, "
+               f"ובשאלה על מחלוקת או על מפרש מסוים את המפרשים לאורך הדף כולו. אם את/ה צריך/ה מקטעים נוספים, "
+               f"רש\"י, תוספות או מפרשים נוספים, בקש/י אותם דרך ===NEED_SOURCES===. "
                f"אם המשתמש שואל על מספר הדף, ענה {daf} ולא מספר אחר — המספרים שמופיעים ברפרנסים של "
-               f"המקורות למטה הם מספור פנימי של מסד הנתונים, לא מספר הדף האמיתי.)")
-    return (f"(For reference: today's real daf is {tractate} {daf}. You were given the daf boundary and sources focused on the user's question — "
+               f"המקורות למטה הם מספור פנימי של מסד הנתונים, לא מספר הדף האמיתי ({mapping}) — המקורות שלמטה עם המספרים האלה הם הדף עצמו. לעולם אל תכתוב מספר פנימי "
+               f"כזה בתשובה, ואל תשאיר סוגריים ריקים במקום מקור. סמן כל טענה שהמקור עצמו אומר במרקר [S#]; מסקנה שלך עצמך — בלי מרקר, והתחל אותה ב'מכאן אפשר להבין ש'. "
+               f"אם השאלה אינה עוסקת בדף הזה, אמור זאת במשפט אחד בתחילת התשובה ואז ענה מהמקורות.{extra_he}{study_he})")
+    subject = "the daf the user asked about" if amudim else "today's real daf"
+    return (f"(For reference: {subject} is {where}. You were given the daf's opening boundary, sources focused on the "
+           f"user's question and, for a dispute or a named commentator, that commentary across the whole daf — "
            f"if you need additional segments, Rashi, Tosafot or other commentaries, request them via ===NEED_SOURCES===. "
            f"If asked which daf this is, answer {daf} — the numbers in the source refs below are the "
-           f"database's internal numbering, not the real daf number.)")
+           f"database's internal numbering, not the real daf number ({mapping}) — sources carrying those numbers ARE the daf. Never print such an internal number, "
+           f"and never leave empty parentheses where a source belongs. Tag what a source itself says with its [S#]; your own inference carries "
+           f"no marker and opens with 'it follows that'. If the question is not about this daf, say so in one sentence "
+           f"at the start and then answer from the sources.{extra_en}{study_en})")
 
 
 # ── Source Sheet Companion Path (Spec 008) ───────────────────────────────────
@@ -2764,8 +3139,10 @@ def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
         _in_flight_count += 1
         _concurrency_at_start.set(_in_flight_count)
     try:
-        return _run_query_impl(question, lang, intent_str, history, audience, grade_band, length,
-                               owner_id, llm)
+        # The improved chavruta path: scope set by CHAVRUTA_IMPROVED_SCOPE (config/rollout.py).
+        with rollout.improved_for(rollout.enabled_for(_is_admin(owner_id))):
+            return _run_query_impl(question, lang, intent_str, history, audience, grade_band, length,
+                                   owner_id, llm)
     except HTTPException:
         raise
     except JobCancelledError:
@@ -2783,8 +3160,12 @@ def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
         llm_base.reset_source_note(_note_token)
 
 
-def _calendar_modes_enabled(owner_id: str) -> bool:
-    """Parshat HaShavua / Daf Yomi's rollout gate."""
+def _calendar_modes_enabled(owner_id: str, intent: str | None = None) -> bool:
+    """Parshat HaShavua's rollout gate (the calendar-modes beta). Daf Yomi left the beta on
+    2026-10-18 and is open to everyone; `intent` lets the gate say so per mode, while the no-argument
+    form (what /me reports to the picker) still means the parsha beta."""
+    if intent == "dafyomi":
+        return True
     if _is_admin(owner_id):
         return True
     raw = os.environ.get("CHAVRUTA_CALENDAR_BETA_OWNERS", "").strip()
@@ -2871,7 +3252,7 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
     if intent_str == "chavruta":      # Socratic study-partner mode (its own path)
         return _run_chavruta(question, lang, history=history, llm=llm)
     if intent_str in ("parsha", "dafyomi"):   # beta — see _calendar_modes_enabled
-        if not _calendar_modes_enabled(owner_id):
+        if not _calendar_modes_enabled(owner_id, intent_str):
             msg = ("המצב הזה עוד לא זמין לכולם." if he else "This mode isn't available to everyone yet.")
             return QueryResponse(answer=msg, citations=[], grounded=False, intent=intent_str, files=[])
         fn = _run_parsha if intent_str == "parsha" else _run_daf_yomi
@@ -2951,8 +3332,8 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
     def _cite(c) -> CitationOut:
         from chavruta.corpus.refs import license_for_ref
 
-        lic = getattr(c, "license", "") or license_for_ref(c.ref, "he" if he else "en")[0]
-        ver = getattr(c, "version_title", "") or license_for_ref(c.ref, "he" if he else "en")[1]
+        lic = getattr(c, "license", "") or license_for_ref(c.ref, "he" if he else "en", getattr(c, "deep_link", "") or "")[0]
+        ver = getattr(c, "version_title", "") or license_for_ref(c.ref, "he" if he else "en", getattr(c, "deep_link", "") or "")[1]
         return CitationOut(
             ref=c.ref,
             ref_he=(hebrew_display_ref(c.ref) or "") if he else "",
@@ -4647,6 +5028,31 @@ def referral_claim(req: ReferralClaimRequest, owner: str = Depends(current_owner
         code=partner["code"],
         discount_pct=float(partner.get("discount_pct", 10.0)),
     )
+
+
+@app.get("/account/unsubscribe")
+def marketing_unsubscribe_page(t: str = ""):
+    """The page a marketing email's link opens. It only ASKS: mail scanners follow links on their own,
+    and a GET that unsubscribed would silently drop people who never clicked."""
+    from fastapi.responses import HTMLResponse
+    from app import marketing
+    if marketing.verify_token(t) is None:
+        return HTMLResponse(marketing.page_error(), status_code=400)
+    return HTMLResponse(marketing.page_confirm(t))
+
+
+@app.post("/account/unsubscribe")
+def marketing_unsubscribe(t: str = ""):
+    """Withdraw marketing consent. Public: the signed token in `t` is the credential. Also the target of
+    the `List-Unsubscribe-Post: List-Unsubscribe=One-Click` header (RFC 8058), which mail clients POST to."""
+    from fastapi.responses import HTMLResponse
+    from app import marketing
+    user_id = marketing.verify_token(t)
+    if user_id is None:
+        return HTMLResponse(marketing.page_error(), status_code=400)
+    if not marketing.withdraw_consent(user_id):
+        return HTMLResponse(marketing.page_error(), status_code=502)
+    return HTMLResponse(marketing.page_done())
 
 
 @app.post("/auth/email-hook")

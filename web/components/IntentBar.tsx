@@ -39,7 +39,8 @@ const ICON: Record<IntentId, string> = {
 };
 
 // Beta-gated modes
-const BETA_CALENDAR_INTENTS: ReadonlySet<IntentId> = new Set(["parsha", "dafyomi"]);
+// Daf Yomi left the beta on 2026-10-18 and is open to everyone; only the parsha mode is still gated.
+const BETA_CALENDAR_INTENTS: ReadonlySet<IntentId> = new Set(["parsha"]);
 const BETA_SOURCESHEET_INTENTS: ReadonlySet<IntentId> = new Set(["sourcesheet"]);
 
 // The mode picker lives inside the composer and opens a menu above it (same pattern as the tools

@@ -65,7 +65,29 @@ def test_calendar_modes_wildcard_enables_everyone(monkeypatch):
     assert api._calendar_modes_enabled("local") is True
 
 
-@pytest.mark.parametrize("intent_str", ["parsha", "dafyomi"])
+def test_daf_yomi_is_open_to_everyone_but_parsha_is_still_beta(monkeypatch):
+    monkeypatch.delenv("CHAVRUTA_CALENDAR_BETA_OWNERS", raising=False)
+    assert api._calendar_modes_enabled("not-listed", "dafyomi") is True
+    assert api._calendar_modes_enabled("not-listed", "parsha") is False
+    assert api._calendar_modes_enabled("not-listed") is False      # what /me reports: the parsha beta
+
+
+def test_unlisted_owner_reaches_daf_yomi(monkeypatch):
+    monkeypatch.delenv("CHAVRUTA_CALENDAR_BETA_OWNERS", raising=False)
+    called = {}
+
+    def _fake(question, lang, history=None, owner_id="local", llm=None):
+        called["ok"] = True
+        return api.QueryResponse(answer="ok", citations=[], grounded=True, intent="dafyomi", files=[])
+
+    monkeypatch.setattr(api, "_run_daf_yomi", _fake)
+    monkeypatch.setattr(api, "classify_and_distill", lambda *a, **k: __import__("types").SimpleNamespace(
+        action="study", answer="", distilled_query="", requested_files=[]))
+    res = api._run_query_impl("מה הדף היום?", "he", "dafyomi", [], owner_id="not-listed")
+    assert called.get("ok") and res.answer == "ok"
+
+
+@pytest.mark.parametrize("intent_str", ["parsha"])
 def test_unlisted_owner_gets_a_friendly_message_not_the_pipeline(monkeypatch, intent_str):
     """The gate must short-circuit BEFORE touching _get_pipeline()/_run_parsha/_run_daf_yomi —
     an unlisted owner's request must never reach the (real, heavy) generation path at all."""
@@ -145,7 +167,11 @@ def test_daf_yomi_context_note_states_the_real_daf_number_hebrew():
     note = api._daf_yomi_context_note("Chullin", 97, True)
     assert "Chullin" in note
     assert "97" in note
-    assert "194" not in note   # never mentions the corpus-internal linear number
+    # The internal number appears ONLY as an explicit mapping back to the real daf (a model told merely
+    # "it is not the daf" sometimes decided the sources were about another daf and refused) ...
+    assert "Chullin.194.* = Chullin 97b" in note
+    # ... and the model is told never to print it.
+    assert "אל תכתוב מספר פנימי" in note
 
 
 def test_daf_yomi_context_note_states_the_real_daf_number_english():
@@ -283,16 +309,48 @@ def test_run_daf_yomi_fetches_boundary_segments_and_rashi(monkeypatch):
 
     monkeypatch.setattr(api, "_fetch_ranked_hits", _fake_fetch)
 
-    api._run_daf_yomi("מה הדף היום?", "he")
+    api._run_daf_yomi("למה רב אומר כך כאן?", "he")      # a specific ask: boundary floor only
 
-    assert len(fetch_calls) == 1
-    targets = fetch_calls[0]
+    # Two lookups: the base boundary segments, then Rashi/Tosafot on the segments that exist.
+    assert len(fetch_calls) == 2
+    targets = fetch_calls[0] + fetch_calls[1]
     # Verify boundary segments for both amud a (245) and amud b (246) are included
     assert any("Chullin.245.1" in t or "Chullin 245.1" in t for t in targets)
     assert any("Chullin.246.1" in t or "Chullin 246.1" in t for t in targets)
-    # Verify Rashi is preloaded on boundary segments, while secondary commentaries are not
+    # Rashi AND Tosafot are preloaded on the boundary segments; nothing else is
     assert any("Rashi_on_Chullin.245.1" in t for t in targets)
-    assert not any("Tosafot_on_Chullin" in t for t in targets)
+    assert any("Tosafot_on_Chullin.245.1" in t for t in targets)
+    assert not any("Ritva_on_Chullin" in t for t in targets)
+
+
+def test_requested_daf_prefers_a_daf_named_in_the_message():
+    assert api._requested_daf("מה הדף היום?") is None
+    tract, daf, amudim, explicit = api._requested_daf("תלמד איתי סנהדרין כה ע\"א")
+    assert (tract, daf, amudim, explicit) == ("Sanhedrin", 25, ["a"], True)
+    # a bare daf names both sides of the page
+    assert api._requested_daf("אני בדף עט בחולין")[:3] == ("Chullin", 79, ["a", "b"])
+
+
+def test_run_daf_yomi_uses_the_named_daf_not_todays_and_pulls_dispute_commentary(monkeypatch):
+    monkeypatch.setattr(api, "_get_pipeline", lambda: __import__("types").SimpleNamespace(llm="llm"))
+    monkeypatch.setattr(api, "_resolve_daf_yomi_cached",
+                        lambda: (_ for _ in ()).throw(AssertionError("today's daf must not be resolved")))
+    monkeypatch.setattr(api, "_wants_full_lesson", lambda *a, **k: False)
+    monkeypatch.setattr(api, "_generate_qa_turn_from_hits",
+                        lambda *a, **k: api.QueryResponse(answer="ok", citations=[], grounded=True,
+                                                          intent="qa", files=[]))
+    calls = []
+
+    def _fake_fetch(targets, **k):
+        calls.append(list(targets))
+        return [_hit(t) for t in targets if " " not in t]
+
+    monkeypatch.setattr(api, "_fetch_ranked_hits", _fake_fetch)
+    api._run_daf_yomi("מה המחלוקת בין רש\"י לתוספות בסנהדרין כה ע\"א?", "he")
+    flat = [t for c in calls for t in c]
+    assert any(t.startswith("Sanhedrin.49.") for t in flat)            # 25a → corpus n=49
+    assert not any(t.startswith("Sanhedrin.50.") for t in flat)        # amud b was not asked for
+    assert any(t.startswith("Tosafot_on_Sanhedrin.49.") for t in flat)
 
 
 def test_wants_full_lesson_requires_lesson_keywords():
@@ -311,3 +369,114 @@ def test_wants_full_lesson_requires_lesson_keywords():
     assert api._wants_full_lesson("אני רוצה מערך שיעור על הדף", llm=FakeLLM())
     assert api._wants_full_lesson("תכין דף מקורות לשבת", llm=FakeLLM())
 
+
+
+def test_daf_phrase_he_is_detected_back_as_the_same_daf():
+    from chavruta.intents.hebrew_refs import detect_hebrew_refs
+
+    assert detect_hebrew_refs(api._daf_phrase_he("Sanhedrin", 25, ["a"])) == ["Sanhedrin.25a"]
+    assert detect_hebrew_refs(api._daf_phrase_he("Chullin", 79, None)) == ["Chullin.79a", "Chullin.79b"]
+
+
+def test_run_daf_yomi_lesson_goes_through_the_regular_lesson_path_seeded_with_the_boundary(monkeypatch):
+    info = cal.DafYomiInfo(tractate="Chullin", daf=123)
+    monkeypatch.setattr(api, "_get_pipeline", lambda: __import__("types").SimpleNamespace(llm="llm"))
+    monkeypatch.setattr(api, "_resolve_daf_yomi_cached", lambda: info)
+    monkeypatch.setattr(api, "_wants_full_lesson", lambda *a, **k: True)
+    monkeypatch.setattr(api, "_fetch_ranked_hits", lambda targets, **k: [_hit(t) for t in targets])
+    seen = {}
+
+    def _fake_lesson(question, lang, **kw):
+        seen.update(question=question, seed=kw.get("seed_hits"))
+        return api.QueryResponse(answer="lesson", citations=[], grounded=True, intent="lesson", files=[])
+
+    monkeypatch.setattr(api, "_run_lesson", _fake_lesson)
+    res = api._run_daf_yomi("תבנה לי שיעור על הדף", "he")
+    assert res.answer == "lesson"
+    assert "חולין" in seen["question"]
+    assert seen["seed"], "the daf boundary must seed the lesson"
+
+
+def test_generic_study_request_reads_the_whole_daf_but_a_specific_question_does_not(monkeypatch):
+    info = cal.DafYomiInfo(tractate="Chullin", daf=123)
+    monkeypatch.setattr(api, "_get_pipeline", lambda: __import__("types").SimpleNamespace(llm="llm"))
+    monkeypatch.setattr(api, "_resolve_daf_yomi_cached", lambda: info)
+    monkeypatch.setattr(api, "_wants_full_lesson", lambda *a, **k: False)
+    monkeypatch.setattr(api, "_generate_qa_turn_from_hits",
+                        lambda *a, **k: api.QueryResponse(answer="ok", citations=[], grounded=True,
+                                                          intent="qa", files=[]))
+
+    def _run(question):
+        calls = []
+        monkeypatch.setattr(api, "_fetch_ranked_hits",
+                            lambda targets, **k: calls.append(list(targets)) or [_hit(t) for t in targets if " " not in t])
+        api._run_daf_yomi(question, "he")
+        return [t for c in calls for t in c]
+
+    assert any(t.startswith("Chullin.245.30") for t in _run("תלמד איתי את הדף היומי"))   # whole daf
+    assert not any(t.startswith("Chullin.245.30") for t in _run("למה רב אומר כך?"))      # boundary only
+
+
+def test_follow_up_without_a_daf_stays_on_the_daf_of_the_conversation():
+    from chavruta.corpus.schema import Turn
+
+    # an earlier answer cited Bava Metzia amud-linear 3 and 4 = daf 2a / 2b
+    hist = [Turn(role="user", text="תלמד אותי את בבא מציעא ב ע\"א"),
+            Turn(role="assistant", text="...", refs=["Bava_Metzia.3.1", "Rashi_on_Bava_Metzia.3.1.1"])]
+    assert api._daf_from_history(hist)[:2] == ("Bava Metzia", 2)
+    # refs only (the user turn named nothing): converted back from the corpus numbering
+    hist = [Turn(role="user", text="תלמד אותי"), Turn(role="assistant", text="...", refs=["Sanhedrin.49.5"])]
+    assert api._daf_from_history(hist)[:2] == ("Sanhedrin", 25)
+    assert api._daf_from_history([]) is None
+    assert api._daf_from_history([Turn(role="assistant", text="x", refs=["Genesis.1.1"])]) is None
+
+
+def test_empty_parentheses_left_by_stripped_markers_are_removed():
+    assert api._strip_markers("חכמים חולקים [S1] (): עד חצות", he=True) == "חכמים חולקים: עד חצות"
+    out = api._strip_markers("מבאר (,[S1]) ועוד ([S2]) וכן (רש\"י) שם", he=True)
+    assert "()" not in out and "(,)" not in out
+    assert '(רש"י)' in out          # a parenthesis with real content is untouched
+
+
+def test_requested_daf_reads_english_references():
+    assert api._requested_daf("Explain Bava Metzia 2a please")[:3] == ("Bava Metzia", 2, ["a"])
+    assert api._requested_daf("what is Sanhedrin 25 about")[:3] == ("Sanhedrin", 25, ["a", "b"])
+    assert api._requested_daf("what is the daf today") is None
+
+
+def test_prefer_tractate_keeps_the_daf_tractate_first_and_caps_the_rest():
+    hits = [_hit("Responsa.1"), _hit("Sanhedrin.49.3"), _hit("Rashi_on_Sanhedrin.49.1.1")] + \
+           [_hit(f"Other.{i}") for i in range(9)]
+    out = api._prefer_tractate(hits, "Sanhedrin", other_cap=4)
+    assert [h.ref for h in out[:2]] == ["Sanhedrin.49.3", "Rashi_on_Sanhedrin.49.1.1"]
+    assert len(out) == 2 + 4
+
+
+def test_segments_are_ordered_numerically_not_alphabetically(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(api, "_fetch_ranked_hits",
+                        lambda targets, **k: seen.setdefault("n", 0) or seen.update(n=1) or
+                        [_hit(f"Chullin.245.{i}") for i in (10, 2, 1)] if seen.get("n") is None else
+                        (seen.update(second=list(targets)) or []))
+    api._daf_hits("Chullin", 123, ["a"], ["rashi"], whole=True)
+    second = seen["second"]
+    assert second.index("Rashi_on_Chullin.245.2.1") < second.index("Rashi_on_Chullin.245.10.1")
+
+
+def test_annotated_markers_are_stripped_whole():
+    out = api._strip_markers('המדרש על קין והבל [S4 מצטט מדרש רבה]: "קשה הדבר" וכן [S5 בשם מדרש שמואל]: עוד', he=True)
+    assert "[S" not in out and "מצטט" not in out
+    assert 'המדרש על קין והבל: "קשה הדבר"' in out
+
+
+def test_hebrew_wikisource_tier_is_cc_by_sa_not_unknown():
+    from chavruta.corpus.refs import license_for_ref
+
+    wiki = "https://he.wikisource.org/wiki/%D7%A1"
+    for ref in ("ספר תולדות אדם, אות 192", "ברטנורא על בבא מציעא א, אות 1", 'רמב"ם הלכות תשובה ה ה'):
+        assert license_for_ref(ref, "he", wiki) == ("CC-BY-SA", "ויקיטקסט העברי")
+        # a Hebrew label alone is NOT evidence of Wikisource — fail closed (unknown)
+        assert license_for_ref(ref, "he") == ("", "")
+        assert license_for_ref(ref, "he", "https://example.org/x") == ("", "")
+    assert license_for_ref("Genesis.1.1", "he")[0] == "Public Domain"        # Sefaria refs untouched
+    assert license_for_ref("Totally_Unknown_Work.1.1", "he") == ("", "")     # an English unknown stays unknown
