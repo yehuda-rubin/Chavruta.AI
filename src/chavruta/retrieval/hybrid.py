@@ -17,6 +17,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 
 from chavruta.corpus.normalize import deuphemize_he, quote_windows
+from chavruta.corpus.quality import is_index_page
 from chavruta.corpus.refs import (
     commentary_refs,
     commentator_from_ref,
@@ -507,6 +508,13 @@ class HybridRetriever:
                 logger.warning("link expansion failed (%s); serving base hits", exc)
 
         hits = self._dedup(hits)
+        # An index page (a book's table of contents, chunked by the Wikisource scan) has nothing to
+        # cite, yet it can match a query by its chapter names — drop it before slots are handed out.
+        content = [h for h in hits if not is_index_page(h.text)]
+        if len(content) != len(hits):
+            logger.info("dropped %d index-page hit(s): %s", len(hits) - len(content),
+                        [h.ref for h in hits if is_index_page(h.text)][:3])
+            hits = content
         hits.sort(key=lambda h: h.score, reverse=True)
         # Actually RESERVE the base-text slots, rather than hoping they rank.
         #
