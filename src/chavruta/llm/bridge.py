@@ -27,6 +27,7 @@ from chavruta.llm import metering
 from chavruta.llm.agentic import (  # noqa: F401 — re-exported for back-compat
     MAX_RETRIEVAL_ROUNDS,
     SOURCE_REQUEST_INSTRUCTION,
+    minor_job,
     run_agentic_loop,
 )
 from chavruta.llm.base import GroundedPrompt, LLMResult, SourceBlock
@@ -93,7 +94,7 @@ class BridgeLLM:
         in [S#] order — so the caller aligns citations without any shared per-call state."""
         def _send(jmd: str) -> str | None:
             jid = uuid.uuid4().hex[:12]
-            (PENDING / f"{jid}.md").write_text(f"{header} {jid}\n\n{jmd}", encoding="utf-8")
+            (PENDING / f"{jid}.md").write_text(f"{header} {jid}\n\n{minor_job(jmd, lang)}", encoding="utf-8")
             return self._await(jid)
 
         return run_agentic_loop(_send, job_md, self.source_fetcher, lang)

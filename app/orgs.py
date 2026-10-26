@@ -13,6 +13,7 @@ without it a teacher can remove the org's admin and all three of those pass.
 
 from __future__ import annotations
 
+import json
 import os
 import secrets
 import string
@@ -399,6 +400,73 @@ def _is_recent(iso: str | None, hours: int = PENDING_CHECKOUT_HOURS) -> bool:
     return when > datetime.now(UTC) - timedelta(hours=hours)
 
 
+def _joiner_is_minor(conn: Any, owner_id: str) -> bool:
+    """Whether this account is a minor TODAY, read on the caller's connection (same transaction as the
+    insert). Display and alerts only: `org_members.is_minor` is never the source of truth."""
+    row = conn.execute("SELECT adult_from FROM age_records WHERE owner_id=?", (owner_id,)).fetchone()
+    return row is not None and datetime.now(UTC).date().isoformat() < row["adult_from"]
+
+
+def _admit(conn: Any, org_id: str, owner_id: str, role: str, invited_by: str, now: str) -> Any:
+    """Eligibility, seat check, sticky-removal check and the membership insert. The ONE membership
+    path: a join code (`accept_invite`) and an approved join request both come through here, so the
+    one-org-per-account index, the paid-plan rules and an admin's removal hold for both. The caller
+    owns the transaction (and the lock) and raises nothing past `JoinRefused`."""
+    # A member may not hold their own paid plan, may not own an org, and may not already belong
+    # to one. Note the plan test is on the EFFECTIVE plan, not on subscriptions.status: a
+    # coupon-granted plan is stored as 'canceled' with a future period end and would slip past.
+    if plans.canonical(db.get_plan(owner_id)) != "free":
+        raise JoinRefused("this account holds a paid plan; leave or let it lapse first")
+    # A checkout in flight counts as holding one. start_checkout writes a 'pending' subscription
+    # but does NOT set accounts.plan, so the plan test above still reads 'free' for someone
+    # sitting on the payment page — join here and the webhook then activates a real recurring
+    # charge on an account whose spending goes to the pool instead. That is money taken monthly
+    # for an entitlement the system deliberately ignores.
+    sub = db.get_subscription(owner_id) or {}
+    if sub.get("status") == "active":
+        raise JoinRefused("this account has an active subscription; cancel it first")
+    # A 'pending' row is someone sitting on the payment page — but nothing ever expires one, so
+    # an ABANDONED checkout would have barred them from joining a school forever, and the remedy
+    # the refusal named (cancel it) has nothing to cancel: their plan is still free, so the
+    # client shows no subscription and offers no cancel button. Only a recent one blocks.
+    if sub.get("status") == "pending" and _is_recent(sub.get("updated_at")):
+        raise JoinRefused("a payment for this account is still in progress; finish or abandon "
+                          "it, then try again in a day")
+    # Credits are NOT refused here (decided 2026-08-20, reversing the earlier rule): a member's
+    # own credits are a spendable fallback once the org pool refuses a turn (see
+    # _reserve_tokens), so a balance carried into a school is not stranded — it still buys
+    # something.
+    if conn.execute("SELECT 1 FROM orgs WHERE owner_id=?", (owner_id,)).fetchone():
+        raise JoinRefused("this account owns an organisation")
+    if conn.execute("SELECT 1 FROM org_members WHERE owner_id=? AND accepted_at IS NOT NULL",
+                    (owner_id,)).fetchone():
+        raise JoinRefused("this account already belongs to an organisation")
+
+    org = conn.execute("SELECT * FROM orgs WHERE id=?", (org_id,)).fetchone()
+    seats = plans.tier(org["plan"]).seats
+    taken = conn.execute(
+        "SELECT COUNT(*) FROM org_members WHERE org_id=? AND accepted_at IS NOT NULL",
+        (org["id"],)).fetchone()[0]
+    if taken >= seats:
+        raise JoinRefused("this organisation has no seats left")
+
+    # An admin's removal is not undone by the code that admitted them in the first place.
+    prior = conn.execute("SELECT removed_at FROM org_members WHERE org_id=? AND owner_id=?",
+                         (org["id"], owner_id)).fetchone()
+    if prior and prior["removed_at"]:
+        raise JoinRefused("this organisation removed your account; its administrator must "
+                          "re-admit you")
+
+    # daily_cap is deliberately NOT in the DO UPDATE list: a cap the administrator set is a
+    # decision about this person, and rejoining is not the moment to discard it.
+    conn.execute(
+        "INSERT INTO org_members (org_id, owner_id, role, invited_by, invited_at, accepted_at, "
+        "is_minor) VALUES (?,?,?,?,?,?,?) ON CONFLICT(org_id, owner_id) DO UPDATE SET "
+        "role=excluded.role, accepted_at=excluded.accepted_at, is_minor=excluded.is_minor",
+        (org["id"], owner_id, role, invited_by, now, now, int(_joiner_is_minor(conn, owner_id))))
+    return org
+
+
 def accept_invite(code: str, owner_id: str) -> dict[str, Any]:
     """Redeem a join code. Eligibility and the seat check happen in ONE transaction.
 
@@ -414,58 +482,7 @@ def accept_invite(code: str, owner_id: str) -> dict[str, Any]:
         if inv["expires_at"] and inv["expires_at"] < now:
             raise JoinRefused("this join code has expired")
 
-        # A member may not hold their own paid plan, may not own an org, and may not already belong
-        # to one. Note the plan test is on the EFFECTIVE plan, not on subscriptions.status: a
-        # coupon-granted plan is stored as 'canceled' with a future period end and would slip past.
-        if plans.canonical(db.get_plan(owner_id)) != "free":
-            raise JoinRefused("this account holds a paid plan; leave or let it lapse first")
-        # A checkout in flight counts as holding one. start_checkout writes a 'pending' subscription
-        # but does NOT set accounts.plan, so the plan test above still reads 'free' for someone
-        # sitting on the payment page — join here and the webhook then activates a real recurring
-        # charge on an account whose spending goes to the pool instead. That is money taken monthly
-        # for an entitlement the system deliberately ignores.
-        sub = db.get_subscription(owner_id) or {}
-        if sub.get("status") == "active":
-            raise JoinRefused("this account has an active subscription; cancel it first")
-        # A 'pending' row is someone sitting on the payment page — but nothing ever expires one, so
-        # an ABANDONED checkout would have barred them from joining a school forever, and the remedy
-        # the refusal named (cancel it) has nothing to cancel: their plan is still free, so the
-        # client shows no subscription and offers no cancel button. Only a recent one blocks.
-        if sub.get("status") == "pending" and _is_recent(sub.get("updated_at")):
-            raise JoinRefused("a payment for this account is still in progress; finish or abandon "
-                              "it, then try again in a day")
-        # Credits are NOT refused here (decided 2026-08-20, reversing the earlier rule): a member's
-        # own credits are a spendable fallback once the org pool refuses a turn (see
-        # _reserve_tokens), so a balance carried into a school is not stranded — it still buys
-        # something.
-        if conn.execute("SELECT 1 FROM orgs WHERE owner_id=?", (owner_id,)).fetchone():
-            raise JoinRefused("this account owns an organisation")
-        if conn.execute("SELECT 1 FROM org_members WHERE owner_id=? AND accepted_at IS NOT NULL",
-                        (owner_id,)).fetchone():
-            raise JoinRefused("this account already belongs to an organisation")
-
-        org = conn.execute("SELECT * FROM orgs WHERE id=?", (inv["org_id"],)).fetchone()
-        seats = plans.tier(org["plan"]).seats
-        taken = conn.execute(
-            "SELECT COUNT(*) FROM org_members WHERE org_id=? AND accepted_at IS NOT NULL",
-            (org["id"],)).fetchone()[0]
-        if taken >= seats:
-            raise JoinRefused("this organisation has no seats left")
-
-        # An admin's removal is not undone by the code that admitted them in the first place.
-        prior = conn.execute("SELECT removed_at FROM org_members WHERE org_id=? AND owner_id=?",
-                             (org["id"], owner_id)).fetchone()
-        if prior and prior["removed_at"]:
-            raise JoinRefused("this organisation removed your account; its administrator must "
-                              "re-admit you")
-
-        # daily_cap is deliberately NOT in the DO UPDATE list: a cap the administrator set is a
-        # decision about this person, and rejoining is not the moment to discard it.
-        conn.execute(
-            "INSERT INTO org_members (org_id, owner_id, role, invited_by, invited_at, accepted_at) "
-            "VALUES (?,?,?,?,?,?) ON CONFLICT(org_id, owner_id) DO UPDATE SET "
-            "role=excluded.role, accepted_at=excluded.accepted_at",
-            (org["id"], owner_id, inv["role"], inv["created_by"], now, now))
+        org = _admit(conn, inv["org_id"], owner_id, inv["role"], inv["created_by"], now)
         conn.execute("UPDATE org_invites SET used_count = used_count + 1 WHERE code=?",
                      (inv["code"],))
     return {"org_id": org["id"], "name": org["name"], "role": inv["role"]}
@@ -601,3 +618,158 @@ def ensure_demo_org() -> str:
                 "INSERT OR IGNORE INTO org_members (org_id, owner_id, role, invited_at, accepted_at)"
                 " VALUES (?,?,?,?,?)", (DEMO_ORG_ID, oid, role, now, now))
     return DEMO_ORG_ID
+
+
+# ── join requests: an org admin asks a student to join (spec 009 FR-005) ─────────
+# A join CODE is the school handing out a key; a join REQUEST is the school naming one account and the
+# account's owner saying yes. The student's yes is the whole point, so nothing here grants anything
+# until `decide_join_request(..., "approve")`, which goes through the same `_admit` as a code.
+def _expire_stale_requests(conn: Any) -> None:
+    cutoff = (datetime.now(UTC) - timedelta(days=INVITE_DAYS)).isoformat()
+    conn.execute("UPDATE org_join_requests SET status='expired', decided_at=? "
+                 "WHERE status='pending' AND created_at < ?", (db._now(), cutoff))
+
+
+def create_join_request(org_id: str, requested_by: str, owner_id: str) -> int | None:
+    """Ask `owner_id` to join. Returns the request id, or None when the target cannot be asked.
+
+    None covers every reason alike (no such account, not a minor, already in a school, owns one, was
+    removed from this one) because the caller turns it into one 404 that must not tell an admin
+    anything about an account that is not theirs. Adults join by code; this route is the minors' one.
+    """
+    conn = db.get_conn()
+    with db._LOCK, db._tx(conn):
+        _expire_stale_requests(conn)
+        if not owner_id or owner_id == requested_by or owner_id == "local":
+            return None
+        age = conn.execute("SELECT adult_from FROM age_records WHERE owner_id=?", (owner_id,)).fetchone()
+        if age is None or datetime.now(UTC).date().isoformat() >= age["adult_from"]:
+            return None
+        if conn.execute("SELECT 1 FROM org_members WHERE owner_id=? AND accepted_at IS NOT NULL",
+                        (owner_id,)).fetchone():
+            return None
+        if conn.execute("SELECT 1 FROM orgs WHERE owner_id=?", (owner_id,)).fetchone():
+            return None
+        if conn.execute("SELECT 1 FROM org_members WHERE org_id=? AND owner_id=? AND removed_at IS NOT NULL",
+                        (org_id, owner_id)).fetchone():
+            return None
+        existing = conn.execute(
+            "SELECT id FROM org_join_requests WHERE org_id=? AND owner_id=? AND status='pending'",
+            (org_id, owner_id)).fetchone()
+        if existing:
+            return int(existing["id"])
+        cur = conn.execute(
+            "INSERT INTO org_join_requests (org_id, owner_id, requested_by, status, created_at) "
+            "VALUES (?,?,?,'pending',?)", (org_id, owner_id, requested_by, db._now()))
+        return int(cur.lastrowid)
+
+
+def pending_join_requests(owner_id: str) -> list[dict[str, Any]]:
+    """What the STUDENT sees: the school's name and when it asked. Not who at the school asked."""
+    conn = db.get_conn()
+    with db._LOCK, db._tx(conn):
+        _expire_stale_requests(conn)
+        rows = conn.execute(
+            "SELECT r.id, o.name AS org_name, r.created_at FROM org_join_requests r "
+            "JOIN orgs o ON o.id = r.org_id WHERE r.owner_id=? AND r.status='pending' "
+            "ORDER BY r.id DESC", (owner_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def decide_join_request(owner_id: str, request_id: int, decision: str) -> dict[str, Any] | None:
+    """Approve or decline a pending request addressed to `owner_id`.
+
+    Returns the joined org on approve, {"declined": True} on decline, None when there is no such
+    pending request for this account (wrong id, someone else's, already decided, or expired).
+    Raises JoinRefused when approval is blocked (already in a school, seats, removed...); the request
+    then stays pending so the student can try again once the cause is gone.
+    """
+    if decision not in ("approve", "decline"):
+        raise ValueError("decision must be 'approve' or 'decline'")
+    now = db._now()
+    conn = db.get_conn()
+    with db._LOCK, db._tx(conn):
+        _expire_stale_requests(conn)
+        req = conn.execute(
+            "SELECT * FROM org_join_requests WHERE id=? AND owner_id=? AND status='pending'",
+            (request_id, owner_id)).fetchone()
+        if req is None:
+            return None
+        if decision == "decline":
+            conn.execute("UPDATE org_join_requests SET status='declined', decided_at=? WHERE id=?",
+                         (now, request_id))
+            return {"declined": True}
+        org = _admit(conn, req["org_id"], owner_id, STUDENT, req["requested_by"], now)
+        conn.execute("UPDATE org_join_requests SET status='approved', decided_at=? WHERE id=?",
+                     (now, request_id))
+    return {"org_id": org["id"], "name": org["name"], "role": STUDENT}
+
+
+# ── safety contacts and crisis alerts (spec 009 US2/US5) ─────────────────────────
+# An alert says THAT something happened to a minor in this school, never what was written (the table
+# has no text column). Who is told is a short list of the school's own staff, chosen by its admin.
+MAX_SAFETY_CONTACTS = 20
+
+
+def safety_contacts(org_id: str) -> list[str]:
+    org = get_org(org_id) or {}
+    try:
+        raw = json.loads(org.get("safety_contacts") or "[]")
+    except (ValueError, TypeError):
+        return []
+    return [c for c in raw if isinstance(c, str)]
+
+
+def set_safety_contacts(org_id: str, owner_ids: list[str]) -> list[str] | None:
+    """Replace the list. Every id must be an ACCEPTED teacher-or-admin member of this org; returns None
+    (nothing written) if any is not, so a typo cannot silently route an alert to nobody."""
+    ids = list(dict.fromkeys(o.strip() for o in owner_ids if o and o.strip()))
+    if len(ids) > MAX_SAFETY_CONTACTS:
+        return None
+    with db._LOCK:
+        ok = {r["owner_id"] for r in db.get_conn().execute(
+            "SELECT owner_id FROM org_members WHERE org_id=? AND accepted_at IS NOT NULL "
+            "AND role IN (?,?)", (org_id, TEACHER, ADMIN)).fetchall()}
+    if any(i not in ok for i in ids):
+        return None
+    with db._tx(db.get_conn()) as conn:
+        conn.execute("UPDATE orgs SET safety_contacts=? WHERE id=?", (json.dumps(ids), org_id))
+    return ids
+
+
+def _alert_row(r: Any) -> dict[str, Any]:
+    # student_label is the account id the admin already sees on the roster; "minor" is the only age
+    # information an alert carries (every alert is about a minor by construction).
+    return {"id": r["id"], "student_label": r["owner_id"], "category": r["category"],
+            "immediate_danger": bool(r["immediate_danger"]), "created_at": r["created_at"],
+            "acknowledged": bool(r["acknowledged_at"]), "minor": True}
+
+
+def org_alerts(org_id: str, limit: int = 200) -> list[dict[str, Any]]:
+    with db._LOCK:
+        rows = db.get_conn().execute(
+            "SELECT id, owner_id, category, immediate_danger, created_at, acknowledged_at "
+            "FROM crisis_alerts WHERE org_id=? ORDER BY id DESC LIMIT ?", (org_id, limit)).fetchall()
+    return [_alert_row(r) for r in rows]
+
+
+def all_alerts(limit: int = 500) -> list[dict[str, Any]]:
+    """Operator view: every school plus unlinked minors (org_id NULL)."""
+    with db._LOCK:
+        rows = db.get_conn().execute(
+            "SELECT id, owner_id, org_id, category, immediate_danger, created_at, acknowledged_at "
+            "FROM crisis_alerts ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    return [{**_alert_row(r), "org_id": r["org_id"], "linked": r["org_id"] is not None} for r in rows]
+
+
+def ack_alert(alert_id: int, by: str, *, org_id: str | None) -> bool:
+    """Acknowledge an alert. `org_id` scopes it to one school (a school can only ack its own); None is
+    the operator, who may ack any, including an unlinked minor's. First ack wins."""
+    sql = ("UPDATE crisis_alerts SET acknowledged_by=?, acknowledged_at=? WHERE id=? "
+           "AND acknowledged_at IS NULL")
+    args: list[Any] = [by, db._now(), alert_id]
+    if org_id is not None:
+        sql += " AND org_id=?"
+        args.append(org_id)
+    with db._tx(db.get_conn()) as conn:
+        return conn.execute(sql, args).rowcount > 0

@@ -111,6 +111,37 @@ function looksLikeHtml(body: string): boolean {
   return head.startsWith("<!doctype html") || head.startsWith("<html");
 }
 
+export interface ContentEntry {
+  kind: "category" | "work";
+  value: string;
+}
+
+export interface ContentNode {
+  id: string;
+  kind: "category" | "work";
+  label_he: string;
+  label_en: string;
+  enabled: boolean;
+  children?: ContentNode[];
+  books?: ContentNode[];
+}
+
+export interface ContentSettings {
+  categories: ContentNode[];
+  disabled: ContentEntry[];
+}
+
+/** A crisis alert about a minor. Never carries text or an age; "minor" is the only age signal. */
+export interface CrisisAlert {
+  id: number;
+  student_label: string;
+  category: string;
+  immediate_danger: boolean;
+  created_at: string;
+  acknowledged: boolean;
+  minor: boolean;
+}
+
 export interface CreatedSession {
   id: string;
   first_q: string;
@@ -340,6 +371,69 @@ export const api = {
       req<{ owner_id: string; daily_cap: number }>("/orgs/members/cap", {
         method: "POST",
         body: JSON.stringify({ owner_id: ownerId, daily_cap: dailyCap }),
+      }),
+    // School-track minors (spec 009). The school never learns a student's age: a join request names an
+    // account and the student approves it; alerts carry a category and a "minor" badge, never text.
+    requestJoin: (ownerId: string) =>
+      req<{ id: number }>("/orgs/join-requests", {
+        method: "POST",
+        body: JSON.stringify({ owner_id: ownerId }),
+      }),
+    content: () => req<ContentSettings>("/orgs/content"),
+    setContent: (disabled: ContentEntry[]) =>
+      req<ContentSettings>("/orgs/content", { method: "PUT", body: JSON.stringify({ disabled }) }),
+    safetyContacts: () => req<{ owner_ids: string[] }>("/orgs/safety-contacts"),
+    setSafetyContacts: (ownerIds: string[]) =>
+      req<{ owner_ids: string[] }>("/orgs/safety-contacts", {
+        method: "PUT",
+        body: JSON.stringify({ owner_ids: ownerIds }),
+      }),
+    alerts: () => req<{ alerts: CrisisAlert[] }>("/orgs/alerts"),
+    ackAlert: (id: number) =>
+      req<{ acknowledged: boolean }>(`/orgs/alerts/${id}/ack`, { method: "POST" }),
+  },
+
+  // The student's side of linking (school join requests, parent requests).
+  joinRequests: () =>
+    req<{ requests: { id: number; org_name: string; created_at: string }[] }>("/account/join-requests"),
+  decideJoinRequest: (id: number, decision: "approve" | "decline") =>
+    req<{ org_id?: string; name?: string; declined?: boolean }>(`/account/join-requests/${id}`, {
+      method: "POST",
+      body: JSON.stringify({ decision }),
+    }),
+  parentLinks: () =>
+    req<{ links: { parent_owner_id: string; status: string; created_at: string }[] }>(
+      "/account/parent-links"),
+  decideParentLink: (parentId: string, decision: "approve" | "decline") =>
+    req<{ status: string }>(`/account/parent-links/${encodeURIComponent(parentId)}`, {
+      method: "POST",
+      body: JSON.stringify({ decision }),
+    }),
+
+  // Parent (spec 009). An adult asks, the child approves; a linked parent may correct the child's
+  // birth month/year and switch books off. Nothing here reads the child's conversations.
+  parent: {
+    link: (childOwnerId: string) =>
+      req<{ status: string }>("/parent/links", {
+        method: "POST",
+        body: JSON.stringify({ child_owner_id: childOwnerId }),
+      }),
+    children: () => req<{ children: { child_owner_id: string; status: string }[] }>("/parent/children"),
+    revoke: (childId: string, parentId?: string) =>
+      req<void>(
+        `/parent/links/${encodeURIComponent(childId)}${parentId ? `?parent_id=${encodeURIComponent(parentId)}` : ""}`,
+        { method: "DELETE" }),
+    setAge: (childId: string, birthYear: number, birthMonth: number) =>
+      req<{ is_minor: boolean; adult_from: string }>(`/parent/children/${encodeURIComponent(childId)}/age`, {
+        method: "PUT",
+        body: JSON.stringify({ birth_year: birthYear, birth_month: birthMonth }),
+      }),
+    content: (childId: string) =>
+      req<ContentSettings>(`/parent/children/${encodeURIComponent(childId)}/content`),
+    setContent: (childId: string, disabled: ContentEntry[]) =>
+      req<ContentSettings>(`/parent/children/${encodeURIComponent(childId)}/content`, {
+        method: "PUT",
+        body: JSON.stringify({ disabled }),
       }),
   },
 

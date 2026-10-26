@@ -482,6 +482,8 @@ from pydantic import BaseModel, Field
 from chavruta import __version__
 from chavruta.config import rollout
 from chavruta.config.profile import Profile
+# `audience_ctx`, not `audience`: half the functions below take an `audience` argument (yeshiva/school).
+from chavruta.corpus import audience as audience_ctx
 from chavruta.corpus import rights
 from chavruta.corpus.refs import (
     COMMENTATOR_HE,
@@ -496,6 +498,7 @@ from chavruta.corpus.schema import Intent, Query, Turn
 from chavruta.generation import computed, grounded, guards
 from chavruta import sugya as sugya_mod
 from chavruta.retrieval.base import RetrievalResult
+from chavruta.retrieval.denylist import drop_scoped, scoped_filters, work_ids_by_ref
 from chavruta.llm import metering
 from chavruta.llm.agentic import is_degrade_message
 from chavruta.llm import base as llm_base
@@ -509,12 +512,14 @@ from chavruta.intents.llm_planner import classify_and_distill, strip_control_cod
 
 import app.accounts as accounts
 import app.orgs as orgs
+import app.content_settings as content_settings
+import app.parents as parents
 import app.auth_supabase as sb
 import app.billing.service as billing
 import app.coupons as coupons
 import app.devhelpers as devhelpers
 import app.db as db
-from app import plans
+from app import crisis_gate, minors, plans
 from app.billing import payplus
 from app.jobs import JobCancelledError, is_cancelled, registry as jobs
 
@@ -665,6 +670,7 @@ async def lifespan(app: FastAPI):
 from fastapi import Depends, Header  # noqa: E402
 
 from app.security import (  # noqa: E402
+    legacy_adult,
     UnsafeProviderURL,
     body_size_middleware,
     current_owner,
@@ -769,6 +775,9 @@ class QueryResponse(BaseModel):
     source_note: str = ""
     # The actual model ID that generated this answer (e.g. Gemini 3.1 Flash-Lite or Nebius Qwen)
     model_used: str = ""
+    # Set INSTEAD of a generated answer when a minor's message screened positive (spec 009 FR-011):
+    # the fixed support message and helplines from app/crisis.py. `answer` then holds the same fixed text.
+    crisis: dict | None = None
 
 
 # ── Lesson audience / grade / length ─────────────────────────────────────────
@@ -1434,6 +1443,7 @@ def _generate_lesson_from_hits(topic: str, hits, lang: str, he: bool, *, audienc
                                     deep_link=(getattr(h, "deep_link", "") or ""),
                                     license=lic or "",
                                     version_title=ver or ""))
+    used = drop_scoped(used, work_ids=work_ids_by_ref(hits))    # content denylist, last line (spec 009)
     # ss isn't bleed-fixed here: it's about to be replaced by the mechanically-assembled sheet below
     # whenever `used` is non-empty (the common case) — fixing bleed in text that's discarded a few
     # lines later would just spend real LLM calls for nothing.
@@ -2068,6 +2078,7 @@ def _generate_chavruta_turn(question: str, hits, lang: str, he: bool, history, w
                                     deep_link=(getattr(h, "deep_link", "") or ""),
                                     license=lic or "",
                                     version_title=ver or ""))
+    used = drop_scoped(used, work_ids=work_ids_by_ref(hits))    # content denylist, last line (spec 009)
     raw = _strip_instruction_echo(raw, he)
     # Split the model's source list off FIRST — see _split_source_note for why it must not reach the
     # foreign-language pass.
@@ -2310,9 +2321,12 @@ def _fetch_ranked_hits(targets: list[str], *, filters=None, limit: int | None = 
     pipeline = _get_pipeline()
     if not targets:
         return []
-    raw = pipeline.store.fetch_by_refs(pipeline.profile.collection, targets, filters=filters,
+    # The calendar modes read the corpus by exact ref, around the retriever: the requester's content
+    # denylist (spec 009) has to be applied here by hand — the tier in the store, the titles after.
+    raw = pipeline.store.fetch_by_refs(pipeline.profile.collection, targets,
+                                       filters=scoped_filters(filters),
                                        limit=limit or max(len(targets) * 4, 200))
-    return [_to_hit(h) for h in raw]
+    return drop_scoped([_to_hit(h) for h in raw])
 
 
 def _dedup_hits(hits: list) -> list:
@@ -3110,12 +3124,30 @@ def _acknowledgement_response(lang: str, intent_str: str = "", question: str = "
     )
 
 
+def _crisis_response(payload: dict, intent_str: str) -> QueryResponse:
+    """The fixed crisis message in the normal response shape. Never generated, never cited."""
+    return QueryResponse(answer=payload["message"], citations=[], grounded=False,
+                         intent=intent_str or "qa", files=[], crisis=payload)
+
+
+def _crisis_done_event(payload: dict, session_id: str | None = None) -> str:
+    """The ONE SSE event a streaming route emits for a crisis: a `done` that carries the payload."""
+    data: dict = {"answer": payload["message"], "citations": [], "crisis": payload}
+    if session_id is not None:
+        data["session_id"] = session_id
+    return f"event: done\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
 def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
                audience: str = "", grade_band: str = "", length: str = "",
                owner_id: str = "local", llm=None) -> QueryResponse:
     """Safety wrapper: a retrieval/LLM/backend failure degrades to an honest error response instead
     of a 500 for the whole request (real HTTPExceptions — e.g. 422 bad intent — still propagate).
     `llm` defaults to the pipeline's own shared backend; a caller may override it (BYOK)."""
+    # Crisis screen FIRST, for minors only (spec 009 US2): a disclosure is never answered by a model, and
+    # every sync/async/session route reaches here. Adults return None without their text being read.
+    if (_crisis := crisis_gate.screen_message(owner_id, question, lang)) is not None:
+        return _crisis_response(_crisis, intent_str)
     if is_pure_greeting(question):
         return _greeting_response(lang, intent_str)
     if is_conversational_acknowledgement(question):
@@ -3126,9 +3158,16 @@ def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
     # in a direct call and never once through the UI: /sessions/{id}/query is what the app actually
     # posts to, and it went through a different door. Reset in the `finally` below, so a worker
     # thread cannot carry it into the next request it serves.
+    scope = minors.audience_scope(owner_id)        # before any token is taken: a failure here leaks none
     _note_token = llm_base.set_source_note(_source_note_enabled(owner_id))
+    # …and the same door carries the audience (spec 009): a minor's safety prompt block and their
+    # school's/parents' content denylist, read by the pipeline, the retriever and the agentic loop
+    # through corpus/audience.py. Adults get the default scope, i.e. no change at all. Set HERE, inside
+    # whichever thread runs the request (a job worker included), and reset in the same places as above.
+    _aud_token = audience_ctx.set_scope(scope)
     if not _generation_semaphore.acquire(timeout=_GENERATION_QUEUE_TIMEOUT_S):
         llm_base.reset_source_note(_note_token)
+        audience_ctx.reset_scope(_aud_token)
         _log.warning("generation queue timeout — system at capacity (intent=%r)", intent_str)
         return QueryResponse(
             answer=("המערכת עמוסה כרגע — נסו שוב בעוד רגע." if he
@@ -3141,8 +3180,8 @@ def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
     try:
         # The improved chavruta path: scope set by CHAVRUTA_IMPROVED_SCOPE (config/rollout.py).
         with rollout.improved_for(rollout.enabled_for(_is_admin(owner_id))):
-            return _run_query_impl(question, lang, intent_str, history, audience, grade_band, length,
-                                   owner_id, llm)
+            return _scope_response(_run_query_impl(question, lang, intent_str, history, audience,
+                                                   grade_band, length, owner_id, llm))
     except HTTPException:
         raise
     except JobCancelledError:
@@ -3158,6 +3197,22 @@ def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
             _in_flight_count -= 1
         _generation_semaphore.release()
         llm_base.reset_source_note(_note_token)
+        audience_ctx.reset_scope(_aud_token)
+
+
+def _scope_response(res: QueryResponse) -> QueryResponse:
+    """The last line of the content denylist (spec 009 R10): drop any citation, whole-answer or in a
+    lesson section, whose work is denied to this requester. Retrieval already excludes them, so for a
+    correct run this removes nothing; it is what keeps SC-005 true if some path was missed. A citation
+    carries only a ref, so this matches by TITLE (tier-level denial is enforced in the store and again
+    on the lesson sheet below, where the retrieved hits' work_id is to hand). No-op for adults."""
+    if not audience_ctx.current().deny:
+        return res
+    res.citations = drop_scoped(res.citations)
+    if res.lesson_plan:
+        for sec in res.lesson_plan.sections:
+            sec.citations = drop_scoped(sec.citations)
+    return res
 
 
 def _calendar_modes_enabled(owner_id: str, intent: str | None = None) -> bool:
@@ -3243,6 +3298,10 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
 
     dist_res = classify_and_distill(question, history=history, intent=intent_str)
     if dist_res.action == "chitchat" and dist_res.answer:
+        if audience_ctx.current().minor:
+            # The classifier WROTE this reply, under its own prompt and with no minor rules. A minor
+            # gets the fixed study-oriented greeting instead (spec 009 T052).
+            return _greeting_response(lang, intent_str)
         clean_ans = strip_control_codes(strip_mudgash_label(dist_res.answer))
         return QueryResponse(answer=clean_ans, citations=[], grounded=False, intent=intent_str or "qa", files=[])
 
@@ -4195,6 +4254,10 @@ def query_stream(req: QueryRequest, owner: str = Depends(current_owner),
 
     def _gen():
         augmented_q = _augment_question(req.question, req.attachments)
+        if (crisis_payload := crisis_gate.screen_message(owner, req.question, req.lang)) is not None:
+            _settle_tokens(owner, reserved, {}, req.intent, meter=meter)
+            yield _crisis_done_event(crisis_payload)
+            return
         pipeline = _get_pipeline()
         effective_llm = llm or pipeline.llm
         if is_pure_greeting(augmented_q):
@@ -4213,7 +4276,10 @@ def query_stream(req: QueryRequest, owner: str = Depends(current_owner),
 
         q = Query(text=augmented_q, lang=req.lang or None, intent=parsed_intent, rerank=True)
         try:
-            raw_stream, hits = pipeline.ask_stream(q, history=[], llm=effective_llm)
+            # Retrieval and prompt-building happen inside this one call, so the audience scope is
+            # held for exactly it — never across the yields below (see corpus/audience.py).
+            with audience_ctx.use(minors.audience_scope(owner)):
+                raw_stream, hits = pipeline.ask_stream(q, history=[], llm=effective_llm)
         except Exception as exc:
             _log.exception("streaming ask_stream failed: %s", exc)
             he = (req.lang or "") != "en"
@@ -4311,10 +4377,16 @@ class MeOut(BaseModel):
     org_id: str = ""
     org_name: str = ""
     org_role: str = ""               # admin | teacher | student | "" (not in one)
+    # School-track minors (spec 009). All derived from the server-side age record (app/minors.py), never
+    # from JWT metadata. UI convenience only — the gates are in security.require_auth.
+    is_minor: bool = False
+    age_required: bool = False           # a new account that has not yet declared birth month/year
+    adult_terms_required: bool = False   # turned 18 and has not yet accepted the adult Terms
+    school_linked: bool = False          # is an accepted member of an organisation
 
 
 @app.get("/me", response_model=MeOut)
-def me(owner: str = Depends(current_owner)):
+def me(request: Request, owner: str = Depends(current_owner)):
     """Account + today's quota state — lets the UI show who's signed in, their plan, how many questions
     remain, whether a deletion is pending, and whether the account is blocked."""
     plan = "free" if owner == "local" else _plan_for(owner)
@@ -4402,7 +4474,54 @@ def me(owner: str = Depends(current_owner)):
         org_id=(_org := orgs.membership(owner) or {}).get("org_id", "") or "",
         org_name=_org.get("name", "") or "",
         org_role=_org.get("role", "") or "",
+        school_linked=bool(_org.get("org_id")),
+        **minors.status(owner, legacy_adult=legacy_adult(request), supabase=sb.enabled()),
     )
+
+
+class AgeIn(BaseModel):
+    birth_year: int
+    birth_month: int
+
+
+def _age_error(exc: minors.AgeError, status: int) -> HTTPException:
+    return HTTPException(status_code=status, detail={"error": exc.code, "message": str(exc)})
+
+
+@app.post("/account/age")
+def set_account_age(req: AgeIn, owner: str = Depends(current_owner)):
+    """Declare birth month and year. Once only: a second call is 409 and changes nothing — afterwards
+    only a linked parent or the operator can correct it (minors.correct_age). Under 12 is refused."""
+    if owner == "local":
+        raise HTTPException(status_code=400, detail={"error": "sign_in_required",
+                                                      "message": "sign in to set an age"})
+    try:
+        rec = minors.set_age_once(owner, req.birth_year, req.birth_month)
+    except minors.AgeAlreadySet as exc:
+        raise _age_error(exc, 409) from exc
+    except minors.AgeError as exc:               # under_minimum_age / invalid_birth
+        raise _age_error(exc, 422) from exc
+    return {"is_minor": minors.is_minor(owner), "adult_from": rec["adult_from"]}
+
+
+class AdultTermsIn(BaseModel):
+    terms_version: str = Field(min_length=1, max_length=64)
+
+
+@app.post("/account/adult-terms")
+def accept_adult_terms(req: AdultTermsIn, owner: str = Depends(current_owner)):
+    """A former minor accepts the adult Terms; message-sending routes stay 403 adult_terms_required
+    until they do. Marketing consent is a separate, optional switch and is NOT given here."""
+    if not req.terms_version.strip():
+        raise HTTPException(status_code=422, detail={"error": "terms_version_required",
+                                                      "message": "terms_version is required"})
+    try:
+        minors.accept_adult_terms(owner)
+    except minors.AgeNotSet as exc:
+        raise _age_error(exc, 409) from exc
+    except minors.NotAdultYet as exc:
+        raise _age_error(exc, 409) from exc
+    return {"ok": True}
 
 
 def _since_cutoff(window: str) -> str | None:
@@ -5344,6 +5463,12 @@ def _stream_query_generator(session_id: str, req: QueryRequest, history: list[Tu
                             intent: str, owner: str, reserved, llm, meter):
     t0 = time.monotonic()
     augmented_q = _augment_question(req.question, req.attachments)
+    # 0. Crisis screen (minors only): the fixed message replaces the answer, saved as the assistant turn.
+    if (crisis_payload := crisis_gate.screen_message(owner, req.question, req.lang)) is not None:
+        _save_assistant(session_id, _crisis_response(crisis_payload, intent))
+        _settle_tokens(owner, reserved, {}, intent, meter=meter)
+        yield _crisis_done_event(crisis_payload, session_id)
+        return
     pipeline = _get_pipeline()
     effective_llm = llm or pipeline.llm
 
@@ -5367,7 +5492,9 @@ def _stream_query_generator(session_id: str, req: QueryRequest, history: list[Tu
     # 2. Distill & Planner
     dist_res = classify_and_distill(augmented_q, history=history, intent=intent)
     if dist_res.action == "chitchat" and dist_res.answer:
-        clean_ans = strip_control_codes(strip_mudgash_label(dist_res.answer))
+        # A minor never gets the classifier's free-text reply (see _run_query_impl).
+        clean_ans = (_greeting_response(req.lang, intent).answer if minors.is_minor(owner)
+                     else strip_control_codes(strip_mudgash_label(dist_res.answer)))
         resp = QueryResponse(answer=clean_ans, citations=[], grounded=False, intent=intent or "qa", files=[])
         _save_assistant(session_id, resp)
         _settle_tokens(owner, reserved, {}, intent, meter=meter)
@@ -5392,7 +5519,8 @@ def _stream_query_generator(session_id: str, req: QueryRequest, history: list[Tu
     )
 
     try:
-        raw_stream, hits = pipeline.ask_stream(q, history=history, llm=effective_llm)
+        with audience_ctx.use(minors.audience_scope(owner)):      # see /query/stream
+            raw_stream, hits = pipeline.ask_stream(q, history=history, llm=effective_llm)
     except Exception as exc:
         _log.exception("streaming ask_stream failed: %s", exc)
         he = (req.lang or "") != "en"
@@ -6302,6 +6430,268 @@ def org_set_cap(req: MemberActionIn, owner: str = Depends(current_owner)):
         raise HTTPException(status_code=404, detail="not found")
     orgs.log_access(m["org_id"], owner, "set_cap", req.owner_id)
     return {"owner_id": req.owner_id, "daily_cap": cap}
+
+
+
+# ── School track for minors (spec 009): linking, parents, content settings, safety alerts ────────────
+# Same convention as the rest of /orgs/*: a caller without the role gets 404, never 403, so the answer
+# does not confirm that an org, an account or a link exists.
+def _org_admin(owner: str) -> dict:
+    m = _org_for(owner)
+    try:
+        return orgs.require_member(owner, m["org_id"], orgs.ADMIN)
+    except orgs.OrgAccessError:
+        raise HTTPException(status_code=404, detail="not found") from None
+
+
+class JoinRequestIn(BaseModel):
+    owner_id: str = Field(min_length=1, max_length=128)
+
+
+@app.post("/orgs/join-requests", status_code=201)
+def org_create_join_request(req: JoinRequestIn, owner: str = Depends(current_owner)):
+    """An org admin asks one student account to join. Takes effect only when the student approves.
+    Unknown, adult, already-placed or removed accounts all answer the same 404: the admin learns
+    nothing about an account that is not theirs (no age, no membership, no existence)."""
+    m = _org_admin(owner)
+    rid = orgs.create_join_request(m["org_id"], owner, req.owner_id.strip())
+    if rid is None:
+        raise HTTPException(status_code=404, detail="not found")
+    orgs.log_access(m["org_id"], owner, "join_request", req.owner_id.strip())
+    return {"id": rid}
+
+
+@app.get("/account/join-requests")
+def account_join_requests(owner: str = Depends(current_owner)):
+    """The student's own pending requests: the school's name only."""
+    return {"requests": orgs.pending_join_requests(owner)}
+
+
+class DecisionIn(BaseModel):
+    decision: str = Field(pattern="^(approve|decline)$")
+
+
+@app.post("/account/join-requests/{request_id}")
+def account_decide_join_request(request_id: int, req: DecisionIn, owner: str = Depends(current_owner)):
+    try:
+        res = orgs.decide_join_request(owner, request_id, req.decision)
+    except orgs.JoinRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    if res is None:
+        raise HTTPException(status_code=404, detail="not found")
+    if "org_id" in res:
+        orgs.log_access(res["org_id"], owner, "join")
+    return res
+
+
+# ── parents ──
+class ParentLinkIn(BaseModel):
+    child_owner_id: str = Field(min_length=1, max_length=128)
+
+
+@app.post("/parent/links", status_code=201)
+def parent_request_link(req: ParentLinkIn, request: Request, owner: str = Depends(current_owner)):
+    """An adult asks to link to a minor's account; the child must approve. Unknown / not a minor / self
+    is one 404. A non-adult caller gets a 403 that says nothing about the child."""
+    try:
+        ok = parents.request_link(owner, req.child_owner_id.strip(), legacy_adult=legacy_adult(request))
+    except parents.AdultRequired:
+        raise HTTPException(status_code=403, detail={"error": "adult_required",
+                                                      "message": "Only an adult account can link to a child."}) from None
+    if not ok:
+        raise HTTPException(status_code=404, detail="not found")
+    return {"status": "pending"}
+
+
+@app.get("/account/parent-links")
+def account_parent_links(owner: str = Depends(current_owner)):
+    """The child's view: pending requests and active parents (account ids)."""
+    return {"links": parents.pending_for_child(owner)}
+
+
+@app.post("/account/parent-links/{parent_id}")
+def account_decide_parent_link(parent_id: str, req: DecisionIn, owner: str = Depends(current_owner)):
+    try:
+        status = parents.decide(owner, parent_id, req.decision)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    if status is None:
+        raise HTTPException(status_code=404, detail="not found")
+    return {"status": status}
+
+
+@app.delete("/parent/links/{child_id}", status_code=204)
+def parent_revoke_link(child_id: str, parent_id: str | None = None, owner: str = Depends(current_owner)):
+    """The parent ends their link (path = the child), or the child ends it (path = their OWN id; the
+    optional `parent_id` query picks one parent, otherwise every link to them is ended)."""
+    if owner == child_id:
+        with db._LOCK:
+            rows = db.get_conn().execute(
+                "SELECT parent_owner_id FROM parent_links WHERE child_owner_id=? "
+                "AND status IN ('pending','active')", (owner,)).fetchall()
+        targets = [r["parent_owner_id"] for r in rows if parent_id in (None, r["parent_owner_id"])]
+        done = [parents.revoke(p, owner) for p in targets]
+        if not any(done):
+            raise HTTPException(status_code=404, detail="not found")
+    elif not parents.revoke(owner, child_id):
+        raise HTTPException(status_code=404, detail="not found")
+    return Response(status_code=204)
+
+
+@app.get("/parent/children")
+def parent_children(owner: str = Depends(current_owner)):
+    return {"children": parents.children_of(owner)}
+
+
+def _linked_child(owner: str, child_id: str) -> None:
+    try:
+        parents.require_active_parent(owner, child_id)
+    except parents.NotLinked:
+        raise HTTPException(status_code=404, detail="not found") from None
+
+
+@app.put("/parent/children/{child_id}/age")
+def parent_correct_child_age(child_id: str, req: AgeIn, owner: str = Depends(current_owner)):
+    """A linked parent corrects the child's birth month/year. Logged with actor and time."""
+    try:
+        rec = parents.correct_child_age(owner, child_id, req.birth_year, req.birth_month)
+    except parents.NotLinked:
+        raise HTTPException(status_code=404, detail="not found") from None
+    except minors.AgeNotSet as exc:
+        raise _age_error(exc, 409) from exc
+    except minors.AgeError as exc:
+        raise _age_error(exc, 422) from exc
+    return {"is_minor": minors.is_minor(child_id), "adult_from": rec["adult_from"]}
+
+
+@app.put("/admin/age/{owner_id}")
+def admin_correct_age(owner_id: str, req: AgeIn, operator: str = Depends(_require_admin)):
+    """Operator correction of any account's age (support cases). Logged as actor_kind 'operator'."""
+    try:
+        rec = parents.correct_age_as_operator(operator, owner_id, req.birth_year, req.birth_month)
+    except minors.AgeNotSet:
+        raise HTTPException(status_code=404, detail="not found") from None
+    except minors.AgeError as exc:
+        raise _age_error(exc, 422) from exc
+    return {"is_minor": minors.is_minor(owner_id), "adult_from": rec["adult_from"]}
+
+
+# ── content settings (school and parent) ──
+class ContentEntry(BaseModel):
+    kind: str = Field(max_length=16)
+    value: str = Field(max_length=256)
+
+
+class ContentIn(BaseModel):
+    disabled: list[ContentEntry] = Field(default_factory=list, max_length=content_settings.MAX_ENTRIES)
+
+
+def _content_view(scope_kind: str, scope_id: str) -> dict:
+    disabled = content_settings.get_disabled(scope_kind, scope_id)
+    return {"categories": content_settings.tree(disabled), "disabled": content_settings.as_json(disabled)}
+
+
+def _content_put(scope_kind: str, scope_id: str, actor: str, req: ContentIn) -> dict:
+    try:
+        entries = content_settings.validate([e.model_dump() for e in req.disabled])
+    except content_settings.InvalidEntries as exc:
+        raise HTTPException(status_code=422, detail={"error": "unknown_content_entries",
+                                                      "message": "Some entries are not in the library.",
+                                                      "entries": exc.bad}) from None
+    content_settings.set_disabled(scope_kind, scope_id, entries, actor)
+    content_settings.log_change(scope_kind, scope_id, actor, len(entries))
+    return _content_view(scope_kind, scope_id)
+
+
+@app.get("/orgs/content")
+def org_content(owner: str = Depends(current_owner)):
+    m = _org_admin(owner)
+    return _content_view("org", m["org_id"])
+
+
+@app.put("/orgs/content")
+def org_set_content(req: ContentIn, owner: str = Depends(current_owner)):
+    """Replace the school's disabled set. Applies to the school's MINOR students only (never adults,
+    never another school, never the crisis path)."""
+    m = _org_admin(owner)
+    return _content_put("org", m["org_id"], owner, req)
+
+
+@app.get("/parent/children/{child_id}/content")
+def parent_child_content(child_id: str, owner: str = Depends(current_owner)):
+    _linked_child(owner, child_id)
+    return _content_view("parent", child_id)
+
+
+@app.put("/parent/children/{child_id}/content")
+def parent_set_child_content(child_id: str, req: ContentIn, owner: str = Depends(current_owner)):
+    _linked_child(owner, child_id)
+    return _content_put("parent", child_id, owner, req)
+
+
+# ── safety contacts and alerts ──
+class SafetyContactsIn(BaseModel):
+    owner_ids: list[str] = Field(default_factory=list, max_length=orgs.MAX_SAFETY_CONTACTS)
+
+
+@app.get("/orgs/safety-contacts")
+def org_get_safety_contacts(owner: str = Depends(current_owner)):
+    m = _org_admin(owner)
+    return {"owner_ids": orgs.safety_contacts(m["org_id"])}
+
+
+@app.put("/orgs/safety-contacts")
+def org_set_safety_contacts(req: SafetyContactsIn, owner: str = Depends(current_owner)):
+    """Who at the school is told about a crisis alert. Members only (teacher or admin role)."""
+    m = _org_admin(owner)
+    ids = orgs.set_safety_contacts(m["org_id"], req.owner_ids)
+    if ids is None:
+        raise HTTPException(status_code=422, detail={"error": "invalid_safety_contacts",
+                                                      "message": "Every contact must be a teacher or admin member of this school."})
+    orgs.log_access(m["org_id"], owner, f"safety_contacts:{len(ids)}")
+    return {"owner_ids": ids}
+
+
+def _alert_viewer(owner: str) -> dict:
+    """A safety contact or an org admin of the caller's school; anyone else gets the 404."""
+    m = _org_for(owner)
+    try:
+        orgs.require_member(owner, m["org_id"], orgs.TEACHER)
+    except orgs.OrgAccessError:
+        raise HTTPException(status_code=404, detail="not found") from None
+    if m["role"] != orgs.ADMIN and owner not in orgs.safety_contacts(m["org_id"]):
+        raise HTTPException(status_code=404, detail="not found")
+    return m
+
+
+@app.get("/orgs/alerts")
+def org_alerts_list(owner: str = Depends(current_owner)):
+    """Alerts about the school's minors: who (account label), category, danger flag, time, state.
+    Never any text, and never an age: every row just carries the "minor" badge."""
+    m = _alert_viewer(owner)
+    return {"alerts": orgs.org_alerts(m["org_id"])}
+
+
+@app.post("/orgs/alerts/{alert_id}/ack")
+def org_alert_ack(alert_id: int, owner: str = Depends(current_owner)):
+    m = _alert_viewer(owner)
+    if not orgs.ack_alert(alert_id, owner, org_id=m["org_id"]):
+        raise HTTPException(status_code=404, detail="not found")
+    orgs.log_access(m["org_id"], owner, "alert_ack")
+    return {"acknowledged": True}
+
+
+@app.get("/admin/crisis-alerts")
+def admin_crisis_alerts(owner: str = Depends(_require_admin)):
+    """Operator view: every school's alerts plus unlinked minors' (org_id null)."""
+    return {"alerts": orgs.all_alerts()}
+
+
+@app.post("/admin/crisis-alerts/{alert_id}/ack")
+def admin_crisis_alert_ack(alert_id: int, owner: str = Depends(_require_admin)):
+    if not orgs.ack_alert(alert_id, owner, org_id=None):
+        raise HTTPException(status_code=404, detail="not found")
+    return {"acknowledged": True}
 
 
 # ── Source Sheet Companion Library (Spec 008) ────────────────────────────────

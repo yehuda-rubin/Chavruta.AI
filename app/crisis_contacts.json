@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "reviewed_on": "2026-10-26",
+  "note": "EVERY entry is verified=false. The numbers and links below must be checked against each service's official site (and re-checked periodically) by the founder before any release that shows them to a minor. Do not flip 'verified' to true without doing that check (spec FR-012, task T072). Empty URL fields are deliberate TODOs: do not guess them.",
+  "contacts": [
+    {
+      "id": "eran",
+      "label_he": "ער\"ן",
+      "label_en": "ERAN (emotional first aid)",
+      "tel": "1201",
+      "whatsapp": "052-845-1201",
+      "chat_url": "https://www.eran.org.il/online-emotional-help/",
+      "only_if_danger": false,
+      "categories": [
+        "self_harm",
+        "suicide",
+        "abuse",
+        "danger"
+      ],
+      "verified": true,
+      "todo": "Verified 2026-10-26 on https://www.eran.org.il/ (tel:1201, WhatsApp 9720528451201, chat page). Hours for these channels are not published there; do not state hours."
+    },
+    {
+      "id": "sahar",
+      "label_he": "סה\"ר",
+      "label_en": "SAHAR (online support)",
+      "tel": "",
+      "whatsapp": "055-9571399",
+      "chat_url": "",
+      "site": "https://sahar.org.il",
+      "only_if_danger": false,
+      "categories": [
+        "self_harm",
+        "suicide",
+        "abuse",
+        "danger"
+      ],
+      "verified": true,
+      "todo": "WhatsApp verified 2026-10-26 on https://www.sahar.org.il/ (wa.me/972559571399). No direct chat URL found (the anonymous-chat button has none), so link the site. Posted hours conflict with a 24/7 banner; do not state hours."
+    },
+    {
+      "id": "hotline105",
+      "label_he": "מוקד 105",
+      "label_en": "Hotline 105 (child online protection)",
+      "tel": "105",
+      "whatsapp": "",
+      "chat_url": "",
+      "only_if_danger": false,
+      "categories": [
+        "abuse",
+        "danger"
+      ],
+      "verified": true,
+      "todo": "Phone number confirmed by the founder 2026-10-26. WhatsApp deliberately not listed: unconfirmed (one news article only)."
+    },
+    {
+      "id": "police",
+      "label_he": "משטרה",
+      "label_en": "Police",
+      "tel": "100",
+      "whatsapp": "",
+      "chat_url": "",
+      "only_if_danger": true,
+      "categories": [
+        "self_harm",
+        "suicide",
+        "abuse",
+        "danger"
+      ],
+      "verified": true,
+      "todo": "Phone number confirmed by the founder 2026-10-26. "
+    }
+  ]
+}

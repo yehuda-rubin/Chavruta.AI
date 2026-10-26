@@ -4,6 +4,10 @@ shell commands, and other important information, read the current plan:
 `specs/001-chavruta-redesign/plan.md` (and its research.md, data-model.md,
 contracts/, quickstart.md).
 
+Planned sub-feature: **009-school-minors**, opening the product to students aged 12–17 through the school
+track. Plan: `specs/009-school-minors/plan.md` (plus spec/research/data-model/contracts/quickstart in that folder).
+Background: `docs/MINORS_READINESS.md`.
+
 Active feature: **001-chavruta-redesign** — full redesign of Chavruta.AI as a
 deployment-agnostic, dynamically-extensible RAG over the Jewish bookshelf.
 Stack: Python 3.13 · bge-m3 embeddings · Qdrant (embedded local / server cloud) ·

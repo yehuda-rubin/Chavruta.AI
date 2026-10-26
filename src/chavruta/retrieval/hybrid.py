@@ -26,6 +26,15 @@ from chavruta.corpus.refs import (
     with_ref_variants,
 )
 from chavruta.corpus.schema import Query
+from chavruta.retrieval.denylist import (
+    TITLE_OVERFETCH,
+    _title_of,
+    deny_filter,
+    drop_denied,
+    drop_denied_titles,
+    scoped_query,
+    with_deny,
+)
 from chavruta.retrieval.base import RankedHit, RetrievalResult
 from chavruta.store.base import Filter, HybridQuery
 
@@ -263,13 +272,21 @@ class HybridRetriever:
         f: Filter = {}
         if query.work_ids:
             f["work_id"] = list(query.work_ids)
-        return f or None
+        return with_deny(f, query.deny_work_ids) or None
+
+    @staticmethod
+    def _deny_kw(query: Query) -> dict:
+        """`filters=` kwarg carrying ONLY the denylist, for searches that are otherwise unfiltered
+        (the tractate / quotation floors, the unscoped fallback). Empty denylist → no kwarg at all,
+        so those calls stay exactly as they were."""
+        return {"filters": deny_filter(query.deny_work_ids)} if query.deny_work_ids else {}
 
     def _work_filter(self, query: Query) -> Filter | None:
         """Work scope only — used for ref anchoring so the verse itself and ALL its
         commentaries are fetched, not just the named commentators (the named ones are
         still boosted above the rest; this also brings the pasuk in for context)."""
-        return {"work_id": list(query.work_ids)} if query.work_ids else None
+        return with_deny({"work_id": list(query.work_ids)} if query.work_ids else None,
+                         query.deny_work_ids)
 
     def retrieve(self, query: Query, *, top_k: int, priority: bool = False) -> RetrievalResult:
         """Entry point. The CPU-bound work (embedding + Qdrant round-trips) is bounded by
@@ -278,9 +295,19 @@ class HybridRetriever:
 
         `priority` is for a request already mid-conversation asking to CONTINUE (an agentic
         ===NEED_SOURCES=== follow-up — see pipeline.py::_build_source_fetcher) — never for a fresh
-        turn's first retrieval, which has no completed work at stake yet."""
+        turn's first retrieval, which has no completed work at stake yet.
+
+        The request's ambient denylist (corpus/audience.py) is merged in HERE, the one door every
+        retrieval walks through, so a Query built anywhere still honours it. Tiers are excluded in the
+        store; denied TITLES (a book or category) cannot be, so they are over-fetched and dropped."""
+        query = scoped_query(query)
         with _retrieval_gate.acquire(priority=priority):
-            return self._retrieve_impl(query, top_k=top_k)
+            if not query.deny_titles:
+                return self._retrieve_impl(query, top_k=top_k)
+            res = self._retrieve_impl(query, top_k=top_k * TITLE_OVERFETCH)
+        hits = drop_denied_titles(res.hits, query.deny_titles)[:top_k]
+        anchors = [r for r in res.anchor_refs if _title_of(r) not in query.deny_titles]
+        return RetrievalResult(hits=hits, anchor_refs=anchors, is_empty=res.is_empty or not hits)
 
     def _retrieve_impl(self, query: Query, *, top_k: int) -> RetrievalResult:
         t_all = time.monotonic()
@@ -309,7 +336,7 @@ class HybridRetriever:
                 raw = self.store.search(
                     self.profile.collection, hquery, top_k=candidate_k, filters=filters
                 )
-            if not raw and filters is not None:
+            if not raw and query.work_ids:
                 # A SCOPED search (work_ids / commentator_ids) came back empty. That scope can be wrong
                 # — e.g. a hallucinated or mis-resolved named_ref pinned the query to the wrong tractate
                 # (Bava Metzia for a Sanhedrin topic). A wrong scope must never collapse retrieval to
@@ -317,8 +344,9 @@ class HybridRetriever:
                 # surface. (The floors below also key off query.work_ids, so clear the scope for them.)
                 logger.info("scoped retrieval empty; falling back to unscoped semantic search")
                 with _timed(t, "search"):
+                    # The denylist survives the fallback: "unscoped" drops the WORK scope only.
                     raw = self.store.search(self.profile.collection, hquery, top_k=candidate_k,
-                                            filters=None)
+                                            filters=deny_filter(query.deny_work_ids) or None)
                 query = replace(query, work_ids=None, commentator_ids=None)
         except Exception as exc:
             # A backend failure (e.g. a Qdrant search timeout under load) must degrade to an honest
@@ -396,7 +424,7 @@ class HybridRetriever:
         # server-side filter, so over-fetch and drop commentary here.
         if not query.work_ids and not query.commentator_ids:
             try:
-                bfilt = {"work_id": list(_FOUNDATIONAL_WORKS)}
+                bfilt = with_deny({"work_id": list(_FOUNDATIONAL_WORKS)}, query.deny_work_ids)
                 with _timed(t, "floors"):
                     base = self.store.search(self.profile.collection, hquery, top_k=24, filters=bfilt)
                     bmap = self.store.dense_scores(self.profile.collection, emb.dense, bfilt, top_k=24) \
@@ -427,7 +455,8 @@ class HybridRetriever:
                 with _timed(t, "floors"):
                     found = self.store.search(self.profile.collection, hquery,
                                               top_k=_FOUNDATIONAL_TOP_K,
-                                              filters={"work_id": list(_FOUNDATIONAL_WORKS)})
+                                              filters=with_deny({"work_id": list(_FOUNDATIONAL_WORKS)},
+                                                                query.deny_work_ids))
                 for h in found:
                     rh = _to_hit(h)
                     # boost, but never reach the anchor sentinel
@@ -451,7 +480,8 @@ class HybridRetriever:
                 # equivalent to the word-level match this was meant to do.
                 with _timed(t, "tractate"):
                     scoped = self.store.search(self.profile.collection, hquery,
-                                               top_k=_TRACTATE_TOP_K * 8)
+                                               top_k=_TRACTATE_TOP_K * 8,
+                                               **self._deny_kw(query))
                 kept = 0
                 for h in scoped:
                     if kept >= _TRACTATE_TOP_K:
@@ -480,7 +510,8 @@ class HybridRetriever:
                             pq = HybridQuery(dense=pe.dense,
                                              sparse=pe.sparse if use_sparse else None)
                             for h in self.store.search(self.profile.collection, pq,
-                                                       top_k=_QUOTE_TOP_K):
+                                                       top_k=_QUOTE_TOP_K,
+                                                       **self._deny_kw(query)):
                                 rh = _to_hit(h)
                                 # Level with the tractate floor and capped below the named-ref
                                 # anchor: a phrase we GUESSED was a quotation is weaker evidence
@@ -508,6 +539,10 @@ class HybridRetriever:
                 logger.warning("link expansion failed (%s); serving base hits", exc)
 
         hits = self._dedup(hits)
+        # Defence in depth (spec 009 R10): the store filters above are the real guard; this catches
+        # any path that missed one. No-op (same list) when the denylist is empty.
+        if query.deny_work_ids:
+            hits = drop_denied(hits, query.deny_work_ids)
         # An index page (a book's table of contents, chunked by the Wikisource scan) has nothing to
         # cite, yet it can match a query by its chapter names — drop it before slots are handed out.
         content = [h for h in hits if not is_index_page(h.text)]

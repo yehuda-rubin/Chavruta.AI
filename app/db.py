@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sqlite3
 import threading
 import uuid
@@ -81,6 +82,11 @@ def get_conn() -> sqlite3.Connection:
 # What was actually missing is below: WHAT each bump added. When a migration goes wrong the question
 # is never "was that major or minor", it is "what changed at 28". Reconstructed from git history.
 #
+#   36  feedback.minor_until (a minor's feedback expires on the minor schedule)  2026-10-26
+#   35  age_records (+log), org_join_requests, parent_links, content_denylist, crisis_alerts;
+#       minor_until on messages/saved_lessons/saved_source_sheets; org_members.is_minor;
+#       orgs.safety_contacts (spec 009-school-minors)                2026-10-26
+#   34  accounts/referral_partners.auto_convert_credits
 #   33  referral_partners, referral_redemptions, referral_rewards 2026-10-01
 #   32  saved_source_sheets (Source Sheet Companion)              2026-09-01
 #   31  messages.source_note                                      2026-08-14
@@ -99,7 +105,7 @@ def get_conn() -> sqlite3.Connection:
 #   18  billing_ledger                                            2026-07-26
 #   17  coupons                                                   2026-07-26
 #   ≤16 subscriptions, bans, deletion scheduling, per-owner scoping — see git log -G'^SCHEMA_VERSION'
-SCHEMA_VERSION = 34
+SCHEMA_VERSION = 36
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -781,6 +787,98 @@ def _migrate(conn: sqlite3.Connection) -> None:
             if "auto_convert_credits" not in pcols:
                 conn.execute("ALTER TABLE referral_partners ADD COLUMN auto_convert_credits INTEGER NOT NULL DEFAULT 1")
 
+    if version < 35:
+        # School-track minors (specs/009-school-minors/data-model.md). The age record is the one source
+        # of truth for "is a minor"; minor_until is stamped on content AT WRITE TIME and never updated,
+        # so it keeps excluding that content from review and deleting it on schedule after the author
+        # turns 18. Everything is additive; legacy accounts have no age_records row and stay adults.
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS age_records (
+                owner_id                TEXT PRIMARY KEY,
+                birth_year              INTEGER NOT NULL,
+                birth_month             INTEGER NOT NULL,
+                adult_from              TEXT NOT NULL,   -- ISO date; first day of the month after the 18th-birthday month
+                adult_terms_accepted_at TEXT,
+                created_at              TEXT NOT NULL,
+                updated_at              TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS age_record_log (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_id        TEXT NOT NULL,
+                actor           TEXT NOT NULL,
+                actor_kind      TEXT NOT NULL,           -- self | parent | operator
+                old_birth_year  INTEGER,
+                old_birth_month INTEGER,
+                new_birth_year  INTEGER NOT NULL,
+                new_birth_month INTEGER NOT NULL,
+                at              TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_age_record_log_owner ON age_record_log(owner_id);
+
+            CREATE TABLE IF NOT EXISTS org_join_requests (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                org_id       TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+                owner_id     TEXT NOT NULL,              -- the student
+                requested_by TEXT NOT NULL,              -- the org admin
+                status       TEXT NOT NULL DEFAULT 'pending',   -- pending | approved | declined | expired
+                created_at   TEXT NOT NULL,
+                decided_at   TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_org_join_requests_owner ON org_join_requests(owner_id, status);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_org_join_requests_one_pending
+                ON org_join_requests(org_id, owner_id) WHERE status = 'pending';
+
+            CREATE TABLE IF NOT EXISTS parent_links (
+                parent_owner_id TEXT NOT NULL,
+                child_owner_id  TEXT NOT NULL,
+                status          TEXT NOT NULL DEFAULT 'pending',   -- pending | active | declined | revoked
+                created_at      TEXT NOT NULL,
+                decided_at      TEXT,
+                PRIMARY KEY (parent_owner_id, child_owner_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_parent_links_child ON parent_links(child_owner_id, status);
+
+            CREATE TABLE IF NOT EXISTS content_denylist (
+                scope_kind TEXT NOT NULL,                -- org | parent
+                scope_id   TEXT NOT NULL,                -- org_id, or the child's owner_id for parent scope
+                kind       TEXT NOT NULL,                -- category | work
+                value      TEXT NOT NULL,
+                set_by     TEXT NOT NULL,
+                set_at     TEXT NOT NULL,
+                PRIMARY KEY (scope_kind, scope_id, kind, value)
+            );
+
+            -- No message text, ever: an alert says THAT something happened, never what was written.
+            CREATE TABLE IF NOT EXISTS crisis_alerts (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_id          TEXT NOT NULL,
+                org_id            TEXT,                  -- NULL for an unlinked minor: only the operator is told
+                category          TEXT NOT NULL,         -- self_harm | suicide | abuse | danger
+                immediate_danger  INTEGER NOT NULL DEFAULT 0,
+                detector          TEXT NOT NULL,         -- phrase | classifier
+                created_at        TEXT NOT NULL,
+                delivered_at      TEXT,
+                acknowledged_by   TEXT,
+                acknowledged_at   TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_crisis_alerts_owner ON crisis_alerts(owner_id);
+        """)
+        for table in ("messages", "saved_lessons", "saved_source_sheets"):
+            if "minor_until" not in {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN minor_until TEXT")
+        if "is_minor" not in {r[1] for r in conn.execute("PRAGMA table_info(org_members)")}:
+            conn.execute("ALTER TABLE org_members ADD COLUMN is_minor INTEGER NOT NULL DEFAULT 0")
+        if "safety_contacts" not in {r[1] for r in conn.execute("PRAGMA table_info(orgs)")}:
+            conn.execute("ALTER TABLE orgs ADD COLUMN safety_contacts TEXT")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_minor_until ON messages(minor_until) "
+                     "WHERE minor_until IS NOT NULL")
+
+    if version < 36:
+        # A separate step from 35 on purpose: a database already opened at 35 (every dev machine that ran
+        # Wave 1) never re-runs the 35 block, and would then fail on the first feedback insert.
+        if "minor_until" not in {r[1] for r in conn.execute("PRAGMA table_info(feedback)")}:
+            conn.execute("ALTER TABLE feedback ADD COLUMN minor_until TEXT")
+
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
 
@@ -1026,6 +1124,11 @@ def reviewable_questions(*, since: str | None = None, limit: int = 200,
 
     The ONLY sanctioned way to read conversation text for review, evaluation or model improvement.
     Do not hand-roll a query over `messages` for those purposes — see the conditions above.
+
+    Anything written as a minor is out, permanently: `m.minor_until` is stamped at write time and
+    survives the author turning 18. The age_records clause is a second, independent guard for the
+    account that is a minor right now (belt and braces — a fail-open here is a child's words in a
+    training set).
     """
     if opted_out_owners is None:
         return []
@@ -1039,9 +1142,11 @@ def reviewable_questions(*, since: str | None = None, limit: int = 200,
                  AND s.owner_id NOT IN (SELECT owner_id FROM accounts
                                         WHERE deletion_scheduled_for IS NOT NULL)
                  AND s.created_at >= ?
+                 AND m.minor_until IS NULL
+                 AND s.owner_id NOT IN (SELECT owner_id FROM age_records WHERE adult_from > ?)
                ORDER BY m.id ASC
                LIMIT ?""",
-            (cutoff, max(1, int(limit))),
+            (cutoff, datetime.now(UTC).date().isoformat(), max(1, int(limit))),
         ).fetchall()
     excluded = {o for o in opted_out_owners}
     return [dict(r) for r in rows if r["owner_id"] not in excluded]
@@ -1094,13 +1199,18 @@ def save_message(
     files: list[dict] | None = None,
     source_note: str = "",
 ) -> int:
+    from app import minors      # lazy: minors imports this module
+
     now = _now()
     with _tx(get_conn()) as conn:
+        # Stamped at write time from the SESSION OWNER's age record, never updated afterwards.
+        owner_row = conn.execute("SELECT owner_id FROM sessions WHERE id=?", (session_id,)).fetchone()
+        minor_until = minors.minor_until_for(conn, owner_row["owner_id"] if owner_row else "local")
         cur = conn.execute(
             """INSERT INTO messages
                (session_id, role, text, intent, citations, caveats, grounded, files,
-                source_note, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                source_note, created_at, minor_until)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 session_id,
                 role,
@@ -1112,6 +1222,7 @@ def save_message(
                 json.dumps(files, ensure_ascii=False) if files else None,
                 source_note or "",
                 now,
+                minor_until,
             ),
         )
         message_id = cur.lastrowid
@@ -1184,14 +1295,43 @@ def report_message(message_id: int, owner_id: str, reason: str) -> None:
 def list_flagged_messages(reviewed: bool = False, limit: int = 100) -> list[dict[str, Any]]:
     """Reports awaiting operator review by default (reviewed=False); pass True to see the ones
     already handled. Joins in the actual message text — unlike usage_events, a report exists
-    precisely so a human can read what triggered it; there is no separate content-free path here."""
-    return _agg(
+    precisely so a human can read what triggered it; there is no separate content-free path here.
+
+    EXCEPT for a minor's message (stamped `minor_until`, or authored by an account that is a minor
+    now): that row is cut down to {id, category, snippet_redacted, created_at, minor: True} — no
+    owner_id, session_id, message id or full text (specs/009-school-minors R11)."""
+    from app import minors
+
+    rows = _agg(
         "SELECT r.id, r.message_id, r.owner_id, r.reason, r.source, r.created_at, "
-        "r.reviewed_at, m.role, m.text, m.session_id "
+        "r.reviewed_at, m.role, m.text, m.session_id, m.minor_until "
         "FROM message_reports r JOIN messages m ON m.id = r.message_id "
         "WHERE (r.reviewed_at IS NOT NULL) = ? "
         "ORDER BY r.created_at DESC LIMIT ?",
         (int(reviewed), limit))
+    minor_owners = minors.minor_owner_ids()
+    out = []
+    for r in rows:
+        minor = r.pop("minor_until") is not None or r["owner_id"] in minor_owners
+        out.append({"id": r["id"], "category": r["reason"] or "",
+                    "snippet_redacted": redact_snippet(r["text"]),
+                    "created_at": r["created_at"], "minor": True} if minor else r)
+    return out
+
+
+_EMAIL_RE = re.compile(r"\S+@\S+")
+_URL_RE = re.compile(r"(?:https?://|www\.)\S+")
+_DIGITS_RE = re.compile(r"\d")
+REDACTED_SNIPPET_CHARS = 40
+
+
+def redact_snippet(text: str | None) -> str:
+    """A short, masked lead-in of a minor's text for the operator's queue: emails, links and digits
+    are masked and it stops after REDACTED_SNIPPET_CHARS characters. Masking cannot make free text
+    anonymous — the length cap is the real protection, and the full text is simply not returned."""
+    t = " ".join((text or "").split())
+    t = _DIGITS_RE.sub("#", _URL_RE.sub("[link]", _EMAIL_RE.sub("[email]", t)))
+    return t[:REDACTED_SNIPPET_CHARS] + ("…" if len(t) > REDACTED_SNIPPET_CHARS else "")
 
 
 def mark_report_reviewed(report_id: int) -> bool:
@@ -1206,19 +1346,27 @@ def mark_report_reviewed(report_id: int) -> bool:
 def submit_feedback(owner_id: str, text: str) -> None:
     """Record a general comment/correction/suggestion — not tied to any specific message, unlike
     report_message(). `text` is already trimmed/length-checked by the caller."""
+    from app import minors
+
     with _tx(get_conn()) as conn:
         conn.execute(
-            "INSERT INTO feedback (owner_id, text, created_at) VALUES (?,?,?)",
-            (owner_id, text, datetime.now(UTC).isoformat()),
+            "INSERT INTO feedback (owner_id, text, created_at, minor_until) VALUES (?,?,?,?)",
+            (owner_id, text, datetime.now(UTC).isoformat(), minors.minor_until_for(conn, owner_id)),
         )
 
 
 def list_feedback(reviewed: bool = False, limit: int = 100) -> list[dict[str, Any]]:
     """Feedback awaiting operator review by default (reviewed=False); pass True for handled ones."""
-    return _agg(
+    from app import minors
+
+    rows = _agg(
         "SELECT id, owner_id, text, created_at, reviewed_at FROM feedback "
         "WHERE (reviewed_at IS NOT NULL) = ? ORDER BY created_at DESC LIMIT ?",
         (int(reviewed), limit))
+    minor_owners = minors.minor_owner_ids()
+    return [{"id": r["id"], "category": "feedback", "snippet_redacted": redact_snippet(r["text"]),
+             "created_at": r["created_at"], "minor": True} if r["owner_id"] in minor_owners else r
+            for r in rows]
 
 
 def mark_feedback_reviewed(feedback_id: int) -> bool:
@@ -1235,15 +1383,18 @@ def mark_feedback_reviewed(feedback_id: int) -> bool:
 def save_lesson(lesson_id: str, topic: str, audience: str, grade_band: str, length: str,
                 lang: str, files: list[dict], citations: list[dict] | None = None,
                 owner_id: str = "local") -> None:
+    from app import minors
+
     conn = get_conn()
     with _LOCK, _tx(conn):
         conn.execute(
             "INSERT OR REPLACE INTO saved_lessons "
-            "(id, topic, audience, grade_band, length, lang, files, citations, created_at, owner_id) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "(id, topic, audience, grade_band, length, lang, files, citations, created_at, owner_id, "
+            "minor_until) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (lesson_id, topic, audience or "", grade_band or "", length or "", lang or "he",
              json.dumps(files, ensure_ascii=False),
-             json.dumps(citations or [], ensure_ascii=False), _now(), owner_id),
+             json.dumps(citations or [], ensure_ascii=False), _now(), owner_id,
+             minors.minor_until_for(conn, owner_id)),
         )
 
 
@@ -1282,12 +1433,14 @@ def save_source_sheet(
     session_id: str | None = None,
     message_id: int | None = None,
 ) -> None:
+    from app import minors
+
     conn = get_conn()
     with _LOCK, _tx(conn):
         conn.execute(
             "INSERT OR REPLACE INTO saved_source_sheets "
-            "(id, title, owner_id, session_id, message_id, raw_content, parsed_sheet, files, citations, created_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "(id, title, owner_id, session_id, message_id, raw_content, parsed_sheet, files, citations, "
+            "created_at, minor_until) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (
                 sheet_id,
                 title,
@@ -1299,6 +1452,7 @@ def save_source_sheet(
                 json.dumps(files, ensure_ascii=False),
                 json.dumps(citations or [], ensure_ascii=False),
                 _now(),
+                minors.minor_until_for(conn, owner_id),
             ),
         )
 
@@ -1569,6 +1723,50 @@ def delete_sessions_older_than(cutoff_iso: str) -> int:
         cur = conn.execute(
             "DELETE FROM sessions WHERE COALESCE(updated_at, created_at) < ?", (cutoff_iso,))
         return cur.rowcount
+
+
+def delete_expired_minor_data(now_iso: str, retention_days: int) -> dict[str, int]:
+    """Delete everything stamped `minor_until <= now_iso`, whatever the chat's activity: messages,
+    saved lessons, saved source sheets, feedback. This is the second retention pass (see accounts.run_retention)
+    and unlike the first it does NOT look at `updated_at` — a child who keeps chatting still loses
+    each message when its own date arrives, and lessons/sheets are swept too (the first pass
+    deliberately spares a teacher's work product; a minor's saved items are not that).
+
+    Also tidies what the deleted messages leave behind: their moderation reports (the reason can carry
+    a user's words), sessions left with no messages, and the title of a session whose first message
+    went (first_q/title were copied from that message). Crisis alerts hold no text but follow the
+    same schedule, by age. Returns the counts."""
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        ids = [r[0] for r in conn.execute(
+            "SELECT id FROM messages WHERE minor_until IS NOT NULL AND minor_until <= ?", (now_iso,))]
+        sessions = {r[0] for r in conn.execute(
+            "SELECT DISTINCT session_id FROM messages WHERE minor_until IS NOT NULL AND minor_until <= ?",
+            (now_iso,))}
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            marks = ",".join("?" * len(chunk))
+            conn.execute(f"DELETE FROM message_reports WHERE message_id IN ({marks})", chunk)
+            conn.execute(f"DELETE FROM messages WHERE id IN ({marks})", chunk)
+        emptied = 0
+        for sid in sessions:
+            if conn.execute("SELECT 1 FROM messages WHERE session_id=? LIMIT 1", (sid,)).fetchone():
+                # Survivors were written as an adult; the title still quotes the child's first turn.
+                conn.execute("UPDATE sessions SET first_q='…', title=NULL WHERE id=?", (sid,))
+            else:
+                conn.execute("DELETE FROM sessions WHERE id=?", (sid,))
+                emptied += 1
+        lessons = conn.execute(
+            "DELETE FROM saved_lessons WHERE minor_until IS NOT NULL AND minor_until <= ?", (now_iso,)).rowcount
+        sheets = conn.execute(
+            "DELETE FROM saved_source_sheets WHERE minor_until IS NOT NULL AND minor_until <= ?",
+            (now_iso,)).rowcount
+        feedback = conn.execute(
+            "DELETE FROM feedback WHERE minor_until IS NOT NULL AND minor_until <= ?", (now_iso,)).rowcount
+        cutoff = (datetime.fromisoformat(now_iso) - timedelta(days=retention_days)).isoformat()
+        alerts = conn.execute("DELETE FROM crisis_alerts WHERE created_at < ?", (cutoff,)).rowcount
+    return {"messages": len(ids), "sessions": emptied, "lessons": lessons, "sheets": sheets,
+            "feedback": feedback, "alerts": alerts}
 
 
 def count_sessions_older_than(cutoff_iso: str) -> int:
@@ -2627,6 +2825,49 @@ def purge_owner(owner_id: str) -> None:
         conn.execute("UPDATE helper_messages SET sent_by=? WHERE sent_by=?",
                      (DELETED_OWNER, owner_id))
         conn.execute("UPDATE dev_helpers SET added_by=? WHERE added_by=?",
+                     (DELETED_OWNER, owner_id))
+        # ── School-track minors (spec 009). ABOUT a person, so deleted outright, like dev_helpers:
+        # the age record and its change log go with the account (the log is "never purged while the
+        # account exists, deleted with the account"), as do join requests, parent links in EITHER
+        # direction, a child's content switches, and crisis alerts about them. Where the departing
+        # person is the ACTOR on someone else's row (a parent who set a child's switches or corrected
+        # their age, an admin who asked a student to join, a teacher who acknowledged an alert), the
+        # row stays — it is the child's record — and the actor id becomes the sentinel.
+        conn.execute("DELETE FROM age_records WHERE owner_id=?", (owner_id,))
+        conn.execute("DELETE FROM age_record_log WHERE owner_id=?", (owner_id,))
+        conn.execute("UPDATE age_record_log SET actor=? WHERE actor=?", (DELETED_OWNER, owner_id))
+        conn.execute("DELETE FROM org_join_requests WHERE owner_id=?", (owner_id,))
+        conn.execute("UPDATE org_join_requests SET requested_by=? WHERE requested_by=?",
+                     (DELETED_OWNER, owner_id))
+        conn.execute("DELETE FROM parent_links WHERE parent_owner_id=? OR child_owner_id=?",
+                     (owner_id, owner_id))
+        conn.execute("DELETE FROM content_denylist WHERE scope_kind='parent' AND scope_id=?", (owner_id,))
+        conn.execute("UPDATE content_denylist SET set_by=? WHERE set_by=?", (DELETED_OWNER, owner_id))
+        conn.execute("DELETE FROM crisis_alerts WHERE owner_id=?", (owner_id,))
+        conn.execute("UPDATE crisis_alerts SET acknowledged_by=? WHERE acknowledged_by=?",
+                     (DELETED_OWNER, owner_id))
+        # A safety contact is a member id inside a JSON list on the org; drop it from every list.
+        for org in conn.execute(
+                "SELECT id, safety_contacts FROM orgs WHERE safety_contacts LIKE ? ESCAPE '\\'",
+                ("%" + _like_literal(owner_id) + "%",)).fetchall():
+            try:
+                kept = [c for c in json.loads(org["safety_contacts"]) if c != owner_id]
+            except (ValueError, TypeError):
+                continue
+            conn.execute("UPDATE orgs SET safety_contacts=? WHERE id=?", (json.dumps(kept), org["id"]))
+        # ── Referral program (an existing gap — none of these were purged). The person's own
+        # partner row (code, rates) and their own redemption of someone's code are theirs, so they
+        # go. The money rows are different, exactly as with usage_events and the billing ledger: a
+        # reward records a charge and an amount, aggregates and the other party's statement are
+        # computed from it, and the ledger's retention stands. So a row that merely NAMES the
+        # departing account on the other side of a pair keeps the row and loses the name.
+        conn.execute("DELETE FROM referral_partners WHERE owner_id=?", (owner_id,))
+        conn.execute("DELETE FROM referral_redemptions WHERE referred_owner_id=?", (owner_id,))
+        conn.execute("UPDATE referral_redemptions SET referrer_owner_id=? WHERE referrer_owner_id=?",
+                     (DELETED_OWNER, owner_id))
+        conn.execute("UPDATE referral_rewards SET referrer_owner_id=? WHERE referrer_owner_id=?",
+                     (DELETED_OWNER, owner_id))
+        conn.execute("UPDATE referral_rewards SET referred_owner_id=? WHERE referred_owner_id=?",
                      (DELETED_OWNER, owner_id))
 
 

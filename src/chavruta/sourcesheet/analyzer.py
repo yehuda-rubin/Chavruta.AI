@@ -1425,7 +1425,10 @@ def _parse_llm_json(response_text: str) -> dict | None:
 def _generate_text(llm: Any, prompt: str, system: str, max_tokens: int) -> tuple[str, str]:
     """One model call → (text, finish_reason). finish_reason is "" when the backend does not say."""
     if hasattr(llm, "generate"):
-        grounded_prompt = GroundedPrompt(system=system, sources=[], question=prompt, bare=True)
+        from chavruta.llm.agentic import minor_system   # a minor's safety block (spec 009); no-op otherwise
+
+        grounded_prompt = GroundedPrompt(system=minor_system(system, "he"), sources=[], question=prompt,
+                                         bare=True)
         res = llm.generate(grounded_prompt, lang="he", max_tokens=max_tokens, temperature=0.2)
         text = res.text if hasattr(res, "text") else str(res)
         return text or "", str(getattr(res, "finish_reason", "") or "")

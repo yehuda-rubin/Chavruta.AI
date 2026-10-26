@@ -17,11 +17,13 @@ from dataclasses import replace
 
 from chavruta.config import rollout
 from chavruta.config.profile import Profile
+from chavruta.corpus import audience
 from chavruta.corpus.links import LinkGraph
 from chavruta.corpus.refs import canon_corpus_ref, with_ref_variants
 from chavruta.corpus.registry import CorpusRegistry, default_registry
 from chavruta.corpus.schema import Answer, Intent, Query, Turn
 from chavruta.generation import deontic, grounded, guards
+from chavruta.retrieval.denylist import drop_denied_titles, scoped_filters
 from chavruta.retrieval.hybrid import HybridRetriever
 
 # Its own name, not chavruta.pipeline: these lines are the only record the watching guards leave,
@@ -260,7 +262,11 @@ class ChavrutaPipeline:
                 if not (q or "").strip():
                     continue
                 try:
-                    rq = self._resolve_query(Query(text=q, intent=Intent.QA))
+                    # A fresh Query: it would otherwise lose the requester's denylist (retrieve() also
+                    # merges the ambient one, so this is belt and braces for a minor's request).
+                    deny = audience.current().deny
+                    rq = self._resolve_query(Query(text=q, intent=Intent.QA,
+                                                   deny_work_ids=deny.work_ids, deny_titles=deny.titles))
                     # priority=True: this is an in-flight answer CONTINUING (the model already
                     # spent a round and real tokens on it) — see hybrid.py::_PriorityGate.
                     hits = self.retriever.retrieve(rq, top_k=per_query_k, priority=True).hits
@@ -486,6 +492,12 @@ class ChavrutaPipeline:
         # A lesson — and a responsa (שו"ת) — is delivered as a full walkthrough (the "מהלך")
         # that follows its arc and keeps only the sources it actually uses. Both run the same
         # machine; HALACHA just selects the separate responsa template set (shared corpus).
+        # …except that a MINOR asking in responsa mode gets the plain grounded answer instead: the
+        # responsa walkthrough's own prompt says to "rule clearly le-ma'aseh", and the minor safety
+        # block only overrides that text (the text is still there). A halachic question is then
+        # answered with sources and "ask your rav" (Principle VIII), by the same path as QA.
+        if query.intent is Intent.HALACHA and audience.current().minor:
+            return self._qa_answer(query, result, llm, history=history, missing_note=missing_note)
         if query.intent in (Intent.LESSON, Intent.HALACHA):
             return self._lesson_answer(query, result, llm, history=history)
 
@@ -506,7 +518,7 @@ class ChavrutaPipeline:
         distilled = getattr(query, "distilled_text", "") or ""
         prompt, marker_map = grounded.build_prompt(
             query.text, result.hits, intent=query.intent, history=history, lang=query.lang,
-            distilled_question=distilled,
+            distilled_question=distilled, audience_minor=audience.current().minor,
         )
         # Run through the agentic ===NEED_SOURCES=== loop so the model can pull MORE sources when the
         # retrieved set is THIN (it answers in a single round if the sources already suffice). On a
@@ -614,7 +626,11 @@ class ChavrutaPipeline:
             # Caught live 2026-08-20 (ויקרא כג,ל cited correctly, then ויקרא יג,ל for the identical
             # phrase a few lines later — Leviticus 13 is tzaraat, unrelated).
             def _fetch_tanakh_refs(refs: list[str]):
-                return self.store.fetch_by_refs(self.profile.collection, refs, limit=len(refs) * 2)
+                # Verification only, but it reads the corpus: a minor's denylist applies to it too.
+                deny_kw = {"filters": scoped_filters(None)} if audience.current().deny else {}
+                found = self.store.fetch_by_refs(self.profile.collection, refs,
+                                                 limit=len(refs) * 2, **deny_kw)
+                return drop_denied_titles(found, audience.current().deny.titles)
 
             for c in grounded.mismatched_tanakh_citations(text, _fetch_tanakh_refs)[:2]:
                 guards.report("citation_mismatch", intent_name,
@@ -637,17 +653,19 @@ class ChavrutaPipeline:
         follow-up in Q&A mode kept its thread. Both prompt builders now carry it.
         """
         llm = llm or self.llm
-        is_shut = query.intent is Intent.HALACHA
+        minor = audience.current().minor
+        # Never the responsa walkthrough for a minor (see ask(); this guards a direct caller).
+        is_shut = query.intent is Intent.HALACHA and not minor
         distilled = getattr(query, "distilled_text", "") or ""
         plan = self._build_lesson(query, result)
         if plan.sections:
             prompt, marker_map = grounded.build_lesson_walkthrough_prompt(
                 plan, query.text, lang=query.lang, shut=is_shut, history=history,
-                distilled_question=distilled)
+                distilled_question=distilled, audience_minor=minor)
         else:
             prompt, marker_map = grounded.build_prompt(
                 query.text, result.hits, intent=query.intent, lang=query.lang, history=history,
-                distilled_question=distilled)
+                distilled_question=distilled, audience_minor=minor)
         # Run through the agentic ===NEED_SOURCES=== loop, same as _qa_answer: a lesson/responsa
         # whose initial sources share only a surface word with a modern real-world question (e.g.
         # "computer" retrieving a games sugya instead of the corpus's own electricity/muktzeh
@@ -690,7 +708,7 @@ class ChavrutaPipeline:
         distilled = getattr(query, "distilled_text", "") or ""
         prompt, marker_map = grounded.build_prompt(
             query.text, result.hits, intent=Intent.QA, history=history, lang=query.lang,
-            distilled_question=distilled,
+            distilled_question=distilled, audience_minor=audience.current().minor,
         )
         raw, fetched = self._agentic_generate(prompt, query.lang, Intent.QA, llm)
         from chavruta.llm.agentic import is_degrade_message
@@ -719,7 +737,7 @@ class ChavrutaPipeline:
         distilled = getattr(query, "distilled_text", "") or ""
         prompt, marker_map = grounded.build_prompt(
             query.text, result.hits, intent=Intent.SOURCESHEET, history=history, lang=query.lang,
-            distilled_question=distilled,
+            distilled_question=distilled, audience_minor=audience.current().minor,
         )
         raw, fetched = self._agentic_generate(prompt, query.lang, Intent.SOURCESHEET, llm)
         from chavruta.llm.agentic import is_degrade_message
@@ -824,7 +842,8 @@ class ChavrutaPipeline:
             for c in with_ref_variants([r]):             # first variant that resolves wins
                 try:
                     raw = self.store.fetch_by_refs(self.profile.collection, [c],
-                                                   filters={"unit_type": "source"})
+                                                   filters=scoped_filters({"unit_type": "source"}))
+                    raw = drop_denied_titles(raw, audience.current().deny.titles)
                 except Exception:
                     raw = []
                 if raw:
@@ -848,7 +867,8 @@ class ChavrutaPipeline:
                 yield grounded.no_source_answer(query.lang, query.intent).text
             return _empty_stream(), []
         prompt, _ = grounded.build_prompt(
-            query.text, result.hits, intent=query.intent, history=history, lang=query.lang
+            query.text, result.hits, intent=query.intent, history=history, lang=query.lang,
+            audience_minor=audience.current().minor,
         )
         return llm.stream(
             prompt, lang=query.lang,

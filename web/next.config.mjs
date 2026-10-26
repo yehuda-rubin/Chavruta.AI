@@ -55,6 +55,9 @@ const nextConfig = {
       // feature, whose failure surfaced as the school panel's "no permission" screen. /school is
       // the page and nothing owns bare /orgs, so the prefix is safe.
       ...proxy("orgs"),
+      // /parent/links, /parent/children/{id}/age|content (spec 009). Nothing owns bare /parent today;
+      // if a Next page is ever added there, move it (/family) or give this the /admin-style carve-out.
+      ...proxy("parent"),
       ...proxy("messages"),   // /messages/{id}/report — reporting a bad answer
       ...proxy("byok"),       // /byok/check — validating a personal API key
       ...proxy("helper"),     // /helper/status|accept|decline|messages — the dev-helper's own side

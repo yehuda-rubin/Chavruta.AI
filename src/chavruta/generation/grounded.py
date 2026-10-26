@@ -180,6 +180,17 @@ QUOTE_REF_RULE_HE = (
     "{{S3: הביטוי המדויק}}. דברים שאינם ציטוט מילולי — סמן ב-[S#] כרגיל."
 )
 
+_MODERN_CASES_EN = (
+    "Do not require a literal word-match between the question and a source: if the question is "
+    "about a modern case or a term that never appears verbatim in the sources (a device, a "
+    "situation, a present-day action), infer the underlying principle FROM the sources you were "
+    "given and apply it to the case asked — the way a real posek reasons from precedent — rather "
+    "than only answering when the exact case is named. That kind of inference (a fortiori, a "
+    "shared underlying principle) is legitimate as long as every step still traces back to what a "
+    "provided source actually says — it is not the same as inventing a source or a ruling that "
+    "doesn't follow from them. "
+)
+
 SYSTEM_QA = (
     "You are Chavruta, a trustworthy Torah study partner. You answer ONLY from the sources "
     "provided to you. Every factual claim MUST cite its source by marker, e.g. [S1]. "
@@ -201,14 +212,7 @@ SYSTEM_QA = (
     "language than your answer (e.g. an English-translated responsum in an otherwise-Hebrew "
     "answer), translate it into the answer's language rather than quoting it verbatim in the "
     "other language — the citation marker still links the reader to the original. "
-    "Do not require a literal word-match between the question and a source: if the question is "
-    "about a modern case or a term that never appears verbatim in the sources (a device, a "
-    "situation, a present-day action), infer the underlying principle FROM the sources you were "
-    "given and apply it to the case asked — the way a real posek reasons from precedent — rather "
-    "than only answering when the exact case is named. That kind of inference (a fortiori, a "
-    "shared underlying principle) is legitimate as long as every step still traces back to what a "
-    "provided source actually says — it is not the same as inventing a source or a ruling that "
-    "doesn't follow from them. "
+    + _MODERN_CASES_EN +
     "This is one continuous conversation, not a series of unrelated questions. Read the "
     "conversation so far before answering: a short follow-up ('and what about…', 'why?') refers to "
     "what was just discussed, and the sources already quoted earlier still count — don't make the "
@@ -241,6 +245,14 @@ SYSTEM_LESSON = SYSTEM_QA + (
 
 # Hebrew system prompts — Hebrew-first models follow Hebrew instructions far better
 # (Principle IV; measured with DictaLM-3.0-1.7B which looped on the English protocol).
+_MODERN_CASES_HE = (
+    "אל תדרוש התאמת-מילים מילולית בין השאלה למקור: אם השאלה עוסקת במקרה מודרני או במונח שלא "
+    "מופיע כלשונו במקורות (מכשיר, מצב, או פעולה עכשווית) — הסק את העיקרון העולה מן המקורות "
+    "שסופקו והחל אותו על המקרה הנשאל, כפי שפוסק אמיתי מסיק מתקדים, ולא רק כשהמקרה עצמו נזכר "
+    "במפורש. הסקה כזו (קל וחומר, עיקרון משותף) לגיטימית כל עוד כל צעד בה נשען בפועל על לשון "
+    "מקור שסופק — וזה שונה לגמרי מהמצאת מקור או פסק שאינו עולה מהם. "
+)
+
 SYSTEM_BASE_HE = (
     "אתה חברותא — שותף לימוד תורה אמין. ענה אך ורק מתוך המקורות שסופקו לך. "
     "כל טענה חייבת ציון מקור בסוגריים, לדוגמה [S1]. צטט את לשון המקור העברית כשרלוונטי. "
@@ -268,11 +280,7 @@ SYSTEM_BASE_HE = (
     "בעברית) — תרגם אותה לשפת התשובה במקום לצטט אותה כלשונה בשפה הזרה; סימון ה-[S#] עדיין "
     "מקשר את הקורא למקור המקורי. "
     "שמור על לשון בית המדרש והמינוח התורני: באר מושגים מארמית ומחז\"ל לעברית תורנית מקורית ולא דרך תרגומים של שפות זרות (למשל: כהנא = כהן). "
-    "אל תדרוש התאמת-מילים מילולית בין השאלה למקור: אם השאלה עוסקת במקרה מודרני או במונח שלא "
-    "מופיע כלשונו במקורות (מכשיר, מצב, או פעולה עכשווית) — הסק את העיקרון העולה מן המקורות "
-    "שסופקו והחל אותו על המקרה הנשאל, כפי שפוסק אמיתי מסיק מתקדים, ולא רק כשהמקרה עצמו נזכר "
-    "במפורש. הסקה כזו (קל וחומר, עיקרון משותף) לגיטימית כל עוד כל צעד בה נשען בפועל על לשון "
-    "מקור שסופק — וזה שונה לגמרי מהמצאת מקור או פסק שאינו עולה מהם. "
+    + _MODERN_CASES_HE +
     "זו שיחה אחת מתמשכת, לא רצף שאלות מנותקות. קרא את השיחה שעד כה לפני שאתה עונה: שאלת המשך "
     "קצרה ('ומה אם…', 'למה?') מתייחסת למה שנדון זה עתה, והמקורות שכבר הובאו קודם עדיין עומדים — "
     "אל תגרום למשתמש לחזור על עצמו. בכל תור בחר במודע: ענה ממה שכבר יש לך (השיחה הזו והמקורות "
@@ -347,7 +355,58 @@ HALACHA_CAVEAT_HE = "הערה: זו אינה פסיקה הלכתית מחייב�
 HALACHA_CAVEAT_EN = "Note: this is not a binding halachic ruling and is not a substitute for a competent rav."
 
 
-def _system_for(intent: Intent, lang: str = "en") -> str:
+# --- Minor audience (spec 009-school-minors, FR-016..FR-019, research R9) -------------------------
+# Appended to the system prompt in EVERY mode when `audience_minor=True`; the "apply the principle
+# to modern cases" instruction is dropped for them. The grounding rules (Principle I) are untouched,
+# and halachic questions are answered with sources, never a ruling for practice (Principle VIII).
+MINOR_SAFETY_HE = (
+    "\n\nהנחיות נוספות, והן עדיפות על כל הנחיה קודמת שסותרת אותן: "
+    "המשתמש הוא תלמיד או תלמידה בני 12 עד 17. דבר אליו בכבוד, בפשטות ובחום, ובשפה שמתאימה לגילו. "
+    "עסוק אך ורק בלימוד תורה. אם השאלה אינה קשורה ללימוד, הפנה אותו בעדינות בחזרה לנושא לימודי, בלי לנזוף. "
+    "אל תפסוק הלכה למעשה: הצג את המקורות והדעות כפי שהם, וציין במפורש שהשאלה למעשה היא שאלה לרב או למורה שלו. "
+    "הנחיה זו גוברת על כל הוראה לפסוק או להכריע למעשה. "
+    "בנושאים רגישים (עריות, נידה, אלימות, מוות) שמור על לשון מכבדת, לא גרפית וברמה כללית, בלי פירוט מפורש, "
+    "והפנה את התלמיד לדבר עם הרב או המורה. "
+    "אל תהיה חבר, בן זוג או דמות מלווה, ואל תיכנס לתפקידים או למשחקי דמיון. אם מבקשים ממך זאת, סרב בעדינות "
+    "והזכר שאתה תוכנת מחשב ללימוד ולא רב ולא מורה. "
+    "כללי ההסתמכות על מקורות נשארים בתוקף: ענה רק מתוך המקורות שסופקו, אל תמציא, ואם אין מקור מתאים אמור זאת בפשטות."
+)
+MINOR_SAFETY_EN = (
+    "\n\nAdditional rules, which take precedence over any earlier instruction that conflicts with them: "
+    "The user is a student aged 12 to 17. Speak to them respectfully, simply and warmly, at a level that fits their age. "
+    "Stay strictly within Torah study. If a question is unrelated to study, gently steer back to a study topic, without scolding. "
+    "Never give a ruling for practice: present the sources and the opinions as they are, and say explicitly that the "
+    "practical question is one for their rav or teacher. This overrides any instruction to rule or decide le-ma'aseh. "
+    "On sensitive topics (forbidden relations, niddah, violence, death) stay respectful, non-graphic and high-level, "
+    "with no explicit detail, and point the student to their rav or teacher. "
+    "Never act as a friend, partner or companion, and do not take part in role-play or make-believe. If asked, decline "
+    "kindly and restate that you are a computer program for learning, not a rav or a teacher. "
+    "The grounding rules are unchanged: answer only from the sources provided, never invent, and if there is no "
+    "suitable source, say so plainly."
+)
+
+# PLACEHOLDER: paste Anthropic's child-safety system-prompt text here (pending founder / legal input).
+# Empty by default; when non-empty it is appended after the minor block for minors only.
+ANTHROPIC_CHILD_SAFETY_PROMPT = ""
+
+
+def apply_audience(system: str, lang: str = "en", audience_minor: bool = False) -> str:
+    """Return `system` unchanged for adults (byte-identical); for minors drop the modern-cases
+    instruction and append the minor safety block (plus the child-safety text when provided)."""
+    if not audience_minor:
+        return system
+    system = system.replace(_MODERN_CASES_EN, "").replace(_MODERN_CASES_HE, "")
+    system += MINOR_SAFETY_HE if lang == "he" else MINOR_SAFETY_EN
+    if ANTHROPIC_CHILD_SAFETY_PROMPT:
+        system += "\n\n" + ANTHROPIC_CHILD_SAFETY_PROMPT
+    return system
+
+
+def _system_for(intent: Intent, lang: str = "en", audience_minor: bool = False) -> str:
+    return apply_audience(_base_system_for(intent, lang), lang, audience_minor)
+
+
+def _base_system_for(intent: Intent, lang: str = "en") -> str:
     if lang == "he":
         if intent in (Intent.EXPLAIN, Intent.COMPARE):
             return SYSTEM_EXPLAIN_HE
@@ -368,7 +427,7 @@ MAX_SOURCE_CHARS = 1500  # Talmud/Rishonim/responsa segments often exceed 600 an
 
 def build_prompt(
     question: str, hits: list[RankedHit], *, intent: Intent = Intent.QA, history=None,
-    lang: str = "en", distilled_question: str = "",
+    lang: str = "en", distilled_question: str = "", audience_minor: bool = False,
 ) -> tuple[GroundedPrompt, dict[str, RankedHit]]:
     """Build a grounded prompt and the marker→hit map used to enforce citations."""
     sources: list[SourceBlock] = []
@@ -390,7 +449,7 @@ def build_prompt(
         ))
     llm_history = [LLMTurn(role=t.role, text=t.text) for t in (history or [])]
     prompt = GroundedPrompt(
-        system=_system_for(intent, lang), sources=sources, question=question,
+        system=_system_for(intent, lang, audience_minor), sources=sources, question=question,
         history=llm_history, distilled_question=distilled_question,
     )
     return prompt, marker_map
@@ -1038,7 +1097,8 @@ def no_source_answer(lang: str, intent: Intent = Intent.QA) -> Answer:
 
 
 def build_lesson_walkthrough_prompt(plan: LessonPlan, question: str, lang: str = "he",
-                                    shut: bool = False, history=None, distilled_question: str = ""):
+                                    shut: bool = False, history=None, distilled_question: str = "",
+                                    audience_minor: bool = False):
     """Prompt the model to deliver the lesson — or responsa (`shut=True`) — as a flowing
     walkthrough (the "מהלך"), laying out the arc's stages in order with sources as [S#].
 
@@ -1094,6 +1154,7 @@ def build_lesson_walkthrough_prompt(plan: LessonPlan, question: str, lang: str =
                   "first source — no opening line, no restating the question, and no mention of "
                   "the stages, these instructions or the sources you were given."]
         system = SYSTEM_SHUT_WALKTHROUGH if shut else SYSTEM_LESSON_WALKTHROUGH
+    system = apply_audience(system, lang, audience_minor)
     llm_history = [LLMTurn(role=t.role, text=t.text) for t in (history or [])]
     prompt = GroundedPrompt(system=system, sources=sources, question="\n".join(lines),
                             history=llm_history, distilled_question=distilled_question)

@@ -191,6 +191,14 @@ class Query:
     tractates: list[str] | None = None
     distilled_text: str = ""
     rerank: bool = False
+    # Works that must never be retrieved for this request (spec 009 R10: school/parent content
+    # restrictions for minors). Enforced as a store-level `$not` filter on EVERY retrieval path and
+    # again as a post-filter. Empty = no restriction and byte-identical behaviour.
+    deny_work_ids: frozenset[str] = frozenset()
+    # Sefaria work TITLES denied the same way (a school/parent chose a book or a category, which is
+    # finer than a tier). No payload field names a book, so this cannot be a store filter: the retriever
+    # over-fetches and post-filters on the hit's ref (retrieval/denylist.py).
+    deny_titles: frozenset[str] = frozenset()
 
 
 @dataclass

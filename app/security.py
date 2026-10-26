@@ -27,6 +27,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app import accounts as accts
 from app import auth_supabase as sb
+from app import minors
 
 _log = logging.getLogger("chavruta.request")
 
@@ -174,6 +175,19 @@ def _has_consented(payload: dict) -> bool:
     return bool(meta.get("age_confirmed_18")) and bool(str(meta.get("terms_version") or "").strip())
 
 
+def _declared_age(owner: str, payload: dict) -> bool:
+    """Whether this account has told us its age: a legacy 18+ confirmation (accounts that signed up
+    before age records existed stay adults, with no record) or a record from POST /account/age."""
+    if bool((payload.get("user_metadata") or {}).get("age_confirmed_18")):
+        return True
+    return minors.get_age(owner) is not None
+
+
+def legacy_adult(request: Request) -> bool:
+    """The caller's JWT carried `age_confirmed_18` (stashed by require_auth) — for /me."""
+    return bool(getattr(getattr(request, "state", None), "age_confirmed_18", False))
+
+
 def require_auth(
     request: Request,
     authorization: str | None = Header(default=None),
@@ -194,11 +208,24 @@ def require_auth(
         owner = payload.get("sub")
         if not owner:
             raise HTTPException(status_code=401, detail="missing or invalid bearer token")
-        if not _has_consented(payload) and not _ban_exempt(path):
-            raise HTTPException(status_code=403, detail={
-                "error": "consent_required",
-                "message": "Terms of Use and age (18+) confirmation are required to use the service.",
-            })
+        meta = payload.get("user_metadata") or {}
+        request.state.age_confirmed_18 = bool(meta.get("age_confirmed_18"))
+        if not _ban_exempt(path):
+            # Terms first (consent_required, exactly as before), THEN the age. A legacy account
+            # (age_confirmed_18 + terms) never reaches the age lookup's 403; a new one that accepted
+            # the Terms but has not declared a birth month/year gets age_required, and /me and
+            # /account/* stay reachable so the client can send it.
+            has_terms = bool(str(meta.get("terms_version") or "").strip())
+            if not has_terms:
+                raise HTTPException(status_code=403, detail={
+                    "error": "consent_required",
+                    "message": "Terms of Use and age (18+) confirmation are required to use the service.",
+                })
+            if not _declared_age(owner, payload):
+                raise HTTPException(status_code=403, detail={
+                    "error": "age_required",
+                    "message": "Please tell us your birth month and year to continue.",
+                })
     else:
         require_api_key(request, authorization, x_api_key)     # 401 on a bad/absent key
         owner = _owner_from_key(authorization, x_api_key)
@@ -213,6 +240,11 @@ def require_auth(
                 "until": ban["until"],
                 "reason": ban["reason"],
             })
+
+    # Per-route age gates (adult_terms_required / minor_no_purchase). One table in app/minors.py.
+    gate = minors.gate_error(owner, getattr(request, "method", "") or "", path)
+    if gate:
+        raise HTTPException(status_code=403, detail=gate)
 
 
 def current_owner(

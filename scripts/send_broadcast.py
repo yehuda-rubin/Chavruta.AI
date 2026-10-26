@@ -1,6 +1,6 @@
 """Operator CLI for sending broadcast emails to all registered users.
 
-Sends an email to every user in the Supabase auth database via Resend. Recipients are sent via
+Sends an email to every user who opted in to marketing email (and is not a minor) via Resend. Recipients are sent via
 BCC for privacy — no recipient sees another recipient's address. The script requires explicit
 confirmation before sending (or --yes to skip), and supports --dry-run to preview without sending.
 
@@ -20,8 +20,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import app.accounts as accounts  # noqa: E402
 import app.email as email  # noqa: E402
+import app.marketing as marketing  # noqa: E402
 
 
 def main() -> None:
@@ -44,10 +44,11 @@ def main() -> None:
     if not body.strip():
         raise SystemExit("body file is empty")
 
-    # Get recipient list
-    recipients = accounts.list_supabase_user_emails()
+    # Get recipient list: the same consent + not-a-minor filter as scripts/send_product_update.py.
+    # (This used to be every Supabase address, which included minors and people who never opted in.)
+    recipients = sorted({addr for _uid, addr in marketing.list_marketing_recipients()})
     if not recipients:
-        print("No recipients found (Supabase may not be configured or no users exist)")
+        print("No recipients found (Supabase may not be configured, or nobody has opted in)")
         return
 
     print(f"Recipients: {len(recipients)} user(s)")

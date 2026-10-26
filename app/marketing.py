@@ -80,6 +80,12 @@ def list_marketing_recipients() -> list[tuple[str, str]]:
     import urllib.request
 
     url, headers = admin
+    # Minors are never mailed (specs/009-school-minors R11). Read from the age records, not from the
+    # JWT: user_metadata is writable by the account holder. Raises if the database cannot be read —
+    # an unreadable age table must stop a send, not become "nobody is a minor".
+    from app import minors
+
+    minor_ids = minors.minor_owner_ids()
     out: list[tuple[str, str]] = []
     seen: set[str] = set()
     page = 1
@@ -89,7 +95,8 @@ def list_marketing_recipients() -> list[tuple[str, str]]:
             users = json.loads(resp.read()).get("users", [])
         for u in users:
             email = (u.get("email") or "").strip().lower()
-            if u.get("id") and "@" in email and email not in seen and has_consent(u) and not u.get("banned_until"):
+            if u.get("id") and "@" in email and email not in seen and has_consent(u) and not u.get("banned_until") \
+                    and u["id"] not in minor_ids:
                 seen.add(email)
                 out.append((u["id"], email))
         if len(users) < 1000:

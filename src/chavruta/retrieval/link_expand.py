@@ -13,6 +13,7 @@ from dataclasses import replace
 from chavruta.corpus.refs import canonical_ref
 from chavruta.corpus.schema import Query
 from chavruta.retrieval.base import RankedHit
+from chavruta.retrieval.denylist import drop_denied, drop_denied_titles, scoped_query, with_deny
 from chavruta.retrieval.hybrid import _to_hit
 
 
@@ -29,6 +30,7 @@ class LinkExpander:
         self.max_refs = max_refs
 
     def expand(self, anchor_refs: list[str], query: Query) -> list[RankedHit]:
+        query = scoped_query(query)
         if self.ref_resolver is not None:
             canon = [canonical_ref(r) for r in anchor_refs if r]
             reached_canon = self.link_graph.expand(canon, depth=query.expand_depth)
@@ -46,7 +48,8 @@ class LinkExpander:
             )
         if not reached:
             return []
-        filters = {"work_id": list(query.work_ids)} if query.work_ids else None
+        filters = with_deny({"work_id": list(query.work_ids)} if query.work_ids else None,
+                            query.deny_work_ids)
         raw = self.store.fetch_by_refs(self.profile.collection, reached, filters=filters)
         # Reuse hybrid.py's own payload->RankedHit mapping instead of a second, hand-rolled one here:
         # a link-expanded hit is built from the exact same store payload shape as a direct vector hit,
@@ -54,4 +57,6 @@ class LinkExpander:
         # text_he/text_en, license, version_title were missing here), silently blanking attribution
         # and reader-facing text for every source that arrived via link expansion instead of a direct
         # hit. Only the score differs (link-expanded hits rank below direct vector hits by design).
-        return [replace(_to_hit(h), score=self.link_score) for h in raw]
+        out = [replace(_to_hit(h), score=self.link_score) for h in raw]
+        out = drop_denied(out, query.deny_work_ids) if query.deny_work_ids else out
+        return drop_denied_titles(out, query.deny_titles) if query.deny_titles else out

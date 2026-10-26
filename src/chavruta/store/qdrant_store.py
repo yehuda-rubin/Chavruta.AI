@@ -124,7 +124,16 @@ class QdrantStore:
         from qdrant_client import models
 
         must = []
+        must_not = []
         for key, value in filters.items():
+            if key == "$not":
+                # Exclusion: {"$not": {"work_id": [..]}} → must_not MatchAny per field (content
+                # denylist, spec 009 R10). Combined with whatever `must` clauses are present.
+                for nkey, nvalue in (value or {}).items():
+                    vals = list(nvalue) if isinstance(nvalue, (list, tuple, set, frozenset)) else [nvalue]
+                    if vals:
+                        must_not.append(models.FieldCondition(key=nkey, match=models.MatchAny(any=vals)))
+                continue
             if isinstance(value, dict) and "$text" in value:
                 # Full-text (tokenised) match against a text-indexed payload field — every
                 # token must be present (AND). Used for nikud/ktiv-insensitive lexical lookup.
@@ -133,6 +142,8 @@ class QdrantStore:
                 must.append(models.FieldCondition(key=key, match=models.MatchAny(any=list(value))))
             else:
                 must.append(models.FieldCondition(key=key, match=models.MatchValue(value=value)))
+        if must_not:
+            return models.Filter(must=must or None, must_not=must_not)
         return models.Filter(must=must)
 
     def ensure_text_index(self, name: str, field: str = "search_he") -> None:
@@ -261,7 +272,8 @@ class QdrantStore:
             models.FieldCondition(key="anchor_ref", match=models.MatchAny(any=list(refs))),
         ])
         combined = models.Filter(
-            must=([*base.must, ref_or_anchor] if base else [ref_or_anchor])
+            must=([*(base.must or []), ref_or_anchor] if base else [ref_or_anchor]),
+            **({"must_not": base.must_not} if base is not None and base.must_not else {}),
         )
         # Short timeout: without a payload index on `ref`/`anchor_ref` this scroll is a full scan of
         # the (large) collection. Fail fast so the caller degrades to base hits in seconds instead of

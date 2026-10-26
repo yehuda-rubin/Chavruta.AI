@@ -263,6 +263,12 @@ def run_retention(now: datetime | None = None) -> int:
     with no stated purpose past a point. The window is disclosed to users in the Terms and the
     Privacy Policy — deleting quietly would be worse than not deleting at all.
     """
+    n = _run_inactivity_retention(now)
+    _run_minor_retention(now)
+    return n
+
+
+def _run_inactivity_retention(now: datetime | None) -> int:
     days = retention_days()
     if days <= 0:
         return 0
@@ -271,6 +277,20 @@ def run_retention(now: datetime | None = None) -> int:
     if n:
         _log.info("retention: deleted %d chat(s) untouched since %s (%dd window)", n, cutoff[:10], days)
     return n
+
+
+def _run_minor_retention(now: datetime | None) -> dict[str, int]:
+    """Second pass: whatever was written as a minor is deleted when ITS date arrives (minor_until,
+    stamped at write time, CHAVRUTA_MINOR_RETENTION_DAYS), regardless of session activity and
+    independent of CHAVRUTA_CHAT_RETENTION_DAYS — turning the general window off (0) must not switch
+    off the shorter promise made about children's data."""
+    from app import minors
+
+    now_iso = (now or datetime.now(UTC)).isoformat()
+    counts = db.delete_expired_minor_data(now_iso, minors.minor_retention_days())
+    if any(counts.values()):
+        _log.info("minor retention: deleted %s", counts)
+    return counts
 
 
 # ── Background sweeper ────────────────────────────────────────────────────────

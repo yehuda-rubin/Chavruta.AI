@@ -22,6 +22,12 @@ import app.db as db  # noqa: E402
 
 
 def _print_report(r: dict) -> None:
+    if r.get("minor"):
+        # A minor's row is redacted at the source (db.list_flagged_messages): no owner, message, session,
+        # role or source, and only a masked lead-in. There is nothing here to look up, by design.
+        print(f"\n[{r['id']}] {r.get('category') or '(no reason)'}  ·  minor (redacted)  ·  {r['created_at']}")
+        print(f"    {r.get('snippet_redacted', '')}")
+        return
     owner = r["owner_id"] or "(deleted account)"
     text = (r["text"] or "").replace("\n", " ")
     snippet = text[:200] + ("…" if len(text) > 200 else "")

@@ -230,6 +230,22 @@ def run_agentic_loop(send: Callable[[str], str | None], job_md: str,
 
 
 # ── generic transport for a chat/completion backend (cloud/local) ────────────────────────────────
+def minor_system(system: str, lang: str) -> str:
+    """`system` with the minor safety block appended when the request runs under a minor's scope
+    (corpus/audience.py); the same string, unchanged, for everyone else."""
+    from chavruta.corpus import audience
+    from chavruta.generation.grounded import apply_audience
+
+    return apply_audience(system, lang, audience.current().minor)
+
+
+def minor_job(job_md: str, lang: str) -> str:
+    """For a transport with no system channel (the bridge writes one markdown file): the safety block
+    goes in front of the job itself. Unchanged for everyone but a minor."""
+    framed = minor_system("", lang)
+    return f"## RULES FOR THIS USER{framed}\n\n{job_md}" if framed else job_md
+
+
 _REQUEST_SYSTEM = ("You are a grounded Torah study assistant. Follow the job below exactly — it "
                    "contains the sources (each tagged [S#]) and the instructions. Cite by [S#].")
 
@@ -268,7 +284,10 @@ def agentic_request(llm, body_md: str, *, lang: str = "he",
         # bare=False, render_messages ALSO wraps it in the standard QA template (whose sources=[]
         # branch adds "(no sources retrieved)"), so the model got that contradicting the sources it
         # could plainly see in job_md right below it.
-        prompt = GroundedPrompt(system=_REQUEST_SYSTEM, sources=[], question=job_md, bare=True)
+        # Every job the app builds by hand (lesson, chavruta, calendar modes, edits) reaches the model
+        # through here, which is why a minor's safety block is applied here and not in each builder.
+        prompt = GroundedPrompt(system=minor_system(_REQUEST_SYSTEM, lang), sources=[], question=job_md,
+                                bare=True)
         try:
             # Unlike the bridge's file-poll transport (which returns None on timeout and never
             # raises), a real completion backend raises on any API error / timeout / rate-limit.
