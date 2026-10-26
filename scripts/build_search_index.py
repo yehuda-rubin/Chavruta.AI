@@ -99,6 +99,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
 
 INDEX_AND_TRIGGERS_SQL = """
 CREATE INDEX IF NOT EXISTS idx_work ON chunks(work_id);
+CREATE INDEX IF NOT EXISTS idx_ref ON chunks(ref);
 CREATE INDEX IF NOT EXISTS idx_canon ON chunks(canon_order, sort_title);
 
 CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN

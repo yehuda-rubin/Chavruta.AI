@@ -985,21 +985,36 @@ async def reader_catalog() -> Response:
                     headers={"Cache-Control": "public, max-age=300"})
 
 
+def _prefix_upper_bound(prefix: str) -> str:
+    """The smallest string greater than every string that starts with `prefix` — the exclusive top
+    of a `col >= prefix AND col < bound` range. Every unit prefix ends in an ASCII separator, so
+    bumping the last character can never overflow."""
+    return prefix[:-1] + chr(ord(prefix[-1]) + 1)
+
+
 def _unit_where(clean_ref: str) -> tuple[str, list[Any]]:
-    """WHERE clause + params selecting the rows of one reader unit (a chapter, a daf, a siman…)."""
+    """WHERE clause + params selecting the rows of one reader unit (a chapter, a daf, a siman…).
+
+    Prefix matches are written as ranges, not `LIKE 'prefix%'`: SQLite cannot use an index for a
+    case-insensitive LIKE, so the OR of ~24 LIKEs scanned all of `chunks` (5.9 GB) on every page —
+    ~60 s, past nginx's timeout (2026-10-26). Ranges use idx_ref and the chunk_id unique index.
+    Unlike LIKE they are case-sensitive, which matches how refs are stored and linked."""
     clauses: list[str] = []
     params: list[Any] = []
     for p in get_unit_query_prefixes(clean_ref):
-        pattern = f"{like_escape(p)}%"
-        clauses.append("ref LIKE ? ESCAPE '\\'")
-        params.append(pattern)
-        clauses.append("chunk_id LIKE ? ESCAPE '\\'")
-        params.append(pattern)
+        upper = _prefix_upper_bound(p)
+        clauses.append("(ref >= ? AND ref < ?)")
+        params.extend([p, upper])
+        clauses.append("(chunk_id >= ? AND chunk_id < ?)")
+        params.extend([p, upper])
     clauses.append("ref = ?")
     params.append(clean_ref)
     clauses.append("chunk_id = ?")
     params.append(clean_ref)
-    return " OR ".join(clauses), params
+    # Wrapped in a rowid subquery because the caller orders by rowid: given a bare OR plus
+    # ORDER BY rowid, the planner prefers walking the table in rowid order (a full scan again)
+    # to sorting a handful of index hits.
+    return f"rowid IN (SELECT rowid FROM chunks WHERE {' OR '.join(clauses)})", params
 
 
 def _unit_exists(db: sqlite3.Connection, clean_ref: str) -> bool:
