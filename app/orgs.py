@@ -13,6 +13,7 @@ without it a teacher can remove the org's admin and all three of those pass.
 
 from __future__ import annotations
 
+import os
 import secrets
 import string
 from datetime import UTC, datetime, timedelta
@@ -97,8 +98,22 @@ def effective_plan(owner_id: str) -> str:
 
     m = membership(owner_id)
     own = plans.canonical(m["plan"]) if m else plans.canonical(db.get_plan(owner_id))
+    if _is_admin_owner(owner_id):
+        own = devhelpers.rank_at_least(own, _TOP_PERSONAL_PLAN)
     floor = devhelpers.plan_floor(owner_id)
     return devhelpers.rank_at_least(own, floor) if floor else own
+
+
+# Admins always draw on at least the highest PERSONAL tier (founder decision 2026-10-26) — a floor,
+# like the dev-helper one, so an admin who is also an institution member keeps the institution pool.
+_TOP_PERSONAL_PLAN = max((t.id for t in plans.TIERS if not plans.is_institutional(t.id)), key=plans.rank)
+
+
+def _is_admin_owner(owner_id: str) -> bool:
+    """Reads the same CHAVRUTA_ADMIN_OWNERS allowlist as app/api.py::_is_admin — that one can't be
+    imported here (api imports this module) — and, like it, has no "*" wildcard."""
+    raw = os.environ.get("CHAVRUTA_ADMIN_OWNERS", "").strip()
+    return owner_id in {o.strip() for o in raw.split(",") if o.strip()}
 
 
 # What a stored `daily_cap` means. The column is NOT NULL DEFAULT 0 and the two sides of the
