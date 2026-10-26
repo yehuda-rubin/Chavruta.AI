@@ -63,7 +63,7 @@ Rules for every task:
 ## Wave 2: after Wave 1, sequential (all touch `app/api.py`)
 
 - [ ] T050 Route minors only to an LLM preset that is approved for minors. Configure the approved preset with `CHAVRUTA_MINOR_LLM_PRESET`. If no preset is set or the provider is unavailable, fail closed with `503 minor_backend_unavailable`. Nebius is blocked for minors until it confirms in writing, because Services Agreement §4.1.6 lists "personal data of minors" as Sensitive Personal Data. An email to privacy@nebius.com was drafted on 2026-10-26. Enable ZDR either way. Claude is a later option.
-- [ ] T051 Wire the crisis gate before generation for minors, add the `crisis` payload, and add alert dispatch through `email_pool` plus the `crisis_alerts` row.
+- [x] T051 Wire the crisis gate before generation for minors, add the `crisis` payload, and add alert dispatch through `email_pool` plus the `crisis_alerts` row.
 - [x] T052 Wire `audience_minor` into all modes. Do not offer the shut/responsa walkthrough to minors: its prompt says "rule clearly le-ma'aseh", and the minor block only overrides that text, which is still present.
 - [x] T053 Wire the effective denylist (org ∪ parents) into `Query`, and apply the post-filter. Per the R10 investigation, `work_id` is a tier slug (15 values), not a book. Use two mechanisms:
   - **Whole tier**: deny it in Qdrant with `deny_work_ids` (`must_not`).
