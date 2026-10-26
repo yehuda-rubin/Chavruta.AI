@@ -904,11 +904,41 @@ def _select_template(topic: str, audience: str | None = None, grade_band: str | 
         if grade_band:
             must.append(models.FieldCondition(key="grade_band", match=models.MatchValue(value=grade_band)))
         vec = _get_pipeline().embedding.embed_query(topic).dense
-        res = client.query_points(collection_name=_TPL_COLLECTION, query=vec, limit=1,
+        res = client.query_points(collection_name=_TPL_COLLECTION, query=vec, limit=5,
                                   query_filter=models.Filter(must=must), with_payload=True)
         if not res.points:
             return None
-        pl = dict(res.points[0].payload or {})
+
+        # Re-rank: If topic asks for a Talmudic sugya or tractate without explicitly asking for chassidut/mussar,
+        # prioritize the gemara-iyun template over chassidut/mussar/machshava.
+        t_low = topic.lower()
+        is_talmud = any(kw in t_low for kw in ("סוגי", "גמרא", "תלמוד", "ש" + "ס", "משנה", "בבא", "ברכות",
+                                               "שבת", "עירובין", "פסחים", "יומא", "סוכה", "ביצה", "ראש השנה",
+                                               "תענית", "מגילה", "מועד קטן", "חגיגה", "יבמות", "כתובות",
+                                               "נדרים", "נזיר", "סוטה", "גיטין", "קידושין", "סנהדרין",
+                                               "מכות", "שבועות", "עבודה זרה", "הוריות", "זבחים", "מנחות",
+                                               "חולין", "בכורות", "ערכין", "תמורה", "כריתות", "מעילה", "תמיד", "נדה",
+                                               "אוחזין", "טלית", "מציעא", "קמא", "בתרא", "עכנאי", "מיגו", "שמתא",
+                                               "חזקה", "שבועה", "פועלים", "שומרים", "הפקדון", "הגוזל"))
+        if not is_talmud:
+            try:
+                rq = _get_pipeline()._resolve_query(Query(text=topic))
+                if getattr(rq, "named_refs", None) or getattr(rq, "tractate", None):
+                    is_talmud = True
+            except Exception:
+                pass
+
+        wants_chassidut = any(kw in t_low for kw in ("חסיד", "תניא", "בעש" + "ט", "מוהר" + "ן", "שפת אמת"))
+        wants_mussar = any(kw in t_low for kw in ("מוסר", "מידות", "חובות הלבבות", "מסילת ישרים"))
+
+        chosen_point = res.points[0]
+        if is_talmud and not (wants_chassidut or wants_mussar):
+            for p in res.points:
+                if (p.payload or {}).get("id") == "gemara-iyun":
+                    chosen_point = p
+                    break
+
+        pl = dict(chosen_point.payload or {})
         _attach_template_bodies(pl, lang=lang)
         return pl
     except Exception:
@@ -1150,7 +1180,7 @@ def _lesson_job_md(question: str, hits, lang: str, *, audience: str | None,
             lines += ["## AUDIENCE", f"בית ספר — כיתות {_GRADE_HE.get(grade_band, grade_band or '?')}.",
                       _BAND_PED.get(grade_band, ""), ""]
         elif audience == "yeshiva":
-            lines += ["## AUDIENCE", "בית מדרש / ישיבה — לומדים מבוגרים; שיעור עיון.", ""]
+            lines += ["## AUDIENCE", "בית מדרש / ישיבה — לומדים מבוגרים; שיעור עיון מעמיק המבוסס על שקלא וטריא למדנית, מושגי יסוד ודיוק בדברי הגמרא והראשונים.", ""]
 
         mins = _length_minutes(length, audience, grade_band, lang="he")
         lines += ["## LENGTH", f"{ln['he']} — כ־{mins} סה\"כ. {ln['depth']} "
@@ -1269,7 +1299,10 @@ def _lesson_job_md(question: str, hits, lang: str, *, audience: str | None,
                 "'צד א׳/צד ב׳ נפקא מינה'). WHERE the genre is a talmudic/lamdanic sugya: sharpen a central חקירה "
                 "with TWO clearly-named sides, map the ראשונים to the sides, deepen with אחרונים, give נפקא מינה, "
                 "and conclude with the יסוד. Present each שיטה, raise קושיות and answer them; progress step by step. "
-                "A real, full shiur.",
+                "לימוד בית מדרש בסוגיית גמרא חייב לצמוח מתוך המנגנונים המשפטיים והמושגים הלמדניים של הסוגיה "
+                "(כגון: מוחזקות, חזקת תפיסה, גדרי שבועת חכמים, אנן סהדי, דין יחלוקו וספק ממון). "
+                "לעולם אל תדלג על השקלא וטריא וההגדרות הלמדניות אל דרשנות או רעיונות קיומיים מופשטים; "
+                "הממד הרעיוני חייב לצמוח מתוך המנגנון הלמדני המדויק. A real, full shiur.",
             ]
 
     len_label = ln.get("en", "Medium") if lang == "en" else ln["he"]
@@ -4157,7 +4190,7 @@ def _enforce_quota(owner: str, lang: str, intent: str = "", user_key: str = "") 
     before ownership checks so an over-quota user probing session ids learns nothing. `user_key` is
     the caller's own provider API key (X-User-LLM-Key), if any — see _byok_supported.
     """
-    if owner == "local":
+    if owner == "local" or _is_admin(owner):
         return Reservation(0)
     return _reserve_tokens(owner, lang, intent, user_key)
 

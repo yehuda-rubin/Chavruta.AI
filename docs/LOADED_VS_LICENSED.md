@@ -38,7 +38,7 @@
 
 ## מורשות מסחרית ולא טעונות (כל הכותרות, לפי קטגוריה)
 
-סה"כ: 406 כותרות. 400 הראשונות:
+סה"כ: 402 כותרות. 400 הראשונות:
 - Abarbanel on Amos
 - Abarbanel on Ezekiel
 - Abarbanel on Hosea
@@ -275,7 +275,6 @@
 - Ma'amar Zohar HaRakia
 - Ma'amar al Yishmael
 - Machzor Rosh Hashanah Sefard
-- Machzor Yom Kippur Ashkenaz
 - Machzor Yom Kippur Sefard
 - Maggid Mishneh on Mishneh Torah, Ownerless Property and Gifts
 - Mahari Bruna
@@ -305,7 +304,6 @@
 - Minchat Ani on Pesach Haggadah
 - Mishnat Eretz Yisrael on Mishnah Sanhedrin
 - Mishnat Eretz Yisrael on Pirkei Avot
-- Mishnat Eretz Yisrael, Preface
 - Mishpetei Uziel
 - Musafia Teshuvot HaGeonim
 - Nachalat Avot on Avot
@@ -396,7 +394,6 @@
 - Sefer HaMitzvot HaKatzar
 - Sha'ar HaEmunah VeYesod HaChasidut
 - Sheilat Yaavetz
-- Shem HaGedolim, Maarekhet Sefarim
 - Shemirat HaLashon
 - Shemonah Kevatzim
 - Shir HaKavod
@@ -439,3 +436,6 @@
 - Who is the Heir of Divine Things
 - Yalkut Shimoni on Nach
 - Yalkut Shimoni on Torah
+- Yein HaTov
+- Yesod HaTeshuvah
+- Yismach Yisrael on Pesach Haggadah
