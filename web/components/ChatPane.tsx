@@ -215,6 +215,19 @@ function Bubble({ lang, m, onPreview, onOpenSources }: { lang: Lang; m: Message;
           <p className={`text-[17px] leading-relaxed ${dir}`} style={{ whiteSpace: "pre-wrap" }}>
             {m.text}
           </p>
+          {m.files && m.files.length > 0 && (
+            <div className="mt-2.5 pt-2 border-t border-white/20 flex flex-wrap gap-1.5">
+              {m.files.map((f, fi) => (
+                <span
+                  key={fi}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/20 text-white text-[12px] font-medium"
+                >
+                  <Icon name="attachment" className="text-[14px]" />
+                  <span className="truncate max-w-[220px]" title={f.name}>{f.name}</span>
+                </span>
+              ))}
+            </div>
+          )}
           <button
             onClick={() => {
               navigator.clipboard?.writeText(m.text).then(() => {
@@ -434,6 +447,7 @@ export function ChatPane({
   userEmail,
   userSources = [],
   onAddSource,
+  onRemoveSource,
   onOpenSources,
   onStop,
 }: {
@@ -457,10 +471,12 @@ export function ChatPane({
   userEmail?: string | null;
   userSources?: Attachment[];
   onAddSource?: () => void;
+  onRemoveSource?: (i: number) => void;
   onOpenSources?: () => void;
   onStop?: () => void;
 }) {
   const [input, setInput] = useState("");
+  const dir = lang === "he" ? "rtl" : "ltr";
   const endRef = useRef<HTMLDivElement>(null);
   const lastBubbleRef = useRef<HTMLDivElement>(null);
   const prevCountRef = useRef(messages.length);
@@ -629,6 +645,33 @@ export function ChatPane({
       </div>
 
       <div className="p-3 sm:p-5">
+        {userSources.length > 0 && (
+          <div className="max-w-3xl mx-auto mb-2 flex items-center gap-2 flex-wrap px-2" dir={dir}>
+            <span className="text-[12px] font-semibold text-tekhelet/85 flex items-center gap-1">
+              <Icon name="attachment" className="text-[15px]" />
+              {lang === "he" ? "קבצים מצורפים לשאלה:" : "Attached files:"}
+            </span>
+            {userSources.map((s, idx) => (
+              <span
+                key={idx}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/95 text-indigo text-[12px] font-semibold border border-indigo/20 shadow-xs"
+              >
+                <Icon name={s.kind === "file" ? "description" : "notes"} className="text-[14px]" />
+                <span className="max-w-[190px] truncate" title={s.name}>{s.name}</span>
+                {onRemoveSource && (
+                  <button
+                    type="button"
+                    onClick={() => onRemoveSource(idx)}
+                    className="hover:bg-indigo/15 text-ink/40 hover:text-red-600 rounded-full p-0.5 transition cursor-pointer"
+                    title={lang === "he" ? "הסר קובץ" : "Remove file"}
+                  >
+                    <Icon name="close" className="text-[13px]" />
+                  </button>
+                )}
+              </span>
+            ))}
+          </div>
+        )}
         {/* One row, like the composer people already know from other chat apps: "+" at the start, the text
             in the middle, the mode picker and send at the end. It grows into a rounded card when the
             question runs to several lines; the buttons stay pinned to the bottom edge. `relative` is

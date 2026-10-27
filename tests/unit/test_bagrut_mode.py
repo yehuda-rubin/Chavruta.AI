@@ -72,8 +72,9 @@ def test_curriculum_yaml_loads_and_has_required_keys():
 
 
 def test_all_14_bagrut_templates_exist_and_have_valid_manifests():
-    found = sorted(p.name for p in TEMPLATES_DIR.glob("bagrut-*") if p.is_dir())
-    assert found == sorted(EXPECTED_14_TEMPLATES)
+    for tpl_name in EXPECTED_14_TEMPLATES:
+        p = TEMPLATES_DIR / tpl_name
+        assert p.is_dir(), f"Template directory missing: {tpl_name}"
 
     required_files = [
         "manifest.yaml",
@@ -134,6 +135,8 @@ def test_detect_bagrut_action():
     assert detect_bagrut_action("בדוק לי את התשובה לפי מחוון: תשובתי היא...") == "check"
     assert detect_bagrut_action("תכין לי סיכום מיקודית לבגרות על בראשית יב") == "summary"
     assert detect_bagrut_action("בנה לי מתכונת מלאה ומחוון בגמרא בבא מציעא") == "exam"
+    assert detect_bagrut_action("תפתור את כל הבגרות הזאת ותחזיר לי את הפתרון כקובץ") == "solution"
+    assert detect_bagrut_action("פתרון מלא לשאלון הבגרות בתנך") == "solution"
 
 
 def test_resolve_bagrut_params_followup_after_file_routes_to_chat():

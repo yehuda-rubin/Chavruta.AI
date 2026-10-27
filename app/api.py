@@ -872,7 +872,7 @@ def _attach_template_bodies(pl: dict, lang: str = "he") -> None:
     files_en = pl.get("files_en") or {}
     dir_str = pl.get("dir") or (f"lessons/templates/{pl.get('id')}" if pl.get("id") else "")
     d = _REPO_DIR / dir_str
-    for role in ("full_lesson", "lesson_flow", "source_sheet", "exam", "rubric", "summary"):
+    for role in ("full_lesson", "lesson_flow", "source_sheet", "exam", "rubric", "summary", "solution", "grading"):
         fn = None
         if lang == "en":
             fn = files_en.get(role)
@@ -3224,6 +3224,20 @@ def _run_bagrut(
     he = (lang or "") != "en"
     has_attachments = ("## מקורות שצירף המשתמש" in question) or ("## Sources the user attached" in question)
 
+    # Check if user attached a file that yielded no readable text (scanned image, unsupported format, etc.)
+    has_unextracted_attachment = bool(
+        re.search(r"\[(?:קובץ|תמונה)[^\]]+(?:לא חולץ טקסט|שגיאה בפענוח|אינו נגיש כעת|חורג מהמגבלה|אינם נתמכים ישירות)", question)
+    )
+    if has_unextracted_attachment:
+        msg = (
+            "הקובץ שהועלה התקבל, אך לא זוהתה בו שכבת טקסט דיגיטלית קריאה (ייתכן שמדובר במסמך סרוק כתמונה, צילום ללא OCR או פורמט שאינו נתמך לחילוץ ישיר). "
+            "כדי שנוכל לעבד, לפתור או להעריך את השאלות בדיוק מירבי — אנא העתק/י והדבק/י את נוסח השאלות כטקסט בהודעה, או העלה/י קובץ Word/PDF המכיל טקסט דיגיטלי."
+            if he
+            else "The attached file was received, but no readable digital text layer was detected (it may be a scanned image or unsupported format). "
+                 "To process and solve the exam accurately, please paste the question text into the chat or upload a digital PDF/Word document."
+        )
+        return QueryResponse(answer=msg, citations=[], grounded=False, intent="bagrut", files=[])
+
     # Principle I Anti-Hallucination Gate: refuse to guess unattached past Ministry exams by year/number
     if is_unattached_past_exam_query(question, has_attachments=has_attachments):
         msg = (
@@ -3256,8 +3270,24 @@ def _run_bagrut(
     carried = _carried_refs(history)
     clean_q = " ".join(question.split()).strip()
 
+    # If the user asked to solve an exam ("תפתור את כל הבגרות הזאת") but provided neither an attachment
+    # nor specific chapter/tractate/question context, ask for clarification instead of guessing random sources!
+    has_explicit_context = bool(
+        carried
+        or re.search(r"(?:פרק|סוגי|דף|משנ|הלכ|בראשית|שמות|ויקרא|במדבר|דברים|בבא|סנהדרין|ברכות|שבת|פסחים|יומא|סוכה|גיטין|קידושין)", clean_q)
+    )
+    if act == "solution" and not has_attachments and not has_explicit_context:
+        msg = (
+            "בשמחה רבה! כדי שאוכל להפיק פתרון מלא, מנומק ומדויק לפי מחוון משרד החינוך — "
+            "אנא העלה/י קובץ שאלון (Word או PDF), הדבק/י כאן את שאלות המבחן, או ציין/י את המקצוע (תנ\"ך / גמרא / תושב\"ע) והפרק/הסוגיה המבוקשים."
+            if he
+            else "Gladly! To generate a complete, accurate, and grounded Bagrut exam solution — "
+                 "please upload the exam file (Word/PDF), paste the questions here, or specify the subject and chapter/tractate."
+        )
+        return QueryResponse(answer=msg, citations=[], grounded=False, intent="bagrut", files=[])
+
     # Retrieve sources tailored to Bagrut mode
-    top_k = 24 if act in ("summary", "exam") else 14
+    top_k = 24 if act in ("summary", "exam", "solution") else 14
     if _EMPTY_META_SOURCES_RE.match(clean_q) and carried:
         targets = with_ref_variants(carried)
         hits = _fetch_ranked_hits(targets, limit=len(targets) * 2) if hasattr(pipeline, "retriever") else []
@@ -3316,8 +3346,8 @@ def _run_bagrut(
     hits = boost_bagrut_hits(hits, subj, trk)
     tpl = _select_bagrut_template(question, subj, trk, unt, lang=lang)
 
-    # ── Path A: Downloadable Bagrut Files (Summary Booklet or Mock Exam + Rubric) ──
-    if act in ("summary", "exam"):
+    # ── Path A: Downloadable Bagrut Files (Summary, Mock Exam + Rubric, or Exam Solution) ──
+    if act in ("summary", "exam", "solution"):
         job = build_bagrut_file_job_md(question, hits, lang, params=params, tpl=tpl, history=history)
         raw, fetched = llm.request(
             job,
@@ -3350,14 +3380,17 @@ def _run_bagrut(
         sum_body = parts.get("BAGRUT_SUMMARY", "")
         exam_body = parts.get("BAGRUT_EXAM", "")
         rubric_body = parts.get("BAGRUT_RUBRIC", "")
+        solution_body = parts.get("BAGRUT_SOLUTION", "")
         order_str = parts.get("ORDER", "")
 
         if act == "summary" and not sum_body:
             sum_body = raw
         elif act == "exam" and not (exam_body or rubric_body):
             exam_body = raw
+        elif act == "solution" and not solution_body:
+            solution_body = raw
 
-        combined_prose = "\n".join(p for p in (sum_body, exam_body, rubric_body) if p)
+        combined_prose = "\n".join(p for p in (sum_body, exam_body, rubric_body, solution_body) if p)
         nums = [int(n) for n in re.findall(r"S(\d+)", order_str)] or gr_mod.marker_numbers_in(combined_prose)
         if not nums and hits:
             nums = list(range(1, min(len(hits), 8) + 1))
@@ -3401,6 +3434,7 @@ def _run_bagrut(
         sum_body = _clean_section(sum_body)
         exam_body = _clean_section(exam_body)
         rubric_body = _clean_section(rubric_body)
+        solution_body = _clean_section(solution_body)
 
         ss = "\n\n".join(_source_sheet_entry(n, c, lang=lang) for n, c in enumerate(used, 1)) if used else ""
         if used:
@@ -3428,6 +3462,15 @@ def _run_bagrut(
                         "סיכום_והכנה_לבגרות.doc" if he else "bagrut_study_summary.doc",
                         f"חוברת סיכום ושאלות חזרה{tag}" if he else f"Bagrut Study Summary{tag}",
                         sum_body,
+                    )
+                )
+        elif act == "solution":
+            if solution_body:
+                raw_files.append(
+                    (
+                        "פתרון_מלא_לבגרות.doc" if he else "bagrut_exam_solution.doc",
+                        f"פתרון מלא לשאלון הבגרות{tag}" if he else f"Bagrut Exam Solution{tag}",
+                        solution_body,
                     )
                 )
         else:
@@ -4067,20 +4110,20 @@ class Attachment(BaseModel):
 
 # Total extracted attachment text folded into one question — bounded so an upload can't blow the
 # prompt token budget. Generous enough for a full daf / a few pages.
-_ATTACH_MAX_CHARS = 12000
+_ATTACH_MAX_CHARS = 32000
 
 # Decoded bytes of ONE file, and how many attachments we'll parse at all. Both matter because
 # extraction happens BEFORE _ATTACH_MAX_CHARS can trim anything: a .docx is a zip, so a small upload
 # can expand to gigabytes while python-docx reads it (a decompression bomb), and a list of many small
 # files multiplies the same work. The output cap does not protect the parser — these do.
-_ATTACH_MAX_BYTES = 3 * 1024 * 1024
+_ATTACH_MAX_BYTES = 25 * 1024 * 1024
 _ATTACH_MAX_COUNT = 12
 
 
 def _attachment_text(att: Attachment) -> str:
     """Extract usable text from one attachment. Text is used directly; PDF/Word are parsed; images
-    are not read yet (Hebrew OCR is a separate, opt-in step) — they contribute a labelled note so the
-    model knows a source was attached but its text is unavailable, rather than hallucinating it."""
+    are noted if OCR is not enabled — they contribute a labelled note so the model and user know a source
+    was attached and its status, rather than silently dropping it."""
     import base64
 
     if att.kind == "text" or (not att.content.startswith("data:")):
@@ -4091,11 +4134,11 @@ def _attachment_text(att: Attachment) -> str:
         header, b64 = att.content.split(",", 1)
         raw = base64.b64decode(b64)
     except Exception:
-        return ""
+        return f"[קובץ צורף: {att.name} — שגיאה בקידוד base64]"
     if len(raw) > _ATTACH_MAX_BYTES:
         _log.warning("attachment rejected (%s): %d bytes exceeds the %d cap",
                      att.name, len(raw), _ATTACH_MAX_BYTES)
-        return ""
+        return f"[קובץ צורף: {att.name} — גודל הקובץ חורג מהמגבלה של 25MB]"
     mime = (att.mime or header).lower()
     name = (att.name or "").lower()
 
@@ -4105,11 +4148,36 @@ def _attachment_text(att: Attachment) -> str:
 
             from pypdf import PdfReader
             reader = PdfReader(io.BytesIO(raw))
-            return "\n".join((p.extract_text() or "") for p in reader.pages).strip()
+            pages_text = []
+            for i, p in enumerate(reader.pages):
+                try:
+                    pt = (p.extract_text() or "").strip()
+                    if pt:
+                        pages_text.append(pt)
+                except Exception:
+                    continue
+            extracted = "\n\n".join(pages_text).strip()
+            if not extracted:
+                return (
+                    f"[קובץ PDF: {att.name} — שים לב: לא חולץ טקסט מקובץ זה. "
+                    f"ייתכן שמדובר במסמך סרוק כתמונה ללא שכבת טקסט דיגיטלית OCR]"
+                )
+            return extracted
         except Exception as exc:
             _log.warning("attachment pdf extract failed (%s): %s", att.name, exc)
-            return ""
+            return f"[קובץ PDF: {att.name} — שגיאה בפענוח ה-PDF: {exc}]"
     if "word" in mime or "officedocument" in mime or name.endswith((".docx", ".doc")):
+        if name.endswith(".doc") and not name.endswith(".docx"):
+            try:
+                import io
+
+                import docx
+                d = docx.Document(io.BytesIO(raw))
+            except Exception:
+                return (
+                    f"[קובץ Word: {att.name} — שים לב: קבצי .doc בינאריים ישנים אינם נתמכים ישירות לחילוץ טקסט. "
+                    f"אנא שמור/שמרי את הקובץ כ-.docx חדש או כ-PDF והעלה/י שוב]"
+                )
         try:
             import io
 
@@ -4121,17 +4189,23 @@ def _attachment_text(att: Attachment) -> str:
                 for table in d.tables
                 for row in table.rows
             )
-            return (para_text + ("\n" + table_text if table_text else "")).strip()
+            extracted = (para_text + ("\n" + table_text if table_text else "")).strip()
+            if not extracted:
+                return f"[קובץ Word: {att.name} — הקובץ ריק או ללא תוכן טקסטואלי]"
+            return extracted
         except Exception as exc:
             _log.warning("attachment docx extract failed (%s): %s", att.name, exc)
-            return ""
+            return f"[קובץ Word: {att.name} — שגיאה בפענוח מסמך Word: {exc}]"
     if mime.startswith("image/") or name.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif", ".heic")):
-        return f"[image attached: {att.name} — OCR not enabled; text unavailable]"
+        return (
+            f"[תמונה צורפה: {att.name} — שים לב: טקסט התמונה אינו נגיש כעת ללא פענוח OCR. "
+            f"אנא הדבק/י את תוכן השאלות כטקסט בהודעה]"
+        )
     if "text" in mime or name.endswith(".txt"):
         try:
             return raw.decode("utf-8", "ignore").strip()
         except Exception:
-            return ""
+            return f"[קובץ טקסט: {att.name} — שגיאה בפענוח הקידוד]"
     return ""
 
 
@@ -6160,7 +6234,8 @@ def _prepare_continue(session_id: str, req: QueryRequest, owner: str) -> tuple[l
                             bagrut=is_bagrut,
                             files=m.get("files") or [],
                             citations=m.get("citations") or []))
-    db.save_message(session_id, "user", req.question)
+    user_files = [{"name": a.name, "content": ""} for a in (req.attachments or []) if a.name]
+    db.save_message(session_id, "user", req.question, files=user_files or None)
     # Sticky mode: a chat stays in the mode chosen on its first turn — ignore any intent the client
     # sends on later turns. Legacy sessions (mode=NULL) fall back to the per-request intent.
     locked_mode = db.get_session_mode(session_id, owner)
@@ -6195,7 +6270,8 @@ def create_session(req: QueryRequest, owner: str = Depends(current_owner),
     # Lock the chat's mode to the intent chosen on this first turn; every follow-up stays in it.
     with _release_on_error(owner, reserved, req.intent, meter):
         sid = db.create_session(req.question.strip(), mode=req.intent or None, owner_id=owner)
-        db.save_message(sid, "user", req.question)
+        user_files = [{"name": a.name, "content": ""} for a in (req.attachments or []) if a.name]
+        db.save_message(sid, "user", req.question, files=user_files or None)
     return _metered(owner, reserved, req.intent,
                     lambda: _first_query_work(sid, req, owner, llm=llm), req, meter=meter)()
 
@@ -6378,7 +6454,8 @@ def session_create_stream(req: QueryRequest, owner: str = Depends(current_owner)
                                                     x_user_llm_base_url, x_user_llm_model, x_user_llm_preset)
     with _release_on_error(owner, reserved, req.intent, meter):
         sid = db.create_session(req.question.strip(), mode=req.intent or None, owner_id=owner)
-        db.save_message(sid, "user", req.question)
+        user_files = [{"name": a.name, "content": ""} for a in (req.attachments or []) if a.name]
+        db.save_message(sid, "user", req.question, files=user_files or None)
 
     gen = _stream_query_generator(sid, req, [], req.intent, owner, reserved, llm, meter)
     return StreamingResponse(
@@ -6427,7 +6504,8 @@ def create_session_async(req: QueryRequest, owner: str = Depends(current_owner),
     with _release_on_error(owner, reserved, req.intent, meter):
         llm = _prescreen_unavailable_minor(owner, req, llm)       # 503 at submit (T050)
         sid = db.create_session(req.question.strip(), mode=req.intent or None, owner_id=owner)
-        db.save_message(sid, "user", req.question)
+        user_files = [{"name": a.name, "content": ""} for a in (req.attachments or []) if a.name]
+        db.save_message(sid, "user", req.question, files=user_files or None)
         jid = jobs.submit(owner, _metered(
             owner, reserved, req.intent,
             lambda: jsonable_encoder(_first_query_work(sid, req, owner, llm=llm)),

@@ -828,6 +828,7 @@ export default function Home() {
           userEmail={auth.user?.email}
           userSources={userSources}
           onAddSource={() => setShowAddSource(true)}
+          onRemoveSource={(i) => setUserSources((prev) => prev.filter((_, j) => j !== i))}
           onOpenSources={openSources}
         />
 

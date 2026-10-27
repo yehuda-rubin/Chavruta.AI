@@ -1,0 +1,46 @@
+id: bagrut-exam-solution
+title: בגרות — פתרון מלא ומנומק לשאלון בגרות (תנ"ך, גמרא, תושב"ע)
+title_en: Bagrut — Complete Grounded Exam Solution (Tanakh, Gemara, Toshba)
+genre: bagrut-exam-solution
+mode: bagrut
+audience: school
+subject: all
+bagrut_track: both
+bagrut_units: 2-5
+grade_band: j-l
+age_range: י–י"ב — גיל 15–18 (תיכון / בגרות)
+description: >
+  תבנית ייעודית למתן פתרון מלא, מקיף ומנומק לשאלון בחינת בגרות או מתכונת (שהועלו בקובץ, הודבקו בשאלה, או נבנו מן המקורות)
+  בכל מקצועות הבגרות (תנ"ך חמ"ד/כללי, גמרא ותושב"ע).
+  כוללת טבלת ריכוז שאלות וניקוד, תשובות מופת מלאות לכל סעיף, פירוק לרכיבי המענה המלא (טענה + ביסוס [S#] + הסבר), וטיפים לבחינה.
+when_to_use: >
+  בחר תבנית זו כאשר המשתמש מבקש לפתור שאלון בגרות, להפיק פתרון מלא למבחן, לענות על שאלות בגרות סעיף אחר סעיף,
+  או כשהועלה קובץ שאלון ומבוקש פתרון מלא להורדה.
+keywords:
+  - פתרון בגרות
+  - פתרון שאלון
+  - פתרון מבחן
+  - תשובות לבגרות
+  - מענה מלא
+  - תנ"ך
+  - גמרא
+  - תושב"ע
+  - חמ"ד
+  - מחוון
+  - 5 יח"ל
+  - 3 יח"ל
+  - 2 יח"ל
+example_topics:
+  - פתרון שאלון בגרות בתנ"ך (חמ"ד / ממלכתי)
+  - פתרון בחינת בגרות בגמרא (מסכת בבא מציעא / פסחים)
+  - פתרון שאלון בתושב"ע והלכה (משנה, רמב"ם ושו"ע)
+example_queries:
+  - תפתור לי את שאלון הבגרות בתנ"ך
+  - פתרון מלא לשאלון המצורף
+  - פתור את כל הבגרות הזאת ותחזיר לי את הפתרון כקובץ
+structure: טבלת ריכוז שאלות ומבנה ניקוד → מענה מפורט לכל שאלה (סעיפים א'–ג') → פירוק לרכיבי המחוון (טענה + ביסוס + הסבר) → טיפים לבחינה
+structure_en: Question & Points Table → Detailed Step-by-Step Solutions → Rubric Breakdown (Claim + Evidence + Explanation) → Exam Tips
+files:
+  solution: TEMPLATE_solution.md
+files_en:
+  solution: TEMPLATE_solution_en.md

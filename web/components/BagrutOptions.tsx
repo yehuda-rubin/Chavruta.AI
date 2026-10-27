@@ -64,6 +64,7 @@ export function BagrutOptions({
         <option value="check">{tr(lang, "bagrutActCheck")}</option>
         <option value="summary">{tr(lang, "bagrutActSummary")}</option>
         <option value="exam">{tr(lang, "bagrutActExam")}</option>
+        <option value="solution">{lang === "he" ? "פתרון שאלון בגרות (קובץ)" : "Exam Solution (File)"}</option>
       </select>
     </div>
   );

@@ -1,0 +1,43 @@
+id: bagrut-student-grading
+title: בגרות — בדיקת תשובת תלמיד, משוב וניקוד מפורט לפי מחוון
+title_en: Bagrut — Student Answer Grading, Feedback & Scoring Rubric
+genre: bagrut-student-grading
+mode: bagrut
+audience: school
+subject: all
+bagrut_track: both
+bagrut_units: 2-5
+grade_band: j-l
+age_range: י–י"ב — גיל 15–18 (תיכון / בגרות)
+description: >
+  תבנית ייעודית לבדיקת מענה של תלמיד לשאלת בגרות: הערכה מבוססת מחוון רשמי, מתן ציון מספרי מנומק,
+  פירוק לשלושת רכיבי החובה (טענה, ביסוס מן המקור והסבר), ציון נקודות חוזק ונקודות לשיפור,
+  והצעת ניסוח מופת משופר המעניק 100% מהניקוד.
+when_to_use: >
+  בחר תבנית זו כאשר תלמיד מזין את תשובתו ("תבדוק לי את התשובה", "איך התשובה שלי", "כמה נקודות הייתי מקבל")
+  ומבקש בדיקה, משוב וציון.
+keywords:
+  - בדיקת תשובה
+  - הערכת תשובה
+  - משוב לבגרות
+  - כמה נקודות
+  - ציון לבגרות
+  - מחוון
+  - מודל תשובה
+  - תנ"ך
+  - גמרא
+  - תושב"ע
+example_topics:
+  - בדיקת מענה על שאלת אנסין בתנ"ך
+  - הערכת תשובה על קושי ושיטות מפרשים
+  - בדיקת ניתוח סוגיה בגמרא או דין במשנה
+example_queries:
+  - תבדוק לי את התשובה שכתבתי
+  - כמה נקודות הייתי מקבל על התשובה הזאת בבגרות?
+  - הערך את תשובתי לפי המחוון ותן לי משוב לשיפור
+structure: ציון משוקלל → טבלת הערכת רכיבי המחוון (טענה, ביסוס, הסבר) → פירוט מה נכון ומה חסר → הצעת ניסוח מופת (100%)
+structure_en: Score Assessment → Rubric Breakdown Table (Claim, Evidence, Explanation) → Detailed Feedback → Model Answer (100%)
+files:
+  grading: TEMPLATE_grading.md
+files_en:
+  grading: TEMPLATE_grading_en.md

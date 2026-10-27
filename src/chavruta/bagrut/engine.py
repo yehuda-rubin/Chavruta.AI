@@ -762,15 +762,29 @@ _ACTION_EXAM_RE = re.compile(
     re.IGNORECASE,
 )
 
+_ACTION_SOLUTION_RE = re.compile(
+    r"(?:"
+    r"(?:תפתור|פתור|תפתרי|פתרי|לפתור)\s+(?:לי\s+)?(?:את\s+)?(?:כל\s+)?(?:הבגרות|שאלון|המבחן|הבחינה)"
+    r"|פתרון\s+(?:מלא\s+)?(?:לבגרות|לשאלון|למבחן|של\s+הבגרות|לבחינה)"
+    r"|תשובות\s+(?:מלאות\s+)?(?:לבגרות|לשאלון|למבחן)"
+    r"|מענה\s+מלא\s+(?:לבגרות|לשאלון)"
+    r"|\b(?:solve|solution\s+to|complete\s+solution)\s+(?:the\s+)?(?:bagrut|exam)\b"
+    r")",
+    re.IGNORECASE,
+)
+
 
 def _detect_bagrut_action_raw(text: str) -> str:
-    """Return 'check', 'summary', or 'exam' if explicitly signaled in `text`, else ''."""
+    """Return 'check', 'summary', 'exam', or 'solution' if explicitly signaled in `text`, else ''."""
     clean = " ".join((text or "").split())
     if not clean:
         return ""
     # Check grading/answer-verification first so "תבדוק את התשובה שלי במבחן" routes to 'check'
     if _ACTION_CHECK_RE.search(clean):
         return "check"
+    # Check solving a full exam/questionnaire into a solution file
+    if _ACTION_SOLUTION_RE.search(clean):
+        return "solution"
     # If the user asks to solve a single question from a past exam ("פתור לי את שאלה 3 ממבחן בגרות"),
     # that is interactive practice/solving, not generating a full mock exam file.
     if re.search(r"(?:פתור|תפתור|נסה\s+לפתור|תרגל\s+איתי)\s+(?:לי\s+)?(?:את\s+)?שאלה\b", clean):
@@ -783,7 +797,7 @@ def _detect_bagrut_action_raw(text: str) -> str:
 
 
 def detect_bagrut_action(text: str) -> str:
-    """Detect 'exam', 'summary', 'check', or 'practice' (default) from user text."""
+    """Detect 'exam', 'summary', 'solution', 'check', or 'practice' (default) from user text."""
     return _detect_bagrut_action_raw(text) or "practice"
 
 
@@ -1084,7 +1098,7 @@ def boost_bagrut_hits(hits: list, subject: str, track: str = "mmd") -> list:
 # ── Output Splitting ─────────────────────────────────────────────────────────────────────────
 
 BAGRUT_SPLIT_RE = re.compile(
-    r"^[ \t>*‏‎]*===\s*(BAGRUT_SUMMARY|BAGRUT_EXAM|BAGRUT_RUBRIC|ORDER)\s*===[ \t*]*$",
+    r"^[ \t>*‏‎]*===\s*(BAGRUT_SUMMARY|BAGRUT_EXAM|BAGRUT_RUBRIC|BAGRUT_SOLUTION|ORDER)\s*===[ \t*]*$",
     re.MULTILINE,
 )
 
@@ -1095,13 +1109,15 @@ _SPLIT_KEY_ALIASES: dict[str, str] = {
     "bagrut_exam": "BAGRUT_EXAM",
     "rubric": "BAGRUT_RUBRIC",
     "bagrut_rubric": "BAGRUT_RUBRIC",
+    "solution": "BAGRUT_SOLUTION",
+    "bagrut_solution": "BAGRUT_SOLUTION",
     "order": "ORDER",
 }
 
 
 class _BagrutSplitDict(dict):
-    """Dict with canonical keys (`BAGRUT_SUMMARY`, `BAGRUT_EXAM`, `BAGRUT_RUBRIC`, `ORDER`)
-    that also resolves shorthand aliases (`summary`, `exam`, `rubric`, `order`).
+    """Dict with canonical keys (`BAGRUT_SUMMARY`, `BAGRUT_EXAM`, `BAGRUT_RUBRIC`, `BAGRUT_SOLUTION`, `ORDER`)
+    that also resolves shorthand aliases (`summary`, `exam`, `rubric`, `solution`, `order`).
     """
 
     def __getitem__(self, key: str) -> str:
@@ -1126,6 +1142,7 @@ def split_bagrut_files(text: str) -> dict[str, str]:
             "BAGRUT_SUMMARY": "",
             "BAGRUT_EXAM": "",
             "BAGRUT_RUBRIC": "",
+            "BAGRUT_SOLUTION": "",
             "ORDER": "",
         }
     )
@@ -1340,6 +1357,15 @@ def build_bagrut_file_job_md(
                     "SUMMARY TEMPLATE SKELETON — replace every [ ] placeholder with real grounded content from SOURCES:",
                     skel_sum,
                 ]
+        elif action == "solution":
+            skel_sol = _load_tpl_skeleton(tpl, "solution", lang)
+            if skel_sol:
+                skel_sol = re.sub(r"<!--.*?-->", "", skel_sol, flags=re.S).strip()
+                lines += [
+                    "",
+                    "SOLUTION TEMPLATE SKELETON — replace every [ ] placeholder with complete model answers grounded in SOURCES:",
+                    skel_sol,
+                ]
         else:
             skel_exam = _load_tpl_skeleton(tpl, "exam", lang)
             skel_rubric = _load_tpl_skeleton(tpl, "rubric", lang)
@@ -1396,6 +1422,24 @@ def build_bagrut_file_job_md(
             "3. ניתוח מפורט של הפסוקים / שלבי הסוגיה (שקלא וטריא) / פירוק המשנה וההלכה (מקרה, דין, טעם) לפי המקורות [S#].",
             "4. השוואת מפרשים / מחלוקות תנאים, אמוראים וראשונים (Commentator & Sage Comparisons) grounded in [S#].",
             "5. שאלות חזרה ותרגול במבנה בגרות (סעיפים מדורגים א'–ב' עם ניקוד) + פתרונות מלאים לפי נוסחת המחוון (טענה + ביסוס [S#] + הסבר).",
+            "",
+            "Under ===ORDER===, write a single line listing the [S#] markers in the order used (e.g. 'S1, S2, S4').",
+        ]
+    elif action == "solution":
+        lines += [
+            "",
+            "STEP 2 — Write ONE response containing these EXACT delimiter lines:",
+            "===BAGRUT_SOLUTION===",
+            "===ORDER===",
+            "",
+            "Under ===BAGRUT_SOLUTION===, write the Complete Student-Facing Bagrut Exam Solution (פתרון מלא ומנומק לשאלון בגרות) tailored to "
+            f"{subj_title} ({track_title}, {units} יח\"ל):",
+            "1. כותרת הפתרון, שאלון/פרק הנלמד וטבלת ריכוז שאלות ומבנה הניקוד המלא.",
+            "2. לכל שאלה וסעיף בשאלון (בין אם נמסר בשאלת המשתמש/קובץ ובין אם נבנה מתוך המקורות):",
+            "   - הצגת השאלה ומשקלה בנקודות.",
+            "   - תשובת מופת מלאה ומנוסחת ברמת 100% המעוגנת ישירות במקורות [S#].",
+            "   - פירוק התשובה לפי מחוון משרד החינוך: טענה מרכזית מפורשת (40%) + ביסוס מדויק (ציטוט מן המקור [S#], 30%) + הסבר מקשר ומבאר במילות התלמיד (30%).",
+            "   - טיפ מעשי לבחינה / דגש למניעת שגיאות נפוצות של תלמידים בסעיף זה.",
             "",
             "Under ===ORDER===, write a single line listing the [S#] markers in the order used (e.g. 'S1, S2, S4').",
         ]
