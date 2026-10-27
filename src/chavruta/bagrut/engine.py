@@ -765,10 +765,13 @@ _ACTION_EXAM_RE = re.compile(
 _ACTION_SOLUTION_RE = re.compile(
     r"(?:"
     r"(?:תפתור|פתור|תפתרי|פתרי|לפתור)\s+(?:לי\s+)?(?:את\s+)?(?:כל\s+)?(?:הבגרות|שאלון|המבחן|הבחינה)"
+    r"|(?:תפתור|פתור|תפתרי|פתרי|לפתור|תשובות|פתרון|מענה)(?:.*?)כקובץ"
+    r"|(?:קובץ\s+פתרון|קובץ\s+תשובות)"
     r"|פתרון\s+(?:מלא\s+)?(?:לבגרות|לשאלון|למבחן|של\s+הבגרות|לבחינה)"
     r"|תשובות\s+(?:מלאות\s+)?(?:לבגרות|לשאלון|למבחן)"
     r"|מענה\s+מלא\s+(?:לבגרות|לשאלון)"
     r"|\b(?:solve|solution\s+to|complete\s+solution)\s+(?:the\s+)?(?:bagrut|exam)\b"
+    r"|\b(?:solve|solution)\s+(?:.*?\s+)?as\s+(?:a\s+)?file\b"
     r")",
     re.IGNORECASE,
 )
@@ -920,23 +923,23 @@ def resolve_bagrut_params(
     if has_prior_bagrut_files and not is_bagrut_file_rebuild_request(question):
         if q_act == "check" or act == "check":
             act = "check"
-        else:
-            act = "practice"
-    elif q_act in ("exam", "summary", "check") and (not act or act == "practice"):
-        act = q_act
-    elif not act:
-        if q_act:
+        elif q_act in ("solution", "exam", "summary"):
             act = q_act
         else:
-            # If no completed bagrut files yet, check if an earlier user turn requested exam/summary
-            # (e.g. before a clarifying question)
-            for ut in reversed(user_turns):
-                prev_act = _detect_bagrut_action_raw(ut)
-                if prev_act:
-                    act = prev_act
-                    break
-            if not act:
-                act = "practice"
+            act = "practice"
+    elif q_act in ("exam", "summary", "check", "solution"):
+        # Explicit intent in the user prompt (e.g. asking for a solution or exam file)
+        # overrides any sticky default ("practice") from the UI dropdown.
+        act = q_act
+    elif not act:
+        # If no completed bagrut files yet, check if an earlier user turn requested exam/summary/solution
+        for ut in reversed(user_turns):
+            prev_act = _detect_bagrut_action_raw(ut)
+            if prev_act:
+                act = prev_act
+                break
+        if not act:
+            act = "practice"
 
     return {
         "subject": subj,

@@ -3323,7 +3323,13 @@ def _run_bagrut(
         except Exception:
             pass
 
-    if not hits and (has_attachments or len(clean_q) >= 140):
+    # ── User Attachments as Primary Grounded Sources ────────────────────────
+    user_att_hits = _parse_user_attached_hits(question, lang=lang)
+    if user_att_hits:
+        seen_refs = {u.ref for u in user_att_hits}
+        hits = list(user_att_hits) + [h for h in hits if getattr(h, "ref", None) not in seen_refs]
+        weak = False
+    elif not hits and len(clean_q) >= 140:
         from chavruta.retrieval.base import RankedHit
         user_ref = "מקור שצורף בשאלה" if he else "User-Provided Source"
         hits = [
@@ -3997,6 +4003,17 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
         )
 
     citations_out = [_cite(c) for c in answer.citations]
+    for u in reversed(_parse_user_attached_hits(question, lang=lang)):
+        citations_out.insert(0, CitationOut(
+            ref=u.ref,
+            ref_he=u.ref,
+            text_he=u.text_he,
+            text_en=u.text_en,
+            commentator="",
+            deep_link="",
+            license="user_provided",
+            version_title=u.version_title,
+        ))
     resolved_llm = llm or _get_pipeline().llm
     text = _strip_instruction_echo(answer.text, he)
     text, source_note = _split_source_note(text)
@@ -4237,6 +4254,42 @@ def _augment_question(question: str, attachments: list[Attachment] | None) -> st
     header = "## מקורות שצירף המשתמש (לא מהמאגר — התייחס אליהם כמקור נוסף)" if he \
         else "## Sources the user attached (not from the corpus — treat as additional source material)"
     return f"{question}\n\n{header}\n{joined}"
+
+
+def _parse_user_attached_hits(question: str, lang: str = "he") -> list:
+    """Extract user-attached files from an augmented question as RankedHit objects,
+    so they are treated as grounded sources, cited with [S#], and surfaced in the citations panel."""
+    from chavruta.retrieval.base import RankedHit
+    he = (lang or "") != "en"
+    hits = []
+    marker = "## מקורות שצירף המשתמש" if "## מקורות שצירף המשתמש" in question else (
+        "## Sources the user attached" if "## Sources the user attached" in question else None
+    )
+    if not marker:
+        return hits
+    att_section = question.split(marker, 1)[1]
+    # Match each ### <filename>\n<content> block
+    pattern = re.compile(r"(?m)^###\s+([^\n]+)\n(.*?)(?=(?:^###\s+|\Z))", re.DOTALL)
+    for m in pattern.finditer(att_section):
+        filename = m.group(1).strip()
+        body = m.group(2).strip()
+        if body:
+            hits.append(
+                RankedHit(
+                    chunk_id=f"user_att_{len(hits)+1}",
+                    ref=f"קובץ מצורף: {filename}" if he else f"Attached file: {filename}",
+                    text=body,
+                    score=2.0,
+                    commentator_id=None,
+                    work_id="user_attachment",
+                    lang=lang or "he",
+                    text_he=body if he else "",
+                    text_en=body if not he else "",
+                    license="user_provided",
+                    version_title="קובץ שהועלה על ידי המשתמש" if he else "User-uploaded attachment",
+                )
+            )
+    return hits
 
 
 # ── BYOK (bring-your-own-key) ─────────────────────────────────────────────────

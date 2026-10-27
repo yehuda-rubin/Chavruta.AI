@@ -618,7 +618,8 @@ export default function Home() {
       let target = activeId;
       setLoading(true);
       setLoadingTarget(target);
-      setMessages((prev) => [...prev, { role: "user", text, citations: [], caveats: [] }]);
+      const userFiles = att ? att.map((a) => ({ name: a.name, title: a.name, content: "" })) : undefined;
+      setMessages((prev) => [...prev, { role: "user", text, citations: [], caveats: [], files: userFiles }]);
       const appendIfCurrent = (msg: Message) =>
         setMessages((prev) => {
           if (activeIdRef.current !== target) return prev;
