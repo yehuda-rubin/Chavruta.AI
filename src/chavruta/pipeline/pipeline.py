@@ -56,12 +56,8 @@ _API_BACKENDS = frozenset({"api", "openai", "nebius", "fallback"})
 # preserved. A budget is a ceiling, not a target: a short question still gets a short answer, so
 # this raises what a long answer MAY use rather than what a typical turn does use.
 _INTENT_MAX_TOKENS = {
-    # QA 6000 -> 12000 and EXPLAIN 8000 -> 16000 on 2026-10-27: the generation model became
-    # DeepSeek-V4.1-Flash, which reasons before it answers and that reasoning counts against the budget.
-    # On the 50-question set one request in fifty spent ~15K tokens (p90 3.7K), so 8000 cut it off.
-    # Still a ceiling, not a target: only a long reasoning pass uses it.
-    Intent.QA: 12000,
-    Intent.EXPLAIN: 16000,
+    Intent.QA: 6000,
+    Intent.EXPLAIN: 8000,
     Intent.LESSON: 30000,
     Intent.COMPARE: 20000,
     Intent.HALACHA: 24000,     # a teshuva: source → poskim → pesak, can be substantial

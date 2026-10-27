@@ -318,7 +318,7 @@ def agentic_request(llm, body_md: str, *, lang: str = "he",
               state["out_tokens"], state["prompt_tokens"], token_budget, len(fetched))
     if state.get("config_error"):
         return _CONFIG_MSG.get(lang, _CONFIG_MSG["en"]), fetched
-    # A budget stop mid-loop leaves no answer text; say so rather than returning the timeout lie.
-    if (state.get("budget_exhausted") or state.get("empty_answer")) and not (answer or "").strip():
+    # A budget stop or empty reasoning answer mid-loop leaves no answer text; say so rather than returning the timeout lie.
+    if state.get("budget_exhausted") or state.get("empty_answer"):
         return _BUDGET_MSG.get(lang, _BUDGET_MSG["en"]), fetched
     return answer, fetched
