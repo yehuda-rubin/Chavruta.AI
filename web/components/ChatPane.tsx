@@ -259,9 +259,9 @@ function Bubble({ lang, m, onPreview, onOpenSources }: { lang: Lang; m: Message;
       <img src="/logo.svg" alt={tr(lang, "brand")} className="h-8 w-8 object-contain shrink-0 mt-1" />
       <div className={"min-w-0 flex-1 " + (hasFiles ? "max-w-[85%] w-full" : "")}>
         {m.text && (
-          <p className={`text-[18px] leading-[1.95] text-ink/90 ${dir} ${hasFiles ? "mb-3" : ""}`} style={{ whiteSpace: "pre-wrap" }}>
+          <div className={`text-[18px] leading-[1.95] text-ink/90 ${dir} ${hasFiles ? "mb-3" : ""}`} style={{ whiteSpace: "pre-wrap" }}>
             {renderText(m.text)}
-          </p>
+          </div>
         )}
         {hasFiles && <LessonFiles lang={lang} files={m.files!} intent={m.intent} onPreview={onPreview} />}
         {!hasFiles && chips.length > 0 && (
