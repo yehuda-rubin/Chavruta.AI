@@ -17,8 +17,10 @@ HE_BOOKS: dict[str, str] = {
     "בראשית": "Genesis", "שמות": "Exodus", "ויקרא": "Leviticus",
     "במדבר": "Numbers", "דברים": "Deuteronomy", "יהושע": "Joshua",
     "שופטים": "Judges",
-    "שמואל א": "I Samuel", "שמואל ב": "II Samuel",
-    "מלכים א": "I Kings", "מלכים ב": "II Kings",
+    "שמואל א'": "I Samuel", "שמואל א׳": "I Samuel", "שמואל א": "I Samuel",
+    "שמואל ב'": "II Samuel", "שמואל ב׳": "II Samuel", "שמואל ב": "II Samuel",
+    "מלכים א'": "I Kings", "מלכים א׳": "I Kings", "מלכים א": "I Kings",
+    "מלכים ב'": "II Kings", "מלכים ב׳": "II Kings", "מלכים ב": "II Kings",
     "ישעיהו": "Isaiah", "ישעיה": "Isaiah",
     "ירמיהו": "Jeremiah", "ירמיה": "Jeremiah",
     "יחזקאל": "Ezekiel", "הושע": "Hosea", "יואל": "Joel", "עמוס": "Amos",
@@ -29,7 +31,8 @@ HE_BOOKS: dict[str, str] = {
     "שיר השירים": "Song of Songs", "רות": "Ruth", "איכה": "Lamentations",
     "קהלת": "Ecclesiastes", "אסתר": "Esther", "דניאל": "Daniel",
     "עזרא": "Ezra", "נחמיה": "Nehemiah",
-    "דברי הימים א": "I Chronicles", "דברי הימים ב": "II Chronicles",
+    "דברי הימים א'": "I Chronicles", "דברי הימים א׳": "I Chronicles", "דברי הימים א": "I Chronicles",
+    "דברי הימים ב'": "II Chronicles", "דברי הימים ב׳": "II Chronicles", "דברי הימים ב": "II Chronicles",
 }
 
 # ── Bavli tractate names: Hebrew → corpus (English) id ───────────────────────────
@@ -107,8 +110,8 @@ _NUM = (
     rf"(?![{_HE_LETTERS}]))"
 )
 
-# Separators between book / chapter / verse: ":", ".", ",", whitespace, or the words פרק/פסוק.
-_SEP = r"(?:\s*[:.,]\s*|\s+(?:פרק|פסוק)\s+|\s+)"
+# Separators between book / chapter / verse: ":", ".", ",", whitespace, or the words פרק/פרקים/פסוק/פסוקים.
+_SEP = r"(?:\s*[:.,]\s*|\s+(?:פרקים|פרק|פסוקים|פסוק)\s+|\s+)"
 
 _AMUD = r"(?:ע[\"'״׳ ]?א|ע[\"'״׳ ]?ב|עמוד\s*[אב]|[.:])"   # amud aleph(a)/bet(b) marker
 # Daf number: digits OR a Hebrew numeral. Unmarked multi-letter numerals (e.g. "נט"=59)
@@ -132,16 +135,20 @@ def _book_alt(names) -> str:
 
 
 _TANAKH_RE = re.compile(
-    rf"(?P<book>{_book_alt(HE_BOOKS)})"
-    rf"(?:{_SEP}(?P<ch>{_NUM}))?"
+    rf"(?<![{_HE_LETTERS}])(?:[בלמכוהש])?(?P<book>{_book_alt(HE_BOOKS)})"
+    rf"(?:{_SEP}(?P<ch>{_NUM})(?:\s*[-–—]\s*(?P<ch_end>{_NUM}))?)?"
     rf"(?:{_SEP}(?P<vs>{_NUM}))?"
 )
 
-# The amud marker is REQUIRED (so an unmarked daf number is unambiguous and prose like
-# "ברכות טובות" never matches).
+# The amud marker is REQUIRED when 'דף' is omitted (so an unmarked daf number is unambiguous and prose like
+# "ברכות טובות" never matches). When the literal word 'דף' IS present ("בבא מציעא דף ב"), both amudim go in.
 _TALMUD_RE = re.compile(
     rf"(?P<tractate>{_book_alt(HE_TRACTATES)})\s+(?:דף\s+)?"
     rf"(?P<daf>{_DAF})[{_MARK}]*\s*(?P<amud>{_AMUD})"
+)
+_TALMUD_EXPLICIT_DAF_RE = re.compile(
+    rf"(?P<tractate>{_book_alt(HE_TRACTATES)})\s+דף\s+"
+    rf"(?P<daf>{_DAF})[{_MARK}]*(?!\s*{_AMUD})(?![א-ת])"
 )
 
 # The other word order: the DAF FIRST and the tractate after it — "דף עט בחולין", "בדף ב בבבא
@@ -176,10 +183,18 @@ def detect_tanakh_refs(text: str) -> list[str]:
         if not m.group("ch"):
             continue
         ch = _num(m.group("ch"))
-        if ch is None:
+        if ch is None or not (1 <= ch <= 150):
             continue
-        parts = [HE_BOOKS[m.group("book")], str(ch)]
+        book_en = HE_BOOKS[m.group("book")]
+        ch_end = _num(m.group("ch_end")) if m.group("ch_end") else None
         vs = _num(m.group("vs")) if m.group("vs") else None
+        if ch_end is not None and vs is None and ch <= ch_end <= ch + 15:
+            for c in range(ch, ch_end + 1):
+                ref = f"{book_en}.{c}"
+                if ref not in refs:
+                    refs.append(ref)
+            continue
+        parts = [book_en, str(ch)]
         if vs is not None:
             parts.append(str(vs))
         ref = ".".join(parts)
@@ -233,6 +248,16 @@ def detect_talmud_refs(text: str) -> list[str]:
         ref = f"{HE_TRACTATES[m.group('tractate')]}.{daf}{amud}"
         if ref not in refs:
             refs.append(ref)
+
+    for m in _TALMUD_EXPLICIT_DAF_RE.finditer(text):
+        daf = _daf_value(m.group("daf"))
+        if daf is None or not _DAF_MIN <= daf <= _DAF_MAX:
+            continue
+        tractate = HE_TRACTATES[m.group("tractate")]
+        for side in ("a", "b"):
+            ref = f"{tractate}.{daf}{side}"
+            if ref not in refs:
+                refs.append(ref)
 
     for m in _DAF_FIRST_RE.finditer(text):
         daf = _daf_value(m.group("daf"))

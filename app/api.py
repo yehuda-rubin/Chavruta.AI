@@ -3278,15 +3278,20 @@ def _run_bagrut(
         weak = res.is_empty
 
         # Promote canonical base sources (verses / Gemara daf / Mishnah) to the front
-        if getattr(rq, "named_refs", None) and hasattr(pipeline.retriever, "base_sources_for_refs"):
-            try:
+        try:
+            anchor_list = list(getattr(rq, "named_refs", None) or []) + list(getattr(res, "anchor_refs", None) or [])[:8]
+            if anchor_list and hasattr(pipeline, "base_sources_for_refs"):
+                base_hits = pipeline.base_sources_for_refs(anchor_list)
+            elif getattr(rq, "named_refs", None) and hasattr(pipeline.retriever, "base_sources_for_refs"):
                 base_hits = pipeline.retriever.base_sources_for_refs(rq.named_refs, rq.lang or "he")
-                if base_hits:
-                    seen_ids = {getattr(b, "chunk_id", id(b)) for b in base_hits}
-                    hits = list(base_hits) + [h for h in hits if getattr(h, "chunk_id", id(h)) not in seen_ids]
-                    weak = False
-            except Exception:
-                pass
+            else:
+                base_hits = []
+            if base_hits:
+                seen_refs = {getattr(b, "ref", None) for b in base_hits}
+                hits = list(base_hits) + [h for h in hits if getattr(h, "ref", None) not in seen_refs]
+                weak = False
+        except Exception:
+            pass
 
     if not hits and (has_attachments or len(clean_q) >= 140):
         from chavruta.retrieval.base import RankedHit

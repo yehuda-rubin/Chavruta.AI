@@ -908,6 +908,8 @@ def resolve_bagrut_params(
             act = "check"
         else:
             act = "practice"
+    elif q_act in ("exam", "summary", "check") and (not act or act == "practice"):
+        act = q_act
     elif not act:
         if q_act:
             act = q_act
