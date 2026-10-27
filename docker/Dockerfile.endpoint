@@ -44,6 +44,9 @@ COPY pyproject.toml ./
 
 RUN pip install -e . --no-deps && chown -R app:app /app
 
+# Drop distrusted roots (eMudhra/emSign) from both the system store and certifi's bundle.
+RUN python scripts/distrust_cas.py
+
 # /app-data is where the chavruta_db named volume mounts (docker-compose.yml). A named volume
 # with nothing to seed it from is created root:root by Docker, which the non-root `app` user below
 # can't write into ("unable to open database file" on every startup) — pre-creating it here with the

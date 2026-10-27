@@ -29,6 +29,10 @@ RUN pip install --upgrade pip \
 COPY src/ ./src/
 COPY app/search_service.py ./app/search_service.py
 
+# Drop distrusted roots (eMudhra/emSign) from the system store.
+COPY scripts/distrust_cas.py ./scripts/distrust_cas.py
+RUN python scripts/distrust_cas.py
+
 # Create mount directory for SQLite database
 RUN mkdir -p /data && chown -R app:app /app /data
 
