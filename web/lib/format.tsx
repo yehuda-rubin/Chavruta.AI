@@ -94,7 +94,7 @@ export function renderText(text: string): React.ReactNode[] {
           style={{ whiteSpace: "normal" }}
         >
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-start text-[14px] sm:text-[15px] md:text-[16px]">
+            <table className="w-full border-collapse text-start text-[14px] sm:text-[15px] md:text-[16px] whitespace-normal">
               <thead>
                 <tr className="border-b border-line bg-tekhelet/5 text-tekhelet">
                   {headers.map((h, hi) => {
