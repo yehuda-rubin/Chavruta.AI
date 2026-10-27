@@ -1,0 +1,52 @@
+id: bagrut-tanakh-mamlachti-close
+title: בגרות בתנ"ך ממלכתי — קריאה צמודה, אמצעים אומנותיים והקבלה פנים-מקראית (שאלון 1281, 2–5 יח"ל)
+title_en: Bagrut in Tanakh (General State / Mamlachti) — Close Reading & Literary Analysis (Exam 1281, 2–5 Units)
+genre: bagrut-tanakh-mamlachti-close
+mode: bagrut
+audience: school
+subject: tanakh
+bagrut_track: mamlachti
+bagrut_units: 2-5
+grade_band: j-l
+age_range: י–יב — גיל 15–18 (תיכון / בגרות)
+description: >
+  תבנית מתכונת, מחוון וסיכום לבחינת הבגרות בתנ"ך במסלול הממלכתי (הכללי, שאלון 1281 / 0581, 2 ו-5 יח"ל).
+  ממוקדת בקריאה צמודה של הטקסט המקראי, ניתוח אמצעים אומנותיים ורטוריים (מילה מנחה, תקבולת, אנלוגיה,
+  אירוניה, מבנה כיאסטי), השוואה פנים-מקראית בין סיפורים או חוקים, דילמות של מנהיגות ומוסר, וקטע שלא נלמד.
+when_to_use: >
+  בחר תבנית זו עבור תלמידים או מורים במסלול הממלכתי (2 או 5 יח"ל) המבקשים מבחן מתכונת, תרגול שאלות
+  בגרות או דף סיכום בתנ"ך כללי (שאלון 1281), בדגש על ניתוח ספרותי, חוק וחברה, והשוואה בין מקורות מקראיים.
+keywords:
+  - בגרות
+  - תנ"ך ממלכתי
+  - תנ"ך כללי
+  - 1281
+  - 2 יח"ל
+  - קריאה צמודה
+  - אמצעים אומנותיים
+  - מילה מנחה
+  - תקבולת
+  - אנלוגיה
+  - השוואה פנים-מקראית
+  - חוק וחברה
+  - מנהיגות ונבואה
+example_topics:
+  - סיפורי בראשית — בריאה, האבות ויוסף ואחיו
+  - דמות המנהיג: משה, שמואל, שאול ודוד
+  - חוק וחברה במקרא — חוקי העבד, הגר והצדק החברתי
+  - נבואות מוסר ונחמה (ישעיהו, ירמיהו, יחזקאל, עמוס)
+  - ספרות החכמה — איוב, קהלת ותהילים
+example_queries:
+  - תכין לי מתכונת בגרות בתנ"ך ממלכתי 2 יח"ל שאלון 1281
+  - סיכום לבגרות בתנ"ך כללי על אמצעים אומנותיים ומילה מנחה בפרק
+  - שאלות בגרות בתנ"ך ממלכתי עם השוואה פנים-מקראית ומחוון
+structure: פרק א׳ (קטע שלא נלמד — קריאה צמודה) → פרק ב׳ (סיפור ומנהיגות במקרא — אמצעים אומנותיים) → פרק ג׳ (חוק, מוסר והשוואה פנים-מקראית) → מחוון ניקוד
+structure_en: Part I (Unseen Passage — Close Reading) → Part II (Biblical Narrative & Leadership — Literary Devices) → Part III (Law, Ethics & Intra-Biblical Comparison) → Grading Rubric
+files:
+  exam: TEMPLATE_exam.md
+  rubric: TEMPLATE_rubric.md
+  summary: TEMPLATE_summary.md
+files_en:
+  exam: TEMPLATE_exam_en.md
+  rubric: TEMPLATE_rubric_en.md
+  summary: TEMPLATE_summary_en.md

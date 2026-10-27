@@ -82,6 +82,7 @@ def get_conn() -> sqlite3.Connection:
 # What was actually missing is below: WHAT each bump added. When a migration goes wrong the question
 # is never "was that major or minor", it is "what changed at 28". Reconstructed from git history.
 #
+#   37  parental_consents (a parent's emailed consent for a minor with no school)  2026-10-26
 #   36  feedback.minor_until (a minor's feedback expires on the minor schedule)  2026-10-26
 #   35  age_records (+log), org_join_requests, parent_links, content_denylist, crisis_alerts;
 #       minor_until on messages/saved_lessons/saved_source_sheets; org_members.is_minor;
@@ -105,7 +106,7 @@ def get_conn() -> sqlite3.Connection:
 #   18  billing_ledger                                            2026-07-26
 #   17  coupons                                                   2026-07-26
 #   ≤16 subscriptions, bans, deletion scheduling, per-owner scoping — see git log -G'^SCHEMA_VERSION'
-SCHEMA_VERSION = 36
+SCHEMA_VERSION = 37
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -878,6 +879,27 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # Wave 1) never re-runs the 35 block, and would then fail on the first feedback insert.
         if "minor_until" not in {r[1] for r in conn.execute("PRAGMA table_info(feedback)")}:
             conn.execute("ALTER TABLE feedback ADD COLUMN minor_until TEXT")
+
+    if version < 37:
+        conn.executescript("""
+            -- Only HASHES of the tokens are stored. parent_email is kept as proof of consent and is deleted
+            -- with the child (purge_owner).
+            CREATE TABLE IF NOT EXISTS parental_consents (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                child_owner_id      TEXT NOT NULL,
+                parent_email        TEXT NOT NULL,
+                token_hash          TEXT NOT NULL UNIQUE,
+                revoke_token_hash   TEXT NOT NULL UNIQUE,
+                status              TEXT NOT NULL DEFAULT 'pending',  -- pending|approved|declined|expired|revoked
+                sent_at             TEXT NOT NULL,
+                expires_at          TEXT NOT NULL,
+                decided_at          TEXT,
+                decision_ip         TEXT,
+                decision_user_agent TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_parental_consents_child ON parental_consents(child_owner_id, id);
+            CREATE INDEX IF NOT EXISTS idx_parental_consents_email ON parental_consents(parent_email, sent_at);
+        """)
 
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
@@ -2842,6 +2864,7 @@ def purge_owner(owner_id: str) -> None:
         conn.execute("DELETE FROM parent_links WHERE parent_owner_id=? OR child_owner_id=?",
                      (owner_id, owner_id))
         conn.execute("DELETE FROM content_denylist WHERE scope_kind='parent' AND scope_id=?", (owner_id,))
+        conn.execute("DELETE FROM parental_consents WHERE child_owner_id=?", (owner_id,))
         conn.execute("UPDATE content_denylist SET set_by=? WHERE set_by=?", (DELETED_OWNER, owner_id))
         conn.execute("DELETE FROM crisis_alerts WHERE owner_id=?", (owner_id,))
         conn.execute("UPDATE crisis_alerts SET acknowledged_by=? WHERE acknowledged_by=?",

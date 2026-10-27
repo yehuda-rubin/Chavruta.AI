@@ -1,4 +1,5 @@
 "use client";
+import { CrisisCard } from "./CrisisCard";
 import { useEffect, useRef, useState } from "react";
 import type { Attachment, FileOut, Lang, Message } from "@/lib/types";
 import { EXAMPLES, IntentId, tr } from "@/lib/i18n";
@@ -9,6 +10,56 @@ import { Icon } from "./Icon";
 import { HelperPrompt } from "./HelperPrompt";
 import { IntentBar } from "./IntentBar";
 import { LessonOptions, LessonFields } from "./LessonOptions";
+import { BagrutOptions, BagrutFields } from "./BagrutOptions";
+
+const BAGRUT_EXAMPLES: {
+  icon: string;
+  tile: string;
+  labelKey: "bagrutActPractice" | "bagrutActSummary" | "bagrutActCheck" | "bagrutActExam";
+  fields: Partial<BagrutFields>;
+  prompt: { he: string; en: string };
+}[] = [
+  {
+    icon: "quiz",
+    tile: "bg-indigo/10 text-indigo",
+    labelKey: "bagrutActPractice",
+    fields: { subject: "tanakh", action: "practice" },
+    prompt: {
+      he: 'תרגל איתי שאלת בגרות בתנ"ך על מלכים א\' פרק י"ח (אליהו בהר הכרמל)',
+      en: "Practice a Tanakh Bagrut question on I Kings 18 (Elijah on Mount Carmel)",
+    },
+  },
+  {
+    icon: "menu_book",
+    tile: "bg-gold-soft/20 text-gold",
+    labelKey: "bagrutActSummary",
+    fields: { subject: "gemara", action: "summary" },
+    prompt: {
+      he: 'הפק חוברת סיכום לבגרות בגמרא על סוגיית "שניים אוחזין בטלית" (בבא מציעא דף ב)',
+      en: 'Generate a Gemara Bagrut study summary on "Two Holding a Garment" (Bava Metzia 2a)',
+    },
+  },
+  {
+    icon: "fact_check",
+    tile: "bg-sun/25 text-ink/70",
+    labelKey: "bagrutActCheck",
+    fields: { subject: "toshba", action: "check" },
+    prompt: {
+      he: 'בדוק את התשובה שלי לשאלת בגרות בתושב"ע (הלכות שבת — מלאכת בורר) לפי מחוון',
+      en: "Grade my Oral Law Bagrut answer (Hilchot Shabbat — Borer) against the rubric",
+    },
+  },
+  {
+    icon: "workspace_premium",
+    tile: "bg-coral/15 text-coral",
+    labelKey: "bagrutActExam",
+    fields: { subject: "tanakh", action: "exam" },
+    prompt: {
+      he: 'בנה מתכונת מלאה ומחוון למורה בתנ"ך על בראשית פרקים י"ב–י"ח',
+      en: "Build a full Tanakh mock exam and teacher rubric on Genesis chapters 12–18",
+    },
+  },
+];
 
 // What kind of thing each welcome example is, by position in EXAMPLES — the four examples are
 // ordered explain / lesson / question / question. Tile colours cycle through the brand accents.
@@ -79,9 +130,12 @@ function ReportButton({ lang, messageId }: { lang: Lang; messageId: number }) {
   );
 }
 
-function LessonFiles({ lang, files, onPreview }: { lang: Lang; files: FileOut[]; onPreview: (f: FileOut) => void }) {
+function LessonFiles({ lang, files, intent, onPreview }: { lang: Lang; files: FileOut[]; intent?: string; onPreview: (f: FileOut) => void }) {
   const isSinglePdf = files.length === 1 && files[0].name.toLowerCase().endsWith(".pdf");
-  const headerText = isSinglePdf
+  const isBagrut = intent === "bagrut" || files.some((f) => f.name.toLowerCase().includes("bagrut"));
+  const headerText = isBagrut
+    ? tr(lang, "bagrutFilesHeader")
+    : isSinglePdf
     ? (lang === "he" ? "חוברת ליווי להדפסה ו-PDF" : "Companion Guide (Printable PDF)")
     : tr(lang, "lessonThreeFiles");
 
@@ -189,6 +243,16 @@ function Bubble({ lang, m, onPreview, onOpenSources }: { lang: Lang; m: Message;
     if (!chips.includes(label)) chips.push(label);
   }
   const hasFiles = m.files && m.files.length > 0;
+  // A screened minor's message gets the fixed support card, never model text or citations.
+  if (m.crisis) {
+    return (
+      <div className="flex gap-3.5">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/logo.svg" alt={tr(lang, "brand")} className="h-8 w-8 object-contain shrink-0 mt-1" />
+        <CrisisCard lang={lang} crisis={m.crisis} />
+      </div>
+    );
+  }
   return (
     <div className="flex gap-3.5">
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -199,7 +263,7 @@ function Bubble({ lang, m, onPreview, onOpenSources }: { lang: Lang; m: Message;
             {renderText(m.text)}
           </p>
         )}
-        {hasFiles && <LessonFiles lang={lang} files={m.files!} onPreview={onPreview} />}
+        {hasFiles && <LessonFiles lang={lang} files={m.files!} intent={m.intent} onPreview={onPreview} />}
         {!hasFiles && chips.length > 0 && (
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {chips.slice(0, 4).map((t) => (
@@ -357,6 +421,8 @@ export function ChatPane({
   intent,
   locked,
   lessonFields,
+  bagrutFields,
+  onBagrutChange,
   subtitle,
   onPickIntent,
   onLessonChange,
@@ -364,6 +430,7 @@ export function ChatPane({
   onPreviewFile,
   calendarModesEnabled,
   sourcesheetModesEnabled,
+  bagrutModesEnabled,
   userEmail,
   userSources = [],
   onAddSource,
@@ -377,6 +444,8 @@ export function ChatPane({
   intent: IntentId;
   locked: boolean;
   lessonFields: LessonFields;
+  bagrutFields?: BagrutFields;
+  onBagrutChange?: (v: BagrutFields) => void;
   subtitle: string;
   onPickIntent: (i: IntentId) => void;
   onLessonChange: (v: LessonFields) => void;
@@ -384,6 +453,7 @@ export function ChatPane({
   onPreviewFile: (f: FileOut) => void;
   calendarModesEnabled?: boolean;
   sourcesheetModesEnabled?: boolean;
+  bagrutModesEnabled?: boolean;
   userEmail?: string | null;
   userSources?: Attachment[];
   onAddSource?: () => void;
@@ -440,6 +510,9 @@ export function ChatPane({
       </div>
 
       {intent === "lesson" && <LessonOptions lang={lang} value={lessonFields} onChange={onLessonChange} />}
+      {intent === "bagrut" && bagrutFields && onBagrutChange && (
+        <BagrutOptions lang={lang} value={bagrutFields} onChange={onBagrutChange} />
+      )}
 
       <div
         role="log"
@@ -475,7 +548,29 @@ export function ChatPane({
                   to start. Each card carries what KIND of thing it is (explain / lesson / question), so
                   the examples also teach the modes. */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-9 text-start">
-                {EXAMPLES[lang].map((ex, i) => {
+                {intent === "bagrut"
+                  ? BAGRUT_EXAMPLES.map((item) => (
+                      <button
+                        key={item.labelKey}
+                        onClick={() => {
+                          if (bagrutFields && onBagrutChange) {
+                            onBagrutChange({ ...bagrutFields, ...item.fields });
+                          }
+                          setInput(item.prompt[lang]);
+                          taRef.current?.focus();
+                        }}
+                        className="group flex items-start gap-3.5 rounded-3xl bg-white border border-line p-4 hover:-translate-y-0.5 hover:border-indigo/40 hover:shadow-lg hover:shadow-indigo/10 transition"
+                      >
+                        <span className={"h-10 w-10 rounded-2xl grid place-items-center shrink-0 " + item.tile}>
+                          <Icon name={item.icon} className="text-[21px]" />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-xs font-semibold text-ink/50 mb-0.5">{tr(lang, item.labelKey)}</span>
+                          <span className="block text-[15px] leading-snug text-ink/85">{item.prompt[lang]}</span>
+                        </span>
+                      </button>
+                    ))
+                  : EXAMPLES[lang].map((ex, i) => {
                   const k = EXAMPLE_KIND[i % EXAMPLE_KIND.length];
                   return (
                     <button
@@ -573,6 +668,7 @@ export function ChatPane({
             onPick={onPickIntent}
             calendarModesEnabled={calendarModesEnabled}
             sourcesheetModesEnabled={sourcesheetModesEnabled}
+            bagrutModesEnabled={bagrutModesEnabled}
           />
           {loading || thinkingHere ? (
             <button

@@ -4,8 +4,7 @@ Embeds each lesson-template's manifest (title + description + when_to_use + keyw
 bge-m3 and upserts it into a dedicated Qdrant collection ('chavruta_templates'). At lesson
 time, retrieve_template.py queries this collection to pick the template set that best fits the
 requested topic — the "which template?" retrieval layer that complements the "which sources?"
-layer (retrieve_sources.py). Each template = a folder with 3 files (source_sheet, lesson_flow,
-full_lesson) + manifest.yaml.
+layer (retrieve_sources.py). Each template = a folder with template .md files + manifest.yaml.
 
     docker compose up -d qdrant
     .venv/Scripts/python.exe scripts/index_templates.py        # (re)build the template index
@@ -33,15 +32,25 @@ _NS = uuid.UUID("c4a5f0de-7e11-4000-8000-000000000abc")  # stable id namespace f
 DIM = 1024
 
 
+def _str_list(items) -> list[str]:
+    out: list[str] = []
+    for x in items or []:
+        if isinstance(x, dict):
+            out.append(" ".join(f"{k}: {v}" for k, v in x.items()))
+        elif x is not None:
+            out.append(str(x))
+    return out
+
+
 def _manifest_text(m: dict) -> str:
     """The text that gets embedded — what the template IS and WHEN to use it.
 
     Includes example topics AND example query phrasings so real user questions ("האם מותר…",
     "מצוות … בחג") land on the right template even when genres overlap semantically.
     """
-    kw = ", ".join(m.get("keywords", []))
-    topics = ", ".join(m.get("example_topics", []))
-    queries = " ".join(m.get("example_queries", []))
+    kw = ", ".join(_str_list(m.get("keywords", [])))
+    topics = ", ".join(_str_list(m.get("example_topics", [])))
+    queries = " ".join(_str_list(m.get("example_queries", [])))
     # Audience / grade go into the embedded text too, so a query that names the audience
     # ("שיעור לכיתה ד", "עיון לבני ישיבה") lands on the right band even without a filter.
     aud = m.get("audience", "yeshiva")
@@ -93,20 +102,23 @@ def main() -> None:
             "id": tid,
             "title": m.get("title", ""),
             "genre": m.get("genre", ""),
-            "mode": m.get("mode", "lesson"),  # "lesson" (3 files) or "shut" (single answer)
+            "mode": m.get("mode", "lesson"),  # "lesson" (3 files), "shut" (single answer), or "bagrut" (exam/rubric/summary)
             "audience": m.get("audience", "yeshiva"),  # "yeshiva" (beit-midrash) or "school"
-            "subject": m.get("subject", ""),           # school subject slug (chumash, halacha, …)
+            "subject": m.get("subject", ""),           # school subject slug (chumash, halacha, tanakh, gemara, toshba, …)
+            "bagrut_track": m.get("bagrut_track", ""), # bagrut track: "mmd", "mamlachti", or "both"
+            "bagrut_units": str(m.get("bagrut_units", "") or ""),  # e.g. "3-5" or "2-5"
             "grade_band": m.get("grade_band", ""),     # a-c / d-f / g-i / j-l / beit-midrash
             "age_range": m.get("age_range", ""),
             "description": m.get("description", "").strip(),
             "when_to_use": m.get("when_to_use", "").strip(),
-            "keywords": m.get("keywords", []),
+            "keywords": _str_list(m.get("keywords", [])),
             "structure": m.get("structure", ""),
+            "structure_en": m.get("structure_en", ""),
             "dir": str(mp.parent.relative_to(REPO)).replace("\\", "/"),
             "files": m.get("files", {}),
             "files_en": m.get("files_en", {}),
             "title_en": m.get("title_en", ""),
-            "example_topics": m.get("example_topics", []),
+            "example_topics": _str_list(m.get("example_topics", [])),
         }
         points.append(models.PointStruct(id=str(uuid.uuid5(_NS, tid)), vector=e.dense, payload=payload))
         print(f"  indexed template: {tid:24s} [{payload['audience']}/{payload['grade_band'] or '—'}] ({m.get('genre','')})")

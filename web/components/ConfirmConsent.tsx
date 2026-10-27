@@ -6,8 +6,8 @@ import { useAuth } from "@/lib/auth";
 import { TERMS_VERSION } from "@/lib/legal";
 import { Icon } from "./Icon";
 
-// Shown instead of the app when a signed-in account is missing terms/age consent in its
-// user_metadata — the case an account created by calling Supabase's own signup API directly (not
+// Shown instead of the app when a signed-in account is missing terms consent in its
+// user_metadata (age is a separate step now: AgeStep, driven by /me age_required) — the case an account created by calling Supabase's own signup API directly (not
 // through SignIn.tsx) falls into, since that path skips both checkboxes entirely. The backend
 // already 403s every route except /me and /account for such an account (see app/security.py
 // require_auth, docs/legal/LAWSUIT-EXPOSURE-2026-07-30.md Finding A) — this is the self-serve way
@@ -15,20 +15,17 @@ import { Icon } from "./Icon";
 export function ConfirmConsent({ lang }: { lang: Lang }) {
   const { updateMetadata, signOut } = useAuth();
   const [acceptedTerms, setAcceptedTerms] = useState(false);
-  const [confirmedAge, setConfirmedAge] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   const submit = async () => {
-    if (!acceptedTerms || !confirmedAge || busy) return;
+    if (!acceptedTerms || busy) return;
     setBusy(true);
     setError("");
     try {
       await updateMetadata({
         terms_version: TERMS_VERSION,
         terms_accepted_at: new Date().toISOString(),
-        age_confirmed_18: true,
-        age_confirmed_at: new Date().toISOString(),
       });
       // onAuthStateChange (lib/auth.tsx) picks up the USER_UPDATED event and refreshes `user`,
       // which re-renders page.tsx past this gate automatically — no manual redirect needed.
@@ -64,17 +61,11 @@ export function ConfirmConsent({ lang }: { lang: Lang }) {
           </span>
         </label>
 
-        <label className="flex items-start gap-2 text-xs text-ink/70 leading-relaxed cursor-pointer">
-          <input type="checkbox" checked={confirmedAge}
-                 onChange={(e) => setConfirmedAge(e.target.checked)} className="mt-0.5 accent-tekhelet" />
-          <span>{tr(lang, "ageConfirm")}</span>
-        </label>
-
         {error && <p className="text-xs text-red-600 leading-relaxed">{error}</p>}
 
         <button
           onClick={submit}
-          disabled={busy || !acceptedTerms || !confirmedAge}
+          disabled={busy || !acceptedTerms}
           className="py-3 rounded-full grad text-white font-bold text-sm hover:opacity-95 transition disabled:opacity-60"
         >
           {busy ? tr(lang, "authWorking") : tr(lang, "signInBtn")}

@@ -1,0 +1,51 @@
+id: bagrut-tanakh-mmd-bekiut
+title: בגרות בתנ"ך חמ"ד — בקיאות ותוכן (שאלון 2551, 3–5 יח"ל)
+title_en: Bagrut in Tanakh (MMD) — Broad Knowledge / Bekiut (Exam 2551, 3–5 Units)
+genre: bagrut-tanakh-mmd-bekiut
+mode: bagrut
+audience: school
+subject: tanakh
+bagrut_track: mmd
+bagrut_units: 3-5
+grade_band: j-l
+age_range: י–יב — גיל 15–18 (תיכון / בגרות)
+description: >
+  תבנית מתכונת, מחוון וסיכום לבחינת הבגרות בבקיאות בתנ"ך במסלול ממלכתי-דתי (חמ"ד, סגנון שאלון 2551).
+  מתמקדת בשליטה רחבה בתוכן הפרקים בתורה ובנביאים ראשונים: זיהוי הקשר של פסוק (מי אמר למי ובאיזה הקשר),
+  ביאור מילים וביטויים קשים (לפי רש"י ומצודות), מניעי הדמויות, רצף האירועים ומגמת הפרק.
+when_to_use: >
+  בחר תבנית זו כאשר מכינים מבחן בקיאות בתנ"ך חמ"ד (שאלון 2551 או מבחן בקיאות בית-ספרי), או כאשר
+  תלמיד מבקש סיכום בקיאות תמציתי לפרקים רבים בתורה ובנביאים ראשונים (יהושע, שופטים, שמואל, מלכים).
+keywords:
+  - בגרות
+  - תנ"ך
+  - חמ"ד
+  - בקיאות
+  - 2551
+  - נביאים ראשונים
+  - תורה בבקיאות
+  - מי אמר למי
+  - הקשר
+  - ביאור ביטויים
+  - מצודות
+  - רש"י
+  - מתכונת בקיאות
+example_topics:
+  - בקיאות בספר יהושע ושופטים
+  - בקיאות בספר שמואל א–ב (שאול ודוד)
+  - בקיאות בספר מלכים א–ב (שלמה, פילוג המלוכה, אליהו ואלישע)
+  - בקיאות בפרשות התורה (בראשית–דברים)
+example_queries:
+  - תכין לי מתכונת בקיאות בתנ"ך 2551 על שמואל א
+  - סיכום בקיאות לבגרות בתנ"ך על ספר שופטים
+  - שאלות בקיאות מי אמר למי וביאור ביטויים עם מחוון
+structure: פרק א׳ (זיהוי הקשר ורצף אירועים בתורה) → פרק ב׳ (ביאור ביטויים ודמויות בנביאים ראשונים) → פרק ג׳ (שאלות רוחב ומגמת הפרק) → מחוון ניקוד
+structure_en: Part I (Context & Event Sequence in Torah) → Part II (Phrase Explanation & Characters in Early Prophets) → Part III (Cross-Chapter Themes & Purpose) → Grading Rubric
+files:
+  exam: TEMPLATE_exam.md
+  rubric: TEMPLATE_rubric.md
+  summary: TEMPLATE_summary.md
+files_en:
+  exam: TEMPLATE_exam_en.md
+  rubric: TEMPLATE_rubric_en.md
+  summary: TEMPLATE_summary_en.md

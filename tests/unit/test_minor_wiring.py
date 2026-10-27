@@ -377,7 +377,7 @@ def test_run_query_sets_and_resets_the_scope(d, monkeypatch):
 
     monkeypatch.setattr(api, "_run_query_impl", impl)
     monkeypatch.setattr(api, "_source_note_enabled", lambda o: False)
-    res = api._run_query("שאלה", "he", "qa", [], owner_id="kid")
+    res = api._run_query("שאלה", "he", "qa", [], owner_id="kid", llm=object())   # a minor always carries one (T050)
     assert seen[0].minor and seen[0].deny.work_ids == {"shut"}
     assert audience.current() is ADULT                              # reset afterwards
     api._run_query("שאלה", "he", "qa", [], owner_id="someone-else")

@@ -1,4 +1,5 @@
 "use client";
+import { LinkRequests } from "./LinkRequests";
 import { useState } from "react";
 import type { Lang } from "@/lib/types";
 import { IntentId, tr, StringKey } from "@/lib/i18n";
@@ -461,6 +462,7 @@ export function SettingsModal({
   onJoinOrg,
   orgName,
   byokSupported,
+  isMinor,
 }: {
   open: boolean;
   lang: Lang;
@@ -493,6 +495,7 @@ export function SettingsModal({
   onJoinOrg?: (code: string) => Promise<string>;        // institution join code (spec 004)
   orgName?: string;                                    // set ⇒ already a member, show what
                                                        // the school can and cannot see
+  isMinor?: boolean;         // /me: hides marketing consent, plans, coupons and referral (spec 009)
   byokSupported?: boolean;   // /me: whether this deployment's backend accepts a provider key at all
 }) {
   const auth = useAuth();
@@ -599,7 +602,7 @@ export function SettingsModal({
 
             {/* Marketing consent — opt-in, changeable any time; mirrors the sign-up checkbox but
                 reflects (and updates) the value actually stored in user_metadata. */}
-            <label className="mt-2 flex items-center gap-2 text-xs text-ink/70 cursor-pointer">
+            {!isMinor && <label className="mt-2 flex items-center gap-2 text-xs text-ink/70 cursor-pointer">
               <input
                 type="checkbox"
                 checked={Boolean(auth.user.user_metadata?.marketing_consent)}
@@ -610,7 +613,7 @@ export function SettingsModal({
                 className="accent-tekhelet"
               />
               <span>{tr(lang, "marketingConsentSetting")}</span>
-            </label>
+            </label>}
 
             {/* Global data-review opt-out — overrides the per-chat toggle in SessionsPanel. Only
                 meaningful for chats created on/after 2026-08-10 (privacy policy section 12); stored
@@ -629,7 +632,7 @@ export function SettingsModal({
             </label>
 
             {/* Plan + billing — upgrade (free) or cancel subscription (paid). */}
-            <div className="mt-2 flex items-center justify-between gap-2">
+            {!isMinor && <div className="mt-2 flex items-center justify-between gap-2">
               <span className="text-xs text-ink/60">
                 {tr(lang, "planLabel")}: {planName || tr(lang, "planFree")}
                 {cycle === "annual" && <> ({tr(lang, "cycleAnnual")})</>}
@@ -661,7 +664,7 @@ export function SettingsModal({
                   </button>
                 )
               )}
-            </div>
+            </div>}
 
             {/* Three gauges because there are up to three independent pools: daily and weekly
                 conversation usage, and lessons (its own pool — running out of conversation usage
@@ -709,6 +712,15 @@ export function SettingsModal({
             {onRedeemCoupon && <CouponField lang={lang} onRedeem={onRedeemCoupon} />}
 
             {/* Institution membership — join by code, or, once in, what the school can see. */}
+            {/* School / parent link requests (spec 009): shown only when one is pending. */}
+            {auth.user && <LinkRequests lang={lang} />}
+            {!isMinor && (
+              <a href="/family" target="_blank" rel="noopener"
+                 className="mt-2 inline-block text-xs text-tekhelet/80 hover:text-tekhelet font-semibold hover:underline">
+                {tr(lang, "settingsForParents")}
+              </a>
+            )}
+
             {onJoinOrg && <OrgJoinField lang={lang} orgName={orgName} onJoin={onJoinOrg} />}
 
             {/* BYOK — only offered when the backend has a provider-key concept at all (not 'bridge'). */}

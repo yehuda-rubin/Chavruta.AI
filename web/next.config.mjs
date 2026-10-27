@@ -58,6 +58,9 @@ const nextConfig = {
       // /parent/links, /parent/children/{id}/age|content (spec 009). Nothing owns bare /parent today;
       // if a Next page is ever added there, move it (/family) or give this the /admin-style carve-out.
       ...proxy("parent"),
+      // /consent/{token}: the parent-consent API (public GET/POST). The PAGE is /parent-consent/[token],
+      // deliberately not /consent/..., so this prefix never shadows it. docker/nginx.conf needs it too.
+      ...proxy("consent"),
       ...proxy("messages"),   // /messages/{id}/report — reporting a bad answer
       ...proxy("byok"),       // /byok/check — validating a personal API key
       ...proxy("helper"),     // /helper/status|accept|decline|messages — the dev-helper's own side

@@ -1,0 +1,50 @@
+id: bagrut-gemara-rishonim
+title: בגרות בגמרא עיון — רש"י ותוספות על הדף, קושיות ותירוצים ונפקא מינה (שאלון 6281, 5 יח"ל)
+title_en: Bagrut in Gemara Iyun — Rashi & Tosafot on the Daf, Kushya, Terutz & Nafka Mina (Exam 6281, 5 Units)
+genre: bagrut-gemara-rishonim
+mode: bagrut
+audience: school
+subject: gemara
+bagrut_track: mmd
+bagrut_units: 3-5
+grade_band: j-l
+age_range: י–יב — גיל 15–18 (תיכון / בגרות)
+description: >
+  תבנית מתכונת, מחוון וסיכום לבחינת הבגרות בגמרא ברמת עיון מוגברת (5 יח"ל, סגנון שאלון 6281).
+  ממוקדת בלימוד מעמיק של הסוגיה יחד עם שיטות הראשונים על הדף — רש"י ותוספות (וכן רמב"ם ושולחן ערוך):
+  זיהוי ההנחה הסמויה של רש"י, קושיית התוספות (ממקור אחר או מסברא), פירוק התירוצים של תוספות,
+  בירור שורש המחלוקת בין רש"י לתוספות, והצגת הנפקא מינה להלכה.
+when_to_use: >
+  בחר תבנית זו עבור תלמידי 5 יח"ל בגמרא עיון (ישיבות תיכוניות ואולפנות, שאלון 6281) או מורים
+  המבקשים מבחן מתכונת בעיון עם רש"י ותוספות, מחוון ניקוד למדני, או דף סיכום של שיטות הראשונים בסוגיה.
+keywords:
+  - בגרות
+  - גמרא עיון
+  - 6281
+  - 5 יח"ל
+  - רש"י ותוספות
+  - תוספות
+  - קושיית תוספות
+  - תירוצי תוספות
+  - ראשונים
+  - נפקא מינה
+  - שורש המחלוקת
+  - ישיבה תיכונית
+example_topics:
+  - סוגיות עיון בבבא מציעא עם רש"י ותוספות (שניים אוחזין, יאוש שלא מדעת, השומרים)
+  - סוגיות עיון בבבא קמא עם רש"י ותוספות (אבות נזיקין, אדם המזיק)
+  - סוגיות עיון בסנהדרין, קידושין, ברכות ושבת עם רש"י ותוספות
+example_queries:
+  - תכין לי מתכונת בגרות בגמרא עיון 6281 5 יח"ל עם רש"י ותוספות
+  - סיכום תוספות ורש"י לבגרות בגמרא עם קושיא תירוץ ונפקא מינה
+  - שאלת בגרות על תוספות בגמרא עם מחוון ניקוד
+structure: פרק א׳ (הסוגיה בגמרא ושיטת רש"י) → פרק ב׳ (ניתוח דברי התוספות — קושיא, תירוצים ומחלוקת עם רש"י) → פרק ג׳ (שורש המחלוקת, נפקא מינה ופסיקת הלכה) → מחוון
+structure_en: Part I (Gemara Sugya & Rashi's Approach) → Part II (Tosafot Analysis — Kushya, Terutzim & Dispute with Rashi) → Part III (Conceptual Root, Nafka Mina & Halacha) → Rubric
+files:
+  exam: TEMPLATE_exam.md
+  rubric: TEMPLATE_rubric.md
+  summary: TEMPLATE_summary.md
+files_en:
+  exam: TEMPLATE_exam_en.md
+  rubric: TEMPLATE_rubric_en.md
+  summary: TEMPLATE_summary_en.md

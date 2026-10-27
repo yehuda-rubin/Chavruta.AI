@@ -1,0 +1,51 @@
+id: bagrut-toshba-case-study
+title: בגרות בתושב"ע — שאלות אירועון הלכתי לימודי ויישום מקורות (3–5 יח"ל)
+title_en: Bagrut in Toshba (Oral Law) — Educational Halachic Case Studies & Source Application (3–5 Units)
+genre: bagrut-toshba-case-study
+mode: bagrut
+audience: school
+subject: toshba
+bagrut_track: mmd
+bagrut_units: 3-5
+grade_band: j-l
+age_range: י–יב — גיל 15–18 (תיכון / בגרות)
+description: >
+  תבנית מתכונת, מחוון וסיכום לבחינת הבגרות בתושב"ע והלכה הממוקדת בשאלות "אירועון הלכתי" (Case Study)
+  ויישום המקורות על מקרי מבחן לימודיים. מלמדת כיצד לפרק אירועון הלכתי בבחינה: זיהוי השאלה ההלכתית
+  בסיפור, קישור למשנה/לגמרא ולשולחן ערוך/משנה ברורה (`[S#]`), הצגת הדין והטעם לפי השיטות השונות,
+  והבחנה בין שינוי בפרטי המקרה. כפוף במלואו לעקרון VIII: לימוד עיוני לבחינת הבגרות בלבד, לעולם לא פסק הלכה למעשה.
+when_to_use: >
+  בחר תבנית זו כאשר תלמיד או מורה בתושב"ע מבקשים לתרגל שאלות "אירועון" (סיפור מקרה הלכתי לבגרות),
+  לבנות מבחן מתכונת מבוסס אירועונים עם מחוון ניקוד, או ללמוד את מתודולוגיית הפתרון של שאלות יישום בבגרות בתושב"ע.
+keywords:
+  - בגרות
+  - תושב"ע
+  - הלכה
+  - אירועון
+  - אירועון הלכתי
+  - שאלות יישום
+  - מקרה מבחן
+  - שולחן ערוך
+  - משנה ברורה
+  - דין וטעם
+  - 5391
+  - 5381
+example_topics:
+  - אירועונים לימודיים בהלכות שבת, מוקצה ובישול
+  - אירועונים לימודיים בהלכות השבת אבידה, שומרים ונזיקין
+  - אירועונים לימודיים בהלכות כשרות, ברכות ותפילה
+  - אירועונים לימודיים בהלכות צדקה, כיבוד הורים ובין אדם לחברו
+example_queries:
+  - תכין לי שאלות אירועון הלכתי לבגרות בתושב"ע עם מחוון
+  - איך עונים על שאלת אירועון בבגרות בהלכה
+  - מתכונת בתושב"ע עם אירועונים לימודיים בשולחן ערוך ומשנה ברורה
+structure: הבהרת עקרון VIII → פרק א׳ (אירועוני יסוד — זיהוי הדין, המקור והטעם) → פרק ב׳ (אירועונים מורכבים — מחלוקת הפוסקים ושינוי בפרטי המקרה) → מחוון ניקוד
+structure_en: Principle VIII Advisory → Part I (Foundational Case Studies — Identifying Ruling, Source & Rationale) → Part II (Complex Case Studies — Poskim Disputes & Changed Circumstances) → Rubric
+files:
+  exam: TEMPLATE_exam.md
+  rubric: TEMPLATE_rubric.md
+  summary: TEMPLATE_summary.md
+files_en:
+  exam: TEMPLATE_exam_en.md
+  rubric: TEMPLATE_rubric_en.md
+  summary: TEMPLATE_summary_en.md

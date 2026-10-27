@@ -12,6 +12,7 @@ const LABEL_KEY: Record<IntentId, StringKey> = {
   parsha: "parshaMode",
   dafyomi: "dafYomiMode",
   sourcesheet: "sourcesheetMode",
+  bagrut: "bagrutMode",
 };
 
 // One line under each mode, so the menu explains itself instead of leaving a new user to guess what
@@ -25,6 +26,7 @@ const HINT: Record<IntentId, { he: string; en: string }> = {
   parsha: { he: "לימוד פרשת השבוע", en: "This week's parsha" },
   dafyomi: { he: "הדף של היום", en: "Today's daf" },
   sourcesheet: { he: "דף מקורות מהחומרים שלך", en: "A source sheet from your materials" },
+  bagrut: { he: "תנ\"ך, גמרא ותושב\"ע — תרגול, בדיקת תשובות, סיכומים ומתכונות", en: "Tanakh, Gemara & Oral Law — practice, grading, summaries & mock exams" },
 };
 
 const ICON: Record<IntentId, string> = {
@@ -36,12 +38,14 @@ const ICON: Record<IntentId, string> = {
   parsha: "auto_stories",
   dafyomi: "calendar_month",
   sourcesheet: "description",
+  bagrut: "workspace_premium",
 };
 
 // Beta-gated modes
 // Daf Yomi left the beta on 2026-10-18 and is open to everyone; only the parsha mode is still gated.
 const BETA_CALENDAR_INTENTS: ReadonlySet<IntentId> = new Set(["parsha"]);
 const BETA_SOURCESHEET_INTENTS: ReadonlySet<IntentId> = new Set(["sourcesheet"]);
+const BETA_BAGRUT_INTENTS: ReadonlySet<IntentId> = new Set(["bagrut"]);
 
 // The mode picker lives inside the composer and opens a menu above it (same pattern as the tools
 // menu in other chat apps), so the modes are one tap from the text box and never take a row of their
@@ -53,6 +57,7 @@ export function IntentBar({
   onPick,
   calendarModesEnabled = false,
   sourcesheetModesEnabled = false,
+  bagrutModesEnabled = false,
 }: {
   lang: Lang;
   intent: IntentId;
@@ -60,6 +65,7 @@ export function IntentBar({
   onPick: (i: IntentId) => void;
   calendarModesEnabled?: boolean;
   sourcesheetModesEnabled?: boolean;
+  bagrutModesEnabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -67,9 +73,11 @@ export function IntentBar({
   const visible = INTENTS.filter((i) => {
     if (BETA_CALENDAR_INTENTS.has(i)) return calendarModesEnabled;
     if (BETA_SOURCESHEET_INTENTS.has(i)) return sourcesheetModesEnabled;
+    if (BETA_BAGRUT_INTENTS.has(i)) return bagrutModesEnabled;
     return true;
   });
-  const isBeta = (i: IntentId) => BETA_CALENDAR_INTENTS.has(i) || BETA_SOURCESHEET_INTENTS.has(i);
+  const isBeta = (i: IntentId) =>
+    BETA_CALENDAR_INTENTS.has(i) || BETA_SOURCESHEET_INTENTS.has(i) || BETA_BAGRUT_INTENTS.has(i);
   const stable = visible.filter((i) => !isBeta(i));
   const beta = visible.filter(isBeta);
 

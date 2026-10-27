@@ -235,6 +235,26 @@ def status(owner_id: str, *, legacy_adult: bool = False, supabase: bool = False,
     }
 
 
+def parental_consent_ok(owner_id: str) -> bool:
+    """May this person send messages as far as PARENTAL CONSENT goes (spec 009 T090)? True for an adult,
+    the local user, and a minor who has any of: an accepted school membership (the school holds parental
+    consent), an active `parent_links` row (a parent with an account), or an approved, unrevoked emailed
+    consent. Everything else is a minor with no consent."""
+    if owner_id == "local" or not is_minor(owner_id):
+        return True
+    import app.orgs as orgs
+
+    if orgs.membership(owner_id):
+        return True
+    with db._LOCK:
+        conn = db.get_conn()
+        return bool(
+            conn.execute("SELECT 1 FROM parent_links WHERE child_owner_id=? AND status='active' LIMIT 1",
+                         (owner_id,)).fetchone()
+            or conn.execute("SELECT 1 FROM parental_consents WHERE child_owner_id=? AND status='approved' "
+                            "LIMIT 1", (owner_id,)).fetchone())
+
+
 # ── Route gates (called from security.require_auth) ────────────────────────────
 # Which requests a gate applies to is a property of ROUTES, so it lives in one table here rather than
 # as a Depends() on a dozen handlers (the three referral aliases alone are nine decorators): a route

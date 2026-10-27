@@ -1,10 +1,11 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Attachment, FileOut, Lang, Message, SavedLesson, Session } from "@/lib/types";
+import type { Attachment, CrisisPayload, FileOut, Lang, Message, SavedLesson, Session } from "@/lib/types";
 import { api, LessonExtras, Me, Tier } from "@/lib/api";
 import { IntentId } from "@/lib/i18n";
 import { tr } from "@/lib/i18n";
 import { LessonFields } from "@/components/LessonOptions";
+import { BagrutFields } from "@/components/BagrutOptions";
 import { Header } from "@/components/Header";
 import { SessionsPanel } from "@/components/SessionsPanel";
 import { ChatPane } from "@/components/ChatPane";
@@ -20,6 +21,9 @@ import { SignIn } from "@/components/SignIn";
 import { Landing } from "@/components/Landing";
 import { Blocked } from "@/components/Blocked";
 import { ConfirmConsent } from "@/components/ConfirmConsent";
+import { AgeStep } from "@/components/AgeStep";
+import { ParentConsentStep } from "@/components/ParentConsentStep";
+import { AdultTerms } from "@/components/AdultTerms";
 import { useAuth } from "@/lib/auth";
 
 function isPageReload(): boolean {
@@ -36,6 +40,21 @@ function isPageReload(): boolean {
   } catch {
     return false;
   }
+}
+
+// The crisis reply is saved server-side as a plain assistant message, so a history reload loses the
+// structured payload. When the live response carried it, put it back on the last assistant message so
+// the CrisisCard (not bare text) is what the minor sees.
+function withCrisis(msgs: Message[], crisis?: CrisisPayload): Message[] {
+  if (!crisis) return msgs;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].role === "assistant") {
+      const out = msgs.slice();
+      out[i] = { ...msgs[i], crisis };
+      return out;
+    }
+  }
+  return msgs;
 }
 
 export default function Home() {
@@ -58,6 +77,7 @@ export default function Home() {
   const [loadingTarget, setLoadingTarget] = useState<string | null>(null);
   const [intent, setIntent] = useState<IntentId>("qa");
   const [lessonFields, setLessonFields] = useState<LessonFields>({ audience: "", gradeBand: "", length: "" });
+  const [bagrutFields, setBagrutFields] = useState<BagrutFields>({ subject: "", track: "", units: "", action: "practice" });
   const [sessionSources, setSessionSources] = useState<Record<string, Attachment[]>>({});
   const [pendingNewSources, setPendingNewSources] = useState<Attachment[]>([]);
   const [subtitle, setSubtitle] = useState("");
@@ -270,7 +290,7 @@ export default function Home() {
     for (const [sid, jid] of entries) {
       (async () => {
         try {
-          await api.pollJob(jid);
+          const polled = await api.pollJob<{ crisis?: CrisisPayload; result?: { crisis?: CrisisPayload } }>(jid);
           if (unmounted) return;
           clearSessionJob(sid);
           refreshSessions();
@@ -278,7 +298,7 @@ export default function Home() {
           if (activeIdRef.current === sid) {
             const msgs = await api.sessionMessages(sid);
             if (activeIdRef.current === sid) {
-              setMessages(msgs);
+              setMessages(withCrisis(msgs, polled?.crisis ?? polled?.result?.crisis));
               setLoading(false);
               setLoadingTarget(null);
             }
@@ -583,7 +603,14 @@ export default function Home() {
       const extras: LessonExtras | undefined =
         intent === "lesson"
           ? { audience: lessonFields.audience, grade_band: lessonFields.gradeBand, length: lessonFields.length }
-          : undefined;
+          : intent === "bagrut"
+            ? {
+                bagrut_subject: bagrutFields.subject,
+                bagrut_track: bagrutFields.track,
+                bagrut_units: bagrutFields.units,
+                bagrut_action: bagrutFields.action,
+              }
+            : undefined;
       const att = userSources.length ? userSources : undefined;
       if (userSources.length) setUserSources([]);
       // The conversation this turn belongs to. For a follow-up it's the current chat; for a brand-new
@@ -609,13 +636,13 @@ export default function Home() {
         appendIfCurrent({ role: "assistant", text: r.answer, citations: r.citations || [], caveats: r.caveats || [], grounded: r.grounded, files: r.files, source_note: r.source_note });
       try {
         if (activeId) {
-          await api.sessionQueryAsync(activeId, text, intent, lang, extras, att, (jid) => {
+          const answered = await api.sessionQueryAsync(activeId, text, intent, lang, extras, att, (jid) => {
             setSessionJob(activeId, jid);
           });
           clearSessionJob(activeId);
           try {
             const msgs = await api.sessionMessages(activeId);
-            if (activeIdRef.current === activeId) setMessages(msgs);
+            if (activeIdRef.current === activeId) setMessages(withCrisis(msgs, answered?.crisis));
           } catch {
             /* ignore */
           }
@@ -623,7 +650,7 @@ export default function Home() {
           // Async create: the session id comes back immediately (onSession) so the new chat attaches
           // to the UI while the (possibly minutes-long) first lesson generates on the job queue.
           let createdId = "";
-          await api.createSessionAsync(text, intent, lang, extras, att, (id, jid) => {
+          const created = await api.createSessionAsync(text, intent, lang, extras, att, (id, jid) => {
             createdId = id;
             target = id;
             setLoadingTarget(id);
@@ -641,7 +668,7 @@ export default function Home() {
             clearSessionJob(finalId);
             try {
               const msgs = await api.sessionMessages(finalId);
-              if (activeIdRef.current === finalId) setMessages(msgs);
+              if (activeIdRef.current === finalId) setMessages(withCrisis(msgs, created?.result?.crisis));
             } catch {
               /* ignore */
             }
@@ -672,7 +699,7 @@ export default function Home() {
         refreshMe(); // update the remaining-quota pill (incl. after a 429)
       }
     },
-    [activeId, intent, lang, lessonFields, userSources, refreshSessions, refreshMe, setSessionJob, clearSessionJob, appendCancelledMessage],
+    [activeId, intent, lang, lessonFields, bagrutFields, userSources, refreshSessions, refreshMe, setSessionJob, clearSessionJob, appendCancelledMessage],
   );
 
   // Auth gate (Supabase mode only). While the initial session check runs, show a minimal splash;
@@ -685,12 +712,26 @@ export default function Home() {
     // form; everyone else lands on the front page, which sends them to /signup.
     return directToSignIn ? <SignIn lang={lang} /> : <Landing />;
   }
-  // An account with no recorded terms/age consent — e.g. created by calling Supabase's own signup
-  // API directly, bypassing SignIn.tsx's checkboxes entirely. The backend already 403s every route
-  // except /me and /account for it (app/security.py require_auth); this is the self-serve way out.
-  if (auth.enabled && auth.user &&
-      !(auth.user.user_metadata?.age_confirmed_18 && auth.user.user_metadata?.terms_version)) {
+  // An account with no recorded terms consent — e.g. created by calling Supabase's own signup API
+  // directly, bypassing SignIn.tsx's checkbox entirely. The backend already 403s every route except
+  // /me and /account for it (app/security.py require_auth); this is the self-serve way out. (Age is no
+  // longer a metadata checkbox: legacy accounts keep age_confirmed_18 and count as adult server-side,
+  // new ones are asked their birth month/year in the next gate.)
+  if (auth.enabled && auth.user && !auth.user.user_metadata?.terms_version) {
     return <ConfirmConsent lang={lang} />;
+  }
+  // Age step (spec 009): /me says this account has not yet given a birth month/year. Shown on the
+  // first authenticated load, so a delayed email confirmation needs no special handling.
+  if (auth.enabled && auth.user && me?.age_required) {
+    return <AgeStep lang={lang} onDone={() => { refreshMe(); refreshSessions(); }} />;
+  }
+  // A former minor must accept the adult Terms before they can send anything.
+  if (auth.enabled && auth.user && me?.adult_terms_required) {
+    return <AdultTerms lang={lang} onDone={() => { refreshMe(); refreshSessions(); }} />;
+  }
+  // Parental consent (spec 009 T091): a minor with no school link needs a parent to approve by email.
+  if (auth.enabled && auth.user && me?.parental_consent_required) {
+    return <ParentConsentStep lang={lang} me={me} onRefresh={refreshMe} />;
   }
   // Blocklisted account — show the block notice instead of the app (the server 403s everything else).
   if (auth.enabled && auth.user && me?.blocked) {
@@ -773,14 +814,17 @@ export default function Home() {
           intent={intent}
           locked={locked}
           lessonFields={lessonFields}
+          bagrutFields={bagrutFields}
           subtitle={subtitle}
           onPickIntent={setIntent}
           onLessonChange={setLessonFields}
+          onBagrutChange={setBagrutFields}
           onSend={send}
           onStop={stopGeneration}
           onPreviewFile={setPreviewFile}
           calendarModesEnabled={!!me?.is_admin && !!me?.calendar_modes_enabled}
           sourcesheetModesEnabled={!!me?.is_admin && !!me?.sourcesheet_enabled}
+          bagrutModesEnabled={!!me?.is_admin && !!me?.bagrut_enabled}
           userEmail={auth.user?.email}
           userSources={userSources}
           onAddSource={() => setShowAddSource(true)}
@@ -838,14 +882,14 @@ export default function Home() {
         onAdd={(items) => setUserSources((prev) => [...prev, ...items])}
       />
       <LessonsModal open={showLessons} lang={lang} onClose={() => setShowLessons(false)} onOpenLesson={openLesson} />
-      <PlansModal
+      {!me?.is_minor && <PlansModal
         open={plansOpen}
         lang={lang}
         tiers={tiers}
         currentPlan={me?.plan}
         onClose={() => setPlansOpen(false)}
         onChoose={choosePlan}
-      />
+      />}
 
       <SettingsModal
         open={showSettings}
@@ -872,10 +916,11 @@ export default function Home() {
         dayLeft={me?.day_left ?? null}
         weekLeft={me?.week_left ?? null}
         lessonsLeft={me?.lessons_left ?? null}
-        billingEnabled={billingEnabled}
+        isMinor={!!me?.is_minor}
+        billingEnabled={billingEnabled && !me?.is_minor}
         onUpgrade={upgrade}
         onCancelSubscription={cancelSubscription}
-        onRedeemCoupon={me?.authenticated ? redeemCoupon : undefined}
+        onRedeemCoupon={me?.authenticated && !me?.is_minor ? redeemCoupon : undefined}
         byokSupported={me?.byok_supported}
         onJoinOrg={me?.authenticated ? joinOrg : undefined}
         orgName={me?.org_name}

@@ -29,6 +29,7 @@ class Intent(str, Enum):
     HALACHA = "halacha"        # reserved / deferred until a halachic corpus is loaded
     SOURCESHEET = "sourcesheet"
     CHAVRUTA = "chavruta"
+    BAGRUT = "bagrut"
 
 
 @dataclass(frozen=True)
@@ -167,6 +168,8 @@ class Turn:
     lesson: bool = False
     # True for an assistant turn that completed a SOURCE SHEET companion guide.
     sourcesheet: bool = False
+    # True for an assistant turn that completed a BAGRUT summary/exam file generation.
+    bagrut: bool = False
     files: list[dict] = field(default_factory=list)
     citations: list[dict] = field(default_factory=list)
 

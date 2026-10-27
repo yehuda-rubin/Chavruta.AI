@@ -127,6 +127,15 @@ _AUTH_EXEMPT = (
 )
 
 
+# Public, token-authenticated prefixes (the token in the path IS the credential): the parent's consent
+# page API (app/parental_consent.py). Prefix match, hence "/consent/" with the trailing slash.
+_AUTH_EXEMPT_PREFIXES = ("/consent/",)
+
+
+def _auth_exempt(path: str) -> bool:
+    return path in _AUTH_EXEMPT or path.startswith(_AUTH_EXEMPT_PREFIXES)
+
+
 def _bearer(authorization: str | None) -> str:
     """The token from an `Authorization: Bearer <token>` header, or ''."""
     if authorization and authorization.lower().startswith("bearer "):
@@ -142,7 +151,7 @@ def require_api_key(
     """API-key gate. If CHAVRUTA_API_KEYS is set, require a matching key via `Authorization: Bearer
     <key>` or `X-API-Key: <key>`; otherwise a no-op. Liveness / readiness / docs are always exempt so
     probes and orchestrators aren't blocked."""
-    if request.url.path in _AUTH_EXEMPT:
+    if _auth_exempt(request.url.path):
         return
     keys = _api_keys()
     if not keys:
@@ -188,6 +197,11 @@ def legacy_adult(request: Request) -> bool:
     return bool(getattr(getattr(request, "state", None), "age_confirmed_18", False))
 
 
+def account_email(request: Request) -> str:
+    """The caller's own sign-in address from the verified JWT claims (stashed by require_auth), or ''."""
+    return str(getattr(getattr(request, "state", None), "email", "") or "")
+
+
 def require_auth(
     request: Request,
     authorization: str | None = Header(default=None),
@@ -199,7 +213,7 @@ def require_auth(
     enforces that the account actually carries terms/age consent (see _has_consented) — again
     exempting /me and /account so the frontend can detect the situation and let the user confirm."""
     path = request.url.path
-    if path in _AUTH_EXEMPT:
+    if _auth_exempt(path):
         return
     if sb.enabled():
         payload = sb.verify(_bearer(authorization))
@@ -210,6 +224,7 @@ def require_auth(
             raise HTTPException(status_code=401, detail="missing or invalid bearer token")
         meta = payload.get("user_metadata") or {}
         request.state.age_confirmed_18 = bool(meta.get("age_confirmed_18"))
+        request.state.email = str(payload.get("email") or "")      # for the parental-consent same-address check
         if not _ban_exempt(path):
             # Terms first (consent_required, exactly as before), THEN the age. A legacy account
             # (age_confirmed_18 + terms) never reaches the age lookup's 403; a new one that accepted

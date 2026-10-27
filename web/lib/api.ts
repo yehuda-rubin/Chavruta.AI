@@ -81,9 +81,14 @@ async function req<T>(path: string, opts?: RequestInit): Promise<T> {
     // rather than a raw "API 502: {json}" blob. Tag with the status so callers can special-case.
     const raw = await res.text().catch(() => "");
     let detail = raw;
+    let code: string | undefined;
     try {
       const j = JSON.parse(raw);
-      detail = typeof j.detail === "string" ? j.detail : raw;
+      // Structured errors ({error: "age_required", message}) carry a machine code the UI branches on.
+      const d = j.detail && typeof j.detail === "object" ? j.detail : j;
+      if (typeof d.error === "string") code = d.error;
+      detail = typeof j.detail === "string" ? j.detail
+        : typeof d.message === "string" && code ? d.message : raw;
     } catch {
       // Not JSON. If it's a whole HTML document, the request never reached the API — Next owns the
       // origin and served its own 404 page for a path that has no rewrite (see next.config.mjs).
@@ -92,7 +97,8 @@ async function req<T>(path: string, opts?: RequestInit): Promise<T> {
       if (looksLikeHtml(raw)) detail = `הבקשה לא הגיעה לשרת (${path}) — HTTP ${res.status}`;
     }
     const err = new Error(detail || `HTTP ${res.status}`);
-    (err as Error & { status?: number }).status = res.status;
+    (err as Error & { status?: number; code?: string }).status = res.status;
+    (err as Error & { status?: number; code?: string }).code = code;
     throw err;
   }
   // A 200 carrying HTML means the same routing problem, just without an error status to catch it.
@@ -155,6 +161,10 @@ export interface LessonExtras {
   audience?: string;
   grade_band?: string;
   length?: string;
+  bagrut_subject?: string;
+  bagrut_track?: string;
+  bagrut_units?: string;
+  bagrut_action?: string;
 }
 
 function body(question: string, intent: string, lang: string, extras?: LessonExtras, attachments?: Attachment[]) {
@@ -259,6 +269,32 @@ export const api = {
 
   ready: () => req<{ status: string; points?: number; reason?: string }>("/ready"),
   me: () => req<Me>("/me"),
+
+  // School-track minors (spec 009). Birth month/year is asked once, after sign-up; a second call is 409.
+  setAge: (birthYear: number, birthMonth: number) =>
+    req<{ is_minor: boolean; adult_from: string }>("/account/age", {
+      method: "POST",
+      body: JSON.stringify({ birth_year: birthYear, birth_month: birthMonth }),
+    }),
+  // Parental consent for a minor with no school (spec 009 T090/T091). The parent answers on the public
+  // /parent-consent/[token] page, which calls the API at /consent/{token} (no auth).
+  requestParentalConsent: (parentEmail: string) =>
+    req<{ status: string; sent_at?: string }>("/account/parental-consent", {
+      method: "POST",
+      body: JSON.stringify({ parent_email: parentEmail }),
+    }),
+  consentInfo: (token: string) =>
+    req<{ status: string; expires_at?: string; child_label?: string }>(`/consent/${encodeURIComponent(token)}`),
+  consentDecide: (token: string, decision: "approve" | "decline") =>
+    req<{ status: string }>(`/consent/${encodeURIComponent(token)}`, {
+      method: "POST",
+      body: JSON.stringify({ decision }),
+    }),
+  acceptAdultTerms: (termsVersion: string) =>
+    req<{ ok: boolean }>("/account/adult-terms", {
+      method: "POST",
+      body: JSON.stringify({ terms_version: termsVersion }),
+    }),
 
   // Account deletion. By default it is SCHEDULED after a grace period and `cancel` undoes it;
   // `immediate` skips the wait and erases everything at once, which nothing can undo.
@@ -587,6 +623,7 @@ export interface Me {
   // _calendar_modes_enabled). false for everyone not on it; the picker hides both modes entirely.
   calendar_modes_enabled: boolean;
   sourcesheet_enabled: boolean;
+  bagrut_enabled?: boolean;
   // Admin dashboard link — see app/api.py::_is_admin. UI convenience only; the real gate is the
   // 404 every /admin/* route raises for a non-admin owner.
   is_admin: boolean;
@@ -596,6 +633,18 @@ export interface Me {
   org_id: string;
   org_name: string;
   org_role: string;                         // 'admin' | 'teacher' | 'student' | '' (not in one)
+  // School-track minors (spec 009). Derived server-side from the age record, never from JWT metadata.
+  is_minor?: boolean;
+  age_required?: boolean;                   // signed up, has not yet given birth month/year
+  adult_terms_required?: boolean;           // turned 18, has not yet accepted the adult Terms
+  school_linked?: boolean;
+  // Minor with no school link and no approved parental consent (spec 009 T090/T091).
+  parental_consent_required?: boolean;
+  parental_consent?: {
+    status: "none" | "pending" | "approved" | "declined" | "expired";
+    parent_email_masked?: string;
+    sent_at?: string;
+  } | null;
 }
 
 export interface OrgMember {

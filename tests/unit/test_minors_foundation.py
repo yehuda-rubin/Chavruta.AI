@@ -57,7 +57,7 @@ def _stamp(table, mid):
 # ── T001: schema ──────────────────────────────────────────────────────────────
 def test_migration_35_creates_everything(d):
     conn = db.get_conn()
-    assert db.SCHEMA_VERSION == 36
+    assert db.SCHEMA_VERSION == 37
     assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
     for t in ("age_records", "age_record_log", "org_join_requests", "parent_links",
               "content_denylist", "crisis_alerts"):
@@ -567,9 +567,20 @@ def test_account_age_endpoint_contract(d):
     with pytest.raises(HTTPException) as e:
         api.set_account_age(api.AgeIn(birth_year=1990, birth_month=1), owner="u1")
     assert e.value.status_code == 409 and e.value.detail["error"] == "age_already_set"
-    with pytest.raises(HTTPException) as e:
-        api.set_account_age(api.AgeIn(birth_year=2024, birth_month=1), owner="u2")
-    assert e.value.status_code == 422 and e.value.detail["error"] == "under_minimum_age"
+    # T093: an under-12 declaration is refused AND the account is deleted (purge_now is stubbed: no
+    # Supabase / billing here; tests/unit/test_parental_consent.py covers the deletion itself).
+    import json
+    import app.accounts as accounts
+    gone = []
+    original = accounts.purge_now
+    accounts.purge_now = lambda o: gone.append(o)
+    try:
+        out = api.set_account_age(api.AgeIn(birth_year=2024, birth_month=1), owner="u2")
+    finally:
+        accounts.purge_now = original
+    body = json.loads(out.body)
+    assert out.status_code == 422 and body["error"] == "under_minimum_age" and body["account_deleted"] is True
+    assert gone == ["u2"]
     assert minors.get_age("u2") is None
     with pytest.raises(HTTPException) as e:
         api.set_account_age(api.AgeIn(birth_year=1990, birth_month=1), owner="local")

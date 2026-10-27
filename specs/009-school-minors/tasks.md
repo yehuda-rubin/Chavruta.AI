@@ -62,7 +62,7 @@ Rules for every task:
 
 ## Wave 2: after Wave 1, sequential (all touch `app/api.py`)
 
-- [ ] T050 Route minors only to an LLM preset that is approved for minors. Configure the approved preset with `CHAVRUTA_MINOR_LLM_PRESET`. If no preset is set or the provider is unavailable, fail closed with `503 minor_backend_unavailable`. Nebius is blocked for minors until it confirms in writing, because Services Agreement §4.1.6 lists "personal data of minors" as Sensitive Personal Data. An email to privacy@nebius.com was drafted on 2026-10-26. Enable ZDR either way. Claude is a later option.
+- [x] T050 Route minors only to an LLM preset that is approved for minors. Configure the approved preset with `CHAVRUTA_MINOR_LLM_PRESET`. If no preset is set or the provider is unavailable, fail closed with `503 minor_backend_unavailable`. Nebius is blocked for minors until it confirms in writing, because Services Agreement §4.1.6 lists "personal data of minors" as Sensitive Personal Data. The founder emailed privacy@nebius.com on 2026-10-26 and is awaiting a reply. Enable ZDR either way. Claude is a later option.
 - [x] T051 Wire the crisis gate before generation for minors, add the `crisis` payload, and add alert dispatch through `email_pool` plus the `crisis_alerts` row.
 - [x] T052 Wire `audience_minor` into all modes. Do not offer the shut/responsa walkthrough to minors: its prompt says "rule clearly le-ma'aseh", and the minor block only overrides that text, which is still present.
 - [x] T053 Wire the effective denylist (org ∪ parents) into `Query`, and apply the post-filter. Per the R10 investigation, `work_id` is a tier slug (15 values), not a book. Use two mechanisms:
@@ -80,10 +80,10 @@ Rules for every task:
 
 ## Wave 3: frontend (`web/`)
 
-- [ ] T060 Signup with birth month/year, the child-friendly disclosure, and the `age_required` and `adult_terms_required` flows.
-- [ ] T061 Hide pricing, coupons and referral when `me.is_minor`. Add a `CrisisCard`.
-- [ ] T062 School page: join request by account ID, content settings, safety contacts, alerts. Do not modify the student-code button.
-- [ ] T063 Parent page, served at `/family`, not `/parent`, because `/parent` is proxied to the API in `nginx.conf` and `next.config.mjs`.
+- [x] T060 Signup with birth month/year, the child-friendly disclosure, and the `age_required` and `adult_terms_required` flows.
+- [x] T061 Hide pricing, coupons and referral when `me.is_minor`. Add a `CrisisCard`.
+- [x] T062 School page: join request by account ID, content settings, safety contacts, alerts. Do not modify the student-code button.
+- [x] T063 Parent page, served at `/family`, not `/parent`, because `/parent` is proxied to the API in `nginx.conf` and `next.config.mjs`.
 
 ## Wave 4: release gates
 
@@ -97,3 +97,36 @@ Rules for every task:
 - [x] T081 Delete `feedback` rows written by minors on the minor schedule. Today they are redacted but have no `minor_until`.
 - [x] T082 `minors.correct_age` checks only the actor kind. Its callers in Wave 2 must verify an active `parent_links` row or the operator gate.
 - [ ] T083 The crisis phrase-layer metrics (recall 68/71, false positives 0/66) come from sets written by the same agent that wrote the phrase layer. Build an independent set before relying on them.
+
+## Parental consent for minors without a school (founder decision 2026-10-26, option 2)
+
+A minor who is not linked to a school can study only after a parent has consented. Either of these counts as consent:
+- an active `parent_links` row, where the parent has an account; or
+- a parent who approved through an emailed consent link, without needing an account.
+
+Until a parent consents, message-sending routes return `403 parental_consent_required`. A school link also satisfies consent, because the school holds parental consent.
+
+- [x] T090 Backend: add a `parental_consents` table with these columns:
+  - child id;
+  - parent email (kept only as proof of consent);
+  - token hash;
+  - status (`pending`, `approved`, `declined`, `expired` or `revoked`);
+  - `sent_at`, `decided_at`, plus the IP and user agent at decision time, as proof.
+
+  Endpoints:
+  - `POST /account/parental-consent {parent_email}`: the minor requests consent. Rate-limited, with resend and a 7-day expiry. The parent address must not be the child's own.
+  - `GET /consent/{token}`: public. Shows what the parent is agreeing to: the minor rules, what is collected, the 60-day retention, no training, and alerts.
+  - `POST /consent/{token} {decision}`: records the parent's decision.
+  - `DELETE /account/parental-consent`: the parent revokes through a link in the email. The child cannot revoke.
+
+  Gate this into `require_auth` / `minors.gate_error`. Send the parent email through `app/email_pool.py`. It is a transactional product email: in Hebrew, with no marketing. Add the `/consent` prefix to `nginx.conf`, `next.config.mjs` and `api.ts`, and purge the rows with the child.
+- [x] T091 Frontend: on the age step, a 12–17 user without a school link enters a parent's email. Show a "waiting for parental consent" state with a resend button. Add a public `/consent/[token]` page.
+- [x] T092 Update the legal drafts: terms 5.1(c) and privacy §7 now allow an unlinked minor once a parent consents by email. Add a parent-consent text and a consent-email template.
+- [x] T093 Under-12 refusal: when `POST /account/age` refuses with `under_minimum_age`, delete the account immediately (`purge_owner` plus the Supabase user). Do not leave an account that can only sign out. The frontend shows that the account was deleted. Founder decision 2026-10-26.
+- [ ] T094 Add a frontend revoke page at `/parent-consent/revoke/[token]` that calls `POST /consent/revoke/{revoke_token}`. The endpoint is public and takes no body. It returns `{status:"revoked"}`, 404 when the token is unknown, and 409 `already_decided`.
+
+**State at pause, 2026-10-26:**
+- Committed and pushed up to `2d0781e`.
+- Not yet committed: T050, T090, T091, T093, the frontend (T060–T063), and the legal drafts.
+- Next steps: T094, then a full test run, then a commit.
+- Minors stay blocked until a preset is added to `APPROVED_MINOR_PRESETS`. The list is empty while we wait for Nebius to reply.

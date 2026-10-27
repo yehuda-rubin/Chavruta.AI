@@ -1,0 +1,53 @@
+id: bagrut-toshba-mishnah-halacha
+title: בגרות בתושב"ע — משנה והשתלשלות ההלכה (ברטנורא, רמב"ם, שולחן ערוך ומשנה ברורה, 3–5 יח"ל)
+title_en: Bagrut in Toshba (Oral Law) — Mishnah & Halachic Progression (Bartenura, Rambam, Shulchan Arukh, 3–5 Units)
+genre: bagrut-toshba-mishnah-halacha
+mode: bagrut
+audience: school
+subject: toshba
+bagrut_track: mmd
+bagrut_units: 3-5
+grade_band: j-l
+age_range: י–יב — גיל 15–18 (תיכון / בגרות)
+description: >
+  תבנית מתכונת, מחוון וסיכום לבחינת הבגרות בתורה שבעל פה (תושב"ע — משנה והלכה, 3–5 יח"ל).
+  ממוקדת בפירוק מבני של המשנה (מקרה, דין, טעם ומחלוקת תנאים), ביאור המשנה לפי ר"ע מברטנורא ופירוש
+  המשנה להרמב"ם, ומעקב אחר השתלשלות ההלכה מן המשנה והגמרא אל משנה תורה להרמב"ם, השולחן ערוך
+  ונושאי כליו (רמ"א, משנה ברורה).
+when_to_use: >
+  בחר תבנית זו עבור תלמידים או מורים בתושב"ע (משנה והלכה — שבת ומועדים, אישות ומשפחה, כשרות,
+  נזיקין, צדקה ומשפט, מצוות התלויות בארץ) המבקשים מבחן מתכונת, מחוון ניקוד או דף סיכום על
+  יחידות המשנה והשתלשלות ההלכה.
+keywords:
+  - בגרות
+  - תושב"ע
+  - תורה שבעל פה
+  - משנה
+  - הלכה
+  - ברטנורא
+  - רמב"ם
+  - שולחן ערוך
+  - משנה ברורה
+  - מקרה דין וטעם
+  - השתלשלות ההלכה
+  - 5391
+  - 5381
+example_topics:
+  - הלכות שבת ומועדים במשנה ובשולחן ערוך
+  - הלכות אישות ומשפחה (קידושין, כתובות)
+  - הלכות כשרות, ברכות ותפילה
+  - הלכות נזיקין, השבת אבידה וצדקה
+example_queries:
+  - תכין לי מתכונת בגרות בתושב"ע משנה והלכה עם ברטנורא ושולחן ערוך
+  - סיכום משנה לבגרות מקרה דין וטעם והשתלשלות ההלכה
+  - שאלות בגרות במשנה ובהלכה עם מחוון ניקוד
+structure: פרק א׳ (פירוק משניות — מקרה, דין, טעם ומחלוקת) → פרק ב׳ (פרשנות המשנה — ברטנורא ורמב"ם) → פרק ג׳ (השתלשלות ההלכה לשולחן ערוך ומשנה ברורה) → מחוון
+structure_en: Part I (Mishnah Breakdown — Case, Ruling, Rationale & Dispute) → Part II (Mishnah Commentary — Bartenura & Rambam) → Part III (Halachic Progression to Shulchan Arukh & Mishnah Berurah) → Rubric
+files:
+  exam: TEMPLATE_exam.md
+  rubric: TEMPLATE_rubric.md
+  summary: TEMPLATE_summary.md
+files_en:
+  exam: TEMPLATE_exam_en.md
+  rubric: TEMPLATE_rubric_en.md
+  summary: TEMPLATE_summary_en.md

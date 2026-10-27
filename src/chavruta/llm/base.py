@@ -33,6 +33,14 @@ def reset_source_note(token) -> None:
     _SOURCE_NOTE.reset(token)
 
 
+def append_minor_safety(system: str, lang: str = "he") -> str:
+    """Append the minor safety rules (Spec 009) when running under a minor's AudienceScope."""
+    from chavruta.corpus import audience
+    from chavruta.generation.grounded import apply_audience
+
+    return apply_audience(system, "en" if (lang or "").startswith("en") else "he", audience.current().minor)
+
+
 @dataclass
 class SourceBlock:
     """One retrieved source the model is allowed to use, with a stable marker for citation."""
@@ -62,6 +70,7 @@ class Turn:
     refs: list[str] = field(default_factory=list)
     lesson: bool = False
     sourcesheet: bool = False
+    bagrut: bool = False
     files: list[dict] = field(default_factory=list)
     citations: list[dict] = field(default_factory=list)
 

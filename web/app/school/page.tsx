@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Icon } from "@/components/Icon";
+import { SchoolMinors } from "@/components/SchoolMinors";
 import { api, type OrgInvite, type OrgPanel } from "@/lib/api";
 import type { Lang } from "@/lib/types";
 import { tr } from "@/lib/i18n";
@@ -430,6 +431,9 @@ export default function SchoolPanel() {
           </tbody>
         </table>
       </section>
+
+      {/* School-track minors (spec 009): join requests, content settings, safety contacts, alerts. */}
+      {!panel.is_demo && <SchoolMinors lang={lang} isAdmin={isAdminRole} members={panel.members} />}
 
       {isAdminRole && (
         <section className="glass rounded-2xl p-4">

@@ -182,7 +182,7 @@ def test_classifier_error_answers_normally_and_logs_without_text(env, monkeypatc
     monkeypatch.setattr(gate, "_classifier_call", lambda: boom)
     secret = "an ordinary question about shabbat candles"
     with caplog.at_level("WARNING", logger="chavruta.crisis"):
-        resp = api._run_query(secret, "en", "qa", [], owner_id="kid")
+        resp = api._run_query(secret, "en", "qa", [], owner_id="kid", llm=object())
     assert resp.crisis is None and resp.answer == "generated answer" and env.calls["impl"] == 1
     assert _alerts() == [] and env.sent == []
     assert crisis.SCREEN_UNAVAILABLE_TAG in caplog.text and "shabbat" not in caplog.text
@@ -191,7 +191,7 @@ def test_classifier_error_answers_normally_and_logs_without_text(env, monkeypatc
 def test_benign_sensitive_study_question_gets_a_normal_answer(env, monkeypatch):
     _minor()
     monkeypatch.setattr(gate, "_classifier_call", lambda: (lambda p: '{"category": null}'))
-    resp = api._run_query(BENIGN, "en", "qa", [], owner_id="kid")
+    resp = api._run_query(BENIGN, "en", "qa", [], owner_id="kid", llm=object())
     assert resp.crisis is None and resp.answer == "generated answer"
     assert _alerts() == [] and env.sent == []
 
@@ -199,7 +199,7 @@ def test_benign_sensitive_study_question_gets_a_normal_answer(env, monkeypatch):
 def test_gate_failure_never_blocks_the_request(env, monkeypatch):
     _minor()
     monkeypatch.setattr(crisis, "check", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("bug")))
-    resp = api._run_query(BENIGN, "en", "qa", [], owner_id="kid")
+    resp = api._run_query(BENIGN, "en", "qa", [], owner_id="kid", llm=object())
     assert resp.crisis is None and resp.answer == "generated answer"
 
 

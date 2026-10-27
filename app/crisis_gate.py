@@ -26,7 +26,7 @@ import time
 from typing import Any, Callable, Optional
 
 import app.db as db
-from app import crisis, minors, orgs
+from app import crisis, minor_llm, minors, orgs
 
 _log = logging.getLogger("chavruta.crisis")
 
@@ -34,7 +34,6 @@ _log = logging.getLogger("chavruta.crisis")
 _ATTACHMENT_MARKERS = ("\n\n## מקורות שצירף המשתמש", "\n\n## Sources the user attached")
 
 _RETRY_DELAYS_S = (0.0, 5.0, 30.0)     # three attempts per recipient; patched to zero in tests
-_NOT_APPROVED_HOSTS = ("nebius",)       # providers that must never read a minor's text
 _classifier_note_logged = False
 
 
@@ -58,24 +57,15 @@ def _note_classifier_disabled(reason: str) -> None:
 
 def _classifier_call() -> Optional[Callable[[str], str]]:
     """`llm_call(prompt) -> str` for the minors-approved preset, or None for phrase-layer-only."""
-    name = os.environ.get("CHAVRUTA_MINOR_LLM_PRESET", "").strip()
-    if not name:
-        _note_classifier_disabled("CHAVRUTA_MINOR_LLM_PRESET not set")
+    backend, why = minor_llm.approved_backend()      # the same resolution generation uses (T050)
+    if backend is None:
+        _note_classifier_disabled(why)
         return None
     try:
         from chavruta.llm.cloud import CloudLLM
-        from chavruta.llm.presets import resolve
 
-        preset = resolve(name)
-        key = os.environ.get("CHAVRUTA_MINOR_LLM_API_KEY", "").strip()
-        if preset is None or not key:
-            _note_classifier_disabled("preset unknown or no CHAVRUTA_MINOR_LLM_API_KEY")
-            return None
-        if any(h in preset.base_url.lower() for h in _NOT_APPROVED_HOSTS):
-            _note_classifier_disabled("preset is hosted by a provider not approved for minors")
-            return None
-        llm = CloudLLM(preset.model, preset.base_url, key, timeout_s=10.0, max_retries=0,
-                       min_output_tokens=preset.min_output_tokens)
+        llm = CloudLLM(backend.model, backend.base_url, backend.api_key, timeout_s=10.0, max_retries=0,
+                       min_output_tokens=backend.min_output_tokens)
 
         def call(prompt: str) -> str:
             choice, _usage = llm._complete([{"role": "user", "content": prompt}], max_tokens=200,

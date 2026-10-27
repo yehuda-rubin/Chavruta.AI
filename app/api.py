@@ -19,6 +19,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import NamedTuple
@@ -514,12 +515,13 @@ import app.accounts as accounts
 import app.orgs as orgs
 import app.content_settings as content_settings
 import app.parents as parents
+import app.parental_consent as parental_consent
 import app.auth_supabase as sb
 import app.billing.service as billing
 import app.coupons as coupons
 import app.devhelpers as devhelpers
 import app.db as db
-from app import crisis_gate, minors, plans
+from app import crisis_gate, minor_llm, minors, plans
 from app.billing import payplus
 from app.jobs import JobCancelledError, is_cancelled, registry as jobs
 
@@ -670,6 +672,9 @@ async def lifespan(app: FastAPI):
 from fastapi import Depends, Header  # noqa: E402
 
 from app.security import (  # noqa: E402
+    _SlidingWindow,
+    _client_ip,
+    account_email,
     legacy_adult,
     UnsafeProviderURL,
     body_size_middleware,
@@ -867,7 +872,7 @@ def _attach_template_bodies(pl: dict, lang: str = "he") -> None:
     files_en = pl.get("files_en") or {}
     dir_str = pl.get("dir") or (f"lessons/templates/{pl.get('id')}" if pl.get("id") else "")
     d = _REPO_DIR / dir_str
-    for role in ("full_lesson", "lesson_flow", "source_sheet"):
+    for role in ("full_lesson", "lesson_flow", "source_sheet", "exam", "rubric", "summary"):
         fn = None
         if lang == "en":
             fn = files_en.get(role)
@@ -888,6 +893,77 @@ def _attach_template_bodies(pl: dict, lang: str = "he") -> None:
                 pl[f"_{role}"] = path.read_text(encoding="utf-8")
             except Exception:
                 _log.warning("template body unreadable (role=%s, file=%s)", role, fn)
+
+
+def _select_bagrut_template(topic: str, subject: str, track: str, units: str, lang: str = "he") -> dict | None:
+    """Pick the best-matching Bagrut structural template (`mode == 'bagrut'`) from the template RAG,
+    or fall back to scanning `lessons/templates/bagrut-*/manifest.yaml` on disk if Qdrant is offline."""
+    t_low = (topic or "").lower()
+    wants_unseen = any(kw in t_low for kw in ("אנסין", "קטע שלא נלמד", "unseen"))
+    wants_mavo = any(kw in t_low for kw in ("מבוא לתושב", "מבוא לתורה שבעל פה", "שרשרת המסירה", "עריכת המשנה", "oral law intro"))
+    wants_case = any(kw in t_low for kw in ("אירועון", "מקרה מבחן", "case study", "halachic case"))
+    wants_bekiut = any(kw in t_low for kw in ("בקיאות", "2551", "bekiut"))
+    wants_rishonim = any(kw in t_low for kw in ("תוספות", "ראשונים", "6281", "tosafot", "rishonim"))
+
+    def _score_manifest(pl: dict) -> int:
+        score = 0
+        tid = str(pl.get("id") or "")
+        if pl.get("subject") == subject:
+            score += 20
+        b_track = str(pl.get("bagrut_track") or "both")
+        if b_track == track:
+            score += 10
+        elif b_track == "both":
+            score += 5
+        if wants_unseen and "unseen" in tid:
+            score += 25
+        if wants_mavo and "mavo" in tid:
+            score += 25
+        if wants_case and "case-study" in tid:
+            score += 25
+        if wants_bekiut and "bekiut" in tid:
+            score += 25
+        if wants_rishonim and "rishonim" in tid:
+            score += 25
+        for kw in (pl.get("keywords") or []):
+            if str(kw).lower() in t_low:
+                score += 2
+        return score
+
+    try:
+        from qdrant_client import models
+        client = _templates_client()
+        if client.collection_exists(_TPL_COLLECTION):
+            must = [models.FieldCondition(key="mode", match=models.MatchValue(value="bagrut"))]
+            if subject:
+                must.append(models.FieldCondition(key="subject", match=models.MatchValue(value=subject)))
+            vec = _get_pipeline().embedding.embed_query(topic).dense
+            res = client.query_points(collection_name=_TPL_COLLECTION, query=vec, limit=8,
+                                      query_filter=models.Filter(must=must), with_payload=True)
+            if res.points:
+                best_p = max(res.points, key=lambda p: _score_manifest(p.payload or {}))
+                pl = dict(best_p.payload or {})
+                _attach_template_bodies(pl, lang=lang)
+                return pl
+    except Exception:
+        pass
+
+    # Deterministic local disk fallback over lessons/templates/bagrut-*/manifest.yaml
+    try:
+        import yaml
+        candidates = []
+        for mp in sorted((_REPO_DIR / "lessons" / "templates").glob("bagrut-*/manifest.yaml")):
+            m = yaml.safe_load(mp.read_text(encoding="utf-8"))
+            if isinstance(m, dict) and m.get("mode") == "bagrut":
+                m["dir"] = f"lessons/templates/{mp.parent.name}"
+                candidates.append(m)
+        if candidates:
+            best_m = max(candidates, key=_score_manifest)
+            _attach_template_bodies(best_m, lang=lang)
+            return best_m
+    except Exception:
+        pass
+    return None
 
 
 def _select_template(topic: str, audience: str | None = None, grade_band: str | None = None, lang: str = "he"):
@@ -2060,6 +2136,8 @@ def _wants_full_lesson(question: str, llm=None) -> bool:
         return False
     if not _LESSON_KEYWORD_RE.search(clean):
         return False
+    if llm is None and audience_ctx.current().minor:
+        return False        # never the default classifier provider for a minor (spec 009 T050)
     llm = llm or _classifier_llm() or _get_pipeline().llm
     try:
         prompt = GroundedPrompt(system=_WANTS_LESSON_SYSTEM, sources=[], question=clean, bare=True)
@@ -2439,7 +2517,7 @@ def _run_parsha(question: str, lang: str, history=None, owner_id: str = "local",
 
     all_hits = _dedup_hits(specific_hits + boundary_hits + haftarah_hits)
 
-    if _wants_full_lesson(raw_question):
+    if _wants_full_lesson(raw_question, llm=_minor_only(llm)):
         tpl = _select_template(topic, "yeshiva", "", lang=lang)
         return _generate_lesson_from_hits(topic, _cap_hits(all_hits, _LESSON_HIT_CAP, min_commentaries=15),
                                           lang, he, audience="yeshiva", grade_band="", length="medium",
@@ -2662,7 +2740,7 @@ def _run_daf_yomi(question: str, lang: str, history=None, owner_id: str = "local
         tract, daf, amudim, explicit = info.tractate, info.daf, ["a", "b"], False
 
     topic = f"{tract} {daf}" + (amudim[0] if explicit and len(amudim) == 1 else "")
-    wants_lesson = _wants_full_lesson(raw_question)
+    wants_lesson = _wants_full_lesson(raw_question, llm=_minor_only(llm))
 
     # (1) floor: the opening boundary with the two commentators every daf has.
     boundary_hits = _daf_hits(tract, daf, amudim, ["rashi", "tosafot"], whole=False)
@@ -2790,6 +2868,22 @@ def _sourcesheet_mode_enabled(owner_id: str) -> bool:
     if owner_id and owner_id in {o.strip() for o in raw.split(",") if o.strip()}:
         return True
     return bool(owner_id) and devhelpers.has_feature(owner_id, "sourcesheet")
+
+
+def _bagrut_mode_enabled(owner_id: str) -> bool:
+    """Bagrut mode's rollout gate (Spec 010).
+
+    CHAVRUTA_BAGRUT_BETA_OWNERS is a comma-separated allowlist of owner_ids, or "*" once it is
+    open to everyone; empty (the default) means nobody except admins and devhelpers with 'bagrut'.
+    """
+    if _is_admin(owner_id):
+        return True
+    raw = os.environ.get("CHAVRUTA_BAGRUT_BETA_OWNERS", "").strip()
+    if raw == "*":
+        return True
+    if owner_id and owner_id in {o.strip() for o in raw.split(",") if o.strip()}:
+        return True
+    return bool(owner_id) and devhelpers.has_feature(owner_id, "bagrut")
 
 
 def _sheet_amud_segment_refs(ref: str) -> list[str]:
@@ -3087,6 +3181,373 @@ def _run_sourcesheet(
     )
 
 
+def _run_bagrut(
+    question: str,
+    lang: str,
+    history: list[Turn] | None = None,
+    *,
+    bagrut_subject: str = "",
+    bagrut_track: str = "",
+    bagrut_units: str = "",
+    bagrut_action: str = "",
+    owner_id: str = "local",
+    llm=None,
+) -> QueryResponse:
+    """Dedicated Bagrut Mode path (Spec 010):
+    - Guards against unattached past Ministry of Education exam requests (Principle I).
+    - Resolves subject (tanakh / gemara / toshba), track (mmd / mamlachti), units (2 / 3 / 5),
+      and action (practice / check / summary / exam).
+    - Retrieves verified corpus sources with base-source promotion and core commentator boosting.
+    - Selects a clean-room structural Bagrut template (`mode == 'bagrut'`).
+    - Generates either downloadable Bagrut files (`summary` / `exam` + `rubric`) or an interactive
+      practice / rubric-grading chat turn (`practice` / `check`).
+    """
+    from chavruta.bagrut.engine import (
+        boost_bagrut_hits,
+        build_bagrut_chat_messages,
+        build_bagrut_file_job_md,
+        is_unattached_past_exam_query,
+        resolve_bagrut_params,
+        split_bagrut_files,
+    )
+    from chavruta.corpus.refs import (
+        hebrew_display_ref,
+        license_for_ref,
+        talmud_english_display_ref,
+        talmud_hebrew_display_ref,
+        with_ref_variants,
+    )
+    from chavruta.generation import grounded as gr_mod
+
+    pipeline = _get_pipeline()
+    llm = llm or pipeline.llm
+    he = (lang or "") != "en"
+    has_attachments = ("## מקורות שצירף המשתמש" in question) or ("## Sources the user attached" in question)
+
+    # Principle I Anti-Hallucination Gate: refuse to guess unattached past Ministry exams by year/number
+    if is_unattached_past_exam_query(question, has_attachments=has_attachments):
+        msg = (
+            "שאלוני הבגרות הרשמיים של משרד החינוך לפי שנים וסמלי שאלון אינם שמורים במאגר המקורות (עקרון I — איננו משחזרים שאלונים מוגנים מהזיכרון). "
+            "אנא העתק/י לכאן את נוסח השאלה (או העלה קובץ שלה), או ציין/י את הפרק, הפסוקים או הסוגיה בגמרא/משנה — ונפתור, נתרגל או נבנה מתכונת מלאה על בסיס המקורות המאומתים!"
+            if he
+            else "Official past Ministry of Education Bagrut questionnaires by year/code are not stored in the corpus (Principle I — we never reconstruct past exams from memory). "
+                 "Please paste the question text (or attach a file), or specify the chapter, verses, or Talmudic sugya — and we will practice, grade, or build a full mock exam from the verified sources!"
+        )
+        return QueryResponse(answer=msg, citations=[], grounded=False, intent="bagrut", files=[])
+
+    params = resolve_bagrut_params(
+        question,
+        history=history,
+        subject=bagrut_subject,
+        track=bagrut_track,
+        units=bagrut_units,
+        action=bagrut_action,
+    )
+    subj = params["subject"]
+    trk = params["track"]
+    unt = params["units"]
+    act = params["action"]
+
+    user_turns = [
+        (getattr(h, "text", "") or "").strip()
+        for h in (history or [])
+        if getattr(h, "role", "user") == "user" and (getattr(h, "text", "") or "").strip()
+    ]
+    carried = _carried_refs(history)
+    clean_q = " ".join(question.split()).strip()
+
+    # Retrieve sources tailored to Bagrut mode
+    top_k = 24 if act in ("summary", "exam") else 14
+    if _EMPTY_META_SOURCES_RE.match(clean_q) and carried:
+        targets = with_ref_variants(carried)
+        hits = _fetch_ranked_hits(targets, limit=len(targets) * 2) if hasattr(pipeline, "retriever") else []
+        weak = not hits
+    else:
+        anchor_q = (user_turns[0] + " " + question) if (user_turns and act in ("practice", "check")) else question
+        q = Query(text=anchor_q, lang=lang or None, intent=Intent.BAGRUT)
+        try:
+            rq = pipeline._resolve_query(q, history=history)
+        except TypeError:
+            rq = pipeline._resolve_query(q)
+        if act in ("practice", "check"):
+            _conversation_signals(user_turns, question, rq, history)
+        lang = rq.lang or lang or "he"
+        he = lang != "en"
+        res = pipeline.retriever.retrieve(rq, top_k=top_k)
+        hits = list(res.hits)
+        weak = res.is_empty
+
+        # Promote canonical base sources (verses / Gemara daf / Mishnah) to the front
+        if getattr(rq, "named_refs", None) and hasattr(pipeline.retriever, "base_sources_for_refs"):
+            try:
+                base_hits = pipeline.retriever.base_sources_for_refs(rq.named_refs, rq.lang or "he")
+                if base_hits:
+                    seen_ids = {getattr(b, "chunk_id", id(b)) for b in base_hits}
+                    hits = list(base_hits) + [h for h in hits if getattr(h, "chunk_id", id(h)) not in seen_ids]
+                    weak = False
+            except Exception:
+                pass
+
+    if not hits and (has_attachments or len(clean_q) >= 140):
+        from chavruta.retrieval.base import RankedHit
+        user_ref = "מקור שצורף בשאלה" if he else "User-Provided Source"
+        hits = [
+            RankedHit(
+                chunk_id="user_provided_1",
+                ref=user_ref,
+                text=question.strip(),
+                score=1.0,
+                commentator_id=None,
+                work_id=subj,
+                lang=lang or "he",
+                text_he=question.strip() if he else "",
+                text_en=question.strip() if not he else "",
+                license="user_provided",
+                version_title="טקסט שצורף על ידי המשתמש" if he else "User-provided text",
+            )
+        ]
+        weak = False
+
+    hits = boost_bagrut_hits(hits, subj, trk)
+    tpl = _select_bagrut_template(question, subj, trk, unt, lang=lang)
+
+    # ── Path A: Downloadable Bagrut Files (Summary Booklet or Mock Exam + Rubric) ──
+    if act in ("summary", "exam"):
+        job = build_bagrut_file_job_md(question, hits, lang, params=params, tpl=tpl, history=history)
+        raw, fetched = llm.request(
+            job,
+            lang=lang,
+            token_budget=_max_tokens_for(Intent.LESSON, getattr(pipeline, "profile", None)),
+        )
+        if is_degrade_message(raw):
+            msg = raw.strip() or (
+                "לא הצלחתי להפיק את קובצי הבגרות כרגע — נסו שוב."
+                if he
+                else "Couldn't build the Bagrut files right now — please try again."
+            )
+            return QueryResponse(answer=msg, citations=[], grounded=False, intent="bagrut", files=[])
+
+        hits = hits + list(fetched or [])
+        if not hits:
+            msg = "לא נמצאו מקורות לנושא זה בארון הספרים." if he else "No sources found for this topic."
+            return QueryResponse(answer=msg, citations=[], grounded=False, intent="bagrut", files=[])
+
+        if "===CLARIFY===" in raw:
+            qs = raw.split("===CLARIFY===", 1)[1]
+            qs = _strip_instruction_echo(qs, he)
+            qs = _strip_markers(_fix_bleeding_sentences(qs, he, llm), he=he).strip()
+            return QueryResponse(answer=qs, citations=[], grounded=False, intent="bagrut", files=[])
+
+        raw, _ = gr_mod.expand_quote_refs(
+            raw, {i: (getattr(h, "text", "") or "").strip() for i, h in enumerate(hits, 1)}
+        )
+        parts = split_bagrut_files(raw)
+        sum_body = parts.get("BAGRUT_SUMMARY", "")
+        exam_body = parts.get("BAGRUT_EXAM", "")
+        rubric_body = parts.get("BAGRUT_RUBRIC", "")
+        order_str = parts.get("ORDER", "")
+
+        if act == "summary" and not sum_body:
+            sum_body = raw
+        elif act == "exam" and not (exam_body or rubric_body):
+            exam_body = raw
+
+        combined_prose = "\n".join(p for p in (sum_body, exam_body, rubric_body) if p)
+        nums = [int(n) for n in re.findall(r"S(\d+)", order_str)] or gr_mod.marker_numbers_in(combined_prose)
+        if not nums and hits:
+            nums = list(range(1, min(len(hits), 8) + 1))
+
+        used: list[CitationOut] = []
+        seen: set[int] = set()
+        for i in nums:
+            if 1 <= i <= len(hits) and i not in seen:
+                seen.add(i)
+                h = hits[i - 1]
+                he_text = (getattr(h, "text_he", "") or "").strip()
+                en_text = (getattr(h, "text_en", "") or "").strip()
+                if not he_text and not en_text:
+                    he_text = getattr(h, "text", "") or ""
+                ref_he = hebrew_display_ref(h.ref) or talmud_hebrew_display_ref(h.ref) or ""
+                ref_en = talmud_english_display_ref(h.ref) or h.ref
+                lic = getattr(h, "license", "") or license_for_ref(h.ref, "he" if he else "en", getattr(h, "deep_link", "") or "")[0]
+                ver = getattr(h, "version_title", "") or license_for_ref(h.ref, "he" if he else "en", getattr(h, "deep_link", "") or "")[1]
+                used.append(
+                    CitationOut(
+                        ref=ref_en if not he else h.ref,
+                        ref_he=ref_he if he else (ref_he or ""),
+                        text_he=he_text,
+                        text_en=en_text,
+                        commentator=(getattr(h, "commentator_id", "") or ""),
+                        deep_link=(getattr(h, "deep_link", "") or ""),
+                        license=lic or "",
+                        version_title=ver or "",
+                    )
+                )
+        if 'drop_scoped' in globals():
+            used = drop_scoped(used, work_ids=work_ids_by_ref(hits))
+
+        def _clean_section(txt: str) -> str:
+            if not txt.strip():
+                return ""
+            t = _strip_instruction_echo(txt, he)
+            t = _strip_markers(_fix_bleeding_sentences(t, he, llm), he=he)
+            return gr_mod.sanitize_priestly_terms(t, question=question, sources=hits).strip()
+
+        sum_body = _clean_section(sum_body)
+        exam_body = _clean_section(exam_body)
+        rubric_body = _clean_section(rubric_body)
+
+        ss = "\n\n".join(_source_sheet_entry(n, c, lang=lang) for n, c in enumerate(used, 1)) if used else ""
+        if used:
+            ss += "\n\n" + _license_table(used, he)
+            if notice := rights.document_license_notice([(c.ref, c.license) for c in used], lang):
+                ss += "\n\n" + notice
+
+        subj_label_he = {"tanakh": "תנ\"ך", "gemara": "גמרא", "toshba": "תושב\"ע"}.get(subj, "בגרות")
+        subj_label_en = {"tanakh": "Tanakh", "gemara": "Gemara", "toshba": "Toshba"}.get(subj, "Bagrut")
+        tag = f" · {subj_label_he} ({unt} יח\"ל)" if he else f" · {subj_label_en} ({unt}u)"
+
+        raw_files: list[tuple[str, str, str]] = []
+        if ss.strip():
+            raw_files.append(
+                (
+                    "דף_מקורות_לבגרות.doc" if he else "bagrut_source_sheet.doc",
+                    f"דף מקורות לבגרות{tag}" if he else f"Bagrut Source Sheet{tag}",
+                    ss,
+                )
+            )
+        if act == "summary":
+            if sum_body:
+                raw_files.append(
+                    (
+                        "סיכום_והכנה_לבגרות.doc" if he else "bagrut_study_summary.doc",
+                        f"חוברת סיכום ושאלות חזרה{tag}" if he else f"Bagrut Study Summary{tag}",
+                        sum_body,
+                    )
+                )
+        else:
+            if exam_body:
+                raw_files.append(
+                    (
+                        "שאלון_מתכונת_לבגרות.doc" if he else "bagrut_mock_exam.doc",
+                        f"שאלון מתכונת לבגרות{tag}" if he else f"Bagrut Mock Exam{tag}",
+                        exam_body,
+                    )
+                )
+            if rubric_body:
+                raw_files.append(
+                    (
+                        "מחוון_תשובות_וניקוד.doc" if he else "bagrut_grading_rubric.doc",
+                        f"מחוון תשובות וניקוד{tag}" if he else f"Bagrut Grading Rubric{tag}",
+                        rubric_body,
+                    )
+                )
+
+        files = [FileOut(name=n, title=t, content=c) for n, t, c in raw_files if c.strip()]
+        lesson_id = ""
+        if files:
+            try:
+                import uuid
+                lesson_id = uuid.uuid4().hex[:12]
+                db.save_lesson(
+                    lesson_id,
+                    question[:120].strip(),
+                    "school",
+                    "j-l",
+                    f"bagrut_{act}",
+                    lang,
+                    [f.model_dump() for f in files],
+                    [c.model_dump() for c in used],
+                    owner_id=owner_id,
+                )
+            except Exception:
+                lesson_id = ""
+                _log.exception("saving bagrut files to library failed")
+
+        return QueryResponse(
+            answer="",
+            citations=used,
+            grounded=bool(used),
+            intent="bagrut",
+            files=files,
+            lesson_id=lesson_id,
+        )
+
+    # ── Path B: Interactive Practice & Rubric Answer Checking (Chat) ──
+    sys_prompt, usr_prompt = build_bagrut_chat_messages(
+        question, hits, lang, params=params, tpl=tpl, history=history, weak=weak
+    )
+    job_md = f"lang: {lang}\n\n## SYSTEM\n{sys_prompt}\n\n{usr_prompt}"
+    raw, fetched = llm.request(
+        job_md,
+        lang=lang,
+        token_budget=_max_tokens_for(Intent.EXPLAIN, getattr(pipeline, "profile", None)),
+    )
+    hits = hits + list(fetched or [])
+    if not hits:
+        msg = (
+            "לא נמצאו מקורות מתאימים לשאלת הבגרות בארון הספרים. אנא ציין/י את הפרק והפסוקים בתנ\"ך או את המסכת והדף בגמרא/משנה."
+            if he
+            else "No matching sources were found in the library. Please specify the biblical chapter/verses or Talmudic tractate and daf."
+        )
+        return QueryResponse(answer=msg, citations=[], grounded=False, intent="bagrut", files=[])
+
+    raw, _ = gr_mod.expand_quote_refs(
+        raw, {i: (getattr(h, "text", "") or "").strip() for i, h in enumerate(hits, 1)}
+    )
+    used = []
+    seen = set()
+    for i in gr_mod.marker_numbers_in(raw):
+        if 1 <= i <= len(hits) and i not in seen:
+            seen.add(i)
+            h = hits[i - 1]
+            lic = getattr(h, "license", "") or license_for_ref(h.ref, "he" if he else "en", getattr(h, "deep_link", "") or "")[0]
+            ver = getattr(h, "version_title", "") or license_for_ref(h.ref, "he" if he else "en", getattr(h, "deep_link", "") or "")[1]
+            used.append(
+                CitationOut(
+                    ref=h.ref,
+                    ref_he=(hebrew_display_ref(h.ref) or "") if he else "",
+                    text_he=(getattr(h, "text", "") or ""),
+                    text_en=(getattr(h, "text_en", "") or ""),
+                    commentator=(getattr(h, "commentator_id", "") or ""),
+                    deep_link=(getattr(h, "deep_link", "") or ""),
+                    license=lic or "",
+                    version_title=ver or "",
+                )
+            )
+    if 'drop_scoped' in globals():
+        used = drop_scoped(used, work_ids=work_ids_by_ref(hits))
+    raw = _strip_instruction_echo(raw, he)
+    raw, note = _split_source_note(raw)
+    clean = _strip_markers(_fix_bleeding_sentences(raw, he, llm), he=he)
+    clean = strip_mudgash_label(clean)
+    clean = strip_control_codes(clean)
+
+    caveats: list[str] = []
+    try:
+        bad_q = gr_mod.unverified_quotes(clean, hits)
+    except Exception:
+        bad_q = []
+    if bad_q:
+        caveats.append(
+            ("הערה: ציטוט/ים שלא נמצאו במקורות שנשלפו: «" + "», «".join(bad_q[:2]) + "» — יש לאמת.")
+            if he
+            else ("Note: quote(s) not found in the retrieved sources: «" + "», «".join(bad_q[:2]) + "» — verify.")
+        )
+
+    out = QueryResponse(
+        answer=clean,
+        citations=used,
+        grounded=bool(used),
+        intent="bagrut",
+        files=[],
+        source_note=note,
+        caveats=caveats,
+    )
+    _widen_citations_from_note(out, note, retrieved_refs=[h.ref for h in hits])
+    return out
+
+
 # Global concurrency gate — every generation reaches the LLM/embedder/Qdrant through this one
 # function (sync routes call it inline; async routes call it from inside a job worker), so gating
 # HERE bounds total concurrent generations across BOTH paths combined, not per-path.
@@ -3173,19 +3634,34 @@ def _crisis_done_event(payload: dict, session_id: str | None = None) -> str:
 
 def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
                audience: str = "", grade_band: str = "", length: str = "",
-               owner_id: str = "local", llm=None) -> QueryResponse:
+               owner_id: str = "local", llm=None,
+               bagrut_subject: str = "", bagrut_track: str = "",
+               bagrut_units: str = "", bagrut_action: str = "") -> QueryResponse:
     """Safety wrapper: a retrieval/LLM/backend failure degrades to an honest error response instead
     of a 500 for the whole request (real HTTPExceptions — e.g. 422 bad intent — still propagate).
     `llm` defaults to the pipeline's own shared backend; a caller may override it (BYOK)."""
     # Crisis screen FIRST, for minors only (spec 009 US2): a disclosure is never answered by a model, and
     # every sync/async/session route reaches here. Adults return None without their text being read.
-    if (_crisis := crisis_gate.screen_message(owner_id, question, lang)) is not None:
+    if isinstance(llm, _MinorBackendUnavailable) and llm.screened:
+        _crisis = llm.crisis             # an async route already screened this message at submit
+    else:
+        _crisis = crisis_gate.screen_message(owner_id, question, lang)
+    if _crisis is not None:
         return _crisis_response(_crisis, intent_str)
     if is_pure_greeting(question):
         return _greeting_response(lang, intent_str)
     if is_conversational_acknowledgement(question):
         return _acknowledgement_response(lang, intent_str, question)
     he = (lang or "") != "en"
+    # A minor's text reaches ONLY the minor-approved preset (spec 009 T050). The routes already hand one
+    # in; this is the backstop for a caller that did not (llm=None would mean the default backend) and
+    # the place the "no approved provider" marker becomes a 503. After the crisis screen, on purpose.
+    if isinstance(llm, _MinorBackendUnavailable) or (llm is None and minors.is_minor(owner_id)):
+        _no_consent = (llm.consent_required if isinstance(llm, _MinorBackendUnavailable)
+                       else not minors.parental_consent_ok(owner_id))
+        llm = _build_minor_llm() if (llm is None and not _no_consent) else None
+        if llm is None:
+            raise _minor_unavailable(lang, consent=_no_consent)
     # Every route reaches generation through here — /query, /sessions/{id}/query, its async twin and
     # the calendar paths. Setting the flag on ONE of them is what made the trailing source list work
     # in a direct call and never once through the UI: /sessions/{id}/query is what the app actually
@@ -3214,7 +3690,11 @@ def _run_query(question: str, lang: str, intent_str: str, history: list[Turn],
         # The improved chavruta path: scope set by CHAVRUTA_IMPROVED_SCOPE (config/rollout.py).
         with rollout.improved_for(rollout.enabled_for(_is_admin(owner_id))):
             return _scope_response(_run_query_impl(question, lang, intent_str, history, audience,
-                                                   grade_band, length, owner_id, llm))
+                                                   grade_band, length, owner_id, llm,
+                                                   bagrut_subject=bagrut_subject,
+                                                   bagrut_track=bagrut_track,
+                                                   bagrut_units=bagrut_units,
+                                                   bagrut_action=bagrut_action))
     except HTTPException:
         raise
     except JobCancelledError:
@@ -3323,7 +3803,9 @@ def _is_admin(owner_id: str) -> bool:
 
 def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Turn],
                     audience: str = "", grade_band: str = "", length: str = "",
-                    owner_id: str = "local", llm=None) -> QueryResponse:
+                    owner_id: str = "local", llm=None,
+                    bagrut_subject: str = "", bagrut_track: str = "",
+                    bagrut_units: str = "", bagrut_action: str = "") -> QueryResponse:
     if is_pure_greeting(question):
         return _greeting_response(lang, intent_str)
     if is_conversational_acknowledgement(question):
@@ -3386,6 +3868,21 @@ def _run_query_impl(question: str, lang: str, intent_str: str, history: list[Tur
             )
             return QueryResponse(answer=msg, citations=[], grounded=False, intent="sourcesheet", files=[])
         return _run_sourcesheet(question, lang, history=history, owner_id=owner_id, llm=llm)
+
+    if intent == Intent.BAGRUT or intent_str == "bagrut":
+        if not _bagrut_mode_enabled(owner_id):
+            msg = (
+                "מצב הכנה לבגרויות זמין כרגע בבטא סגורה בלבד."
+                if he
+                else "Bagrut Prep mode is currently in private beta."
+            )
+            return QueryResponse(answer=msg, citations=[], grounded=False, intent="bagrut", files=[])
+        return _run_bagrut(
+            question, lang, history=history,
+            bagrut_subject=bagrut_subject, bagrut_track=bagrut_track,
+            bagrut_units=bagrut_units, bagrut_action=bagrut_action,
+            owner_id=owner_id, llm=llm,
+        )
 
     has_attachments = ("## מקורות שצירף המשתמש" in question) or ("## Sources the user attached" in question)
     has_prior_answers = any(getattr(h, "role", "") == "assistant" for h in (history or []))
@@ -4203,6 +4700,84 @@ def _hstr(v) -> str:
     return v.strip() if isinstance(v, str) else ""
 
 
+@dataclass(frozen=True)
+class _MinorBackendUnavailable:
+    """Stands in for the `llm` of a minor's request when no minor-approved provider is configured
+    (spec 009 T050). It is NOT an LLM: it carries the request to the first place that can refuse it
+    AFTER the crisis screen has run, so a distress message still gets the crisis reply. `screened` is
+    set by the async routes, which screen at submit time (they must answer 503 before queuing) and hand
+    the result to the worker so the message is not screened, and alerted, twice."""
+    lang: str = ""
+    screened: bool = False
+    crisis: dict | None = None
+    # T090: the minor has no school link, parent link or approved parental consent. Same mechanism, so
+    # the refusal also comes AFTER the crisis screen (a distressed child gets the help numbers, not a
+    # consent error); the refusal itself is a 403 parental_consent_required instead of the 503.
+    consent_required: bool = False
+
+
+def _minor_unavailable(lang: str = "", consent: bool = False) -> HTTPException:
+    he = (lang or "") != "en"
+    if consent:
+        msg = ("נדרש אישור הורה כדי להשתמש בשירות. הזינו כתובת מייל של הורה במסך ההגדרות."
+               if he else "A parent's approval is required before you can use the service.")
+        return HTTPException(status_code=403, detail={"error": "parental_consent_required", "message": msg})
+    msg = ("השירות אינו זמין כרגע לחשבונות תלמידים. נסו שוב מאוחר יותר או פנו למורה."
+           if he else "The service is temporarily unavailable for student accounts. Please try again later.")
+    return HTTPException(status_code=503, detail={"error": "minor_backend_unavailable", "message": msg})
+
+
+def _build_minor_llm():
+    """A per-request CloudLLM on the minor-approved preset (CHAVRUTA_MINOR_LLM_PRESET), or None when
+    there is none. Never the pipeline's own backend, never a caller's key."""
+    backend, _why = minor_llm.approved_backend()
+    if backend is None:
+        return None
+    from chavruta.llm.cloud import CloudLLM
+
+    pipeline = _get_pipeline()
+    profile = getattr(pipeline, "profile", None)
+    llm = CloudLLM(backend.model, backend.base_url, backend.api_key,
+                   timeout_s=getattr(profile, "llm_timeout_s", 60.0),
+                   max_retries=getattr(profile, "llm_max_retries", 2),
+                   min_output_tokens=backend.min_output_tokens)
+    wire = getattr(pipeline, "wire_source_fetcher", None)
+    if wire is not None:
+        wire(llm)               # the agentic ===NEED_SOURCES=== loop retrieves through the pipeline
+    return llm
+
+
+def _minor_llm_or_unavailable(lang: str = "", owner: str = ""):
+    if owner and not minors.parental_consent_ok(owner):
+        return _MinorBackendUnavailable(lang=lang, consent_required=True)
+    return _build_minor_llm() or _MinorBackendUnavailable(lang=lang)
+
+
+def _minor_unavailable_event(lang: str = "", consent: bool = False) -> str:
+    """The streaming form of the 503: one error event, then the stream ends (a stream's status line is
+    already sent by the time the generator runs)."""
+    return f"event: error\ndata: {json.dumps(_minor_unavailable(lang, consent).detail, ensure_ascii=False)}\n\n"
+
+
+def _prescreen_unavailable_minor(owner: str, req: "QueryRequest", llm):
+    """Async routes only. With the minor backend down, answer 503 AT SUBMIT (a queued job that can only
+    fail is a worse answer) — unless the message is a crisis, which still gets its reply from the worker.
+    Anything else passes through untouched."""
+    if not isinstance(llm, _MinorBackendUnavailable):
+        return llm
+    payload = crisis_gate.screen_message(owner, req.question, req.lang)
+    if payload is None:
+        raise _minor_unavailable(req.lang, llm.consent_required)
+    return _MinorBackendUnavailable(lang=req.lang, screened=True, crisis=payload,
+                                    consent_required=llm.consent_required)
+
+
+def _minor_only(llm):
+    """`llm` while serving a minor, else None — for the helper calls that default to a small classifier
+    model on the deployment's own provider, which a minor's text must not reach."""
+    return llm if audience_ctx.current().minor else None
+
+
 def _resolve_llm_for_request(owner: str, lang: str, intent: str, user_key: str | None,
                              base_url: str | None = None, model: str | None = None,
                              preset: str | None = None):
@@ -4211,7 +4786,14 @@ def _resolve_llm_for_request(owner: str, lang: str, intent: str, user_key: str |
     unless the turn was actually admitted on the caller's own key, in which case it's a fresh
     single-request CloudLLM built from it (see _byok_llm) and meter is BYOK_TOKENS so settlement
     lands in the right pool. `base_url`/`model`/`preset` let the caller point their key or select
-    an alternate preset (e.g. mistral-large-3) for themselves without affecting other users."""
+    an alternate preset (e.g. mistral-large-3) for themselves without affecting other users.
+
+    A MINOR never gets any of that (spec 009 T050): no BYOK headers, no admin Mistral route, never the
+    default backend. They get a CloudLLM on CHAVRUTA_MINOR_LLM_PRESET, or a _MinorBackendUnavailable
+    marker that the route turns into a 503 once the crisis screen has had its say."""
+    if minors.is_minor(owner):
+        res = _enforce_quota(owner, lang, intent, user_key="")
+        return res, _minor_llm_or_unavailable(lang, owner), db.TOKENS
     key = _hstr(user_key)
     res = _enforce_quota(owner, lang, intent, user_key=key)
     if res.used_byok:
@@ -4253,6 +4835,10 @@ class QueryRequest(BaseModel):
     audience: str = ""       # lesson mode: "" (auto) | "yeshiva" | "school"
     grade_band: str = ""     # school lessons: a-c | d-f | g-i | j-l
     length: str = ""         # "" (medium) | "short" | "medium" | "long"
+    bagrut_subject: str = "" # bagrut mode: "" (auto) | "tanakh" | "gemara" | "toshba"
+    bagrut_track: str = ""   # bagrut mode: "" (auto) | "mmd" | "mamlachti"
+    bagrut_units: str = ""   # bagrut mode: "" (auto) | "2" | "3" | "5"
+    bagrut_action: str = ""  # bagrut mode: "" (auto) | "practice" | "check" | "summary" | "exam"
     attachments: list[Attachment] = []   # user-brought sources (text / pdf / word); images pending OCR
 
 
@@ -4270,7 +4856,9 @@ def query(req: QueryRequest, owner: str = Depends(current_owner),
     return _metered(owner, reserved, req.intent, lambda: _run_query(
         _augment_question(req.question, req.attachments), req.lang, req.intent, [],
         audience=req.audience, grade_band=req.grade_band, length=req.length,
-        owner_id=owner, llm=llm), req, meter=meter)()
+        owner_id=owner, llm=llm,
+        bagrut_subject=req.bagrut_subject, bagrut_track=req.bagrut_track,
+        bagrut_units=req.bagrut_units, bagrut_action=req.bagrut_action), req, meter=meter)()
 
 
 @app.post("/query/stream")
@@ -4290,6 +4878,10 @@ def query_stream(req: QueryRequest, owner: str = Depends(current_owner),
         if (crisis_payload := crisis_gate.screen_message(owner, req.question, req.lang)) is not None:
             _settle_tokens(owner, reserved, {}, req.intent, meter=meter)
             yield _crisis_done_event(crisis_payload)
+            return
+        if isinstance(llm, _MinorBackendUnavailable):      # after the crisis screen, on purpose (T050)
+            _settle_tokens(owner, reserved, {}, req.intent, meter=meter)
+            yield _minor_unavailable_event(req.lang, llm.consent_required)
             return
         pipeline = _get_pipeline()
         effective_llm = llm or pipeline.llm
@@ -4400,6 +4992,7 @@ class MeOut(BaseModel):
     # the client shows).
     calendar_modes_enabled: bool = False
     sourcesheet_enabled: bool = False
+    bagrut_enabled: bool = False
     # Admin dashboard link — see _is_admin. UI convenience only, same as the field above; the real
     # enforcement is the 404 every /admin/* route raises for a non-admin owner.
     is_admin: bool = False
@@ -4416,6 +5009,18 @@ class MeOut(BaseModel):
     age_required: bool = False           # a new account that has not yet declared birth month/year
     adult_terms_required: bool = False   # turned 18 and has not yet accepted the adult Terms
     school_linked: bool = False          # is an accepted member of an organisation
+    # T090: a minor with no school link, no active parent link and no approved parental consent cannot
+    # send messages (403 parental_consent_required). `parental_consent` is null for an adult.
+    parental_consent_required: bool = False
+    parental_consent: dict | None = None   # {status: none|pending|approved|declined|expired, parent_email_masked?, sent_at?}
+
+
+def _consent_fields(owner: str) -> dict:
+    """The two parental-consent fields of /me. Adults and the local user: not required, null."""
+    if owner == "local" or not minors.is_minor(owner):
+        return {"parental_consent_required": False, "parental_consent": None}
+    return {"parental_consent_required": not minors.parental_consent_ok(owner),
+            "parental_consent": parental_consent.me_view(owner)}
 
 
 @app.get("/me", response_model=MeOut)
@@ -4503,12 +5108,14 @@ def me(request: Request, owner: str = Depends(current_owner)):
         blocked_reason=ban["reason"] if ban else "",
         calendar_modes_enabled=_calendar_modes_enabled(owner),
         sourcesheet_enabled=_sourcesheet_mode_enabled(owner),
+        bagrut_enabled=_bagrut_mode_enabled(owner),
         is_admin=_is_admin(owner),
         org_id=(_org := orgs.membership(owner) or {}).get("org_id", "") or "",
         org_name=_org.get("name", "") or "",
         org_role=_org.get("role", "") or "",
         school_linked=bool(_org.get("org_id")),
         **minors.status(owner, legacy_adult=legacy_adult(request), supabase=sb.enabled()),
+        **_consent_fields(owner),
     )
 
 
@@ -4532,9 +5139,91 @@ def set_account_age(req: AgeIn, owner: str = Depends(current_owner)):
         rec = minors.set_age_once(owner, req.birth_year, req.birth_month)
     except minors.AgeAlreadySet as exc:
         raise _age_error(exc, 409) from exc
-    except minors.AgeError as exc:               # under_minimum_age / invalid_birth
+    except minors.UnderMinimumAge as exc:
+        # T093 (founder decision 2026-10-26): a child under 12 must not keep an account that can only
+        # sign out. Delete it now, exactly as an immediate /account/delete does (data first, login
+        # second). set_age_once refused BEFORE writing, so no age record, birth date or age_record_log
+        # row was ever created for this person. What survives is what purge_owner keeps by design:
+        # anonymised usage telemetry (owner_id NULL) and the billing ledger (a free sign-up has none).
+        deleted = False
+        try:
+            accounts.purge_now(owner)
+            deleted = True
+        except Exception:                        # noqa: BLE001 - say honestly that it did not happen
+            _log.exception("under-minimum-age account %s could not be deleted", owner)
+        return JSONResponse(status_code=422, content={
+            "error": exc.code, "message": str(exc), "account_deleted": deleted})
+    except minors.AgeError as exc:               # invalid_birth
         raise _age_error(exc, 422) from exc
     return {"is_minor": minors.is_minor(owner), "adult_from": rec["adult_from"]}
+
+
+# ── Parental consent for a minor with no school (spec 009 T090) ─────────────────────────────────────
+class ParentalConsentIn(BaseModel):
+    parent_email: str = Field(max_length=320)
+
+
+class ConsentDecisionIn(BaseModel):
+    decision: str
+
+
+_consent_public_window = _SlidingWindow(30, 60.0)      # per client IP, on the unauthenticated endpoints
+
+
+def _consent_error(exc: parental_consent.ConsentError) -> HTTPException:
+    return HTTPException(status_code=exc.status, detail={"error": exc.code, "message": str(exc)})
+
+
+def _consent_public_guard(request: Request) -> None:
+    if not _consent_public_window.allow(_client_ip(request), time.monotonic()):
+        raise HTTPException(status_code=429, detail={"error": "rate_limited", "message": "too many requests"})
+
+
+@app.post("/account/parental-consent")
+def request_parental_consent(req: ParentalConsentIn, request: Request, owner: str = Depends(current_owner)):
+    """The minor asks for a parent's consent. A repeat POST (same or different address) supersedes the
+    pending request and sends a fresh email, so it doubles as "resend". Minor only, not school-linked."""
+    if owner == "local":
+        raise HTTPException(status_code=400, detail={"error": "sign_in_required", "message": "sign in first"})
+    try:
+        return parental_consent.request_consent(owner, account_email(request), req.parent_email)
+    except parental_consent.ConsentError as exc:
+        raise _consent_error(exc) from exc
+
+
+@app.get("/consent/{token}")
+def consent_info(token: str, request: Request):
+    """PUBLIC (the token is the credential). Never returns anything about the child."""
+    _consent_public_guard(request)
+    try:
+        return parental_consent.info(token)
+    except parental_consent.ConsentError as exc:
+        raise _consent_error(exc) from exc
+
+
+@app.post("/consent/revoke/{revoke_token}")
+def consent_revoke(revoke_token: str, request: Request):
+    """PUBLIC. The parent withdraws consent; the child has no route that does this."""
+    _consent_public_guard(request)
+    try:
+        return parental_consent.revoke(revoke_token, _client_ip(request),
+                                       request.headers.get("user-agent", ""))
+    except parental_consent.ConsentError as exc:
+        raise _consent_error(exc) from exc
+
+
+@app.post("/consent/{token}")
+def consent_decide(token: str, req: ConsentDecisionIn, request: Request):
+    """PUBLIC. Records approve/decline with the time, client IP (trusted-proxy aware) and user agent."""
+    _consent_public_guard(request)
+    if req.decision not in ("approve", "decline"):
+        raise HTTPException(status_code=422, detail={"error": "invalid_decision",
+                                                      "message": "decision must be approve or decline"})
+    try:
+        return parental_consent.decide(token, req.decision, _client_ip(request),
+                                       request.headers.get("user-agent", ""))
+    except parental_consent.ConsentError as exc:
+        raise _consent_error(exc) from exc
 
 
 class AdultTermsIn(BaseModel):
@@ -5375,7 +6064,9 @@ def _first_query_work(sid: str, req: QueryRequest, owner: str, llm=None) -> dict
     try:
         result = _run_query(_augment_question(req.question, req.attachments), req.lang, req.intent, [],
                             audience=req.audience, grade_band=req.grade_band, length=req.length,
-                            owner_id=owner, llm=llm)
+                            owner_id=owner, llm=llm,
+                            bagrut_subject=req.bagrut_subject, bagrut_track=req.bagrut_track,
+                            bagrut_units=req.bagrut_units, bagrut_action=req.bagrut_action)
     except Exception:
         db.delete_session(sid, owner)   # don't leave a half-created, answer-less session behind
         raise
@@ -5413,6 +6104,28 @@ def _sourcesheet_turn_text(m: dict) -> tuple[str, bool]:
     return text, is_sourcesheet
 
 
+def _bagrut_turn_text(m: dict) -> tuple[str, bool]:
+    """The text to carry into history for one saved turn, plus whether it was a completed BAGRUT file turn."""
+    text = m.get("text") or ""
+    files = m.get("files") or []
+    is_bagrut = (
+        bool(files)
+        and (
+            m.get("intent") == "bagrut"
+            or any(
+                "לבגרות" in (f.get("name") or "")
+                or "bagrut_" in (f.get("name") or "")
+                or "מחוון" in (f.get("name") or "")
+                for f in files
+            )
+        )
+    )
+    if is_bagrut and files:
+        bg_md = next((f for f in files if (f.get("name") or "").endswith(".md")), files[0])
+        return bg_md.get("content") or text, True
+    return text, False
+
+
 def _prepare_continue(session_id: str, req: QueryRequest, owner: str) -> tuple[list[Turn], str]:
     """Shared setup for continuing a session: ownership gate (404 if not owned), build the trailing
     history, save the user turn, and resolve the sticky/locked intent. Returns (history, intent)."""
@@ -5428,12 +6141,18 @@ def _prepare_continue(session_id: str, req: QueryRequest, owner: str) -> tuple[l
     for m in history_rows[-8:]:
         text, is_lesson = _lesson_turn_text(m)
         ss_text, is_sourcesheet = _sourcesheet_turn_text(m)
+        bg_text, is_bagrut = _bagrut_turn_text(m)
         if is_sourcesheet:
             text = ss_text
+            is_lesson = False
+        elif is_bagrut:
+            text = bg_text
+            is_lesson = False
         history.append(Turn(role=m["role"], text=text,
                             refs=[r for c in (m.get("citations") or []) if (r := (c or {}).get("ref"))],
                             lesson=is_lesson,
                             sourcesheet=is_sourcesheet,
+                            bagrut=is_bagrut,
                             files=m.get("files") or [],
                             citations=m.get("citations") or []))
     db.save_message(session_id, "user", req.question)
@@ -5448,7 +6167,9 @@ def _continue_query_work(session_id: str, req: QueryRequest, history: list[Turn]
     """Run a follow-up turn, save the assistant answer, and return the SessionQueryResponse."""
     result = _run_query(_augment_question(req.question, req.attachments), req.lang, intent, history,
                         audience=req.audience, grade_band=req.grade_band, length=req.length,
-                        owner_id=owner, llm=llm)
+                        owner_id=owner, llm=llm,
+                        bagrut_subject=req.bagrut_subject, bagrut_track=req.bagrut_track,
+                        bagrut_units=req.bagrut_units, bagrut_action=req.bagrut_action)
     _save_assistant(session_id, result)
     return SessionQueryResponse(**result.model_dump(), session_id=session_id)
 
@@ -5502,6 +6223,10 @@ def _stream_query_generator(session_id: str, req: QueryRequest, history: list[Tu
         _settle_tokens(owner, reserved, {}, intent, meter=meter)
         yield _crisis_done_event(crisis_payload, session_id)
         return
+    if isinstance(llm, _MinorBackendUnavailable):          # after the crisis screen, on purpose (T050)
+        _settle_tokens(owner, reserved, {}, intent, meter=meter)
+        yield _minor_unavailable_event(req.lang, llm.consent_required)
+        return
     pipeline = _get_pipeline()
     effective_llm = llm or pipeline.llm
 
@@ -5523,7 +6248,8 @@ def _stream_query_generator(session_id: str, req: QueryRequest, history: list[Tu
         return
 
     # 2. Distill & Planner
-    dist_res = classify_and_distill(augmented_q, history=history, intent=intent)
+    with audience_ctx.use(minors.audience_scope(owner)):   # the distiller must know it is serving a minor (T050)
+        dist_res = classify_and_distill(augmented_q, history=history, intent=intent)
     if dist_res.action == "chitchat" and dist_res.answer:
         # A minor never gets the classifier's free-text reply (see _run_query_impl).
         clean_ans = (_greeting_response(req.lang, intent).answer if minors.is_minor(owner)
@@ -5671,10 +6397,13 @@ def query_async(req: QueryRequest, owner: str = Depends(current_owner),
     reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key,
                                                     x_user_llm_base_url, x_user_llm_model)
     with _release_on_error(owner, reserved, req.intent, meter):
+        llm = _prescreen_unavailable_minor(owner, req, llm)       # 503 at submit (T050)
         q = _augment_question(req.question, req.attachments)
         jid = jobs.submit(owner, _metered(owner, reserved, req.intent, lambda: jsonable_encoder(
             _run_query(q, req.lang, req.intent, [], audience=req.audience,
-                       grade_band=req.grade_band, length=req.length, owner_id=owner, llm=llm)),
+                       grade_band=req.grade_band, length=req.length, owner_id=owner, llm=llm,
+                       bagrut_subject=req.bagrut_subject, bagrut_track=req.bagrut_track,
+                       bagrut_units=req.bagrut_units, bagrut_action=req.bagrut_action)),
             req, meter=meter), credits_spent=reserved.credits_spent)
     return JobAccepted(job_id=jid)
 
@@ -5691,6 +6420,7 @@ def create_session_async(req: QueryRequest, owner: str = Depends(current_owner),
     reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key,
                                                     x_user_llm_base_url, x_user_llm_model)
     with _release_on_error(owner, reserved, req.intent, meter):
+        llm = _prescreen_unavailable_minor(owner, req, llm)       # 503 at submit (T050)
         sid = db.create_session(req.question.strip(), mode=req.intent or None, owner_id=owner)
         db.save_message(sid, "user", req.question)
         jid = jobs.submit(owner, _metered(
@@ -5712,6 +6442,7 @@ def session_query_async(session_id: str, req: QueryRequest, owner: str = Depends
     # The ownership gate + user-turn save happen NOW (before returning) so an unauthorized caller
     # gets a synchronous 404 and the user message is durable even if generation later fails.
     with _release_on_error(owner, reserved, req.intent, meter):
+        llm = _prescreen_unavailable_minor(owner, req, llm)       # 503 at submit (T050)
         history, intent = _prepare_continue(session_id, req, owner)
         jid = jobs.submit(owner, _metered(owner, reserved, req.intent, lambda: jsonable_encoder(
             _continue_query_work(session_id, req, history, intent, owner, llm=llm)),

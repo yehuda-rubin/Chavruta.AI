@@ -41,9 +41,6 @@ export function SignIn({ lang }: { lang: Lang }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState(false);
-  // Separate from the terms box on purpose. Bundling "I accept the terms" with "I am 18" produces one
-  // tick that means neither: the age statement has to be its own deliberate act to be worth anything.
-  const [confirmedAge, setConfirmedAge] = useState(false);
   // Opt-IN, unchecked by default, and never required — this is what makes a later marketing email
   // lawful under the anti-spam law (Communications Law §30A), which needs explicit prior consent
   // separate from accepting the terms.
@@ -103,21 +100,15 @@ export function SignIn({ lang }: { lang: Lang }) {
       setError(tr(lang, "termsMustAccept"));
       return;
     }
-    if (mode === "up" && !confirmedAge) {
-      setError(tr(lang, "ageMustConfirm"));
-      return;
-    }
     setBusy(true);
     try {
       if (mode === "up") {
-        // Record consent durably on the account (which terms version, when) — and the age statement
-        // alongside it. This is a self-declaration, not verification: it establishes who the service
-        // is for and what the user said, which is what the model providers' terms turn on.
+        // Record consent durably on the account (which terms version, when). Age is NOT asked here: it
+        // is a separate step after sign-up (components/AgeStep.tsx, POST /account/age), shown on the
+        // first authenticated load, so no age_confirmed_18 is sent for a new account.
         const { needsConfirm } = await signUp(email.trim(), password, {
           terms_version: TERMS_VERSION,
           terms_accepted_at: new Date().toISOString(),
-          age_confirmed_18: true,
-          age_confirmed_at: new Date().toISOString(),
           // Recorded either way (true or false) so "never asked" and "declined" stay distinguishable.
           marketing_consent: marketingConsent,
           marketing_consent_at: new Date().toISOString(),
@@ -298,19 +289,6 @@ export function SignIn({ lang }: { lang: Lang }) {
             </label>
           )}
 
-          {/* Age gate — required to register. The service is not directed at minors. */}
-          {mode === "up" && (
-            <label className="flex items-start gap-2 text-xs text-ink/70 leading-relaxed cursor-pointer">
-              <input
-                type="checkbox"
-                checked={confirmedAge}
-                onChange={(e) => setConfirmedAge(e.target.checked)}
-                className="mt-0.5 accent-tekhelet"
-              />
-              <span>{tr(lang, "ageConfirm")}</span>
-            </label>
-          )}
-
           {/* Marketing consent — optional and unchecked by default; never blocks submission. */}
           {mode === "up" && (
             <label className="flex items-start gap-2 text-xs text-ink/70 leading-relaxed cursor-pointer">
@@ -354,7 +332,7 @@ export function SignIn({ lang }: { lang: Lang }) {
 
           <button
             type="submit"
-            disabled={busy || (mode === "up" && (!acceptedTerms || !confirmedAge))}
+            disabled={busy || (mode === "up" && !acceptedTerms)}
             className="py-3 rounded-full grad text-white font-bold text-sm hover:opacity-95 transition disabled:opacity-60"
           >
             {busy ? tr(lang, "authWorking") : tr(lang, mode === "up" ? "signUpBtn" : "signInBtn")}

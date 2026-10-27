@@ -1,0 +1,51 @@
+id: bagrut-tanakh-unseen
+title: בגרות בתנ"ך — ניתוח קטע שלא נלמד (Unseen / אנסין מקראי, חמ"ד וממלכתי)
+title_en: Bagrut in Tanakh — Unseen Biblical Passage Analysis (MMD & Mamlachti, 2–5 Units)
+genre: bagrut-tanakh-unseen
+mode: bagrut
+audience: school
+subject: tanakh
+bagrut_track: both
+bagrut_units: 2-5
+grade_band: j-l
+age_range: י–יב — גיל 15–18 (תיכון / בגרות)
+description: >
+  תבנית ייעודית לתרגול, מבחן ומחוון על פרק ה-Unseen (קטע מקראי שלא נלמד) בבחינות הבגרות בתנ"ך
+  במסלול הממלכתי (1281) ובמסלול החמ"ד (2575 / 2585). מקנה כלים שיטתיים לפיצוח פרק מקראי חדש:
+  חלוקה לפסקאות ויחידות תוכן, פענוח מילים קשות מתוך ההקשר והתקבולת, זיהוי מילה מנחה ואמצעים
+  אומנותיים, הבנת דברי פרשנות קצרים על הקטע, והשוואה לקטע מקראי נוסף.
+when_to_use: >
+  בחר תבנית זו כאשר תלמיד או מורה מבקשים לתרגל אנסין (Unseen / קטע שלא נלמד) בתנ"ך לבגרות,
+  לבנות מבחן אנסין מלא עם מחוון, או לקבל מדריך שיטתי לפיצוח קטע מקראי שלא נלמד בכיתה.
+keywords:
+  - בגרות
+  - תנ"ך
+  - אנסין
+  - unseen
+  - קטע שלא נלמד
+  - קריאה צמודה
+  - פענוח מהקשר
+  - תקבולת
+  - מילה מנחה
+  - השוואת כתובים
+  - חמ"ד
+  - ממלכתי
+example_topics:
+  - אנסין סיפורי בנביאים ראשונים או כתובים
+  - אנסין נבואי בישעיהו, ירמיהו או תרי עשר
+  - אנסין במזמורי תהילים או ספרות החכמה (משלי, איוב)
+  - אנסין חוקתי או היסטורי בתורה ובעזרא–נחמיה
+example_queries:
+  - תרגול אנסין בתנ"ך לבגרות עם פתרון ומחוון
+  - איך פותרים קטע שלא נלמד בבגרות בתנ"ך
+  - תכין לי מבחן אנסין מקראי לבגרות 5 יח"ל
+structure: קריאת הקטע וחלוקה ליחידות → שאלה 1 (הבנת ההקשר ופענוח לשוני) → שאלה 2 (אמצעים אומנותיים ומבנה) → שאלה 3 (פרשנות והשוואה פנים-מקראית) → מחוון
+structure_en: Passage Reading & Segmentation → Q1 (Contextual Comprehension & Lexical Decoding) → Q2 (Literary Devices & Structure) → Q3 (Commentary & Intra-Biblical Comparison) → Rubric
+files:
+  exam: TEMPLATE_exam.md
+  rubric: TEMPLATE_rubric.md
+  summary: TEMPLATE_summary.md
+files_en:
+  exam: TEMPLATE_exam_en.md
+  rubric: TEMPLATE_rubric_en.md
+  summary: TEMPLATE_summary_en.md

@@ -14,6 +14,14 @@ import re
 
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
 
+
+def _minor_request() -> bool:
+    """True while serving a minor (corpus/audience.py scope). The helper calls below build their own
+    client from the deployment's default provider, which must not read a minor's text (spec 009 T050)."""
+    from chavruta.corpus import audience
+
+    return audience.current().minor
+
 _SYSTEM = (
     "You extract structured retrieval hints from a Jewish-texts study question. "
     "Return ONLY a JSON object with keys: "
@@ -44,6 +52,8 @@ class LLMQueryPlanner:
         Never raises — on any failure returns empty hints so the request falls back to
         the heuristic result.
         """
+        if _minor_request():      # a minor's text never goes to this planner's (default) provider
+            return {"refs": [], "commentators": [], "intent": None}
         try:
             resp = self._client_().chat.completions.create(
                 model=self.model_id,
@@ -343,6 +353,8 @@ def _classify_and_distill(
         if client is None:
             import os
             from openai import OpenAI
+            if _minor_request():      # never the deployment's default provider (spec 009 T050)
+                return DistillerResult(action="study", distilled_query=clean, raw=clean)
             api_key = os.environ.get("CHAVRUTA_LLM_API_KEY") or os.environ.get("NEBIUS_API_KEY") or ""
             if not api_key:
                 return DistillerResult(action="study", distilled_query=clean, raw=clean)
@@ -488,6 +500,8 @@ def classify_lesson_followup(
         if client is None:
             import os
             from openai import OpenAI
+            if _minor_request():      # never the deployment's default provider (spec 009 T050)
+                return _heuristic_fallback_classify(clean, history=history, last_lesson_topic=last_lesson_topic)
             api_key = os.environ.get("CHAVRUTA_LLM_API_KEY") or os.environ.get("NEBIUS_API_KEY") or ""
             if not api_key:
                 return _heuristic_fallback_classify(clean, history=history, last_lesson_topic=last_lesson_topic)

@@ -1,7 +1,7 @@
 // Mirrors the FastAPI response shapes (app/api.py). The active static UI is the behavioural
 // source of truth; these types match what /query, /sessions, /lessons actually return.
 
-export type Intent = "qa" | "explain" | "compare" | "halacha" | "lesson" | "chavruta" | "parsha" | "dafyomi" | "sourcesheet";
+export type Intent = "qa" | "explain" | "compare" | "halacha" | "lesson" | "chavruta" | "parsha" | "dafyomi" | "sourcesheet" | "bagrut";
 
 export interface Citation {
   ref: string;
@@ -25,8 +25,33 @@ export interface FileOut {
   content: string;
 }
 
+/** One helpline in a crisis reply (app/crisis_contacts.json). Empty strings mean "no such channel". */
+export interface CrisisContact {
+  id: string;
+  label_he: string;
+  label_en: string;
+  label?: string;
+  tel?: string;
+  whatsapp?: string;
+  chat_url?: string;
+  site?: string;
+  only_if_danger?: boolean;
+}
+
+/** The fixed support reply that replaces a model answer when a minor's message is screened (spec 009). */
+export interface CrisisPayload {
+  kind: "crisis";
+  category: string;
+  immediate_danger: boolean;
+  message_he: string;
+  message_en: string;
+  message?: string;
+  contacts: CrisisContact[];
+}
+
 export interface Message {
   id?: number;
+  crisis?: CrisisPayload;
   role: "user" | "assistant";
   text: string;
   intent?: Intent;
@@ -60,6 +85,7 @@ export interface QueryResponse {
   files?: FileOut[];
   source_note?: string;
   session_id?: string;
+  crisis?: CrisisPayload;
 }
 
 export type Lang = "he" | "en";
