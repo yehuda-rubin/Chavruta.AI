@@ -37,10 +37,11 @@ from chavruta.corpus.schema import Query, Turn
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATES_DIR = REPO_ROOT / "lessons" / "templates"
 
-ALL_17_BAGRUT_TEMPLATES = [
+ALL_18_BAGRUT_TEMPLATES = [
     "bagrut-gemara-comprehensive",
     "bagrut-toshba-comprehensive",
     "bagrut-tanakh-comprehensive",
+    "bagrut-machshava-comprehensive",
     "bagrut-tanakh-mmd-iyun",
     "bagrut-tanakh-mmd-bekiut",
     "bagrut-tanakh-mmd-torah-mitzvot",
@@ -56,7 +57,7 @@ ALL_17_BAGRUT_TEMPLATES = [
     "bagrut-toshba-case-study",
     "bagrut-toshba-thematic-halacha",
 ]
-EXPECTED_14_TEMPLATES = ALL_17_BAGRUT_TEMPLATES
+EXPECTED_14_TEMPLATES = ALL_18_BAGRUT_TEMPLATES
 
 
 # ── 1. Curriculum & 14 Clean-Room Templates ──────────────────────────────────
@@ -65,7 +66,7 @@ def test_curriculum_yaml_loads_and_has_required_keys():
     curr = load_bagrut_curriculum()
     assert curr.get("version") == 1
     subjects = curr.get("subjects") or {}
-    assert set(subjects.keys()) == {"tanakh", "gemara", "toshba"}
+    assert set(subjects.keys()) == {"tanakh", "gemara", "toshba", "machshava"}
     for subj_key, subj in subjects.items():
         assert subj.get("title_he") or subj.get("label_he"), f"{subj_key} missing Hebrew title"
         assert subj.get("title_en") or subj.get("label_en"), f"{subj_key} missing English title"
@@ -103,7 +104,7 @@ def test_all_14_bagrut_templates_exist_and_have_valid_manifests():
         manifest = yaml.safe_load((tdir / "manifest.yaml").read_text(encoding="utf-8"))
         assert manifest["id"] == tid
         assert manifest["mode"] == "bagrut"
-        assert manifest["subject"] in {"tanakh", "gemara", "toshba"}
+        assert manifest["subject"] in {"tanakh", "gemara", "toshba", "machshava"}
         assert manifest["bagrut_track"] in {"mmd", "mamlachti", "both"}
         assert str(manifest["bagrut_units"]).strip()
         assert manifest.get("structure") or manifest.get("structure_he")
@@ -412,3 +413,55 @@ def test_bagrut_topic_diversity_and_narrow_detection():
     assert tpl_narrow is not None
     assert tpl_narrow["id"] in {"bagrut-gemara-sugya", "bagrut-gemara-rishonim"}
     assert tpl_narrow["id"] != "bagrut-gemara-comprehensive"
+
+
+def test_dynamic_bagrut_curriculum_and_machshava():
+    from chavruta.bagrut.engine import (
+        detect_bagrut_subject,
+        get_active_bagrut_curriculum,
+        format_active_curriculum_prompt_block,
+    )
+    from app.db import (
+        init_db,
+        upsert_bagrut_curriculum_cache,
+        get_active_bagrut_curriculum_from_db,
+    )
+
+    # 1. Machshevet Yisrael subject detection
+    assert detect_bagrut_subject("תבנה לי מתכונת במחשבת ישראל") == "machshava"
+    assert detect_bagrut_subject("שאלון מתכונת 281 על ספר הכוזרי") == "machshava"
+    assert detect_bagrut_subject("עיקרי האמונה והרב קוק") == "machshava"
+
+    # 2. Active curriculum resolution for Gemara
+    curr = get_active_bagrut_curriculum("gemara")
+    assert curr is not None
+    assert curr.get("tractate") == "בבא בתרא" or curr.get("tractate_book") == "בבא בתרא"
+
+    # 3. Dynamic DB cache upsert and lookup (Zero-deploy persistence)
+    init_db()
+    upsert_bagrut_curriculum_cache(
+        subject="gemara",
+        track="mmd",
+        units=5,
+        exam_code="5391_test",
+        year_he='תשפ"ז_בדיקה',
+        tractate_book="בבא בתרא",
+        ref_prefix="Bava_Batra",
+        chapter_he="פרק ראשון השותפין",
+        daf_verses_he="ב. עד ד:",
+        page_range=["2a", "2b", "3a", "3b", "4a", "4b"],
+        key_topics=["מחיצה בחצר", "היזק ראיה"],
+        canonical_queries=["בבא בתרא דף ב מחיצה בחצר"],
+        source_url="https://meyda.education.gov.il",
+        is_active=1,
+    )
+
+    db_curr = get_active_bagrut_curriculum_from_db("gemara", exam_code="5391_test")
+    assert db_curr is not None
+    assert db_curr["tractate_book"] == "בבא בתרא"
+    assert db_curr["page_range"] == ["2a", "2b", "3a", "3b", "4a", "4b"]
+
+    # 4. Prompt block formatting
+    block = format_active_curriculum_prompt_block("gemara", "mmd", 5)
+    assert any("MANDATORY ACTIVE MINISTRY OF EDUCATION CURRICULUM" in line for line in block)
+    assert any("בבא בתרא" in line for line in block)

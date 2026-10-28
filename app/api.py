@@ -3333,33 +3333,40 @@ def _run_bagrut(
         except Exception:
             pass
 
-        # Diverse multi-cluster retrieval for broad Bagrut exam requests
+        # Diverse multi-cluster retrieval for broad Bagrut exam requests based on dynamic active curriculum
         if act == "exam" and hasattr(pipeline, "retriever") and hasattr(pipeline, "_resolve_query"):
-            from chavruta.bagrut.engine import is_bagrut_narrow_topic_request
+            from chavruta.bagrut.engine import is_bagrut_narrow_topic_request, get_active_bagrut_curriculum
             has_specific = bool(re.search(r"(?:פרק|סוגי|דף|סימן)", anchor_q))
             if not is_bagrut_narrow_topic_request(anchor_q) and not has_specific and not getattr(rq, "named_refs", None):
                 try:
-                    cluster_queries: dict[str, list[str]] = {
-                        "gemara": [
-                            "מסכת בבא מציעא השבת אבידה שניים אוחזין",
-                            "מסכת ברכות תפילת השחר וקריאת שמע",
-                            "מסכת שבת מלאכות שבת ומוקצה",
-                            "מסכת קידושין וסדר נשים",
-                        ],
-                        "toshba": [
-                            "משנה מסכת בבא מציעא פרק אלו מציאות",
-                            "שולחן ערוך הלכות שבת סימן שכא ושכח",
-                            "שולחן ערוך חושן משפט הלכות נזיקין והשבת אבידה",
-                            "שולחן ערוך יורה דעה הלכות כשרות ומאכלות אסורות",
-                        ],
-                        "tanakh": [
-                            "ספר בראשית פרשת לך לך פרשנות רש\"י ורמב\"ן",
-                            "ספר שמואל מנהיגות שאול ודוד",
-                            "ספר ישעיהו נבואת נחמה ומוסר",
-                            "ספר תהילים מזמורי שירה ותפילה",
-                        ],
-                    }
-                    queries = cluster_queries.get(subj, [])
+                    curr_spec = get_active_bagrut_curriculum(subj, trk, unt)
+                    queries = list(curr_spec.get("canonical_queries") or [])
+                    if not queries:
+                        cluster_queries: dict[str, list[str]] = {
+                            "gemara": [
+                                "בבא בתרא דף ב השותפין שרצו לעשות מחיצה בחצר",
+                                "בבא בתרא דף ב עמוד ב היזק ראיה שמיה היזק",
+                                "סוכה דף ב סוכה שהיא גבוהה למעלה מעשרים אמה",
+                                "בבא מציעא דף כז סימנים ועדים",
+                            ],
+                            "toshba": [
+                                "משנה מסכת בבא מציעא פרק ראשון שנים אוחזין",
+                                "שולחן ערוך הלכות שבת סימן שכא ושכח",
+                                "שולחן ערוך חושן משפט הלכות השבת אבידה",
+                            ],
+                            "tanakh": [
+                                "ספר בראשית פרשת לך לך פרשנות רש\"י ורמב\"ן",
+                                "ספר שמואל מנהיגות שאול ודוד",
+                                "ספר ישעיהו נבואת נחמה ומוסר",
+                            ],
+                            "machshava": [
+                                "ספר הכוזרי מאמר ראשון חלום מלך כוזר מעמד הר סיני",
+                                "רמב\"ם שמונה פרקים פרק רביעי שביל הזהב",
+                                "הרב קוק אורות התשובה פרק ד",
+                                "הרב סולובייצ'יק קול דודי דופק",
+                            ],
+                        }
+                        queries = cluster_queries.get(subj, [])
                     if queries:
                         cluster_hits = []
                         seen_refs = {getattr(h, "ref", None) for h in hits}

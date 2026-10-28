@@ -1,325 +1,545 @@
-# Bagrut Mode (מצב בגרויות) — Curriculum, Commentators, Aramaic Scaffolds & Rubric Principles
-# Spec 010 (specs/010-bagrut-mode/plan.md)
-#
-# Clean-room structural configuration for Israeli Ministry of Education Bagrut tracks in
-# Tanakh (תנ"ך), Gemara / Talmud (גמרא), and Toshba / Oral Law (תושב"ע — משנה והלכה).
-# Contains NO copyrighted exam questions — only pedagogical taxonomy, commentator slugs,
-# Aramaic-Hebrew-English terminology scaffolds, and grading rubric principles.
-
 version: 1
-
 subjects:
   tanakh:
     id: tanakh
-    title_he: "תנ\"ך"
-    title_en: "Tanakh (Hebrew Bible)"
-    tracks: [mmd, mamlachti]
-    units: [2, 3, 5]
+    title_he: תנ"ך
+    title_en: Tanakh (Hebrew Bible)
+    tracks:
+    - mmd
+    - mamlachti
+    units:
+    - 2
+    - 3
+    - 5
     core_commentators:
-      - rashi
-      - ramban
-      - ibn_ezra
-      - rashbam
-      - sforno
-      - radak
-      - malbim
-      - metzudat_david
-      - metzudat_tzion
+    - rashi
+    - ramban
+    - ibn_ezra
+    - rashbam
+    - sforno
+    - radak
+    - malbim
+    - metzudat_david
+    - metzudat_tzion
     track_details:
       mmd:
-        title_he: "תנ\"ך חמ\"ד (ממלכתי-דתי)"
-        title_en: "Tanakh — State-Religious Track (MMD)"
-        exam_codes: ["2551", "2575", "2585"]
-        units_supported: [3, 5]
-        focus_he: >
-          לימוד תנ"ך בעיון ובבקיאות לאור פרשנות הראשונים והאחרונים: זיהוי הקושי בפסוק
-          (לשוני, תחבירי, ענייני או תיאולוגי), הבחנה בין פשט לדרש, השוואת שיטות מפרשים
-          (רש"י, רמב"ן, אבן עזרא, רשב"ם, ספורנו, רד"ק, מלבי"ם, מצודות), וניתוח קטע שלא נלמד (Unseen).
-        focus_en: >
-          In-depth (Iyun) and broad-knowledge (Bekiut) Bible study through classical commentators:
-          identifying textual difficulties, distinguishing pshat from drash, comparing commentators
-          (Rashi, Ramban, Ibn Ezra, Rashbam, Sforno, Radak, Malbim, Metzudot), and analyzing an unseen passage.
-        syllabus_clusters_he:
-          - "תורה בעיון (בראשית, שמות, ויקרא, במדבר, דברים — עם רש\"י, רמב\"ן, אבן עזרא, רשב\"ם וספורנו)"
-          - "נביאים ראשונים (יהושע, שופטים, שמואל א–ב, מלכים א–ב — בקיאות ועיון)"
-          - "נביאים אחרונים (ישעיהו, ירמיהו, יחזקאל, תרי עשר — נבואה, מוסר והיסטוריה)"
-          - "כתובים (תהילים, משלי, איוב, מגילות, עזרא ונחמיה)"
-          - "קטע שלא נלמד (Unseen) — יישום מיומנויות קריאה ופרשנות"
-      mamlachti:
-        title_he: "תנ\"ך ממלכתי (כללי)"
-        title_en: "Tanakh — General State Track (Mamlachti)"
-        exam_codes: ["1281", "0581"]
-        units_supported: [2, 5]
-        focus_he: >
-          קריאה צמודה של הטקסט המקראי, אמצעים אומנותיים ורטוריים (מילה מנחה, תקבולת, כינוי,
-          אירוניה, אנלוגיה, מבנה כיאסטי), השוואה פנים-מקראית, חוק וחברה במקרא, ומנהיגות ונבואה.
-        focus_en: >
-          Close reading of the biblical text, literary and rhetorical devices (leitwort, parallelism,
-          chiasmus, analogy, irony), intra-biblical comparison, biblical law and society, leadership and prophecy.
-        syllabus_clusters_he:
-          - "סיפורי האבות וראשית האומה (בראשית–שמות)"
-          - "דמות המנהיג והמלוכה בישראל (שמואל ומלכים)"
-          - "חוק, צדק וחברה במקרא (דברים, ויקרא, שמות ונביאים אחרונים)"
-          - "חורבן, גלות ושיבת ציון (ירמיהו, יחזקאל, ישעיהו מ–סו, עזרא ונחמיה)"
-          - "ספרות החכמה והשירה המקראית (תהילים, איוב, קהלת, משלי)"
-          - "קטע שלא נלמד (Unseen) — קריאה צמודה של פרק מקראי חדש"
+        title_he: תנ"ך חמ"ד (ממלכתי-דתי)
+        title_en: Tanakh — State-Religious Track (MMD)
+        exam_codes:
+        - '2551'
+        - '2575'
+        - '2585'
+        units_supported:
+        - 3
+        - 5
+        focus_he: 'לימוד תנ"ך בעיון ובבקיאות לאור פרשנות הראשונים והאחרונים: זיהוי הקושי בפסוק (לשוני, תחבירי, ענייני או תיאולוגי),
+          הבחנה בין פשט לדרש, השוואת שיטות מפרשים (רש"י, רמב"ן, אבן עזרא, רשב"ם, ספורנו, רד"ק, מלבי"ם, מצודות), וניתוח קטע
+          שלא נלמד (Unseen).
 
+          '
+        focus_en: 'In-depth (Iyun) and broad-knowledge (Bekiut) Bible study through classical commentators: identifying textual
+          difficulties, distinguishing pshat from drash, comparing commentators (Rashi, Ramban, Ibn Ezra, Rashbam, Sforno,
+          Radak, Malbim, Metzudot), and analyzing an unseen passage.
+
+          '
+        syllabus_clusters_he:
+        - תורה בעיון (בראשית, שמות, ויקרא, במדבר, דברים — עם רש"י, רמב"ן, אבן עזרא, רשב"ם וספורנו)
+        - נביאים ראשונים (יהושע, שופטים, שמואל א–ב, מלכים א–ב — בקיאות ועיון)
+        - נביאים אחרונים (ישעיהו, ירמיהו, יחזקאל, תרי עשר — נבואה, מוסר והיסטוריה)
+        - כתובים (תהילים, משלי, איוב, מגילות, עזרא ונחמיה)
+        - קטע שלא נלמד (Unseen) — יישום מיומנויות קריאה ופרשנות
+      mamlachti:
+        title_he: תנ"ך ממלכתי (כללי)
+        title_en: Tanakh — General State Track (Mamlachti)
+        exam_codes:
+        - '1281'
+        - 0581
+        units_supported:
+        - 2
+        - 5
+        focus_he: 'קריאה צמודה של הטקסט המקראי, אמצעים אומנותיים ורטוריים (מילה מנחה, תקבולת, כינוי, אירוניה, אנלוגיה, מבנה
+          כיאסטי), השוואה פנים-מקראית, חוק וחברה במקרא, ומנהיגות ונבואה.
+
+          '
+        focus_en: 'Close reading of the biblical text, literary and rhetorical devices (leitwort, parallelism, chiasmus, analogy,
+          irony), intra-biblical comparison, biblical law and society, leadership and prophecy.
+
+          '
+        syllabus_clusters_he:
+        - סיפורי האבות וראשית האומה (בראשית–שמות)
+        - דמות המנהיג והמלוכה בישראל (שמואל ומלכים)
+        - חוק, צדק וחברה במקרא (דברים, ויקרא, שמות ונביאים אחרונים)
+        - חורבן, גלות ושיבת ציון (ירמיהו, יחזקאל, ישעיהו מ–סו, עזרא ונחמיה)
+        - ספרות החכמה והשירה המקראית (תהילים, איוב, קהלת, משלי)
+        - קטע שלא נלמד (Unseen) — קריאה צמודה של פרק מקראי חדש
   gemara:
     id: gemara
-    title_he: "גמרא (תלמוד בבלי)"
-    title_en: "Gemara (Babylonian Talmud)"
-    tracks: [mmd, mamlachti]
-    units: [2, 3, 5]
+    title_he: גמרא (תלמוד בבלי)
+    title_en: Gemara (Babylonian Talmud)
+    tracks:
+    - mmd
+    - mamlachti
+    units:
+    - 2
+    - 3
+    - 5
     core_commentators:
-      - rashi
-      - tosafot
-      - rambam
-      - shulchan_aruch
-      - bartenura
-      - mishnah_berurah
+    - rashi
+    - tosafot
+    - rambam
+    - shulchan_aruch
+    - bartenura
+    - mishnah_berurah
     track_details:
       mmd:
-        title_he: "גמרא חמ\"ד — לקט מצוות, סוגיות ועיון"
-        title_en: "Gemara MMD — Talmudic Sugyot & In-Depth Iyun"
-        exam_codes: ["5391", "5291", "6281"]
-        units_supported: [3, 5]
-        focus_he: >
-          ניתוח מבנה הסוגיה (שקלא וטריא), זיהוי מונחי יסוד בארמית ותפקידם הלוגי, הבחנה בין
-          דברי תנאים לדברי אמוראים, הבהרת הסברות שבבסיס המחלוקות, ובעיון (5 יח"ל) — לימוד
-          מעמיק של רש"י ותוספות על הדף (קושיא, תירוץ, אוקימתא ונפקא מינה).
-        focus_en: >
-          Analyzing the structure of the Talmudic sugya (shakla vetarya), identifying Aramaic structural
-          terms and their logical roles, distinguishing Tannaitic from Amoraic statements, articulating
-          underlying rationales (svara), and for 5-unit Iyun — studying Rashi and Tosafot (kushya, terutz, nafka mina).
-        syllabus_clusters_he:
-          - "מסכתות סדר נזיקין (בבא קמא, בבא מציעא, בבא בתרא, סנהדרין)"
-          - "מסכתות סדר מועד וברכות (ברכות, שבת, פסחים, ביצה, סוכה)"
-          - "מסכתות סדר נשים (קידושין, גיטין, כתובות)"
-          - "עיון בראשונים על הדף — רש\"י ותוספות (שאלון 6281)"
-      mamlachti:
-        title_he: "תורה שבעל פה ותרבות ישראל — סוגיות תלמודיות"
-        title_en: "Oral Law & Talmudic Culture (General Track)"
-        exam_codes: ["5291"]
-        units_supported: [2, 5]
-        focus_he: >
-          קריאה מונחית במקורות חז"ל (משנה, אגדה וסוגיות תלמודיות נבחרות), הבנת הדילמה הערכית
-          והמשפטית, וביאור מונחי יסוד בשפת התלמוד.
-        focus_en: >
-          Guided reading in rabbinic texts (Mishnah, Aggadah, and selected Talmudic sugyot),
-          understanding ethical and legal dilemmas, and explaining core Talmudic terms.
+        title_he: גמרא חמ"ד — לקט מצוות, סוגיות ועיון
+        title_en: Gemara MMD — Talmudic Sugyot & In-Depth Iyun
+        exam_codes:
+        - '5391'
+        - '5291'
+        - '6281'
+        units_supported:
+        - 3
+        - 5
+        focus_he: 'ניתוח מבנה הסוגיה (שקלא וטריא), זיהוי מונחי יסוד בארמית ותפקידם הלוגי, הבחנה בין דברי תנאים לדברי אמוראים,
+          הבהרת הסברות שבבסיס המחלוקות, ובעיון (5 יח"ל) — לימוד מעמיק של רש"י ותוספות על הדף (קושיא, תירוץ, אוקימתא ונפקא
+          מינה).
 
+          '
+        focus_en: 'Analyzing the structure of the Talmudic sugya (shakla vetarya), identifying Aramaic structural terms and
+          their logical roles, distinguishing Tannaitic from Amoraic statements, articulating underlying rationales (svara),
+          and for 5-unit Iyun — studying Rashi and Tosafot (kushya, terutz, nafka mina).
+
+          '
+        syllabus_clusters_he:
+        - מסכתות סדר נזיקין (בבא קמא, בבא מציעא, בבא בתרא, סנהדרין)
+        - מסכתות סדר מועד וברכות (ברכות, שבת, פסחים, ביצה, סוכה)
+        - מסכתות סדר נשים (קידושין, גיטין, כתובות)
+        - עיון בראשונים על הדף — רש"י ותוספות (שאלון 6281)
+      mamlachti:
+        title_he: תורה שבעל פה ותרבות ישראל — סוגיות תלמודיות
+        title_en: Oral Law & Talmudic Culture (General Track)
+        exam_codes:
+        - '5291'
+        units_supported:
+        - 2
+        - 5
+        focus_he: 'קריאה מונחית במקורות חז"ל (משנה, אגדה וסוגיות תלמודיות נבחרות), הבנת הדילמה הערכית והמשפטית, וביאור מונחי
+          יסוד בשפת התלמוד.
+
+          '
+        focus_en: 'Guided reading in rabbinic texts (Mishnah, Aggadah, and selected Talmudic sugyot), understanding ethical
+          and legal dilemmas, and explaining core Talmudic terms.
+
+          '
   toshba:
     id: toshba
-    title_he: "תושב\"ע (משנה והלכה)"
-    title_en: "Toshba (Mishnah & Halacha)"
-    tracks: [mmd, mamlachti]
-    units: [2, 3, 5]
+    title_he: תושב"ע (משנה והלכה)
+    title_en: Toshba (Mishnah & Halacha)
+    tracks:
+    - mmd
+    - mamlachti
+    units:
+    - 2
+    - 3
+    - 5
     core_commentators:
-      - bartenura
-      - rambam
-      - shulchan_aruch
-      - mishnah_berurah
-      - rashi
+    - bartenura
+    - rambam
+    - shulchan_aruch
+    - mishnah_berurah
+    - rashi
     track_details:
       mmd:
-        title_he: "תושב\"ע חמ\"ד — משנה, הלכה ואירועונים לימודיים"
-        title_en: "Toshba MMD — Mishnah, Halachic Progression & Exam Case Studies"
-        exam_codes: ["5391", "5381"]
-        units_supported: [3, 5]
-        focus_he: >
-          פירוק מבני של המשנה (כותרת/נושא, מקרה, דין, טעם ומחלוקת), פירוש ר"ע מברטנורא והרמב"ם,
-          השתלשלות ההלכה מן המשנה והגמרא אל השולחן ערוך והמשנה ברורה, וניתוח "אירועון הלכתי"
-          לימודי לבחינה (בכפוף לעקרון VIII: לימוד עיוני לבגרות בלבד, אינו פסק הלכה למעשה).
-        focus_en: >
-          Structural breakdown of the Mishnah (case, ruling, rationale, dispute), Bartenura and Rambam
-          commentaries, halachic progression to Shulchan Arukh and Mishnah Berurah, and educational
-          halachic case studies for exam preparation (subject to Principle VIII: academic study only, never a practical psak).
+        title_he: תושב"ע חמ"ד — משנה, הלכה ואירועונים לימודיים
+        title_en: Toshba MMD — Mishnah, Halachic Progression & Exam Case Studies
+        exam_codes:
+        - '5391'
+        - '5381'
+        units_supported:
+        - 3
+        - 5
+        focus_he: 'פירוק מבני של המשנה (כותרת/נושא, מקרה, דין, טעם ומחלוקת), פירוש ר"ע מברטנורא והרמב"ם, השתלשלות ההלכה מן
+          המשנה והגמרא אל השולחן ערוך והמשנה ברורה, וניתוח "אירועון הלכתי" לימודי לבחינה (בכפוף לעקרון VIII: לימוד עיוני לבגרות
+          בלבד, אינו פסק הלכה למעשה).
+
+          '
+        focus_en: 'Structural breakdown of the Mishnah (case, ruling, rationale, dispute), Bartenura and Rambam commentaries,
+          halachic progression to Shulchan Arukh and Mishnah Berurah, and educational halachic case studies for exam preparation
+          (subject to Principle VIII: academic study only, never a practical psak).
+
+          '
         syllabus_clusters_he:
-          - "אישות ומשפחה"
-          - "שבת ומועדים"
-          - "כשרות ומאכלות אסורות"
-          - "נזיקין, השבת אבידה ודיני ממונות"
-          - "צדקה, משפט וחברה"
-          - "מצוות התלויות בארץ"
+        - אישות ומשפחה
+        - שבת ומועדים
+        - כשרות ומאכלות אסורות
+        - נזיקין, השבת אבידה ודיני ממונות
+        - צדקה, משפט וחברה
+        - מצוות התלויות בארץ
       mamlachti:
-        title_he: "משנה ויצירה תלמודית — מסלול ממלכתי"
-        title_en: "Mishnah & Rabbinic Literature — General Track"
-        exam_codes: ["5291"]
-        units_supported: [2, 5]
-        focus_he: >
-          הכרת עולם המשנה וההלכה, הבנת מבנה המשנה (מקרה, דין וטעם), וניתוח דילמות מוסריות וחברתיות בדברי חז"ל.
-        focus_en: >
-          Introduction to the world of the Mishnah and Halacha, understanding Mishnah structure (case, ruling, reason),
+        title_he: משנה ויצירה תלמודית — מסלול ממלכתי
+        title_en: Mishnah & Rabbinic Literature — General Track
+        exam_codes:
+        - '5291'
+        units_supported:
+        - 2
+        - 5
+        focus_he: 'הכרת עולם המשנה וההלכה, הבנת מבנה המשנה (מקרה, דין וטעם), וניתוח דילמות מוסריות וחברתיות בדברי חז"ל.
+
+          '
+        focus_en: 'Introduction to the world of the Mishnah and Halacha, understanding Mishnah structure (case, ruling, reason),
           and analyzing moral and social dilemmas in rabbinic literature.
 
+          '
+  machshava:
+    id: machshava
+    title_he: מחשבת ישראל (הגות ואמונה)
+    title_en: Jewish Thought (Machshevet Yisrael)
+    tracks:
+    - mmd
+    - mamlachti
+    units:
+    - 2
+    - 3
+    - 5
+    core_commentators:
+    - rambam
+    - yehuda_halevi
+    - kook
+    - soloveitchik
+    - maharal
+    - saadia_gaon
+    - crescas
+    - albo
+    track_details:
+      mmd:
+        title_he: מחשבת ישראל חמ"ד — אמונה, עבודת ה' וחברה
+        title_en: Jewish Thought MMD — Faith, Philosophy & Society
+        exam_codes:
+        - '281'
+        - '282'
+        - '5281'
+        units_supported:
+        - 2
+        - 5
+        focus_he: 'לימוד מעמיק של הגות יהודית, בירור מושגי אמונה והשגחה, יחסי דת ומדע, גאולה ולאומיות, תפילה ומוסר, מתוך ספרי
+          היסוד: הכוזרי לרבי יהודה הלוי, רמב"ם (הקדמות, הלכות תשובה ודעות, שמונה פרקים), הרב קוק (אורות התשובה, מאמרי הראי"ה),
+          והרב י"ד סולובייצ''יק (איש האמונה, קול דודי דופק).'
+        focus_en: In-depth study of Jewish philosophy, faith, providence, religion and science, national revival, prayer and
+          ethics through classical and modern foundational texts (Kuzari, Rambam, Rav Kook, Rav Soloveitchik).
+        syllabus_clusters_he:
+        - מעגל החיים, תפילה ועבודת ה' שבלב
+        - אמונה, גאולה ומדינת ישראל (הרב קוק והרב סולובייצ'יק)
+        - ספר הכוזרי לרבי יהודה הלוי (מאמר ראשון, היסטוריה והתגלות)
+        - תורת האדם והמוסר (רמב"ם — שמונה פרקים והלכות דעות)
+      mamlachti:
+        title_he: מחשבת ישראל — מסלול כללי
+        title_en: Jewish Thought — General Track
+        exam_codes:
+        - '281'
+        units_supported:
+        - 2
+        - 5
+        focus_he: הגות יהודית מודרנית וקלאסית, שאלות זהות, מוסר ואתיקה אוניברסלית.
+        focus_en: Modern and classical Jewish thought, identity, ethics and universal morality.
 tracks:
   mmd:
     id: mmd
-    title_he: "ממלכתי-דתי (חמ\"ד)"
-    title_en: "State-Religious (MMD / Hemed)"
+    title_he: ממלכתי-דתי (חמ"ד)
+    title_en: State-Religious (MMD / Hemed)
   mamlachti:
     id: mamlachti
-    title_he: "ממלכתי (כללי)"
-    title_en: "General State (Mamlachti)"
-
+    title_he: ממלכתי (כללי)
+    title_en: General State (Mamlachti)
 units:
   2:
     level: 2
-    title_he: "2 יח\"ל (חובה / בסיס)"
-    title_en: "2 Units (Core / Mandatory)"
+    title_he: 2 יח"ל (חובה / בסיס)
+    title_en: 2 Units (Core / Mandatory)
   3:
     level: 3
-    title_he: "3 יח\"ל (מורחב בסיסי)"
-    title_en: "3 Units (Intermediate Extended)"
+    title_he: 3 יח"ל (מורחב בסיסי)
+    title_en: 3 Units (Intermediate Extended)
   5:
     level: 5
-    title_he: "5 יח\"ל (מוגבר / עיון)"
-    title_en: "5 Units (Advanced / Iyun)"
-
-# Exact Sefaria / Chavruta commentator_id slugs used for retrieval boosting in Bagrut mode.
+    title_he: 5 יח"ל (מוגבר / עיון)
+    title_en: 5 Units (Advanced / Iyun)
 core_commentators:
-  - rashi
-  - ramban
-  - ibn_ezra
-  - rashbam
-  - sforno
-  - radak
-  - malbim
-  - metzudat_david
-  - metzudat_tzion
-  - tosafot
-  - rambam
-  - shulchan_aruch
-  - bartenura
-  - mishnah_berurah
-
-# Pedagogical Aramaic-Hebrew-English glossary for Talmudic Sugya & Bagrut Gemara questions.
+- rashi
+- ramban
+- ibn_ezra
+- rashbam
+- sforno
+- radak
+- malbim
+- metzudat_david
+- metzudat_tzion
+- tosafot
+- rambam
+- shulchan_aruch
+- bartenura
+- mishnah_berurah
 aramaic_scaffold:
-  - term: "מנא הני מילי (מנלן)"
-    role_he: "שאלת מקור"
-    meaning_he: "מניין לנו הדברים האלה? בקשת מקור מן התורה שבכתב לדין שנאמר במשנה או במימרא."
-    meaning_en: "From where are these words derived? Seeking a biblical source for a Mishnaic or Amoraic ruling."
-  - term: "מאי שנא"
-    role_he: "שאלת הבחנה / קושיא"
-    meaning_he: "מה שונה? מדוע קיים הבדל בדין בין שני מקרים שנראים דומים (למשל בין הרישא לסיפא)?"
-    meaning_en: "What is the difference? Why does the ruling differ between two seemingly similar cases (e.g., first and second clauses)?"
-  - term: "איבעיא להו"
-    role_he: "בעיה / ספק הלכתי"
-    meaning_he: "נשאלה להם (לבני הישיבה): הצגת שאלה או ספק הלכתי שטרם הוכרע."
-    meaning_en: "It was asked by them: Introducing an unresolved legal inquiry or dilemma in the study hall."
-  - term: "תא שמע (ת\"ש)"
-    role_he: "הבאת ראיה / פשיטת ספק"
-    meaning_he: "בוא ושמע: הבאת מקור (משנה, ברייתא או מימרא) כדי להוכיח צד מסוים או לפשוט ספק."
-    meaning_en: "Come and hear: Introducing a proof-text (Mishnah, Baraita, or statement) to resolve an inquiry or support a position."
-  - term: "מיתיבי"
-    role_he: "קושיא ממקור תנאי"
-    meaning_he: "משיבים (מקשים) על דברי אמורא ממקור בעל סמכות גבוהה יותר (משנה או ברייתא)."
-    meaning_en: "They objected: Challenging an Amoraic statement from a higher-authority Tannaitic source (Mishnah or Baraita)."
-  - term: "ורמינהו"
-    role_he: "סתירה בין שני מקורות שווי-מעמד"
-    meaning_he: "והשלך אותם זה בזה: הצגת סתירה בין שני מקורות תנאיים (משנה מול משנה, או ברייתא מול ברייתא)."
-    meaning_en: "Contrast them: Pointing out a contradiction between two sources of equal Tannaitic authority."
-  - term: "הכא במאי עסקינן (אוקימתא)"
-    role_he: "תירוץ על ידי העמדת המקרה"
-    meaning_he: "כאן במה אנו עוסקים? יישוב קושיא או סתירה על ידי צמצום המקור למקרה או לתנאים מסוימים."
-    meaning_en: "With what case are we dealing here? (Okimta): Resolving a contradiction by limiting a source to specific circumstances."
-  - term: "תיובתא"
-    role_he: "דחייה מוחלטת"
-    meaning_he: "קושיא מכרעת שאין לה תירוץ, הדוחה את שיטת האמורא שלהלכה."
-    meaning_en: "Definitive refutation: A decisive objection from an authoritative source that refutes an Amora's position."
-  - term: "בשלמא ... אלא"
-    role_he: "קושיא ממוקדת על אחת השיטות"
-    meaning_he: "ניחא לשיטת פלוני (דבריו מסתברים), אבל לשיטת אלמוני — קשה!"
-    meaning_en: "Granted according to X it makes sense, but according to Y it is difficult!"
-  - term: "אלא"
-    role_he: "חזרה מן ההבנה הקודמת והצעת מהלך חדש"
-    meaning_he: "דחיית ההסבר או האוקימתא הקודמת ומעבר לפירוש או תירוץ חדש."
-    meaning_en: "Rather: Abandoning the previous explanation and proposing a new interpretation or resolution."
-  - term: "לעולם"
-    role_he: "חזרה להבנה הראשונית"
-    meaning_he: "באמת (כפי שאמרנו בתחילה): קיום ההסבר הראשון למרות הקושיא, תוך הוספת תיקון או הבחנה."
-    meaning_en: "Actually / Still: Maintaining the initial proposition despite the objection, with a refined distinction."
-  - term: "קא משמע לן (קמ\"ל)"
-    role_he: "הצגת החידוש"
-    meaning_he: "משמיע לנו: הסבר מדוע המקור אינו מיותר — איזה חידוש הלכתי הוא בא ללמד (ולשלול 'הוה אמינא')."
-    meaning_en: "It teaches us: Explaining the novel point of the source and what mistaken assumption (hava amina) it rules out."
-  - term: "נפקא מינה (נפ\"מ)"
-    role_he: "הבדל מעשי בין שיטות"
-    meaning_he: "יוצא מזה: מהו המקרה המעשי שבו יתבטא ההבדל בין שני פירושים או שתי שיטות?"
-    meaning_en: "Practical difference: What concrete case results in a different ruling depending on the two views?"
-  - term: "מאי בינייהו"
-    role_he: "בירור נקודת המחלוקת"
-    meaning_he: "מה ביניהם? במה נחלקו למעשה שני החכמים שלכאורה אומרים דין דומה?"
-    meaning_en: "What is between them? Clarifying the practical or conceptual difference between two seemingly similar views."
-  - term: "שמע מינה (ש\"מ)"
-    role_he: "הסקת מסקנה"
-    meaning_he: "למד מכאן: הסקת מסקנה ברורה מתוך המקור שהובא."
-    meaning_en: "Learn from this: Drawing a clear conclusion from the cited source."
-  - term: "הלכתא"
-    role_he: "הכרעת ההלכה בסוגיה"
-    meaning_he: "הלכה כדברי פלוני: הכרעת הגמרא בסוף הדיון."
-    meaning_en: "The law is: The Talmud's final halachic conclusion on the dispute."
-
+- term: מנא הני מילי (מנלן)
+  role_he: שאלת מקור
+  meaning_he: מניין לנו הדברים האלה? בקשת מקור מן התורה שבכתב לדין שנאמר במשנה או במימרא.
+  meaning_en: From where are these words derived? Seeking a biblical source for a Mishnaic or Amoraic ruling.
+- term: מאי שנא
+  role_he: שאלת הבחנה / קושיא
+  meaning_he: מה שונה? מדוע קיים הבדל בדין בין שני מקרים שנראים דומים (למשל בין הרישא לסיפא)?
+  meaning_en: What is the difference? Why does the ruling differ between two seemingly similar cases (e.g., first and second
+    clauses)?
+- term: איבעיא להו
+  role_he: בעיה / ספק הלכתי
+  meaning_he: 'נשאלה להם (לבני הישיבה): הצגת שאלה או ספק הלכתי שטרם הוכרע.'
+  meaning_en: 'It was asked by them: Introducing an unresolved legal inquiry or dilemma in the study hall.'
+- term: תא שמע (ת"ש)
+  role_he: הבאת ראיה / פשיטת ספק
+  meaning_he: 'בוא ושמע: הבאת מקור (משנה, ברייתא או מימרא) כדי להוכיח צד מסוים או לפשוט ספק.'
+  meaning_en: 'Come and hear: Introducing a proof-text (Mishnah, Baraita, or statement) to resolve an inquiry or support a
+    position.'
+- term: מיתיבי
+  role_he: קושיא ממקור תנאי
+  meaning_he: משיבים (מקשים) על דברי אמורא ממקור בעל סמכות גבוהה יותר (משנה או ברייתא).
+  meaning_en: 'They objected: Challenging an Amoraic statement from a higher-authority Tannaitic source (Mishnah or Baraita).'
+- term: ורמינהו
+  role_he: סתירה בין שני מקורות שווי-מעמד
+  meaning_he: 'והשלך אותם זה בזה: הצגת סתירה בין שני מקורות תנאיים (משנה מול משנה, או ברייתא מול ברייתא).'
+  meaning_en: 'Contrast them: Pointing out a contradiction between two sources of equal Tannaitic authority.'
+- term: הכא במאי עסקינן (אוקימתא)
+  role_he: תירוץ על ידי העמדת המקרה
+  meaning_he: כאן במה אנו עוסקים? יישוב קושיא או סתירה על ידי צמצום המקור למקרה או לתנאים מסוימים.
+  meaning_en: 'With what case are we dealing here? (Okimta): Resolving a contradiction by limiting a source to specific circumstances.'
+- term: תיובתא
+  role_he: דחייה מוחלטת
+  meaning_he: קושיא מכרעת שאין לה תירוץ, הדוחה את שיטת האמורא שלהלכה.
+  meaning_en: 'Definitive refutation: A decisive objection from an authoritative source that refutes an Amora''s position.'
+- term: בשלמא ... אלא
+  role_he: קושיא ממוקדת על אחת השיטות
+  meaning_he: ניחא לשיטת פלוני (דבריו מסתברים), אבל לשיטת אלמוני — קשה!
+  meaning_en: Granted according to X it makes sense, but according to Y it is difficult!
+- term: אלא
+  role_he: חזרה מן ההבנה הקודמת והצעת מהלך חדש
+  meaning_he: דחיית ההסבר או האוקימתא הקודמת ומעבר לפירוש או תירוץ חדש.
+  meaning_en: 'Rather: Abandoning the previous explanation and proposing a new interpretation or resolution.'
+- term: לעולם
+  role_he: חזרה להבנה הראשונית
+  meaning_he: 'באמת (כפי שאמרנו בתחילה): קיום ההסבר הראשון למרות הקושיא, תוך הוספת תיקון או הבחנה.'
+  meaning_en: 'Actually / Still: Maintaining the initial proposition despite the objection, with a refined distinction.'
+- term: קא משמע לן (קמ"ל)
+  role_he: הצגת החידוש
+  meaning_he: 'משמיע לנו: הסבר מדוע המקור אינו מיותר — איזה חידוש הלכתי הוא בא ללמד (ולשלול ''הוה אמינא'').'
+  meaning_en: 'It teaches us: Explaining the novel point of the source and what mistaken assumption (hava amina) it rules
+    out.'
+- term: נפקא מינה (נפ"מ)
+  role_he: הבדל מעשי בין שיטות
+  meaning_he: 'יוצא מזה: מהו המקרה המעשי שבו יתבטא ההבדל בין שני פירושים או שתי שיטות?'
+  meaning_en: 'Practical difference: What concrete case results in a different ruling depending on the two views?'
+- term: מאי בינייהו
+  role_he: בירור נקודת המחלוקת
+  meaning_he: מה ביניהם? במה נחלקו למעשה שני החכמים שלכאורה אומרים דין דומה?
+  meaning_en: What is between them? Clarifying the practical or conceptual difference between two seemingly similar views.
+- term: שמע מינה (ש"מ)
+  role_he: הסקת מסקנה
+  meaning_he: 'למד מכאן: הסקת מסקנה ברורה מתוך המקור שהובא.'
+  meaning_en: 'Learn from this: Drawing a clear conclusion from the cited source.'
+- term: הלכתא
+  role_he: הכרעת ההלכה בסוגיה
+  meaning_he: 'הלכה כדברי פלוני: הכרעת הגמרא בסוף הדיון.'
+  meaning_en: 'The law is: The Talmud''s final halachic conclusion on the dispute.'
 rubric_principles_he:
-  core_formula: "טענה מפורשת + ביסוס/ציטוט מדויק מן המקור [S#] + הסבר במילים שלך המקשר בין הציטוט לטענה."
+  core_formula: טענה מפורשת + ביסוס/ציטוט מדויק מן המקור [S#] + הסבר במילים שלך המקשר בין הציטוט לטענה.
   principles:
-    - id: claim_cite_explain
-      title: "מבנה תשובה מלאה (טענה – ביסוס – הסבר)"
-      rule: >
-        תשובה מלאה בבחינת הבגרות חייבת לכלול שלושה רכיבים: (1) מענה ישיר לשאלה (הטענה/הדין/הקושי);
-        (2) ביסוס מן הכתוב או מן המפרש באמצעות ציטוט ממוקד או הפניה מפורשת [S#];
-        (3) הסבר במילים של התלמיד המראה כיצד הציטוט מוכיח את הטענה. ציטוט ללא הסבר (או הסבר ללא עיגון בטקסט
-        כאשר נדרש ביסוס) יזכה בניקוד חלקי בלבד (לרוב 50%–60% ממשקל הסעיף).
-    - id: commentary_difficulty
-      title: "זיהוי הקושי בפרשנות (תנ\"ך וגמרא)"
-      rule: >
-        כאשר נשאלים "מה הקושי בפסוק/בגמרא שבעקבותיו פירש המפרש?", אין להסתפק בהעתקת דברי המפרש.
-        יש להצביע במפורש על החריגה, הכפילות, הסתירה או החסר בלשון המקור עצמו, ורק לאחר מכן להראות כיצד
-        המפרש מיישב זאת.
-    - id: sugya_structure
-      title: "הבחנה בין תוכן לתפקיד בסוגיה (גמרא)"
-      rule: >
-        בשאלות על שלבי השקלא וטריא (קושיא, תירוץ, אוקימתא, ראיה), על התלמיד לציין הן את התפקיד המבני של השלב
-        והן את תוכנו ההלכתי-ענייני בסוגיה הספציפית, תוך ביאור המונח הארמי בהקשרו.
-    - id: mishnah_halacha_components
-      title: "פירוק משנה והלכה (מקרה – דין – טעם)"
-      rule: >
-        בשאלות תושב"ע ומשנה יש להבחין בבירור בין: (א) המקרה (הסיטואציה העובדתית); (ב) הדין (פסק ההלכה:
-        חייב/פטור, מותר/אסור, כשר/פסול); (ג) הטעם (הנימוק או הסברא לדין). ערבוב בין המקרה לדין גורע נקודות.
-    - id: halachic_humility_principle_viii
-      title: "ענווה הלכתית בלימוד אירועונים (Principle VIII)"
-      rule: >
-        שאלות יישום ו"אירועון הלכתי" במצב בגרויות נועדו לבחון הבנה לימודית-עיונית של המקורות לקראת בחינת הבגרות בלבד.
-        המחוון והמשוב מציגים את השיטות והנימוקים מתוך המקורות שאוחזרו, ומציינים במפורש כי אין לראות בכך פסק הלכה למעשה.
+  - id: claim_cite_explain
+    title: מבנה תשובה מלאה (טענה – ביסוס – הסבר)
+    rule: 'תשובה מלאה בבחינת הבגרות חייבת לכלול שלושה רכיבים: (1) מענה ישיר לשאלה (הטענה/הדין/הקושי); (2) ביסוס מן הכתוב או
+      מן המפרש באמצעות ציטוט ממוקד או הפניה מפורשת [S#]; (3) הסבר במילים של התלמיד המראה כיצד הציטוט מוכיח את הטענה. ציטוט
+      ללא הסבר (או הסבר ללא עיגון בטקסט כאשר נדרש ביסוס) יזכה בניקוד חלקי בלבד (לרוב 50%–60% ממשקל הסעיף).
 
+      '
+  - id: commentary_difficulty
+    title: זיהוי הקושי בפרשנות (תנ"ך וגמרא)
+    rule: 'כאשר נשאלים "מה הקושי בפסוק/בגמרא שבעקבותיו פירש המפרש?", אין להסתפק בהעתקת דברי המפרש. יש להצביע במפורש על החריגה,
+      הכפילות, הסתירה או החסר בלשון המקור עצמו, ורק לאחר מכן להראות כיצד המפרש מיישב זאת.
+
+      '
+  - id: sugya_structure
+    title: הבחנה בין תוכן לתפקיד בסוגיה (גמרא)
+    rule: 'בשאלות על שלבי השקלא וטריא (קושיא, תירוץ, אוקימתא, ראיה), על התלמיד לציין הן את התפקיד המבני של השלב והן את תוכנו
+      ההלכתי-ענייני בסוגיה הספציפית, תוך ביאור המונח הארמי בהקשרו.
+
+      '
+  - id: mishnah_halacha_components
+    title: פירוק משנה והלכה (מקרה – דין – טעם)
+    rule: 'בשאלות תושב"ע ומשנה יש להבחין בבירור בין: (א) המקרה (הסיטואציה העובדתית); (ב) הדין (פסק ההלכה: חייב/פטור, מותר/אסור,
+      כשר/פסול); (ג) הטעם (הנימוק או הסברא לדין). ערבוב בין המקרה לדין גורע נקודות.
+
+      '
+  - id: halachic_humility_principle_viii
+    title: ענווה הלכתית בלימוד אירועונים (Principle VIII)
+    rule: 'שאלות יישום ו"אירועון הלכתי" במצב בגרויות נועדו לבחון הבנה לימודית-עיונית של המקורות לקראת בחינת הבגרות בלבד. המחוון
+      והמשוב מציגים את השיטות והנימוקים מתוך המקורות שאוחזרו, ומציינים במפורש כי אין לראות בכך פסק הלכה למעשה.
+
+      '
 rubric_principles_en:
-  core_formula: "Explicit Claim + Accurate Textual Citation [S#] + Own-Words Explanation linking the citation to the claim."
+  core_formula: Explicit Claim + Accurate Textual Citation [S#] + Own-Words Explanation linking the citation to the claim.
   principles:
-    - id: claim_cite_explain
-      title: "Complete Answer Structure (Claim – Citation – Explanation)"
-      rule: >
-        A full-credit Bagrut response requires three components: (1) a direct answer to the prompt (claim/ruling/difficulty);
-        (2) textual grounding via a focused quote or explicit reference [S#]; and
-        (3) an explanation in the student's own words demonstrating how the quote proves the claim.
-        Quoting without explaining (or explaining without textual grounding when required) earns partial credit only (typically 50%–60%).
-    - id: commentary_difficulty
-      title: "Identifying the Textual Difficulty (Tanakh & Gemara)"
-      rule: >
-        When asked "What textual difficulty prompted the commentator's explanation?", simply restating the commentary is insufficient.
-        The student must pinpoint the anomaly, redundancy, contradiction, or gap in the base verse/sugya itself, and then show how
-        the commentator resolves it.
-    - id: sugya_structure
-      title: "Distinguishing Structural Role from Content (Gemara)"
-      rule: >
-        In questions on the steps of the shakla vetarya (objection, resolution, okimta, proof), the student must state both
-        the structural/logical function of the step and its specific legal content in the sugya, translating key Aramaic terms in context.
-    - id: mishnah_halacha_components
-      title: "Mishnah & Halacha Breakdown (Case – Ruling – Rationale)"
-      rule: >
-        In Toshba/Mishnah questions, clearly separate: (a) the Case (factual scenario); (b) the Ruling (liable/exempt, permitted/prohibited);
-        and (c) the Rationale (underlying reason or svara). Conflating the case with the ruling deducts points.
-    - id: halachic_humility_principle_viii
-      title: "Halachic Humility in Case Studies (Principle VIII)"
-      rule: >
-        Halachic case-study questions (Eru'on Halachti) in Bagrut Mode strictly assess academic comprehension of the retrieved sources
-        for exam preparation. Rubrics and feedback present the retrieved positions and rationales for study purposes only, never as a practical halachic ruling (psak).
+  - id: claim_cite_explain
+    title: Complete Answer Structure (Claim – Citation – Explanation)
+    rule: 'A full-credit Bagrut response requires three components: (1) a direct answer to the prompt (claim/ruling/difficulty);
+      (2) textual grounding via a focused quote or explicit reference [S#]; and (3) an explanation in the student''s own words
+      demonstrating how the quote proves the claim. Quoting without explaining (or explaining without textual grounding when
+      required) earns partial credit only (typically 50%–60%).
+
+      '
+  - id: commentary_difficulty
+    title: Identifying the Textual Difficulty (Tanakh & Gemara)
+    rule: 'When asked "What textual difficulty prompted the commentator''s explanation?", simply restating the commentary
+      is insufficient. The student must pinpoint the anomaly, redundancy, contradiction, or gap in the base verse/sugya itself,
+      and then show how the commentator resolves it.
+
+      '
+  - id: sugya_structure
+    title: Distinguishing Structural Role from Content (Gemara)
+    rule: 'In questions on the steps of the shakla vetarya (objection, resolution, okimta, proof), the student must state
+      both the structural/logical function of the step and its specific legal content in the sugya, translating key Aramaic
+      terms in context.
+
+      '
+  - id: mishnah_halacha_components
+    title: Mishnah & Halacha Breakdown (Case – Ruling – Rationale)
+    rule: 'In Toshba/Mishnah questions, clearly separate: (a) the Case (factual scenario); (b) the Ruling (liable/exempt,
+      permitted/prohibited); and (c) the Rationale (underlying reason or svara). Conflating the case with the ruling deducts
+      points.
+
+      '
+  - id: halachic_humility_principle_viii
+    title: Halachic Humility in Case Studies (Principle VIII)
+    rule: 'Halachic case-study questions (Eru''on Halachti) in Bagrut Mode strictly assess academic comprehension of the retrieved
+      sources for exam preparation. Rubrics and feedback present the retrieved positions and rationales for study purposes
+      only, never as a practical halachic ruling (psak).
+
+      '
+active_curriculum:
+  version_year: תשפ"ו–תשפ"ז
+  gemara:
+    '5391':
+      name_he: גמרא חובה — תושב"ע חמ"ד (שאלון 5391)
+      tractate: בבא בתרא
+      tractate_en: Bava Batra
+      ref_prefix: Bava_Batra
+      chapter: פרק ראשון — השותפין
+      daf_range: 'ב. עד ד: (Bava_Batra.2a–4b)'
+      pages:
+      - 2a
+      - 2b
+      - 3a
+      - 3b
+      - 4a
+      - 4b
+      key_topics:
+      - השותפין שרצו לעשות מחיצה בחצר (דף ב. - ב:)
+      - 'היזק ראיה שמיה היזק או לאו שמיה היזק (דף ב: - ג.)'
+      - דיני כותל גינה, גזית וכפיסין (דף ג. - ד:)
+      - 'מבוא לתושב"ע: השתלשלות התורה שבעל פה ותורה שבעל פה כמפרשת תורה שבכתב'
+      canonical_queries:
+      - בבא בתרא דף ב השותפין שרצו לעשות מחיצה בחצר
+      - בבא בתרא דף ב עמוד ב היזק ראיה שמיה היזק
+      - בבא בתרא דף ג כותל גינה גזית וכפיסין
+      - מבוא לתושבע השתלשלות התורה שבעל פה רמב"ם הקדמה למשנה
+    '5291':
+      name_he: גמרא הגבר — חמ"ד וממלכתי (שאלון 5291)
+      tractate: סוכה
+      tractate_en: Sukkah
+      ref_prefix: Sukkah
+      chapter: פרק ראשון — סוכה
+      daf_range: 'ב. עד ח: (Sukkah.2a–8b)'
+      pages:
+      - 2a
+      - 2b
+      - 3a
+      - 3b
+      - 4a
+      - 4b
+      - 5a
+      - 5b
+      - 6a
+      - 6b
+      - 7a
+      - 7b
+      - 8a
+      - 8b
+      key_topics:
+      - סוכה שהיא גבוהה למעלה מעשרים אמה פסולה (דף ב. - ג.)
+      - סוכה ישנה וטעמי הסוכה (דף ט.)
+      - 'סוכה תחת האילן וסכך פסול (דף ט: - י.)'
+      canonical_queries:
+      - סוכה דף ב סוכה שהיא גבוהה למעלה מעשרים אמה פסולה
+      - סוכה דף ג שיעור סוכה ודירת עראי
+      - סוכה דף ט סוכה ישנה וסוכה לשם חג
+    '6281':
+      name_he: גמרא עיון — ראשונים על הדף (שאלון 6281)
+      tractate: בבא מציעא
+      tractate_en: Bava Metzia
+      ref_prefix: Bava_Metzia
+      chapter: פרק שני — אלו מציאות
+      daf_range: 'כא. עד לג: (Bava_Metzia.21a–33b)'
+      key_topics:
+      - 'יאוש שלא מדעת (דף כא: - כב:)'
+      - סימנים ועדים (דף כז. - כח.)
+      - מצוות השבת אבידה ועשה דוחה לא תעשה (דף ל. - לא:)
+      canonical_queries:
+      - בבא מציעא דף כא יאוש שלא מדעת אביי ורבא
+      - בבא מציעא דף כז סימנים ועדים
+      - בבא מציעא דף לא השב תשיבם כהן בבית הקברות
+  toshba:
+    '5381':
+      name_he: תושב"ע חמ"ד — משנה והלכה (שאלון 5381)
+      tractate: בבא מציעא
+      ref_prefix: Bava_Metzia
+      chapter: פרק שנים אוחזין ואלו מציאות
+      daf_range: משניות בבא מציעא פרקים א-ב
+      key_topics:
+      - 'משנה: שנים אוחזין בטלית ואלו מציאות עם פירוש רבי עובדיה מברטנורא'
+      - 'הלכה: שולחן ערוך אורח חיים הלכות שבת (סימנים שכא, שכח) וחושן משפט הלכות השבת אבידה (רנט-רסז)'
+      - אירועון הלכתי עיוני לבחינת הבגרות
+      canonical_queries:
+      - משנה מסכת בבא מציעא פרק ראשון שנים אוחזין ברטנורא
+      - משנה מסכת בבא מציעא פרק שני אלו מציאות
+      - שולחן ערוך אורח חיים הלכות שבת סימן שכא ושכח
+      - שולחן ערוך חושן משפט הלכות השבת אבידה סימן רנט
+  tanakh:
+    '2575':
+      name_he: תנ"ך חמ"ד (שאלון 2575 / 2585)
+      tractate: בראשית ושמואל
+      ref_prefix: Genesis
+      chapter: בראשית יב-כב, שמואל א ח-טז
+      daf_range: תורה ונביאים בעיון ובקיאות
+      key_topics:
+      - 'תורה: בראשית יב-כב (לך לך, עקדת יצחק, חיי שרה) עם רש"י ורמב"ן'
+      - 'נביאים: שמואל א ח-טז (משפט המלך, משיחת שאול ודוד)'
+      - 'נביאים אחרונים וכתובים: ישעיהו מ, תהילים א, כג, קכא'
+      - קטע שלא נלמד (Unseen) מן המקרא
+      canonical_queries:
+      - ספר בראשית פרשת לך לך פרשנות רש"י ורמב"ן
+      - ספר בראשית עקדת יצחק פרק כב פרשנות רמב"ן
+      - ספר שמואל א פרק ח משפט המלך מנהיגות
+      - ספר ישעיהו פרק מ נבואת נחמה קול קורא במדבר
+  machshava:
+    '281':
+      name_he: מחשבת ישראל חמ"ד (שאלון 281 / 282 / 5281)
+      tractate: הכוזרי והרמב"ם
+      ref_prefix: Kuzari
+      chapter: ספר הכוזרי מאמר ראשון, שמונה פרקים לרמב"ם
+      daf_range: פרקי יסוד באמונה והגות
+      key_topics:
+      - 'ספר הכוזרי לרבי יהודה הלוי: מאמר ראשון (חלום מלך כוזר, מעמד הר סיני והיסטוריה)'
+      - 'רמב"ם: הקדמה למשנה, שמונה פרקים (הנפש והמידות, שביל הזהב), הלכות תשובה'
+      - 'הרב קוק: אורות התשובה, מאמרי הראי"ה (גאולה וארץ ישראל)'
+      - 'הרב י"ד סולובייצ''יק: איש האמונה הבודד, קול דודי דופק (ייסורים וגורל)'
+      canonical_queries:
+      - ספר הכוזרי מאמר ראשון חלום מלך כוזר מעמד הר סיני
+      - רמב"ם שמונה פרקים פרק רביעי שביל הזהב רפואת הנפש
+      - רמב"ם הלכות תשובה פרק ה בחירה חופשית
+      - הרב קוק אורות התשובה פרק ד תשובה עילאה ותשובה תתאה
+      - הרב סולובייצ'יק קול דודי דופק ברית גורל וברית ייעוד

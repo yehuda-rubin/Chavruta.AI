@@ -1,0 +1,50 @@
+id: bagrut-machshava-comprehensive
+title: בחינת מתכונת מקיפה לבגרות במחשבת ישראל (רב-נושאית, שאלונים 281 / 282 / 5281)
+title_en: Comprehensive Bagrut Mock Exam in Jewish Thought (Machshevet Yisrael, Questionnaires 281 / 282 / 5281)
+genre: bagrut-machshava-comprehensive
+mode: bagrut
+audience: school
+subject: machshava
+bagrut_track: mmd
+bagrut_units: 2-5
+grade_band: j-l
+age_range: י–יב — גיל 15–18 (תיכון / בגרות)
+description: >
+  תבנית בחינת מתכונת מקיפה במחשבת ישראל (שאלונים 281, 282, 5281).
+  כוללת 4 פרקים מובחנים:
+  פרק ראשון — אמונה, מדע והתגלות (הכוזרי והרמב"ם);
+  פרק שני — תורת האדם, מוסר ובחירה חופשית (שמונה פרקים והלכות תשובה);
+  פרק שלישי — גאולה, ציונות דתית וארץ ישראל (הרב קוק והרב סולובייצ'יק);
+  פרק רביעי — שאלת עמדה, ניתוח קטע הגותי ויישום אקטואלי.
+when_to_use: >
+  בחר תבנית זו בכל פעם שתלמיד או מורה מבקש "בחינת מתכונת במחשבת ישראל", "מתכונת במחשבת",
+  "שאלון 281", "שאלון 5281" או "מבחן מתכונת בהגות ואמונה".
+keywords:
+  - מתכונת במחשבת ישראל
+  - מחשבת ישראל
+  - מתכונת במחשבת
+  - הגות ואמונה
+  - שאלון 281
+  - שאלון 282
+  - שאלון 5281
+  - הכוזרי
+  - רמב"ם שמונה פרקים
+  - הרב קוק אורות התשובה
+  - הרב סולובייצ'יק קול דודי דופק
+example_topics:
+  - מתכונת בגרות מלאה במחשבת ישראל — כוזרי, רמב"ם, הרב קוק והרב סולובייצ'יק
+  - שאלון מתכונת 281 במחשבת ישראל עם מחוון תשובות וניקוד למורה
+example_queries:
+  - תבנה לי מתכונת לבגרות במחשבת ישראל
+  - תכין שאלון מתכונת במחשבת 281
+  - בחינת מתכונת מקיפה בהגות ואמונה עם מחוון
+structure: פרק א׳ (אמונה והתגלות — כוזרי ורמב"ם) → פרק ב׳ (תורת האדם ובחירה חופשית — שמונה פרקים) → פרק ג׳ (גאולה וארץ ישראל — הרב קוק וסולובייצ'יק) → פרק ד׳ (שאלת עמדה ואקטואליה) → מחוון ניקוד
+structure_en: Part I (Faith & Revelation — Kuzari & Rambam) → Part II (Human Nature & Free Will — Eight Chapters) → Part III (Redemption & Land of Israel — Rav Kook & Soloveitchik) → Part IV (Contemporary Position & Dilemma) → Grading Rubric
+files:
+  exam: TEMPLATE_exam.md
+  rubric: TEMPLATE_rubric.md
+  summary: TEMPLATE_summary.md
+files_en:
+  exam: TEMPLATE_exam_en.md
+  rubric: TEMPLATE_rubric_en.md
+  summary: TEMPLATE_summary_en.md

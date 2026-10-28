@@ -106,7 +106,7 @@ def get_conn() -> sqlite3.Connection:
 #   18  billing_ledger                                            2026-07-26
 #   17  coupons                                                   2026-07-26
 #   ≤16 subscriptions, bans, deletion scheduling, per-owner scoping — see git log -G'^SCHEMA_VERSION'
-SCHEMA_VERSION = 37
+SCHEMA_VERSION = 38
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -899,6 +899,30 @@ def _migrate(conn: sqlite3.Connection) -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_parental_consents_child ON parental_consents(child_owner_id, id);
             CREATE INDEX IF NOT EXISTS idx_parental_consents_email ON parental_consents(parent_email, sent_at);
+        """)
+
+    if version < 38:
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS bagrut_curriculum_cache (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                subject           TEXT NOT NULL,
+                track             TEXT NOT NULL DEFAULT 'mmd',
+                units             INTEGER NOT NULL DEFAULT 5,
+                exam_code         TEXT NOT NULL,
+                year_he           TEXT NOT NULL,
+                tractate_book     TEXT NOT NULL,
+                ref_prefix        TEXT NOT NULL,
+                chapter_he        TEXT NOT NULL,
+                daf_verses_he     TEXT NOT NULL,
+                page_range        TEXT NOT NULL DEFAULT '[]',
+                key_topics        TEXT NOT NULL DEFAULT '[]',
+                canonical_queries TEXT NOT NULL DEFAULT '[]',
+                source_url        TEXT NOT NULL DEFAULT '',
+                last_synced_at    TEXT NOT NULL,
+                is_active         INTEGER NOT NULL DEFAULT 1,
+                UNIQUE(subject, exam_code, year_he)
+            );
+            CREATE INDEX IF NOT EXISTS idx_bagrut_curr_lookup ON bagrut_curriculum_cache(subject, is_active, units);
         """)
 
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
@@ -3245,3 +3269,150 @@ def reset_mistral_budget() -> None:
         )
 
 
+def upsert_bagrut_curriculum_cache(
+    *,
+    subject: str,
+    track: str,
+    units: int,
+    exam_code: str,
+    year_he: str,
+    tractate_book: str,
+    ref_prefix: str,
+    chapter_he: str,
+    daf_verses_he: str,
+    page_range: list[str] | None = None,
+    key_topics: list[str] | None = None,
+    canonical_queries: list[str] | None = None,
+    source_url: str = "",
+    is_active: int = 1,
+) -> None:
+    conn = get_conn()
+    now_iso = _now()
+    pages_json = json.dumps(page_range or [], ensure_ascii=False)
+    topics_json = json.dumps(key_topics or [], ensure_ascii=False)
+    queries_json = json.dumps(canonical_queries or [], ensure_ascii=False)
+    with _LOCK, _tx(conn):
+        conn.execute(
+            """
+            INSERT INTO bagrut_curriculum_cache (
+                subject, track, units, exam_code, year_he,
+                tractate_book, ref_prefix, chapter_he, daf_verses_he,
+                page_range, key_topics, canonical_queries, source_url,
+                last_synced_at, is_active
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(subject, exam_code, year_he) DO UPDATE SET
+                track = excluded.track,
+                units = excluded.units,
+                tractate_book = excluded.tractate_book,
+                ref_prefix = excluded.ref_prefix,
+                chapter_he = excluded.chapter_he,
+                daf_verses_he = excluded.daf_verses_he,
+                page_range = excluded.page_range,
+                key_topics = excluded.key_topics,
+                canonical_queries = excluded.canonical_queries,
+                source_url = excluded.source_url,
+                last_synced_at = excluded.last_synced_at,
+                is_active = excluded.is_active
+            """,
+            (
+                subject.strip().lower(),
+                track.strip().lower(),
+                int(units),
+                exam_code.strip(),
+                year_he.strip(),
+                tractate_book.strip(),
+                ref_prefix.strip(),
+                chapter_he.strip(),
+                daf_verses_he.strip(),
+                pages_json,
+                topics_json,
+                queries_json,
+                source_url.strip(),
+                now_iso,
+                int(is_active),
+            ),
+        )
+
+
+def get_active_bagrut_curriculum_from_db(
+    subject: str,
+    track: str = "mmd",
+    units: int = 5,
+    exam_code: str | None = None,
+) -> dict[str, Any] | None:
+    conn = get_conn()
+    with _LOCK:
+        if exam_code:
+            row = conn.execute(
+                """
+                SELECT * FROM bagrut_curriculum_cache
+                WHERE subject = ? AND exam_code = ? AND is_active = 1
+                ORDER BY id DESC LIMIT 1
+                """,
+                (subject.strip().lower(), exam_code.strip()),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT * FROM bagrut_curriculum_cache
+                WHERE subject = ? AND track = ? AND units = ? AND is_active = 1
+                ORDER BY id DESC LIMIT 1
+                """,
+                (subject.strip().lower(), track.strip().lower(), int(units)),
+            ).fetchone()
+        if not row:
+            row = conn.execute(
+                """
+                SELECT * FROM bagrut_curriculum_cache
+                WHERE subject = ? AND is_active = 1
+                ORDER BY id DESC LIMIT 1
+                """,
+                (subject.strip().lower(),),
+            ).fetchone()
+
+        if not row:
+            return None
+
+        d = dict(row)
+        try:
+            d["page_range"] = json.loads(d.get("page_range") or "[]")
+        except Exception:
+            d["page_range"] = []
+        try:
+            d["key_topics"] = json.loads(d.get("key_topics") or "[]")
+        except Exception:
+            d["key_topics"] = []
+        try:
+            d["canonical_queries"] = json.loads(d.get("canonical_queries") or "[]")
+        except Exception:
+            d["canonical_queries"] = []
+        return d
+
+
+def list_active_bagrut_curricula_from_db() -> list[dict[str, Any]]:
+    conn = get_conn()
+    with _LOCK:
+        rows = conn.execute(
+            """
+            SELECT * FROM bagrut_curriculum_cache
+            WHERE is_active = 1
+            ORDER BY subject ASC, units DESC, id ASC
+            """
+        ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["page_range"] = json.loads(d.get("page_range") or "[]")
+            except Exception:
+                d["page_range"] = []
+            try:
+                d["key_topics"] = json.loads(d.get("key_topics") or "[]")
+            except Exception:
+                d["key_topics"] = []
+            try:
+                d["canonical_queries"] = json.loads(d.get("canonical_queries") or "[]")
+            except Exception:
+                d["canonical_queries"] = []
+            out.append(d)
+        return out

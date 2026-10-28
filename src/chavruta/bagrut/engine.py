@@ -36,7 +36,7 @@ except ImportError:
     def append_minor_safety(system: str, lang: str = "he") -> str:  # type: ignore[misc]
         return system
 
-BAGRUT_SUBJECTS: tuple[str, ...] = ("tanakh", "gemara", "toshba")
+BAGRUT_SUBJECTS: tuple[str, ...] = ("tanakh", "gemara", "toshba", "machshava")
 BAGRUT_TRACKS: tuple[str, ...] = ("mmd", "mamlachti")
 BAGRUT_UNITS: tuple[str, ...] = ("2", "3", "5")
 BAGRUT_ACTIONS: tuple[str, ...] = ("practice", "check", "summary", "exam")
@@ -361,6 +361,33 @@ def load_bagrut_curriculum(path: str | Path | None = None) -> dict[str, Any]:
 
 # ── Subject Detection ────────────────────────────────────────────────────────────────────────
 
+_MACHSHAVA_KEYWORDS: tuple[str, ...] = (
+    "מחשבת ישראל",
+    "מחשבת",
+    "הכוזרי",
+    "כוזרי",
+    "ריהל",
+    'ריה"ל',
+    "ריה״ל",
+    "ספר הכוזרי",
+    "שמונה פרקים",
+    "מורה נבוכים",
+    "אורות התשובה",
+    "איש האמונה",
+    "קול דודי דופק",
+    "הרב קוק",
+    'הראי"ה',
+    "הראי״ה",
+    "סולובייצ'יק",
+    "סולוביצ'יק",
+    "עיקרי האמונה",
+    "שאלון 281",
+    "שאלון 282",
+    "שאלון 5281",
+    "machshevet yisrael",
+    "jewish thought",
+)
+
 _TOSHBA_KEYWORDS: tuple[str, ...] = (
     'תושב"ע',
     "תושב״ע",
@@ -530,11 +557,14 @@ _DAF_REF_RE = re.compile(
 
 
 def _detect_bagrut_subject_raw(text: str) -> str:
-    """Return 'tanakh', 'gemara', or 'toshba' if explicitly signaled in `text`, else ''."""
+    """Return 'tanakh', 'gemara', 'toshba', or 'machshava' if explicitly signaled in `text`, else ''."""
     clean = " ".join((text or "").split())
     if not clean:
         return ""
     low = clean.lower()
+
+    if any(kw in low for kw in _MACHSHAVA_KEYWORDS):
+        return "machshava"
 
     has_toshba_kw = any(kw in low for kw in _TOSHBA_KEYWORDS)
     has_mishnah_word = bool(_MISHNAH_WORD_RE.search(clean))
@@ -1307,6 +1337,83 @@ def _build_rubric_principles_lines(curriculum: dict[str, Any], lang: str) -> lis
 
 # ── Prompt Builders ──────────────────────────────────────────────────────────────────────────
 
+
+def get_active_bagrut_curriculum(
+    subject: str = "gemara",
+    track: str = "mmd",
+    units: str | int = 5,
+    exam_code: str | None = None,
+) -> dict[str, Any]:
+    """Retrieve active Bagrut curriculum from DB cache if available, falling back to static YAML."""
+    subj = subject.strip().lower()
+    trk = track.strip().lower()
+    unt = int(units) if str(units).isdigit() else 5
+    if not exam_code:
+        default_codes = {"gemara": "5391", "toshba": "5381", "tanakh": "2575", "machshava": "281"}
+        exam_code = default_codes.get(subj)
+
+    # 1. Check dynamic DB cache first (Zero deployment needed)
+    try:
+        from app.db import get_active_bagrut_curriculum_from_db
+        db_curr = get_active_bagrut_curriculum_from_db(subj, trk, unt, exam_code=exam_code)
+        if db_curr:
+            return db_curr
+    except Exception:
+        pass
+
+    # 2. Fallback to active_curriculum in data/bagrut_curriculum.yaml
+    curr = load_bagrut_curriculum()
+    active_root = curr.get("active_curriculum") or {}
+    subj_active = active_root.get(subj) or {}
+    if exam_code and exam_code in subj_active:
+        return dict(subj_active[exam_code])
+    if subj_active:
+        first_key = next(iter(subj_active))
+        return dict(subj_active[first_key])
+
+    return {}
+
+
+def format_active_curriculum_prompt_block(
+    subject: str,
+    track: str,
+    units: str | int,
+    lang: str = "he",
+) -> list[str]:
+    """Build prompt lines instructing the LLM to follow the active Ministry curriculum strictly."""
+    curr_spec = get_active_bagrut_curriculum(subject, track, units)
+    if not curr_spec:
+        return []
+
+    lines = []
+    tractate = curr_spec.get("tractate") or curr_spec.get("tractate_book") or ""
+    chapter = curr_spec.get("chapter") or curr_spec.get("chapter_he") or ""
+    daf_range = curr_spec.get("daf_range") or curr_spec.get("daf_verses_he") or ""
+    topics = curr_spec.get("key_topics") or []
+
+    lines += [
+        "## MANDATORY ACTIVE MINISTRY OF EDUCATION CURRICULUM (מיקוד משרד החינוך המחייב לשנת הלימודים)",
+        f"- Target Subject: {subject.upper()} ({track}, {units} units)",
+    ]
+    if tractate:
+        lines.append(f"- Active Tractate / Book (מסכת/ספר במיקוד): {tractate}")
+    if chapter:
+        lines.append(f"- Chapter (פרק במיקוד): {chapter}")
+    if daf_range:
+        lines.append(f"- Exact Pages / Verses (טווח דפים מחייב): {daf_range}")
+    if topics:
+        lines.append("- Core Sugyot / Topics (סוגיות ליבה מחייבות):")
+        for tp in topics:
+            lines.append(f"  * {tp}")
+    lines += [
+        "CRITICAL CURRICULUM CONSTRAINT (הנחיית מיקוד מחייבת):",
+        "You MUST formulate all exam questions, sugya analyses, and rubric answers strictly within this specified "
+        "active curriculum and from the retrieved SOURCES. Do NOT invent questions from arbitrary, unrelated pages!",
+        "",
+    ]
+    return lines
+
+
 def build_bagrut_file_job_md(
     question: str,
     hits: list,
@@ -1356,6 +1463,10 @@ def build_bagrut_file_job_md(
     if track_focus:
         lines.append(f"- Pedagogical Focus (דגשים פדגוגיים): {track_focus}")
     lines.append("")
+
+    curr_lines = format_active_curriculum_prompt_block(subject, track, units, lang)
+    if curr_lines:
+        lines += curr_lines
 
     if subject == "gemara":
         lines += _build_aramaic_scaffold_lines(curriculum, lang)
