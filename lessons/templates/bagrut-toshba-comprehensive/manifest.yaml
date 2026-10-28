@@ -1,0 +1,50 @@
+id: bagrut-toshba-comprehensive
+title: בחינת מתכונת מקיפה לבגרות בתושב"ע — משנה, הלכה ואירועונים (שאלונים 5391 / 5381)
+title_en: Comprehensive Bagrut Mock Exam in Toshba — Mishnah, Halacha & Case Studies (Exams 5391 / 5381)
+genre: bagrut-toshba-comprehensive
+mode: bagrut
+audience: school
+subject: toshba
+bagrut_track: mmd
+bagrut_units: 3-5
+grade_band: j-l
+age_range: י–יב — גיל 15–18 (תיכון / בגרות)
+description: >
+  תבנית בחינת מתכונת מלאה ומקיפה לבגרות בתושב"ע (משנה, הלכה ואירועונים, שאלונים 5391 ו-5381).
+  כוללת 4 פרקים מובחנים המפזרים את השאלות על פני נושאי הלימוד השונים:
+  פרק ראשון — פירוק מבני של המשנה (מקרה, דין, טעם, מחלוקת) ופרשנות ר"ע מברטנורא;
+  פרק שני — השתלשלות ההלכה בתחום שבת ומועדים (שו"ע ומשנה ברורה);
+  פרק שלישי — אירועונים הלכתיים ויישום מעשי בדיני ממונות, כשרות או משפחה;
+  פרק רביעי — מבוא לתורה שבעל פה, שרשרת המסירה וכללי פסיקה.
+when_to_use: >
+  בחר תבנית זו בכל פעם שתלמיד או מורה מבקש "בחינת מתכונת בתושב"ע", "מתכונת מלאה בתושב"ע",
+  "שאלון 5391 תושבע", "מבחן בתושב"ע" או "בגרות בתושב"ע" ללא הגבלת נושא בודד.
+keywords:
+  - מתכונת תושבע
+  - מתכונת תושב"ע
+  - מתכונת משנה והלכה
+  - בחינת מתכונת בתושבע
+  - שאלון 5391
+  - שאלון 5381
+  - שאלון 5291
+  - אירועון הלכתי
+  - רב נושאית
+  - מקיפה
+  - תושבע חמד
+example_topics:
+  - מתכונת בגרות מלאה בתושב"ע — משנה, שבת ואירועונים בדיני ממונות
+  - שאלון מתכונת 5391 מלא בתושב"ע עם מחוון תשובות וניקוד
+example_queries:
+  - תבנה לי מתכונת לבגרות בתושבע
+  - תכין מתכונת מלאה בתושב"ע 5391
+  - שאלון מתכונת מקיף בתושב"ע עם אירועון ומחוון למורה
+structure: פרק א׳ (מבנה המשנה ופרשנות הרע"ב — שאלות בחירה) → פרק ב׳ (השתלשלות הלכות שבת ומועדים — שו"ע ומשנה ברורה) → פרק ג׳ (אירועונים הלכתיים מעשיים ויישום) → פרק ד׳ (מבוא לתושב"ע ושרשרת המסירה) → מחוון ניקוד
+structure_en: Part I (Mishnah Structure & Bartenura — Choice Questions) → Part II (Halachic Progression of Shabbat & Festivals — Shulchan Aruch & Mishnah Berurah) → Part III (Educational Case Studies & Application) → Part IV (Oral Law Introduction & Transmission) → Grading Rubric
+files:
+  exam: TEMPLATE_exam.md
+  rubric: TEMPLATE_rubric.md
+  summary: TEMPLATE_summary.md
+files_en:
+  exam: TEMPLATE_exam_en.md
+  rubric: TEMPLATE_rubric_en.md
+  summary: TEMPLATE_summary_en.md

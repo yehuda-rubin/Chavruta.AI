@@ -899,6 +899,12 @@ def _select_bagrut_template(topic: str, subject: str, track: str, units: str, la
     """Pick the best-matching Bagrut structural template (`mode == 'bagrut'`) from the template RAG,
     or fall back to scanning `lessons/templates/bagrut-*/manifest.yaml` on disk if Qdrant is offline."""
     t_low = (topic or "").lower()
+    from chavruta.bagrut.engine import is_bagrut_narrow_topic_request
+    is_narrow = is_bagrut_narrow_topic_request(topic)
+    wants_exam = any(kw in t_low for kw in ("מתכונת", "מבחן", "בחינה", "שאלון", "exam", "test"))
+    has_specific_chapter = bool(re.search(r"(?:פרק|סוגי|דף|סימן)", t_low))
+    is_broad_exam = wants_exam and not is_narrow and not has_specific_chapter
+
     wants_unseen = any(kw in t_low for kw in ("אנסין", "קטע שלא נלמד", "unseen"))
     wants_mavo = any(kw in t_low for kw in ("מבוא לתושב", "מבוא לתורה שבעל פה", "שרשרת המסירה", "עריכת המשנה", "oral law intro"))
     wants_case = any(kw in t_low for kw in ("אירועון", "מקרה מבחן", "case study", "halachic case"))
@@ -915,6 +921,10 @@ def _select_bagrut_template(topic: str, subject: str, track: str, units: str, la
             score += 10
         elif b_track == "both":
             score += 5
+        if is_broad_exam and "comprehensive" in tid:
+            score += 50
+        elif (is_narrow or has_specific_chapter) and "comprehensive" in tid:
+            score -= 40
         if wants_unseen and "unseen" in tid:
             score += 25
         if wants_mavo and "mavo" in tid:
@@ -3325,21 +3335,39 @@ def _run_bagrut(
 
         # Diverse multi-cluster retrieval for broad Bagrut exam requests
         if act == "exam" and hasattr(pipeline, "retriever") and hasattr(pipeline, "_resolve_query"):
-            from chavruta.bagrut.engine import is_bagrut_narrow_topic_request, load_bagrut_curriculum
-            if not is_bagrut_narrow_topic_request(anchor_q) and not getattr(rq, "named_refs", None):
+            from chavruta.bagrut.engine import is_bagrut_narrow_topic_request
+            has_specific = bool(re.search(r"(?:פרק|סוגי|דף|סימן)", anchor_q))
+            if not is_bagrut_narrow_topic_request(anchor_q) and not has_specific and not getattr(rq, "named_refs", None):
                 try:
-                    curriculum = load_bagrut_curriculum()
-                    subj_cfg = (curriculum.get("subjects") or {}).get(subj) or {}
-                    track_cfg = (subj_cfg.get("track_details") or {}).get(trk) or {}
-                    clusters = track_cfg.get("syllabus_clusters_he") or []
-                    if clusters:
+                    cluster_queries: dict[str, list[str]] = {
+                        "gemara": [
+                            "מסכת בבא מציעא השבת אבידה שניים אוחזין",
+                            "מסכת ברכות תפילת השחר וקריאת שמע",
+                            "מסכת שבת מלאכות שבת ומוקצה",
+                            "מסכת קידושין וסדר נשים",
+                        ],
+                        "toshba": [
+                            "משנה מסכת בבא מציעא פרק אלו מציאות",
+                            "שולחן ערוך הלכות שבת סימן שכא ושכח",
+                            "שולחן ערוך חושן משפט הלכות נזיקין והשבת אבידה",
+                            "שולחן ערוך יורה דעה הלכות כשרות ומאכלות אסורות",
+                        ],
+                        "tanakh": [
+                            "ספר בראשית פרשת לך לך פרשנות רש\"י ורמב\"ן",
+                            "ספר שמואל מנהיגות שאול ודוד",
+                            "ספר ישעיהו נבואת נחמה ומוסר",
+                            "ספר תהילים מזמורי שירה ותפילה",
+                        ],
+                    }
+                    queries = cluster_queries.get(subj, [])
+                    if queries:
                         cluster_hits = []
                         seen_refs = {getattr(h, "ref", None) for h in hits}
-                        for cl in clusters[:3]:
-                            cl_q = Query(text=f"{subj} {cl}", lang=lang or "he", intent=Intent.BAGRUT)
+                        for q_text in queries:
+                            cl_q = Query(text=q_text, lang=lang or "he", intent=Intent.BAGRUT)
                             try:
                                 cl_rq = pipeline._resolve_query(cl_q)
-                                cl_res = pipeline.retriever.retrieve(cl_rq, top_k=6)
+                                cl_res = pipeline.retriever.retrieve(cl_rq, top_k=5)
                                 for ch in getattr(cl_res, "hits", []):
                                     ch_ref = getattr(ch, "ref", None)
                                     if ch_ref and ch_ref not in seen_refs:
@@ -3348,7 +3376,7 @@ def _run_bagrut(
                             except Exception:
                                 continue
                         if cluster_hits:
-                            hits = hits[:10] + cluster_hits
+                            hits = hits[:6] + cluster_hits
                 except Exception:
                     pass
 

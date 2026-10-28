@@ -37,7 +37,10 @@ from chavruta.corpus.schema import Query, Turn
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATES_DIR = REPO_ROOT / "lessons" / "templates"
 
-EXPECTED_14_TEMPLATES = [
+ALL_17_BAGRUT_TEMPLATES = [
+    "bagrut-gemara-comprehensive",
+    "bagrut-toshba-comprehensive",
+    "bagrut-tanakh-comprehensive",
     "bagrut-tanakh-mmd-iyun",
     "bagrut-tanakh-mmd-bekiut",
     "bagrut-tanakh-mmd-torah-mitzvot",
@@ -53,6 +56,7 @@ EXPECTED_14_TEMPLATES = [
     "bagrut-toshba-case-study",
     "bagrut-toshba-thematic-halacha",
 ]
+EXPECTED_14_TEMPLATES = ALL_17_BAGRUT_TEMPLATES
 
 
 # ── 1. Curriculum & 14 Clean-Room Templates ──────────────────────────────────
@@ -393,3 +397,18 @@ def test_bagrut_topic_diversity_and_narrow_detection():
         params={"subject": "toshba", "track": "mmd", "units": "3", "action": "exam"},
     )
     assert "התמקדות בנושא המבוקש" in narrow_job
+
+    # Verify template selection: comprehensive for broad exam, sugya/chapter for narrow
+    from app import api
+    tpl_broad = api._select_bagrut_template("תבנה לי מתכונת לבגרות בגמרא", "gemara", "mmd", "5")
+    assert tpl_broad is not None
+    assert tpl_broad["id"] == "bagrut-gemara-comprehensive"
+
+    tpl_toshba_broad = api._select_bagrut_template("תבנה לי מתכונת בתושב\"ע", "toshba", "mmd", "5")
+    assert tpl_toshba_broad is not None
+    assert tpl_toshba_broad["id"] == "bagrut-toshba-comprehensive"
+
+    tpl_narrow = api._select_bagrut_template("מתכונת על בבא מציעא פרק ב", "gemara", "mmd", "5")
+    assert tpl_narrow is not None
+    assert tpl_narrow["id"] in {"bagrut-gemara-sugya", "bagrut-gemara-rishonim"}
+    assert tpl_narrow["id"] != "bagrut-gemara-comprehensive"

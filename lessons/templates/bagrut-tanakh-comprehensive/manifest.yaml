@@ -1,0 +1,49 @@
+id: bagrut-tanakh-comprehensive
+title: בחינת מתכונת מקיפה לבגרות בתנ"ך (תורה, נביאים, כתובים וקטע שלא נלמד, שאלונים 2575 / 2585 / 1281)
+title_en: Comprehensive Bagrut Mock Exam in Tanakh (Torah, Prophets, Writings & Unseen, Exams 2575 / 2585 / 1281)
+genre: bagrut-tanakh-comprehensive
+mode: bagrut
+audience: school
+subject: tanakh
+bagrut_track: mmd
+bagrut_units: 3-5
+grade_band: j-l
+age_range: י–יב — גיל 15–18 (תיכון / בגרות)
+description: >
+  תבנית בחינת מתכונת מלאה ומקיפה לבגרות בתנ"ך (שאלונים 2575, 2585, 1281, 3–5 יח"ל).
+  כוללת 4 פרקים מובחנים המפזרים את השאלות על פני כל חלקי המקרא:
+  פרק ראשון — תורה בעיון ופרשנות מפרשי היסוד (רש"י, רמב"ן, אבן עזרא);
+  פרק שני — נביאים ראשונים ואחרונים (היסטוריה, מנהיגות, נבואה ומוסר — שאלות בחירה);
+  פרק שלישי — כתובים, שירה, מזמורי תהילים וספרות החכמה;
+  פרק רביעי — קטע שלא נלמד (Unseen) ומיומנויות ניתוח טקסט מקראי.
+when_to_use: >
+  בחר תבנית זו בכל פעם שתלמיד או מורה מבקש "מתכונת בתנ"ך", "בחינת מתכונת מלאה בתנ"ך",
+  "שאלון 2575", "שאלון 2585" או "מבחן מתכונת בתנ"ך" ללא הגבלת פרק בודד.
+keywords:
+  - מתכונת תנך
+  - מתכונת תנ"ך
+  - בחינת מתכונת בתנך
+  - שאלון 2575
+  - שאלון 2585
+  - שאלון 1281
+  - תנך חמד
+  - תנך מקיף
+  - רב נושאית
+  - מקיפה
+example_topics:
+  - מתכונת בגרות מלאה בתנ"ך — תורה, שמואל ומלכים, תהילים וקטע שלא נלמד
+  - שאלון מתכונת 2575 מלא בתנ"ך עם מחוון ניקוד מפורט למורה
+example_queries:
+  - תבנה לי מתכונת לבגרות בתנך
+  - תכין שאלון מתכונת מלא בתנ"ך 2575
+  - בחינת מתכונת מקיפה בתנ"ך עם שאלות בחירה ומחוון
+structure: פרק א׳ (תורה בעיון ופרשנות ראשונים) → פרק ב׳ (נביאים ראשונים ואחרונים — שאלות בחירה) → פרק ג׳ (כתובים, שירה ומזמורים) → פרק ד׳ (קטע שלא נלמד — Unseen) → מחוון ניקוד
+structure_en: Part I (Torah In-Depth & Classical Commentators) → Part II (Early & Latter Prophets — Choice Questions) → Part III (Writings, Poetry & Psalms) → Part IV (Unseen Passage & Literary Analysis) → Grading Rubric
+files:
+  exam: TEMPLATE_exam.md
+  rubric: TEMPLATE_rubric.md
+  summary: TEMPLATE_summary.md
+files_en:
+  exam: TEMPLATE_exam_en.md
+  rubric: TEMPLATE_rubric_en.md
+  summary: TEMPLATE_summary_en.md

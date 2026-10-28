@@ -1,0 +1,50 @@
+id: bagrut-gemara-comprehensive
+title: בחינת מתכונת מקיפה לבגרות בגמרא (רב-נושאית, שאלונים 5391 / 5381 / 6281)
+title_en: Comprehensive Bagrut Mock Exam in Gemara (Multi-Topic, Questionnaires 5391 / 5381 / 6281)
+genre: bagrut-gemara-comprehensive
+mode: bagrut
+audience: school
+subject: gemara
+bagrut_track: mmd
+bagrut_units: 3-5
+grade_band: j-l
+age_range: י–יב — גיל 15–18 (תיכון / בגרות)
+description: >
+  תבנית בחינת מתכונת מלאה ומקיפה לבגרות בגמרא (תלמוד בבלי, שאלונים 5391, 5381, 6281).
+  כוללת 4 פרקים מובחנים המפזרים את השאלות על פני מספר מסכתות ונושאים שונים:
+  פרק ראשון — בקיאות בסוגיות שונות ושאלות בחירה;
+  פרק שני — עיון מעמיק בסוגיה מרכזית (שקלא וטריא, מונחים בארמית, רש"י ותוספות);
+  פרק שלישי — השתלשלות ההלכה מן הגמרא אל הפוסקים (רמב"ם, שולחן ערוך, משנה ברורה);
+  פרק רביעי — מונחים בארמית, כללי פסיקה וסוגיית Unseen קצרה.
+when_to_use: >
+  בחר תבנית זו בכל פעם שתלמיד או מורה מבקש "בחינת מתכונת בגמרא", "מתכונת מלאה",
+  "שאלון 5391" או "מבחן מתכונת לבגרות בגמרא" ללא הגבלת סוגיה בודדת.
+keywords:
+  - מתכונת מלאה
+  - מתכונת בגמרא
+  - בחינת מתכונת
+  - שאלון בגרות בגמרא
+  - 5391
+  - 5381
+  - 6281
+  - רב נושאית
+  - מקיפה
+  - גמרא חמד
+  - גמרא מועד ונזיקין
+example_topics:
+  - מתכונת בגרות מלאה בגמרא — נזיקין, מועד וברכות
+  - שאלון מתכונת 5391 מלא בגמרא עם שאלות בחירה ומחוון למורה
+example_queries:
+  - תבנה לי מתכונת לבגרות בגמרא
+  - תכין שאלון מתכונת מלא בגמרא 5391
+  - בחינת מתכונת מקיפה בגמרא עם מחוון תשובות
+structure: פרק א׳ (בקיאות בסוגיות שונות — שאלות בחירה) → פרק ב׳ (עיון מעמיק בסוגיה מרכזית — שקלא וטריא, רש"י ותוספות) → פרק ג׳ (השתלשלות ההלכה לפוסקים) → פרק ד׳ (מונחים בארמית וסוגיית Unseen) → מחוון ניקוד
+structure_en: Part I (Breadth Across Multiple Tractates — Choice Questions) → Part II (In-Depth Sugya — Shakla Vetarya, Rashi & Tosafot) → Part III (Halachic Progression to Poskim) → Part IV (Aramaic Terms & Unseen) → Grading Rubric
+files:
+  exam: TEMPLATE_exam.md
+  rubric: TEMPLATE_rubric.md
+  summary: TEMPLATE_summary.md
+files_en:
+  exam: TEMPLATE_exam_en.md
+  rubric: TEMPLATE_rubric_en.md
+  summary: TEMPLATE_summary_en.md
