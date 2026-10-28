@@ -843,6 +843,26 @@ def is_bagrut_file_rebuild_request(text: str) -> bool:
 is_is_bagrut_file_rebuild_request = is_bagrut_file_rebuild_request
 
 
+_NARROW_TOPIC_RE = re.compile(
+    r"(?:"
+    r"רק\s+(?:על|ב|בנושא|בפרק|במסכת|בהלכות|בספר)"
+    r"|בלבד(?=$|[\s,.:;()\[\]])"
+    r"|ממוקד(?:ת)?(?:\s+ב|\s+על)"
+    r"|ספציפי(?:ת)?(?:\s+ל|\s+על)"
+    r"|\b(?:only\s+on|focus(?:ed)?\s+on\s+only|narrowly\s+on)\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def is_bagrut_narrow_topic_request(text: str) -> bool:
+    """Return True if the user explicitly asks for an exam/summary on a single narrow topic only."""
+    clean = " ".join((text or "").split())
+    if not clean:
+        return False
+    return bool(_NARROW_TOPIC_RE.search(clean))
+
+
 def _turn_role(turn: Any) -> str:
     if isinstance(turn, dict):
         return str(turn.get("role") or "user")
@@ -1460,6 +1480,15 @@ def build_bagrut_file_job_md(
             "2. קטעי המקור המלאים מתוך [S#] המוצגים לנבחן (כולל ניקוד/פיסוק וציון המקור).",
             "3. שאלות בגרות מדורגות (סעיפים א', ב', ג' עם ציון נקודות לכל סעיף, כגון '(10 נק')') הבוחנות הבנה, זיהוי קושי/מבנה, השוואת מפרשים/שיטות ויישום.",
             "4. אל תכלול את התשובות בתוך קובץ השאלון לתלמיד (===BAGRUT_EXAM===)!",
+            (
+                "5. חובת פיזור נושאי ומגוון מקורות (Mandatory Curriculum Diversity): "
+                "אלא אם המשתמש הגדיר נושא יחיד ספציפי, עליך להבטיח שהבחינה משקפת מתכונת בגרות מלאה ומאוזנת: "
+                "חלק את הבחינה לפרקים נפרדים המכסים נושאים מובחנים ושונים מתוך תוכנית הלימודים "
+                "(למשל: פרק ראשון על משנה/בקיאות, פרק שני על השתלשלות ההלכה בתחום אחד, ופרק שלישי על תחום הלכתי נוסף או אירועון יישומי). "
+                "חל איסור מוחלט לרכז את כל השאלות סביב מקור בודד או נושא יחיד — הבחינה חייבת לפזר את השאלות על פני מספר מקורות [S#] שונים ומגוונים."
+                if not is_bagrut_narrow_topic_request(question)
+                else "5. התמקדות בנושא המבוקש: בנה את השאלות והסעיפים במעמיק סביב הנושא והמקורות [S#] שהוגדרו בבקשה."
+            ),
             "",
             "Under ===BAGRUT_RUBRIC===, write the complete Teacher Grading Rubric & Answer Key (מחוון תשובות וניקוד למורה):",
             "1. לכל שאלה וסעיף בשאלון: תשובת מופת מלאה ומפורטת המעוגנת במקורות [S#].",

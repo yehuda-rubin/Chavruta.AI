@@ -23,6 +23,7 @@ from chavruta.bagrut import (
     detect_bagrut_units,
     detect_bagrut_action,
     is_bagrut_file_rebuild_request,
+    is_bagrut_narrow_topic_request,
     is_unattached_past_exam_query,
     resolve_bagrut_params,
     boost_bagrut_hits,
@@ -364,3 +365,31 @@ def test_run_bagrut_chat_and_exam_modes_with_mock_pipeline():
         carried_text, is_bg = api._bagrut_turn_text(saved_msg)
         assert is_bg is True
         assert carried_text
+
+
+def test_bagrut_topic_diversity_and_narrow_detection():
+    # Narrow topic detection
+    assert is_bagrut_narrow_topic_request("בנה מתכונת רק על מסכת בבא מציעא פרק ב") is True
+    assert is_bagrut_narrow_topic_request("מתכונת בהלכות שבת בלבד") is True
+    assert is_bagrut_narrow_topic_request("מתכונת ממוקדת על אישות") is True
+    assert is_bagrut_narrow_topic_request("תבנה לי מתכונת בתושב\"ע") is False
+    assert is_bagrut_narrow_topic_request("מתכונת לשאלון 5391") is False
+
+    # Broad exam prompt includes curriculum diversity requirement
+    broad_job = build_bagrut_file_job_md(
+        "תבנה לי מתכונת בתושב\"ע",
+        [],
+        "he",
+        params={"subject": "toshba", "track": "mmd", "units": "3", "action": "exam"},
+    )
+    assert "חובת פיזור נושאי ומגוון מקורות" in broad_job
+    assert "Mandatory Curriculum Diversity" in broad_job
+
+    # Narrow exam prompt instructs focus on the requested topic
+    narrow_job = build_bagrut_file_job_md(
+        "מתכונת רק על הלכות שבת",
+        [],
+        "he",
+        params={"subject": "toshba", "track": "mmd", "units": "3", "action": "exam"},
+    )
+    assert "התמקדות בנושא המבוקש" in narrow_job

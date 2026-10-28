@@ -3323,6 +3323,35 @@ def _run_bagrut(
         except Exception:
             pass
 
+        # Diverse multi-cluster retrieval for broad Bagrut exam requests
+        if act == "exam" and hasattr(pipeline, "retriever") and hasattr(pipeline, "_resolve_query"):
+            from chavruta.bagrut.engine import is_bagrut_narrow_topic_request, load_bagrut_curriculum
+            if not is_bagrut_narrow_topic_request(anchor_q) and not getattr(rq, "named_refs", None):
+                try:
+                    curriculum = load_bagrut_curriculum()
+                    subj_cfg = (curriculum.get("subjects") or {}).get(subj) or {}
+                    track_cfg = (subj_cfg.get("track_details") or {}).get(trk) or {}
+                    clusters = track_cfg.get("syllabus_clusters_he") or []
+                    if clusters:
+                        cluster_hits = []
+                        seen_refs = {getattr(h, "ref", None) for h in hits}
+                        for cl in clusters[:3]:
+                            cl_q = Query(text=f"{subj} {cl}", lang=lang or "he", intent=Intent.BAGRUT)
+                            try:
+                                cl_rq = pipeline._resolve_query(cl_q)
+                                cl_res = pipeline.retriever.retrieve(cl_rq, top_k=6)
+                                for ch in getattr(cl_res, "hits", []):
+                                    ch_ref = getattr(ch, "ref", None)
+                                    if ch_ref and ch_ref not in seen_refs:
+                                        seen_refs.add(ch_ref)
+                                        cluster_hits.append(ch)
+                            except Exception:
+                                continue
+                        if cluster_hits:
+                            hits = hits[:10] + cluster_hits
+                except Exception:
+                    pass
+
     # ── User Attachments as Primary Grounded Sources ────────────────────────
     user_att_hits = _parse_user_attached_hits(question, lang=lang)
     if user_att_hits:
