@@ -500,3 +500,36 @@ def test_bagrut_turn_text_history_resolution():
     assert "### מחוון תשובות וניקוד:" in history_text
     assert "שאלה 1: תשובת מופת" in history_text
 
+def test_split_bagrut_files_hebrew_and_fallback():
+    from chavruta.bagrut.engine import split_bagrut_files
+
+    # 1. Delimiters written in Hebrew (as happened in production)
+    hebrew_delims = """===שאלון מתכונת===
+הנה שאלון הבגרות:
+שאלה 1: פירוק המשנה
+===מחוון בגרות===
+מחוון תשובות וניקוד:
+שאלה 1: תשובת מופת
+===ORDER===
+S1, S2"""
+
+    res1 = split_bagrut_files(hebrew_delims)
+    assert "שאלה 1: פירוק המשנה" in res1["BAGRUT_EXAM"]
+    assert "מחוון בגרות" not in res1["BAGRUT_EXAM"]
+    assert "שאלה 1: תשובת מופת" in res1["BAGRUT_RUBRIC"]
+    assert res1["ORDER"] == "S1, S2"
+
+    # 2. Embedded rubric fallback when delimiter was missing but heading is present
+    embedded_rubric = """===BAGRUT_EXAM===
+שאלה 1: שאלה בשאלון
+שאלה 2: שאלה שניה
+
+## מחוון תשובות וניקוד למורה
+שאלה 1: פתרון
+שאלה 2: פתרון"""
+
+    res2 = split_bagrut_files(embedded_rubric)
+    assert "שאלה 1: שאלה בשאלון" in res2["BAGRUT_EXAM"]
+    assert "מחוון" not in res2["BAGRUT_EXAM"]
+    assert "שאלה 1: פתרון" in res2["BAGRUT_RUBRIC"]
+

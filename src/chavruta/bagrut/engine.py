@@ -1151,7 +1151,7 @@ def boost_bagrut_hits(hits: list, subject: str, track: str = "mmd") -> list:
 # ── Output Splitting ─────────────────────────────────────────────────────────────────────────
 
 BAGRUT_SPLIT_RE = re.compile(
-    r"^[ \t>*‏‎]*===\s*(BAGRUT_SUMMARY|BAGRUT_EXAM|BAGRUT_RUBRIC|BAGRUT_SOLUTION|ORDER)\s*===[ \t*]*$",
+    r"^[ \t#*`>‏‎\-]*={2,4}\s*(?:BAGRUT_|bagrut_)?([^\n=]+?)\s*={2,4}[ \t*`#\-]*$",
     re.MULTILINE,
 )
 
@@ -1166,6 +1166,21 @@ _SPLIT_KEY_ALIASES: dict[str, str] = {
     "bagrut_solution": "BAGRUT_SOLUTION",
     "order": "ORDER",
 }
+
+
+def _normalize_delimiter_tag(tag: str) -> str:
+    clean = re.sub(r"[\s_-]+", " ", tag.strip().lower())
+    if any(k in clean for k in ("rubric", "מחוון", "תשובות וניקוד", "מפתח תשובות")):
+        return "BAGRUT_RUBRIC"
+    if any(k in clean for k in ("exam", "שאלון", "מתכונת", "מבחן")):
+        return "BAGRUT_EXAM"
+    if any(k in clean for k in ("summary", "סיכום", "מיקודית")):
+        return "BAGRUT_SUMMARY"
+    if any(k in clean for k in ("solution", "פתרון")):
+        return "BAGRUT_SOLUTION"
+    if any(k in clean for k in ("order", "סדר")):
+        return "ORDER"
+    return ""
 
 
 class _BagrutSplitDict(dict):
@@ -1201,10 +1216,34 @@ def split_bagrut_files(text: str) -> dict[str, str]:
     )
     if not text:
         return parts
-    matches = list(BAGRUT_SPLIT_RE.finditer(text))
-    for i, m in enumerate(matches):
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        parts[m.group(1)] = text[m.end() : end].strip()
+
+    matches: list[tuple[int, int, str]] = []
+    for m in BAGRUT_SPLIT_RE.finditer(text):
+        tag = _normalize_delimiter_tag(m.group(1))
+        if tag:
+            matches.append((m.start(), m.end(), tag))
+
+    for i, (start, end, tag) in enumerate(matches):
+        next_start = matches[i + 1][0] if i + 1 < len(matches) else len(text)
+        content = text[end:next_start].strip()
+        parts[tag] = content
+
+    # Fallback heuristic: If EXAM is present but RUBRIC is missing, check if the exam contains an embedded rubric section
+    if parts["BAGRUT_EXAM"] and not parts["BAGRUT_RUBRIC"]:
+        rubric_fallback = re.search(
+            r"\n(?=[ \t#*`>‏‎\-]*(?:={2,4}\s*)?(?:מחוון|תשובות וניקוד למורה|מפתח תשובות|grading rubric|rubric))",
+            parts["BAGRUT_EXAM"],
+            re.IGNORECASE,
+        )
+        if rubric_fallback:
+            idx = rubric_fallback.start()
+            exam_part = parts["BAGRUT_EXAM"][:idx].strip()
+            rubric_part = parts["BAGRUT_EXAM"][idx:].strip()
+            rubric_part = re.sub(r"^[ \t#*`>‏‎\-]*={2,4}[^\n]+={2,4}[ \t*`#\-]*\n*", "", rubric_part).strip()
+            rubric_part = re.sub(r"^[ \t#*`>‏‎\-]*#+[^\n]+\n*", "", rubric_part).strip()
+            parts["BAGRUT_EXAM"] = exam_part
+            parts["BAGRUT_RUBRIC"] = rubric_part
+
     return parts
 
 
@@ -1612,6 +1651,8 @@ def build_bagrut_file_job_md(
     lines += [
         "",
         "LANGUAGE RULE: Write ONLY in the requested language (Hebrew for lang=he, English for lang=en) with zero foreign word bleed. "
+        "CRITICAL DELIMITER EXCEPTION: The delimiter lines (===BAGRUT_EXAM===, ===BAGRUT_RUBRIC===, ===BAGRUT_SUMMARY===, ===BAGRUT_SOLUTION===, ===ORDER===) "
+        "MUST remain EXACTLY as written in English uppercase and NEVER be translated into Hebrew! "
         "Never copy internal corpus IDs (like 'Bava_Metzia.3.1') into prose — always use traditional Hebrew/English titles.",
     ]
     return "\n".join(lines)
