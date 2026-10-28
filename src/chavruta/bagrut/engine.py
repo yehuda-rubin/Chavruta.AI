@@ -42,7 +42,7 @@ BAGRUT_UNITS: tuple[str, ...] = ("2", "3", "5")
 BAGRUT_ACTIONS: tuple[str, ...] = ("practice", "check", "summary", "exam")
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_CURRICULUM_PATH = _REPO_ROOT / "data" / "bagrut_curriculum.yaml"
+_CURRICULUM_PATH = Path("/app-data/bagrut_curriculum.yaml") if Path("/app-data/bagrut_curriculum.yaml").exists() else _REPO_ROOT / "data" / "bagrut_curriculum.yaml"
 
 _DEFAULT_CURRICULUM: dict[str, Any] = {
     "version": 1,

@@ -35,9 +35,14 @@ from app.db import (
 
 
 def load_curriculum_specs() -> dict:
-    curr_path = REPO_ROOT / "data" / "bagrut_curriculum.yaml"
-    if not curr_path.exists():
-        print(f"Error: {curr_path} not found")
+    candidates = [
+        Path("/app-data/bagrut_curriculum.yaml"),
+        REPO_ROOT / "data" / "bagrut_curriculum.yaml",
+        Path("/app/data/bagrut_curriculum.yaml"),
+    ]
+    curr_path = next((p for p in candidates if p.exists()), None)
+    if not curr_path:
+        print(f"Error: no bagrut_curriculum.yaml found in {candidates}")
         sys.exit(1)
     with open(curr_path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
