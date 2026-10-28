@@ -6730,6 +6730,7 @@ class MessageOut(BaseModel):
     # without its own column and its own field it existed only for the life of one response.
     source_note: str = ""
     created_at: str
+    rating: int | None = None
 
 
 @app.get("/sessions/{session_id}/messages", response_model=list[MessageOut])
@@ -6806,6 +6807,23 @@ def report_message(message_id: int, req: ReportIn, owner: str = Depends(current_
     except ValueError:
         raise HTTPException(status_code=404, detail="message not found")
     return {"ok": True}
+
+
+class RateMessageIn(BaseModel):
+    rating: int | None = None  # 1 (like), -1 (dislike), None (unrated)
+
+
+@app.post("/messages/{message_id}/rate", status_code=200)
+def rate_message(message_id: int, req: RateMessageIn, owner: str = Depends(current_owner)):
+    if req.rating not in (1, -1, None):
+        raise HTTPException(status_code=400, detail="rating must be 1, -1, or null")
+    try:
+        updated = db.rate_message(message_id, owner, req.rating)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if not updated:
+        raise HTTPException(status_code=404, detail="message not found")
+    return {"ok": True, "message_id": message_id, "rating": req.rating}
 
 
 class FeedbackIn(BaseModel):

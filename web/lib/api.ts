@@ -352,6 +352,12 @@ export const api = {
       body: JSON.stringify({ reason }),
     }),
 
+  rateMessage: (messageId: number, rating: number | null) =>
+    req<{ ok: boolean; rating: number | null }>(`/messages/${messageId}/rate`, {
+      method: "POST",
+      body: JSON.stringify({ rating }),
+    }),
+
   // General comment/correction/suggestion — not tied to any specific message (unlike reportMessage).
   submitFeedback: (text: string) =>
     req<{ ok: boolean }>("/feedback/submit", { method: "POST", body: JSON.stringify({ text }) }),

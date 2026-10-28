@@ -63,6 +63,7 @@ export interface Message {
   // beside the sources rather than inside the answer. Present only for the rollout.
   source_note?: string;
   created_at?: string;
+  rating?: number | null;
 }
 
 export interface Session {

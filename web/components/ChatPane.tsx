@@ -130,6 +130,68 @@ function ReportButton({ lang, messageId }: { lang: Lang; messageId: number }) {
   );
 }
 
+function MessageRating({
+  lang,
+  messageId,
+  initialRating,
+}: {
+  lang: Lang;
+  messageId: number;
+  initialRating?: number | null;
+}) {
+  const [rating, setRating] = useState<number | null>(initialRating ?? null);
+  const [busy, setBusy] = useState(false);
+
+  const rate = async (newVal: number) => {
+    if (busy) return;
+    const target = rating === newVal ? null : newVal;
+    setRating(target);
+    setBusy(true);
+    try {
+      await api.rateMessage(messageId, target);
+    } catch {
+      // optimistic fallback
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="inline-flex items-center gap-1">
+      <button
+        type="button"
+        onClick={() => rate(1)}
+        disabled={busy}
+        aria-label={lang === "he" ? "תשובה טובה" : "Good response"}
+        title={lang === "he" ? "תשובה טובה (לייק)" : "Good response"}
+        className={
+          "p-1 rounded-md text-xs inline-flex items-center transition " +
+          (rating === 1
+            ? "text-tekhelet bg-tekhelet/10 font-medium"
+            : "text-ink/40 hover:text-tekhelet hover:bg-cream-2")
+        }
+      >
+        <Icon name="thumb_up" className={`text-[15px] ${rating === 1 ? "" : "opacity-80"}`} />
+      </button>
+      <button
+        type="button"
+        onClick={() => rate(-1)}
+        disabled={busy}
+        aria-label={lang === "he" ? "טעון שיפור" : "Needs improvement"}
+        title={lang === "he" ? "טעון שיפור (דיסלייק)" : "Needs improvement"}
+        className={
+          "p-1 rounded-md text-xs inline-flex items-center transition " +
+          (rating === -1
+            ? "text-crimson bg-crimson/10 font-medium"
+            : "text-ink/40 hover:text-crimson hover:bg-cream-2")
+        }
+      >
+        <Icon name="thumb_down" className={`text-[15px] ${rating === -1 ? "" : "opacity-80"}`} />
+      </button>
+    </div>
+  );
+}
+
 function LessonFiles({ lang, files, intent, onPreview }: { lang: Lang; files: FileOut[]; intent?: string; onPreview: (f: FileOut) => void }) {
   const isSinglePdf = files.length === 1 && files[0].name.toLowerCase().endsWith(".pdf");
   const isBagrut = intent === "bagrut" || files.some((f) => f.name.toLowerCase().includes("bagrut"));
@@ -293,21 +355,26 @@ function Bubble({ lang, m, onPreview, onOpenSources }: { lang: Lang; m: Message;
             {chips.length > 4 && <span className="text-xs text-ink/45">+{chips.length - 4}</span>}
           </div>
         )}
-        {m.text && (
-          <div className="flex items-center gap-4 flex-wrap">
-            <button
-              onClick={() => {
-                navigator.clipboard?.writeText(m.text).then(() => {
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 1500);
-                }).catch(() => {});
-              }}
-              aria-label={tr(lang, "copy")}
-              className="mt-3 text-xs text-ink/40 hover:text-tekhelet inline-flex items-center gap-1 transition"
-            >
-              <Icon name={copied ? "check" : "content_copy"} className="text-[15px]" />
-              {tr(lang, copied ? "copied" : "copy")}
-            </button>
+        {(m.text || hasFiles) && (
+          <div className="mt-3 flex items-center gap-3 flex-wrap">
+            {m.text && (
+              <button
+                onClick={() => {
+                  navigator.clipboard?.writeText(m.text).then(() => {
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 1500);
+                  }).catch(() => {});
+                }}
+                aria-label={tr(lang, "copy")}
+                className="text-xs text-ink/40 hover:text-tekhelet inline-flex items-center gap-1 transition"
+              >
+                <Icon name={copied ? "check" : "content_copy"} className="text-[15px]" />
+                {tr(lang, copied ? "copied" : "copy")}
+              </button>
+            )}
+            {m.id != null && (
+              <MessageRating lang={lang} messageId={m.id} initialRating={m.rating} />
+            )}
             {m.id != null && <ReportButton lang={lang} messageId={m.id} />}
           </div>
         )}

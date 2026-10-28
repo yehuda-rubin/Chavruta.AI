@@ -106,7 +106,8 @@ def get_conn() -> sqlite3.Connection:
 #   18  billing_ledger                                            2026-07-26
 #   17  coupons                                                   2026-07-26
 #   ≤16 subscriptions, bans, deletion scheduling, per-owner scoping — see git log -G'^SCHEMA_VERSION'
-SCHEMA_VERSION = 38
+#   39  messages.rating (1: like, -1: dislike, None: unrated)      2026-10-28
+SCHEMA_VERSION = 39
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -152,6 +153,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
             grounded      INTEGER,
             files         TEXT,
             source_note   TEXT NOT NULL DEFAULT '',
+            rating        INTEGER DEFAULT NULL,
             created_at    TEXT NOT NULL
         );
 
@@ -925,6 +927,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
             CREATE INDEX IF NOT EXISTS idx_bagrut_curr_lookup ON bagrut_curriculum_cache(subject, is_active, units);
         """)
 
+    if version < 39:
+        mcols = {r[1] for r in conn.execute("PRAGMA table_info(messages)")}
+        if "rating" not in mcols:
+            conn.execute("ALTER TABLE messages ADD COLUMN rating INTEGER DEFAULT NULL")
+
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
 
@@ -1336,6 +1343,24 @@ def report_message(message_id: int, owner_id: str, reason: str) -> None:
             "INSERT INTO message_reports (message_id, owner_id, reason, created_at) VALUES (?,?,?,?)",
             (message_id, owner_id, (reason or "").strip()[:500], datetime.now(UTC).isoformat()),
         )
+
+
+def rate_message(message_id: int, owner_id: str, rating: int | None) -> bool:
+    """Set the user rating (1 for like, -1 for dislike, None for unrated) on a message.
+    Verifies that the message belongs to a session owned by owner_id."""
+    if rating not in (1, -1, None):
+        raise ValueError("rating must be 1, -1, or None")
+    with _tx(get_conn()) as conn:
+        cur = conn.execute(
+            """
+            UPDATE messages
+            SET rating = ?
+            WHERE id = ?
+              AND session_id IN (SELECT id FROM sessions WHERE owner_id = ?)
+            """,
+            (rating, message_id, owner_id),
+        )
+        return cur.rowcount > 0
 
 
 def list_flagged_messages(reviewed: bool = False, limit: int = 100) -> list[dict[str, Any]]:

@@ -825,7 +825,7 @@ export default function Home() {
           onPreviewFile={setPreviewFile}
           calendarModesEnabled={!!me?.is_admin && !!me?.calendar_modes_enabled}
           sourcesheetModesEnabled={!!me?.is_admin && !!me?.sourcesheet_enabled}
-          bagrutModesEnabled={!!me?.is_admin && !!me?.bagrut_enabled}
+          bagrutModesEnabled={true}
           userEmail={auth.user?.email}
           userSources={userSources}
           onAddSource={() => setShowAddSource(true)}
