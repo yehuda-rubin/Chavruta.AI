@@ -465,3 +465,38 @@ def test_dynamic_bagrut_curriculum_and_machshava():
     block = format_active_curriculum_prompt_block("gemara", "mmd", 5)
     assert any("MANDATORY ACTIVE MINISTRY OF EDUCATION CURRICULUM" in line for line in block)
     assert any("בבא בתרא" in line for line in block)
+
+def test_bagrut_turn_text_history_resolution():
+    from app.api import _bagrut_turn_text
+
+    # Simulated message turn with 3 files: source sheet, exam, rubric
+    turn_msg = {
+        "text": "",
+        "intent": "bagrut",
+        "files": [
+            {
+                "name": "דף_מקורות_לבגרות.doc",
+                "title": "דף מקורות לבגרות",
+                "content": "בבא בתרא דף ב. מתני' השותפין שרצו לעשות מחיצה בחצר",
+            },
+            {
+                "name": "שאלון_מתכונת_לבגרות.doc",
+                "title": "שאלון מתכונת לבגרות",
+                "content": "שאלה 1: סוגיית היזק ראיה\nא. פירוק המשנה\nב. זיהוי המחלוקת",
+            },
+            {
+                "name": "מחוון_תשובות_וניקוד.doc",
+                "title": "מחוון תשובות וניקוד",
+                "content": "שאלה 1: תשובת מופת לסעיף א וסעיף ב",
+            },
+        ],
+    }
+
+    history_text, is_bagrut = _bagrut_turn_text(turn_msg)
+    assert is_bagrut is True
+    # Crucial check: history MUST contain the exam questions and rubric, NOT just the source sheet!
+    assert "### שאלון הבחינה:" in history_text
+    assert "שאלה 1: סוגיית היזק ראיה" in history_text
+    assert "### מחוון תשובות וניקוד:" in history_text
+    assert "שאלה 1: תשובת מופת" in history_text
+

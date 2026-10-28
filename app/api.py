@@ -6317,6 +6317,25 @@ def _bagrut_turn_text(m: dict) -> tuple[str, bool]:
         )
     )
     if is_bagrut and files:
+        # Prioritize exam and rubric or summary/solution over just the raw source sheet
+        exam = next((f for f in files if "שאלון" in (f.get("name") or "") or "mock_exam" in (f.get("name") or "")), None)
+        rubric = next((f for f in files if "מחוון" in (f.get("name") or "") or "grading_rubric" in (f.get("name") or "")), None)
+        summary = next((f for f in files if "סיכום" in (f.get("name") or "") or "study_summary" in (f.get("name") or "")), None)
+        solution = next((f for f in files if "פתרון" in (f.get("name") or "") or "exam_solution" in (f.get("name") or "")), None)
+
+        sections: list[str] = []
+        if exam and (exam.get("content") or "").strip():
+            sections.append("### שאלון הבחינה:\n" + exam.get("content", "").strip())
+        if rubric and (rubric.get("content") or "").strip():
+            sections.append("### מחוון תשובות וניקוד:\n" + rubric.get("content", "").strip())
+        if summary and (summary.get("content") or "").strip():
+            sections.append("### סיכום לבגרות:\n" + summary.get("content", "").strip())
+        if solution and (solution.get("content") or "").strip():
+            sections.append("### פתרון שאלון:\n" + solution.get("content", "").strip())
+
+        if sections:
+            return "\n\n".join(sections), True
+
         bg_md = next((f for f in files if (f.get("name") or "").endswith(".md")), files[0])
         return bg_md.get("content") or text, True
     return text, False

@@ -1670,6 +1670,7 @@ def build_bagrut_chat_messages(
             sys_parts.append(
                 "מצב פעולה: **תרגול בגרות אינטראקטיבי ולימוד מונחה (`practice`)**.\n"
                 "פעל כמאמן בגרות סוקרטי וממוקד:\n"
+                "- **התייחסות לשאלון ומחוון קודם מן ההיסטוריה**: אם בהיסטוריית השיחה מופיע שאלון בחינה ומחוון תשובות, והתלמיד שואל על שאלה, סעיף או תשובה מתוכו (כגון: 'השאלה הראשונה', 'שאלה 1', 'תסביר את התשובה', 'למה זה ככה במחוון') — עליך להתייחס ישירות ובמדויק לאותה שאלה ולאותו מחוון מתוך שאלון הבחינה שבהיסטוריה, ולא לקפוץ לסוגיה הכללית!\n"
                 "- הצג לתלמיד את קטע המקור הרלוונטי מתוך [S#] (או התייחס לשאלת ההמשך שלו על הסיכום/המבחן).\n"
                 "- נסח שאלת בגרות תקנית ומדורגת (סעיפים א'–ב' עם ניקוד לצד כל סעיף, למשל: **סעיף א' (8 נק')**, **סעיף ב' (7 נק')**) המבוססת ישירות על המקור [S#].\n"
                 "- אם התלמיד מבקש הסבר או רמז: תן רמז מדורג ומכוון אל המילים המדויקות במקור [S#] בלי לחשוף מיד את הפתרון המלא.\n"
@@ -1714,6 +1715,7 @@ def build_bagrut_chat_messages(
             sys_parts.append(
                 "MODE: **Interactive Socratic Bagrut Practice (`practice`)**.\n"
                 "Act as a focused Bagrut coach:\n"
+                "- **Prior Exam & Rubric Reference**: If the conversation history contains a mock exam and grading rubric, and the student asks about a question or answer (e.g. 'the first question', 'question 1', 'explain the answer') — directly and explicitly address THAT question and rubric from the exam in history, rather than drifting to the general Talmudic sugya!\n"
                 "- Present the relevant verified source text from [S#] (or address the student's follow-up question).\n"
                 "- Pose a structured multi-part Bagrut question (sub-questions a–b with point values, e.g., **Part a (8 pts)**, **Part b (7 pts)**) grounded directly in [S#].\n"
                 "- Offer graduated hints pointing to the text rather than giving away the full solution immediately; if the student answered a question, evaluate it per the rubric (**Claim + Citation [S#] + Explanation**) and advance."
