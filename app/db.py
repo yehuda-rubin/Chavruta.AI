@@ -2449,6 +2449,22 @@ def ensure_free_monthly_credits(owner_id: str, *, now_override: datetime | None 
         plan = (row["plan"] or "free").strip().lower()
         current_credits = int(row["credits"] or 0)
 
+        # Sync from active subscription if any
+        sub_row = conn.execute(
+            "SELECT plan, current_period_end, status FROM subscriptions WHERE owner_id=?",
+            (owner_id,)
+        ).fetchone()
+        if sub_row and sub_row["status"] != "expired":
+            end_str = (sub_row["current_period_end"] or "").strip()
+            end_dt = _parse_iso(end_str, now_dt) if end_str else None
+            if end_dt is None or end_dt > now_dt:
+                plan = (sub_row["plan"] or plan).strip().lower()
+
+        from app import plans
+        canonical_plan = plans.canonical(plan)
+        if row["plan"] != canonical_plan:
+            conn.execute("UPDATE accounts SET plan = ? WHERE owner_id = ?", (canonical_plan, owner_id))
+
         # Retrieve or backfill created_at
         created_str = (row["created_at"] or "").strip()
         if not created_str:
@@ -2468,8 +2484,7 @@ def ensure_free_monthly_credits(owner_id: str, *, now_override: datetime | None 
 
         cycle_start = get_credit_cycle_start(created_dt, now_dt)
 
-        from app import plans
-        t = plans.tier(plan)
+        t = plans.tier(canonical_plan)
         monthly_quota = t.monthly_credits if t and t.monthly_credits > 0 else FREE_MONTHLY_CREDITS
 
         if not reset_str or last_reset_dt < cycle_start:
@@ -2481,6 +2496,21 @@ def ensure_free_monthly_credits(owner_id: str, *, now_override: datetime | None 
             return new_balance
 
         return current_credits
+
+
+def sync_all_subscribers() -> dict[str, int]:
+    """Sweep accounts and align their plan and credits with active subscriptions and monthly quotas."""
+    conn = get_conn()
+    now_dt = datetime.now(UTC)
+    updated = 0
+    with _LOCK, _tx(conn):
+        rows = conn.execute("SELECT owner_id FROM accounts").fetchall()
+        for r in rows:
+            oid = r["owner_id"]
+            if oid and oid != "local":
+                ensure_free_monthly_credits(oid, now_override=now_dt)
+                updated += 1
+    return {"synced": updated}
 
 
 ensure_monthly_credits = ensure_free_monthly_credits

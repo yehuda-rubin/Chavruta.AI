@@ -451,6 +451,9 @@ export function SettingsModal({
   planUntil,
   credits,
   creditsResetAt,
+  monthlyCredits,
+  extraCredits,
+  monthLeft,
   cycle,
   cancelAtPeriodEnd,
   dayLeft,
@@ -459,6 +462,7 @@ export function SettingsModal({
   billingEnabled,
   onUpgrade,
   onCancelSubscription,
+  onOpenPlans,
   onRedeemCoupon,
   onJoinOrg,
   orgName,
@@ -485,6 +489,9 @@ export function SettingsModal({
   planUntil?: string | null;               // ISO ts a coupon-granted plan lapses
   credits?: number;                        // prepaid generations left
   creditsResetAt?: string | null;          // ISO ts when free monthly credits reset
+  monthlyCredits?: number;                 // baseline monthly credits
+  extraCredits?: number;                   // additional credits (e.g. from passes)
+  monthLeft?: number | null;               // fraction of monthly plan allowance left
   cycle?: string;                          // 'monthly' | 'annual' | 'coupon'
   cancelAtPeriodEnd?: boolean;             // cancelled: access runs to planUntil, then lapses
   dayLeft?: number | null;                 // fraction of today's conversation allowance left
@@ -493,6 +500,7 @@ export function SettingsModal({
   billingEnabled?: boolean;
   onUpgrade?: () => void;
   onCancelSubscription?: () => void;
+  onOpenPlans?: () => void;
   onRedeemCoupon?: (code: string) => Promise<string>;   // resolves with a message to show
   onJoinOrg?: (code: string) => Promise<string>;        // institution join code (spec 004)
   orgName?: string;                                    // set ⇒ already a member, show what
@@ -516,68 +524,165 @@ export function SettingsModal({
       { year: "numeric", month: "long", day: "numeric" });
   return (
     <Modal open={open} title={tr(lang, "settingsHeading")} onClose={onClose}>
-      <div className="flex flex-col gap-4 overflow-y-auto">
-        <Field label={tr(lang, "setLanguage")}>
-          <Seg<Lang>
-            value={lang}
-            onPick={onLang}
-            options={[
-              { v: "he", label: "עברית" },
-              { v: "en", label: "English" },
-            ]}
-          />
-        </Field>
+      <div className="flex flex-col gap-3.5 overflow-y-auto">
+        {/* Section 1: Preferences */}
+        <section className="glass rounded-[22px] p-3.5 flex flex-col gap-2.5">
+          <h3 className="font-serif font-bold text-xs text-tekhelet uppercase tracking-wider">{lang === "he" ? "העדפות ממשק ושימוש" : "Preferences"}</h3>
+          <Field label={tr(lang, "setLanguage")}>
+            <Seg<Lang>
+              value={lang}
+              onPick={onLang}
+              options={[
+                { v: "he", label: "עברית" },
+                { v: "en", label: "English" },
+              ]}
+            />
+          </Field>
 
-        <Field label={tr(lang, "setDefaultMode")}>
-          <Seg<IntentId>
-            value={defaultIntent}
-            onPick={onDefaultIntent}
-            wrap
-            options={MODES.map((m) => ({ v: m.id, label: tr(lang, m.key) }))}
-          />
-        </Field>
+          <Field label={tr(lang, "setDefaultMode")}>
+            <Seg<IntentId>
+              value={defaultIntent}
+              onPick={onDefaultIntent}
+              wrap
+              options={MODES.map((m) => ({ v: m.id, label: tr(lang, m.key) }))}
+            />
+          </Field>
 
-        <Field label={tr(lang, "setTheme")}>
-          <Seg<Theme>
-            value={theme}
-            onPick={onTheme}
-            options={[
-              { v: "light", label: tr(lang, "themeLight") },
-              { v: "dark", label: tr(lang, "themeDark") },
-              { v: "auto", label: tr(lang, "themeAuto") },
-            ]}
-          />
-        </Field>
+          <Field label={tr(lang, "setTheme")}>
+            <Seg<Theme>
+              value={theme}
+              onPick={onTheme}
+              options={[
+                { v: "light", label: tr(lang, "themeLight") },
+                { v: "dark", label: tr(lang, "themeDark") },
+                { v: "auto", label: tr(lang, "themeAuto") },
+              ]}
+            />
+          </Field>
 
-        <Field label={tr(lang, "setSourcesDefault")}>
-          <Seg<"collapsed" | "expanded">
-            value={srcDefaultOpen ? "expanded" : "collapsed"}
-            onPick={(v) => onSrcDefaultOpen(v === "expanded")}
-            options={[
-              { v: "collapsed", label: tr(lang, "srcCollapsed") },
-              { v: "expanded", label: tr(lang, "srcExpanded") },
-            ]}
-          />
-        </Field>
+          <Field label={tr(lang, "setSourcesDefault")}>
+            <Seg<"collapsed" | "expanded">
+              value={srcDefaultOpen ? "expanded" : "collapsed"}
+              onPick={(v) => onSrcDefaultOpen(v === "expanded")}
+              options={[
+                { v: "collapsed", label: tr(lang, "srcCollapsed") },
+                { v: "expanded", label: tr(lang, "srcExpanded") },
+              ]}
+            />
+          </Field>
 
-        <Field label={tr(lang, "setHistory")}>
-          <button
-            onClick={onClearHistory}
-            className="w-full py-2.5 rounded-2xl glass text-red-500 font-semibold text-sm hover:bg-red-500/10 transition"
-          >
-            {tr(lang, "clearAll")}
-          </button>
-        </Field>
+          <Field label={tr(lang, "setHistory")}>
+            <button
+              onClick={onClearHistory}
+              className="w-full py-2 rounded-xl glass text-red-500 font-semibold text-xs hover:bg-red-500/10 transition"
+            >
+              {tr(lang, "clearAll")}
+            </button>
+          </Field>
+        </section>
 
-        {/* Account — only in Supabase mode (auth.enabled). Shows who's signed in + a sign-out. */}
+        {/* Section 2: Plan, Monthly Quota & Credit Passes */}
+        {!isMinor && (
+          <section className="glass rounded-[22px] p-4 border border-tekhelet/20 flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="font-serif font-bold text-sm text-tekhelet">
+                  {tr(lang, "planLabel")}: {planName || tr(lang, "planFree")}
+                </span>
+                {cycle === "annual" && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-tekhelet/10 text-tekhelet font-semibold">
+                    {tr(lang, "cycleAnnual")}
+                  </span>
+                )}
+                {planUntil && (
+                  <span className="text-[11px] text-ink/45">
+                    · {fmtDate(planUntil)}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5">
+                {plan && plan !== "free" && cancelAtPeriodEnd ? (
+                  <span className="text-xs text-ink/50 shrink-0">
+                    {tr(lang, "subCanceledNotice")} {planUntil ? fmtDate(planUntil) : ""}
+                  </span>
+                ) : plan && plan !== "free" ? (
+                  <button
+                    onClick={() => {
+                      if (window.confirm(tr(lang, "cancelSubscriptionConfirm"))) onCancelSubscription?.();
+                    }}
+                    className="px-2.5 py-1.5 rounded-xl glass text-red-500 font-semibold text-xs hover:bg-red-500/10 transition shrink-0"
+                  >
+                    {tr(lang, "cancelSubscription")}
+                  </button>
+                ) : null}
+                <button
+                  onClick={() => (onOpenPlans ? onOpenPlans() : onUpgrade?.())}
+                  className="px-3.5 py-1.5 rounded-xl grad text-white font-semibold text-xs hover:opacity-95 transition shrink-0"
+                >
+                  {plan && plan !== "free" ? tr(lang, "openPlansAction") : tr(lang, "upgrade")}
+                </button>
+              </div>
+            </div>
+
+            {/* Monthly Quota Gauge */}
+            {typeof credits === "number" && (
+              <div className="pt-2.5 border-t border-line/60 flex flex-col gap-2">
+                {(() => {
+                  const mQuota = monthlyCredits || (plan === "pro" ? 300 : plan === "basic" ? 100 : 20);
+                  const curMonthly = Math.min(credits, mQuota);
+                  const ratio = monthLeft !== undefined && monthLeft !== null ? monthLeft : Math.min(1.0, curMonthly / mQuota);
+                  const resetCaption = creditsResetAt
+                    ? `${lang === "he" ? "מתאפס ב-" : "Resets "}${fmtDate(creditsResetAt)}`
+                    : undefined;
+                  return (
+                    <Gauge
+                      label={tr(lang, "monthlyQuotaLeft")}
+                      value={ratio}
+                      caption={`${curMonthly} מתוך ${mQuota} קרדיטים חודשיים${resetCaption ? ` · ${resetCaption}` : ""}`}
+                    />
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* Additional credits / Passes */}
+            <div className="p-3 rounded-2xl bg-tekhelet/[0.04] border border-tekhelet/10 flex items-center justify-between gap-3">
+              <div className="min-w-0 flex flex-col gap-0.5">
+                <span className="font-semibold text-xs text-tekhelet">
+                  {tr(lang, "extraCreditsTitle")}
+                </span>
+                <p className="text-[11px] text-ink/65 leading-snug">
+                  {extraCredits && extraCredits > 0
+                    ? `${extraCredits} קרדיטים נוספים מכרטיסיות (${tr(lang, "neverExpires")})`
+                    : tr(lang, "noExtraCreditsDesc")}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => (onOpenPlans ? onOpenPlans() : onUpgrade?.())}
+                className="px-3 py-1.5 rounded-xl glass border border-tekhelet/30 text-tekhelet text-xs font-semibold hover:bg-tekhelet/10 transition shrink-0"
+              >
+                + כרטיסייה
+              </button>
+            </div>
+          </section>
+        )}
+
+        {/* Section 3: Coupon Redemption */}
+        {onRedeemCoupon && (
+          <section className="glass rounded-[22px] p-3.5 flex flex-col gap-2">
+            <h3 className="font-serif font-bold text-xs text-tekhelet uppercase tracking-wider">{tr(lang, "couponLabel")}</h3>
+            <CouponField lang={lang} onRedeem={onRedeemCoupon} />
+          </section>
+        )}
+
+        {/* Section 4: Account & Security */}
         {auth.enabled && auth.user && (
-          <Field label={tr(lang, "account")}>
+          <section className="glass rounded-[22px] p-3.5 flex flex-col gap-3">
+            <h3 className="font-serif font-bold text-xs text-tekhelet uppercase tracking-wider">{tr(lang, "account")}</h3>
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0 flex flex-col gap-0.5">
                 <span className="text-xs text-ink/60 truncate">{auth.user.email}</span>
-                {/* The account id, under the email. It's what support needs to identify an account
-                    (grants and coupons are applied by this id, never by email), so it has to be
-                    readable and copyable by the person being helped. Click copies it. */}
                 <button
                   type="button"
                   title={tr(lang, "copyUserId")}
@@ -589,12 +694,12 @@ export function SettingsModal({
                   className="text-[11px] font-mono text-ink/40 hover:text-tekhelet truncate text-start transition"
                   dir="ltr"
                 >
-                  {idCopied ? tr(lang, "copied") : auth.user.id}
+                  {idCopied ? tr(lang, "copied") : auth.user.id} 📋
                 </button>
               </div>
               <button
                 onClick={() => auth.signOut()}
-                className="px-4 py-2 rounded-2xl glass text-red-500 font-semibold text-sm hover:bg-red-500/10 transition shrink-0"
+                className="px-3 py-1.5 rounded-xl glass text-red-500 font-semibold text-xs hover:bg-red-500/10 transition shrink-0"
               >
                 {tr(lang, "signOut")}
               </button>
@@ -602,25 +707,22 @@ export function SettingsModal({
 
             <ChangePasswordField lang={lang} />
 
-            {/* Marketing consent — opt-in, changeable any time; mirrors the sign-up checkbox but
-                reflects (and updates) the value actually stored in user_metadata. */}
-            {!isMinor && <label className="mt-2 flex items-center gap-2 text-xs text-ink/70 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={Boolean(auth.user.user_metadata?.marketing_consent)}
-                onChange={(e) => auth.updateMetadata({
-                  marketing_consent: e.target.checked,
-                  marketing_consent_at: new Date().toISOString(),
-                })}
-                className="accent-tekhelet"
-              />
-              <span>{tr(lang, "marketingConsentSetting")}</span>
-            </label>}
+            {!isMinor && (
+              <label className="flex items-center gap-2 text-xs text-ink/70 cursor-pointer pt-1">
+                <input
+                  type="checkbox"
+                  checked={Boolean(auth.user.user_metadata?.marketing_consent)}
+                  onChange={(e) => auth.updateMetadata({
+                    marketing_consent: e.target.checked,
+                    marketing_consent_at: new Date().toISOString(),
+                  })}
+                  className="accent-tekhelet"
+                />
+                <span>{tr(lang, "marketingConsentSetting")}</span>
+              </label>
+            )}
 
-            {/* Global data-review opt-out — overrides the per-chat toggle in SessionsPanel. Only
-                meaningful for chats created on/after 2026-08-10 (privacy policy section 12); stored
-                in user_metadata like marketing_consent above, not a server-side schema change. */}
-            <label className="mt-2 flex items-center gap-2 text-xs text-ink/70 cursor-pointer">
+            <label className="flex items-center gap-2 text-xs text-ink/70 cursor-pointer">
               <input
                 type="checkbox"
                 checked={Boolean(auth.user.user_metadata?.data_review_opt_out)}
@@ -632,194 +734,129 @@ export function SettingsModal({
               />
               <span>{tr(lang, "dataReviewOptOutSetting")}</span>
             </label>
+          </section>
+        )}
 
-            {/* Plan + billing — upgrade (free) or cancel subscription (paid). */}
-            {!isMinor && <div className="mt-2 flex items-center justify-between gap-2">
-              <span className="text-xs text-ink/60">
-                {tr(lang, "planLabel")}: {planName || tr(lang, "planFree")}
-                {cycle === "annual" && <> ({tr(lang, "cycleAnnual")})</>}
-                {planUntil && <> · {tr(lang, "planUntil")} {fmtDate(planUntil)}</>}
-                {typeof credits === "number" && (
-                  <> · {credits} {tr(lang, "creditsLabel")}
-                    {creditsResetAt && (
-                      <span className="text-[11px] text-ink/40"> ({lang === "he" ? "מתאפס ב-" : "resets "}{fmtDate(creditsResetAt)})</span>
-                    )}
-                  </>
+        {/* Section 5: Partner Program */}
+        {billingEnabled && (
+          <div className="p-3 rounded-2xl glass border border-tekhelet/20 bg-tekhelet/[0.03] flex items-center justify-between gap-3">
+            <div className="min-w-0 flex flex-col gap-0.5">
+              <div className="flex items-center gap-1.5 font-semibold text-xs text-tekhelet">
+                <Icon name="groups" className="text-base shrink-0" />
+                <span>{tr(lang, "partnerProgramTitle")}</span>
+              </div>
+              <p className="text-[11px] text-ink/65 leading-snug">
+                {tr(lang, "partnerProgramSettingsDesc")}
+              </p>
+            </div>
+            <a
+              href="/partner"
+              className="px-3 py-1.5 rounded-xl grad text-white font-semibold text-xs hover:opacity-95 transition shrink-0 inline-flex items-center gap-1"
+            >
+              <span>{tr(lang, "partnerProgramAction")}</span>
+              <Icon name="arrow_forward" className="text-xs rtl:rotate-180" />
+            </a>
+          </div>
+        )}
+
+        {/* Section 6: Family & School Links */}
+        {auth.user && <LinkRequests lang={lang} />}
+        {!isMinor && (
+          <a href="/family" target="_blank" rel="noopener"
+             className="text-xs text-tekhelet/80 hover:text-tekhelet font-semibold hover:underline ps-1">
+            {tr(lang, "settingsForParents")}
+          </a>
+        )}
+        {onJoinOrg && <OrgJoinField lang={lang} orgName={orgName} onJoin={onJoinOrg} />}
+
+        {/* Section 7: BYOK */}
+        {byokSupported && <ByokKeyField lang={lang} />}
+
+        {/* Section 8: Danger Zone / Account Deletion */}
+        {deletionScheduledFor ? (
+          <div className="p-3 rounded-2xl bg-red-500/5 ring-1 ring-red-500/15 flex flex-col gap-2">
+            <p className="text-xs text-red-600/90 leading-relaxed">
+              {tr(lang, "deletionScheduledPrefix")} {fmtDate(deletionScheduledFor)}. {tr(lang, "deletionCanCancel")}
+            </p>
+            <button
+              onClick={() => onCancelDeletion?.()}
+              className="py-2 rounded-2xl grad text-white font-semibold text-sm hover:opacity-95 transition"
+            >
+              {tr(lang, "cancelDeletion")}
+            </button>
+          </div>
+        ) : confirmDelete ? (
+          <div className="p-3 rounded-2xl bg-red-500/5 ring-1 ring-red-500/15 flex flex-col gap-2">
+            <p className="text-xs text-ink/80 leading-relaxed">{tr(lang, "deleteAccountIntro")}</p>
+            {((plan && plan !== "free" && !cancelAtPeriodEnd) || !!credits) && (
+              <div className="p-2.5 rounded-xl bg-amber-500/10 ring-1 ring-amber-500/25 flex flex-col gap-1.5">
+                <p className="text-[11px] font-semibold text-amber-700">{tr(lang, "deleteWarnTitle")}</p>
+                {plan && plan !== "free" && !cancelAtPeriodEnd && (
+                  <p className="text-[11px] text-ink/70 leading-relaxed">{tr(lang, "deletePaidNotice")}</p>
                 )}
-              </span>
-              {/* Already cancelled: there is nothing left to cancel, and offering the button again
-                  would suggest access is still being billed for. State the end date instead. */}
-              {plan && plan !== "free" && cancelAtPeriodEnd ? (
-                <span className="text-xs text-ink/50 shrink-0">
-                  {tr(lang, "subCanceledNotice")} {planUntil ? fmtDate(planUntil) : ""}
-                </span>
-              ) : plan && plan !== "free" ? (
-                <button
-                  onClick={() => {
-                    if (window.confirm(tr(lang, "cancelSubscriptionConfirm"))) onCancelSubscription?.();
-                  }}
-                  className="px-4 py-2 rounded-2xl glass text-red-500 font-semibold text-sm hover:bg-red-500/10 transition shrink-0"
-                >
-                  {tr(lang, "cancelSubscription")}
-                </button>
-              ) : (
-                billingEnabled && (
-                  <button
-                    onClick={() => onUpgrade?.()}
-                    className="px-4 py-2 rounded-2xl grad text-white font-semibold text-sm hover:opacity-95 transition shrink-0"
-                  >
-                    {tr(lang, "upgrade")}
-                  </button>
-                )
-              )}
-            </div>}
-
-
-            {/* Referral / Partner program — shown only when billing is active */}
-            {billingEnabled && (
-              <div className="mt-2.5 p-3 rounded-2xl glass border border-tekhelet/20 bg-tekhelet/[0.03] flex items-center justify-between gap-3">
-                <div className="min-w-0 flex flex-col gap-0.5">
-                  <div className="flex items-center gap-1.5 font-semibold text-xs text-tekhelet">
-                    <Icon name="groups" className="text-base shrink-0" />
-                    <span>{tr(lang, "partnerProgramTitle")}</span>
-                  </div>
-                  <p className="text-[11px] text-ink/65 leading-snug">
-                    {tr(lang, "partnerProgramSettingsDesc")}
+                {!!credits && (
+                  <p className="text-[11px] text-ink/70 leading-relaxed">
+                    {tr(lang, "deleteCreditsNotice").replace("{n}", String(credits))}
                   </p>
-                </div>
-                <a
-                  href="/partner"
-                  className="px-3.5 py-1.5 rounded-xl grad text-white font-semibold text-xs hover:opacity-95 transition shrink-0 inline-flex items-center gap-1"
-                >
-                  <span>{tr(lang, "partnerProgramAction")}</span>
-                  <Icon name="arrow_forward" className="text-xs rtl:rotate-180" />
-                </a>
-              </div>
-            )}
-
-            {/* Coupon redemption — grants a time-boxed plan or prepaid credits. Always shown to a
-                signed-in user, including when billing is off: coupons are the one way to get paid
-                access on a deployment with no payment provider configured. */}
-            {onRedeemCoupon && <CouponField lang={lang} onRedeem={onRedeemCoupon} />}
-
-            {/* Institution membership — join by code, or, once in, what the school can see. */}
-            {/* School / parent link requests (spec 009): shown only when one is pending. */}
-            {auth.user && <LinkRequests lang={lang} />}
-            {!isMinor && (
-              <a href="/family" target="_blank" rel="noopener"
-                 className="mt-2 inline-block text-xs text-tekhelet/80 hover:text-tekhelet font-semibold hover:underline">
-                {tr(lang, "settingsForParents")}
-              </a>
-            )}
-
-            {onJoinOrg && <OrgJoinField lang={lang} orgName={orgName} onJoin={onJoinOrg} />}
-
-            {/* BYOK — only offered when the backend has a provider-key concept at all (not 'bridge'). */}
-            {byokSupported && <ByokKeyField lang={lang} />}
-
-            {/* Account deletion. Two paths, both named up front with what they cost: wait out the
-                grace period and keep the option to change your mind, or go now and lose it. The old
-                version was one window.confirm that said "after a grace period" without saying how
-                long — the length only appeared once the deletion was already filed, which a user
-                read as us stalling ("why is the deletion delayed by a month, that is strange"). The
-                number is the server's own (deletionGraceDays from /me), not a copy of it here. */}
-            {deletionScheduledFor ? (
-              <div className="mt-2 p-3 rounded-2xl bg-red-500/5 ring-1 ring-red-500/15 flex flex-col gap-2">
-                <p className="text-xs text-red-600/90 leading-relaxed">
-                  {tr(lang, "deletionScheduledPrefix")} {fmtDate(deletionScheduledFor)}. {tr(lang, "deletionCanCancel")}
-                </p>
-                <button
-                  onClick={() => onCancelDeletion?.()}
-                  className="py-2 rounded-2xl grad text-white font-semibold text-sm hover:opacity-95 transition"
-                >
-                  {tr(lang, "cancelDeletion")}
-                </button>
-              </div>
-            ) : confirmDelete ? (
-              <div className="mt-2 p-3 rounded-2xl bg-red-500/5 ring-1 ring-red-500/15 flex flex-col gap-2">
-                <p className="text-xs text-ink/80 leading-relaxed">{tr(lang, "deleteAccountIntro")}</p>
-
-                {/* Money, before the choice rather than after it. Requesting deletion stops the
-                    recurring charge (app/accounts.py::stop_billing) — which is what a paying user
-                    wants, but it is not reversible by cancelling the deletion, and the immediate
-                    path additionally forfeits the period already paid for. */}
-                {/* What is still paid for and would be lost, in one warning, with the way out next
-                    to it: a user who only wants the charges to stop can cancel the subscription and
-                    keep the account (terms §10 — deletion forfeits an unused card balance). */}
-                {((plan && plan !== "free" && !cancelAtPeriodEnd) || !!credits) && (
-                  <div className="p-2.5 rounded-xl bg-amber-500/10 ring-1 ring-amber-500/25 flex flex-col gap-1.5">
-                    <p className="text-[11px] font-semibold text-amber-700">{tr(lang, "deleteWarnTitle")}</p>
-                    {plan && plan !== "free" && !cancelAtPeriodEnd && (
-                      <p className="text-[11px] text-ink/70 leading-relaxed">{tr(lang, "deletePaidNotice")}</p>
-                    )}
-                    {!!credits && (
-                      <p className="text-[11px] text-ink/70 leading-relaxed">
-                        {tr(lang, "deleteCreditsNotice").replace("{n}", String(credits))}
-                      </p>
-                    )}
-                    {plan && plan !== "free" && !cancelAtPeriodEnd && onCancelSubscription && (
-                      <button
-                        onClick={() => {
-                          if (window.confirm(tr(lang, "cancelSubscriptionConfirm"))) {
-                            onCancelSubscription();
-                            setConfirmDelete(false);
-                          }
-                        }}
-                        className="mt-0.5 py-1.5 px-3 rounded-xl glass text-ink font-semibold text-xs hover:bg-white/60 transition text-start"
-                      >
-                        {tr(lang, "deleteCancelSubInstead")}
-                      </button>
-                    )}
-                  </div>
                 )}
-
-                <button
-                  onClick={() => runDelete(false)}
-                  className="py-2 px-3 rounded-2xl glass text-red-500 font-semibold text-sm hover:bg-red-500/10 transition text-start"
-                >
-                  {tr(lang, "deleteAfterDays").replace("{days}", String(deletionGraceDays ?? 30))}
-                  <span className="block font-normal text-[11px] text-ink/55 mt-0.5">
-                    {tr(lang, "deleteAfterDaysHint")}
-                  </span>
-                </button>
-
-                {/* The irreversible one keeps a second confirmation. Not to discourage it — it is a
-                    legitimate choice and the reason this option exists — but because nothing after
-                    it can be taken back, and it sits one tap from the reversible option above. */}
-                <button
-                  onClick={() => {
-                    const lost = credits ? " " + tr(lang, "deleteCreditsNotice").replace("{n}", String(credits)) : "";
-                    if (window.confirm(tr(lang, "deleteNowConfirm") + lost)) runDelete(true);
-                  }}
-                  className="py-2 px-3 rounded-2xl glass text-red-500 font-semibold text-sm hover:bg-red-500/10 transition text-start"
-                >
-                  {tr(lang, "deleteNow")}
-                  <span className="block font-normal text-[11px] text-ink/55 mt-0.5">
-                    {tr(lang, "deleteNowHint")}
-                    {plan && plan !== "free" && <> {tr(lang, "deletePaidNowNotice")}</>}
-                  </span>
-                </button>
-
-                {deleteError && (
-                  <p className="text-[11px] text-red-600 leading-relaxed">{deleteError}</p>
+                {plan && plan !== "free" && !cancelAtPeriodEnd && onCancelSubscription && (
+                  <button
+                    onClick={() => {
+                      if (window.confirm(tr(lang, "cancelSubscriptionConfirm"))) {
+                        onCancelSubscription();
+                        setConfirmDelete(false);
+                      }
+                    }}
+                    className="mt-0.5 py-1.5 px-3 rounded-xl glass text-ink font-semibold text-xs hover:bg-white/60 transition text-start"
+                  >
+                    {tr(lang, "deleteCancelSubInstead")}
+                  </button>
                 )}
-
-                <button
-                  onClick={() => { setDeleteError(""); setConfirmDelete(false); }}
-                  className="py-2 rounded-2xl grad text-white font-semibold text-sm hover:opacity-95 transition"
-                >
-                  {tr(lang, "deleteKeep")}
-                </button>
               </div>
-            ) : (
-              <button
-                onClick={() => setConfirmDelete(true)}
-                className="mt-2 w-full py-2 rounded-2xl glass text-red-500 font-semibold text-sm hover:bg-red-500/10 transition"
-              >
-                {tr(lang, "deleteAccount")}
-              </button>
             )}
-          </Field>
+
+            <button
+              onClick={() => runDelete(false)}
+              className="py-2 px-3 rounded-2xl glass text-red-500 font-semibold text-sm hover:bg-red-500/10 transition text-start"
+            >
+              {tr(lang, "deleteAfterDays").replace("{days}", String(deletionGraceDays ?? 30))}
+              <span className="block font-normal text-[11px] text-ink/55 mt-0.5">
+                {tr(lang, "deleteAfterDaysHint")}
+              </span>
+            </button>
+
+            <button
+              onClick={() => {
+                const lost = credits ? " " + tr(lang, "deleteCreditsNotice").replace("{n}", String(credits)) : "";
+                if (window.confirm(tr(lang, "deleteNowConfirm") + lost)) runDelete(true);
+              }}
+              className="py-2 px-3 rounded-2xl glass text-red-500 font-semibold text-sm hover:bg-red-500/10 transition text-start"
+            >
+              {tr(lang, "deleteNow")}
+              <span className="block font-normal text-[11px] text-ink/55 mt-0.5">
+                {tr(lang, "deleteNowHint")}
+                {plan && plan !== "free" && <> {tr(lang, "deletePaidNowNotice")}</>}
+              </span>
+            </button>
+
+            {deleteError && (
+              <p className="text-[11px] text-red-600 leading-relaxed">{deleteError}</p>
+            )}
+
+            <button
+              onClick={() => { setDeleteError(""); setConfirmDelete(false); }}
+              className="py-2 rounded-2xl grad text-white font-semibold text-sm hover:opacity-95 transition"
+            >
+              {tr(lang, "deleteKeep")}
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setConfirmDelete(true)}
+            className="mt-1 w-full py-2 rounded-2xl glass text-red-500 font-semibold text-xs hover:bg-red-500/10 transition"
+          >
+            {tr(lang, "deleteAccount")}
+          </button>
         )}
 
         <div className="pt-3 border-t border-white/60">

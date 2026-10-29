@@ -627,6 +627,9 @@ export interface Me {
   multiple: number;                         // usage relative to free: the only allowance figure shown
   credits: number;                          // prepaid generations, spent once a cap is hit
   credits_reset_at?: string | null;         // ISO ts when free monthly credits reset (rolling month)
+  monthly_credits?: number;                 // baseline monthly credits for the current plan
+  extra_credits?: number;                   // additional credits (e.g. passes/cards) beyond plan
+  month_left?: number | null;               // fraction of monthly plan allowance left (0.0 to 1.0)
   // BYOK (bring-your-own-key): whether this deployment's backend even accepts a provider key (false
   // for the bridge backend), and — once the pools above are exhausted — a SECOND allowance the same
   // size as the plan's own, spent only when the user has entered their own key in Settings.

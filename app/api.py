@@ -4650,6 +4650,9 @@ def _reserve_tokens(owner: str, lang: str, intent: str, user_key: str = "", acti
     if spent:
         _log.info("owner=%s spent %d credit(s), %d left", owner, cost, balance)
         return Reservation(0, day=day, credits_spent=cost)
+    if _is_admin(owner):
+        _log.info("owner=%s is admin with insufficient credits; admitting turn without charge", owner)
+        return Reservation(0, day=day, credits_spent=0)
     raise HTTPException(status_code=429,
                         detail=_quota_message("credits", lang, balance, cost))
 
@@ -4876,7 +4879,7 @@ def _enforce_quota(owner: str, lang: str, intent: str = "", user_key: str = "", 
     before ownership checks so an over-quota user probing session ids learns nothing. `user_key` is
     the caller's own provider API key (X-User-LLM-Key), if any — see _byok_supported.
     """
-    if owner == "local" or _is_admin(owner):
+    if owner == "local":
         return Reservation(0)
     return _reserve_tokens(owner, lang, intent, user_key, action=action)
 
@@ -5165,6 +5168,9 @@ class MeOut(BaseModel):
     byok_lessons_left: float | None = None
     credits: int = 0                   # prepaid generations, spent once a cap is hit
     credits_reset_at: str | None = None  # ISO ts when monthly free credits reset (rolling month)
+    monthly_credits: int = 20          # baseline monthly credits for the plan
+    extra_credits: int = 0             # credits from packs/passes beyond monthly allowance
+    month_left: float | None = None    # fraction of monthly plan allowance left (0.0 - 1.0)
     plan_until: str | None = None    # ISO ts the paid/coupon period ends
     cycle: str = "monthly"           # 'monthly' | 'annual' | 'coupon'
     cancel_at_period_end: bool = False   # true ⇒ cancelled, access runs to plan_until then lapses
@@ -5271,6 +5277,12 @@ def me(request: Request, owner: str = Depends(current_owner)):
     # is not what they are studying on, and telling a student in a school paying ₪649 a month that
     # they are on the free tier invites them to buy something the server would refuse them.
     shown_plan = ctx["plan"] if ctx else plan
+    t = plans.tier(shown_plan)
+    monthly_quota = t.monthly_credits if t and t.monthly_credits > 0 else plans.FREE_MONTHLY_CREDITS
+    user_credits = 0 if is_local else db.ensure_free_monthly_credits(owner)
+    extra_credits = max(0, user_credits - monthly_quota)
+    credits_in_plan = min(user_credits, monthly_quota)
+    month_left = None if is_local else (1.0 if monthly_quota <= 0 else round(max(0.0, min(1.0, credits_in_plan / monthly_quota)), 2))
     return MeOut(
         owner=owner,
         authenticated=not is_local,
@@ -5288,8 +5300,11 @@ def me(request: Request, owner: str = Depends(current_owner)):
         byok_day_left=byok_day_left,
         byok_week_left=byok_week_left,
         byok_lessons_left=byok_lessons_left,
-        credits=0 if is_local else db.ensure_free_monthly_credits(owner),
+        credits=user_credits,
         credits_reset_at=None if is_local else db.get_free_credits_next_reset(owner),
+        monthly_credits=monthly_quota,
+        extra_credits=extra_credits,
+        month_left=month_left,
         # A member has no subscription of their own; the school's belongs to its owner.
         plan_until=None if ctx else (sub.get("current_period_end") if plan != "free" else None),
         cycle=sub.get("cycle") or "monthly",

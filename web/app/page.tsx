@@ -922,6 +922,9 @@ export default function Home() {
         planUntil={me?.plan_until}
         credits={me?.credits}
         creditsResetAt={me?.credits_reset_at}
+        monthlyCredits={me?.monthly_credits}
+        extraCredits={me?.extra_credits}
+        monthLeft={me?.month_left}
         cycle={me?.cycle}
         cancelAtPeriodEnd={me?.cancel_at_period_end}
         dayLeft={me?.day_left ?? null}
@@ -931,6 +934,7 @@ export default function Home() {
         billingEnabled={billingEnabled && !me?.is_minor}
         onUpgrade={upgrade}
         onCancelSubscription={cancelSubscription}
+        onOpenPlans={() => { setShowSettings(false); setPlansOpen(true); }}
         onRedeemCoupon={me?.authenticated && !me?.is_minor ? redeemCoupon : undefined}
         byokSupported={me?.byok_supported}
         onJoinOrg={me?.authenticated ? joinOrg : undefined}
