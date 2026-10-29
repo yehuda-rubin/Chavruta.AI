@@ -49,13 +49,30 @@ const GUARD_LABELS: Record<string, string> = {
 };
 
 const PLANS = [
-  { id: "basic", label: "בסיסי" },
-  { id: "pro", label: "מלא" },
-  { id: "institution", label: "מוסדי" },
+  { id: "basic", label: "אישי (100 קרדיטים)" },
+  { id: "plus", label: "מתקדם (280 קרדיטים)" },
+  { id: "pro", label: "מלא (600 קרדיטים)" },
+  { id: "institution", label: "כולל / בית מדרש (1,500 קרדיטים · 20 מושבים)" },
+  { id: "institution_50", label: "ישיבה רגילה (3,500 קרדיטים · 50 מושבים)" },
+  { id: "institution_100", label: "ישיבה גדולה (7,000 קרדיטים · 100 מושבים)" },
 ];
+
+const CREDIT_PRESETS = [3, 10, 20, 50, 120, 280, 1000];
+
+interface QuickGrantPreset {
+  owner_id: string;
+  kind: "plan" | "credits";
+  plan?: string;
+  days?: number;
+  credits?: number;
+  expires_in_days?: string;
+  notice_title?: string;
+  notice_body?: string;
+}
 
 export default function AdminDashboard() {
   const [meLoading, setMeLoading] = useState(true);
+  const [presetGrant, setPresetGrant] = useState<QuickGrantPreset | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [section, setSection] = useState<Section>("overview");
   const [since, setSince] = useState<AdminWindow>("30d");
@@ -468,13 +485,34 @@ export default function AdminDashboard() {
                   {(flagged ?? []).map((f) => (
                     <div key={f.id} className="rounded-2xl bg-ink/5 p-3 flex flex-col gap-1.5">
                       <div className="flex items-center justify-between gap-2 text-xs text-ink/50">
-                        <span>{f.reason || "(ללא סיבה)"} · {f.source === "auto" ? "אוטומטי" : "משתמש"}</span>
-                        <button
-                          onClick={() => reviewMessage(f.id)}
-                          className="px-3 py-1 rounded-full glass text-tekhelet text-xs font-semibold hover:bg-tekhelet/10"
-                        >
-                          סומן כנבדק
-                        </button>
+                        <span>{f.reason || "(ללא סיבה)"} · {f.source === "auto" ? "אוטומטי" : "משתמש"}{f.owner_id ? ` · מזהה: ${f.owner_id}` : ""}</span>
+                        <div className="flex items-center gap-1.5">
+                          {f.owner_id && f.owner_id !== "local" && (
+                            <button
+                              onClick={() => {
+                                setPresetGrant({
+                                  owner_id: f.owner_id,
+                                  kind: "credits",
+                                  credits: 3,
+                                  expires_in_days: "30",
+                                  notice_title: "תודה על הדיווח!",
+                                  notice_body: "ראינו את הדיווח שלך, בדקנו וטיפלנו בנושא. כאות תודה הענקנו לך 3 קרדיטים בתוקף ל-30 יום. תודה שעזרת לנו לשפר את חברותא!",
+                                });
+                                setSection("coupons");
+                              }}
+                              className="px-2.5 py-1 rounded-full glass text-tekhelet text-xs font-semibold hover:bg-tekhelet/10 cursor-pointer"
+                              title="הענק קרדיטים למשתמש זה"
+                            >
+                              🎁 צ'פר בקרדיטים
+                            </button>
+                          )}
+                          <button
+                            onClick={() => reviewMessage(f.id)}
+                            className="px-3 py-1 rounded-full glass text-tekhelet text-xs font-semibold hover:bg-tekhelet/10"
+                          >
+                            סומן כנבדק
+                          </button>
+                        </div>
                       </div>
                       <p
                         className={`text-sm text-ink/80 whitespace-pre-wrap ${expandedFlags.has(f.id) ? "" : "line-clamp-3"}`}
@@ -502,12 +540,33 @@ export default function AdminDashboard() {
                     <div key={f.id} className="rounded-2xl bg-ink/5 p-3 flex flex-col gap-1.5">
                       <div className="flex items-center justify-between gap-2 text-xs text-ink/50">
                         <span>{f.owner_id} · {new Date(f.created_at).toLocaleString("he-IL")}</span>
-                        <button
-                          onClick={() => reviewFeedback(f.id)}
-                          className="px-3 py-1 rounded-full glass text-tekhelet text-xs font-semibold hover:bg-tekhelet/10"
-                        >
-                          סומן כנבדק
-                        </button>
+                        <div className="flex items-center gap-1.5">
+                          {f.owner_id && f.owner_id !== "local" && (
+                            <button
+                              onClick={() => {
+                                setPresetGrant({
+                                  owner_id: f.owner_id,
+                                  kind: "credits",
+                                  credits: 3,
+                                  expires_in_days: "30",
+                                  notice_title: "תודה על המשוב!",
+                                  notice_body: "תודה רבה על המשוב החשוב שלך! כאות תודה הענקנו לך 3 קרדיטים בתוקף ל-30 יום.",
+                                });
+                                setSection("coupons");
+                              }}
+                              className="px-2.5 py-1 rounded-full glass text-tekhelet text-xs font-semibold hover:bg-tekhelet/10 cursor-pointer"
+                              title="הענק קרדיטים למשתמש זה"
+                            >
+                              🎁 צ'פר בקרדיטים
+                            </button>
+                          )}
+                          <button
+                            onClick={() => reviewFeedback(f.id)}
+                            className="px-3 py-1 rounded-full glass text-tekhelet text-xs font-semibold hover:bg-tekhelet/10"
+                          >
+                            סומן כנבדק
+                          </button>
+                        </div>
                       </div>
                       <p className="text-sm text-ink/80 whitespace-pre-line">{f.text}</p>
                     </div>
@@ -601,7 +660,7 @@ export default function AdminDashboard() {
 
           {section === "helpers" && <HelpersSection />}
 
-          {section === "coupons" && <CouponsSection />}
+          {section === "coupons" && <CouponsSection initialGrant={presetGrant} />}
         </div>
       </main>
     </div>
@@ -847,7 +906,7 @@ function HelpersSection() {
   );
 }
 
-function CouponsSection() {
+function CouponsSection({ initialGrant }: { initialGrant?: QuickGrantPreset | null }) {
   const [list, setList] = useState<Coupon[] | null>(null);
   const [loadError, setLoadError] = useState(false);
 
@@ -870,6 +929,10 @@ function CouponsSection() {
   const [grantPlan, setGrantPlan] = useState("pro");
   const [grantDays, setGrantDays] = useState(30);
   const [grantCredits, setGrantCredits] = useState(50);
+  const [grantExpiresDays, setGrantExpiresDays] = useState<string>("");
+  const [grantWithNotice, setGrantWithNotice] = useState(false);
+  const [grantNoticeTitle, setGrantNoticeTitle] = useState("תודה על הדיווח!");
+  const [grantNoticeBody, setGrantNoticeBody] = useState("");
   const [granting, setGranting] = useState(false);
   const [grantRes, setGrantRes] = useState<GrantResult | null>(null);
   const [grantErr, setGrantErr] = useState("");
@@ -878,6 +941,38 @@ function CouponsSection() {
     api.admin.coupons().then(setList).catch(() => setLoadError(true));
 
   useEffect(() => { reload(); }, []);
+
+  useEffect(() => {
+    if (initialGrant) {
+      if (initialGrant.owner_id) setGrantOwner(initialGrant.owner_id);
+      if (initialGrant.kind) setGrantKind(initialGrant.kind);
+      if (initialGrant.plan) setGrantPlan(initialGrant.plan);
+      if (initialGrant.days) setGrantDays(initialGrant.days);
+      if (initialGrant.credits) setGrantCredits(initialGrant.credits);
+      if (initialGrant.expires_in_days !== undefined) setGrantExpiresDays(initialGrant.expires_in_days);
+      if (initialGrant.notice_body) {
+        setGrantWithNotice(true);
+        setGrantNoticeBody(initialGrant.notice_body);
+        if (initialGrant.notice_title) setGrantNoticeTitle(initialGrant.notice_title);
+      }
+    }
+  }, [initialGrant]);
+
+  useEffect(() => {
+    if (initialGrant) {
+      if (initialGrant.owner_id) setGrantOwner(initialGrant.owner_id);
+      if (initialGrant.kind) setGrantKind(initialGrant.kind);
+      if (initialGrant.plan) setGrantPlan(initialGrant.plan);
+      if (initialGrant.days) setGrantDays(initialGrant.days);
+      if (initialGrant.credits) setGrantCredits(initialGrant.credits);
+      if (initialGrant.expires_in_days !== undefined) setGrantExpiresDays(initialGrant.expires_in_days);
+      if (initialGrant.notice_body) {
+        setGrantWithNotice(true);
+        setGrantNoticeBody(initialGrant.notice_body);
+        if (initialGrant.notice_title) setGrantNoticeTitle(initialGrant.notice_title);
+      }
+    }
+  }, [initialGrant]);
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
@@ -905,6 +1000,9 @@ function CouponsSection() {
       const res = await api.admin.grant({
         owner_id: grantOwner.trim(), kind: grantKind, plan: grantPlan,
         days: grantDays, credits: grantCredits,
+        expires_in_days: grantExpiresDays.trim() ? Number(grantExpiresDays) : null,
+        notice_title: grantWithNotice ? grantNoticeTitle.trim() : undefined,
+        notice_body: grantWithNotice ? grantNoticeBody.trim() : undefined,
       });
       setGrantRes(res);
       await reload();
@@ -957,11 +1055,21 @@ function CouponsSection() {
                 </label>
               </>
             ) : (
-              <label className="flex flex-col gap-1">
+              <div className="flex flex-col gap-1">
                 <span className="text-xs text-ink/55">כמות קרדיטים</span>
-                <input type="number" min={1} value={credits} onChange={(e) => setCredits(Number(e.target.value))}
-                       className={`${field} w-28`} />
-              </label>
+                <div className="flex items-center gap-2">
+                  <input type="number" min={1} value={credits} onChange={(e) => setCredits(Number(e.target.value))}
+                         className={`${field} w-28`} />
+                  <div className="flex flex-wrap gap-1">
+                    {CREDIT_PRESETS.map((p) => (
+                      <button key={p} type="button" onClick={() => setCredits(p)}
+                              className="px-2 py-1 rounded-lg glass text-xs text-ink/70 hover:text-tekhelet cursor-pointer">
+                        +{p}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
             )}
             <label className="flex flex-col gap-1">
               <span className="text-xs text-ink/55">מימושים (0 = ללא הגבלה)</span>
@@ -1036,11 +1144,61 @@ function CouponsSection() {
                 </label>
               </>
             ) : (
-              <label className="flex flex-col gap-1">
+              <div className="flex flex-col gap-1">
                 <span className="text-xs text-ink/55">כמות קרדיטים</span>
-                <input type="number" min={1} value={grantCredits}
-                       onChange={(e) => setGrantCredits(Number(e.target.value))} className={`${field} w-28`} />
-              </label>
+                <div className="flex items-center gap-2">
+                  <input type="number" min={1} value={grantCredits}
+                         onChange={(e) => setGrantCredits(Number(e.target.value))} className={`${field} w-28`} />
+                  <div className="flex flex-wrap gap-1">
+                    {CREDIT_PRESETS.map((p) => (
+                      <button key={p} type="button" onClick={() => setGrantCredits(p)}
+                              className="px-2 py-1 rounded-lg glass text-xs text-ink/70 hover:text-tekhelet cursor-pointer">
+                        +{p}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+          {grantKind === "credits" && (
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-ink/55">תוקף הקרדיטים בימים (ריק = לצמיתות ללא הגבלה)</span>
+              <div className="flex items-center gap-2">
+                <input type="number" min={1} placeholder="למשל 30" value={grantExpiresDays}
+                       onChange={(e) => setGrantExpiresDays(e.target.value)} className={`${field} w-28`} />
+                <div className="flex gap-1">
+                  <button type="button" onClick={() => setGrantExpiresDays("30")}
+                          className="px-2.5 py-1 rounded-lg glass text-xs text-ink/70 hover:text-tekhelet cursor-pointer">
+                    30 יום
+                  </button>
+                  <button type="button" onClick={() => setGrantExpiresDays("")}
+                          className="px-2.5 py-1 rounded-lg glass text-xs text-ink/70 hover:text-tekhelet cursor-pointer">
+                    לצמיתות
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="flex flex-col gap-2 pt-2 border-t border-ink/5">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input type="checkbox" checked={grantWithNotice} onChange={(e) => setGrantWithNotice(e.target.checked)}
+                     className="rounded text-tekhelet focus:ring-tekhelet" />
+              <span className="text-xs font-semibold text-tekhelet">הצג הודעה קופצת למשתמש בכניסה הבאה (Notice Modal)</span>
+            </label>
+            {grantWithNotice && (
+              <div className="flex flex-col gap-2 p-3 rounded-xl bg-ink/5">
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs text-ink/55">כותרת ההודעה</span>
+                  <input value={grantNoticeTitle} onChange={(e) => setGrantNoticeTitle(e.target.value)}
+                         className={field} placeholder="למשל: תודה על הדיווח!" />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs text-ink/55">תוכן ההודעה</span>
+                  <textarea value={grantNoticeBody} onChange={(e) => setGrantNoticeBody(e.target.value)}
+                            rows={3} className={field} placeholder="ראינו את הדיווח וטיפלנו... קיבלת קרדיטים במתנה!" />
+                </label>
+              </div>
             )}
           </div>
           <div className="flex items-center gap-3">

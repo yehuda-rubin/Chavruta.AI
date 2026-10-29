@@ -594,6 +594,9 @@ export interface GrantIn {
   plan?: string;
   days?: number;
   credits?: number;
+  expires_in_days?: number | null;
+  notice_title?: string;
+  notice_body?: string;
   note?: string;
 }
 

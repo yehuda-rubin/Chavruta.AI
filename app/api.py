@@ -5597,6 +5597,9 @@ class GrantIn(BaseModel):
     plan: str = "pro"
     days: int = 30
     credits: int = 0
+    expires_in_days: int | None = None
+    notice_title: str | None = None
+    notice_body: str | None = None
     note: str = ""
 
 
@@ -5653,6 +5656,8 @@ def admin_grant(req: GrantIn, owner: str = Depends(_require_admin)):
     account with a live PayPlus subscription — never overwriting plan/provider_ref/current_period_end
     (see app/coupons.py::_redeem_against_active_subscription). It also leaves the same audit trail a
     normal redemption does: the coupon row plus a redemption row naming this account.
+
+    Supports optional timed credits via `expires_in_days`, and optional user notification via `notice_body`.
     """
     target = (req.owner_id or "").strip()
     if not target or target == "local":
@@ -5660,19 +5665,41 @@ def admin_grant(req: GrantIn, owner: str = Depends(_require_admin)):
     note = req.note or f"admin grant by {owner}"
     try:
         if req.kind == "credits":
-            code = coupons.issue_credit_coupon(credits=req.credits, max_redemptions=1, note=note)
+            if req.credits <= 0:
+                raise HTTPException(status_code=422, detail="credits must be positive")
+            if req.expires_in_days and req.expires_in_days > 0:
+                grant_id = db.grant_credits_with_expiry(
+                    target, int(req.credits), days=int(req.expires_in_days), reason=note
+                )
+                res = {
+                    "kind": "credits",
+                    "mode": "credits",
+                    "plan": None,
+                    "until": None,
+                    "credits_added": int(req.credits),
+                    "credits_balance": db.get_credits(target),
+                }
+                code = f"grant-{grant_id}"
+            else:
+                code = coupons.issue_credit_coupon(credits=req.credits, max_redemptions=1, note=note)
+                res = coupons.redeem(target, code, bypass_throttle=True)
         else:
             code = coupons.issue_plan_coupon(plan=req.plan, days=req.days, max_redemptions=1,
                                              note=note)
+            res = coupons.redeem(target, code, bypass_throttle=True)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    try:
-        res = coupons.redeem(target, code, bypass_throttle=True)
     except coupons.RedeemError as exc:
         # The code was minted but not applied (e.g. 'downgrade' — the account already has more than
         # this grant would give). Pull it so a dangling single-use code isn't left lying around.
         db.set_coupon_active(coupons.normalize(code), False)
         raise HTTPException(status_code=422, detail=exc.reason) from exc
+
+    if req.notice_body and req.notice_body.strip():
+        title = (req.notice_title or "").strip() or "הודעת מערכת"
+        db.add_user_notice(target, req.notice_body.strip(), title=title, kind="modal")
+        _log.info("admin %s added notice for %s: %s", owner, target, title)
+
     _log.info("admin %s granted %s to %s via %s", owner, req.kind, target, code)
     return {"ok": True, "code": code, **res}
 
