@@ -66,7 +66,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!sb) return { needsConfirm: false };
     // `meta` is stored as Supabase user_metadata — we use it to record terms-acceptance (version +
     // timestamp) so consent is durable on the account, not just a client-side gate.
-    const { data, error } = await sb.auth.signUp({ email, password, options: { data: meta } });
+    const { data, error } = await sb.auth.signUp({ email, password, options: { data: meta, emailRedirectTo: window.location.origin } });
     if (error) throw error;
     // If email confirmation is on, there's a user but no session yet.
     return { needsConfirm: !data.session };
@@ -84,6 +84,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { error } = await sb.auth.resend({
       type: "signup",
       email: email.trim(),
+      options: { emailRedirectTo: window.location.origin },
     });
     if (error) throw error;
   }, []);

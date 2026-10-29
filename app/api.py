@@ -6147,7 +6147,10 @@ async def auth_email_hook(request: Request):
     token_hash = email_data.get("token_hash") or ""
     token_otp = email_data.get("token") or None
     redirect_to = email_data.get("redirect_to") or ""
-    site_url = email_data.get("site_url") or os.environ.get("SUPABASE_URL", "https://chavrutaai.org")
+    # The verify endpoint lives on the Supabase project, NOT on the app's Site URL: the payload's
+    # `site_url` is the dashboard "Site URL" (chavrutaai.org, or the old duckdns host before it was
+    # changed), which has no /auth/v1/verify and 404s in nginx. SUPABASE_URL wins.
+    site_url = os.environ.get("SUPABASE_URL", "").strip() or email_data.get("site_url") or "https://chavrutaai.org"
 
     if not recipient:
         return JSONResponse(
