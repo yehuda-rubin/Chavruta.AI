@@ -201,6 +201,7 @@ SYSTEM_QA = (
     "Quote a source only through a quote reference (see QUOTE REFERENCES below); never invent or paraphrase inside quotes. "
     "Respect halachic chronology and hierarchy (Tannaim, Amoraim, Rishonim, Shulchan Aruch/Rema, Acharonim/Mishna Berurah); "
     "never treat a Tanna and a Rishon as equal opposing opinions. Attribute each statement to the correct commentator. "
+    "When attributing a Mishnah, statement, or quote to a specific Talmud daf (e.g. 'on daf 33b'), ensure that this location exactly matches the provided source [S#]; never guess or extrapolate which daf a Mishnah appears on. "
     "When a claim characterizes a specific real, identifiable person (a historical figure, a "
     "posek, a living or recently-deceased rabbi) — especially their conduct, motives, or "
     "character — stay close to that source's own wording rather than your own paraphrase, and "
@@ -276,6 +277,7 @@ SYSTEM_BASE_HE = (
     "לעולם אל תכתוב את המילה \"מודגש\" ככותרת, כפתיח או כתווית בתחילת התשובה! "
     "דיוק בציטוטים: ציטוט מילה במילה — אך ורק באמצעות הפניית ציטוט (ראה בסוף). "
     "אם אינך מצטט אלא מסכם או מביא את תורף הדברים — כתוב זאת בלשונך ללא מרכאות; לעולם אל תמציא ציטוט. "
+    "דיוק במראי מקומות: כשאתה מייחס משנה, סוגיה או ציטוט לדף מסוים בגמרא (כגון 'בדף לג,ב' או 'שבועות לג ע\"ב') — ודא שמראה המקום תואם בדיוק את המקור [S#] שממנו נלקח; לעולם אל תנחש או תסיק מזיכרונך באיזה דף מופיעה משנה או מימרא. "
     "אם לשון מקור מסוים כתובה בשפה שונה משפת התשובה (למשל תשובה שתורגמה לאנגלית, בתוך תשובה "
     "בעברית) — תרגם אותה לשפת התשובה במקום לצטט אותה כלשונה בשפה הזרה; סימון ה-[S#] עדיין "
     "מקשר את הקורא למקור המקורי. "
@@ -1029,6 +1031,191 @@ def fix_raw_talmud_segment_refs(text: str) -> str:
         return f"{m.group('prefix')}{m.group('tractate')} {hebrew_numeral(daf)} {amud_label}"
 
     return _talmud_segment_re().sub(_replace, text or "")
+
+
+class MisattributedTalmud(NamedTuple):
+    quote: str
+    stated_ref: str
+    found_in_ref: str
+    span_stated: str
+    start: int
+    end: int
+
+
+_FULL_TALMUD_DAF_RE: re.Pattern | None = None
+_BARE_TALMUD_DAF_RE: re.Pattern | None = None
+
+
+def _get_talmud_daf_regexes():
+    global _FULL_TALMUD_DAF_RE, _BARE_TALMUD_DAF_RE
+    if _FULL_TALMUD_DAF_RE is None or _BARE_TALMUD_DAF_RE is None:
+        from chavruta.intents.hebrew_refs import HE_TRACTATES, _book_alt
+        tractate_alt = _book_alt(HE_TRACTATES)
+        # Full Talmud ref: (בשבועות לג,ב | שבועות דף לג ע"ב | במסכת שבועות לג:)
+        _FULL_TALMUD_DAF_RE = re.compile(
+            rf"(?:ב|ל|מ)?(?:מסכת\s+)?(?P<tractate>{tractate_alt})\s+"
+            rf"(?:דף\s+)?"
+            rf"(?P<daf>[א-ת]{{1,4}}|\d{{1,3}})"
+            rf"(?:\s*,\s*(?P<amud_comma>[אב])"
+            rf"|\s+עמוד\s*(?P<amud_word>[אב])"
+            rf"|\s+ע[\"״'׳]?\s*(?P<amud_abbr>[אב])"
+            rf"|(?P<colon>:)"
+            rf"|(?P<dot>\.)"
+            rf")?",
+            re.UNICODE
+        )
+        # Bare daf ref: (בדף לג,ב | דף לג ע"ב | בדף לג עמוד ב)
+        _BARE_TALMUD_DAF_RE = re.compile(
+            rf"(?P<prefix>ב?דף)\s+(?P<daf>[א-ת]{{1,4}}|\d{{1,3}})"
+            rf"(?:\s*,\s*(?P<amud_comma>[אב])"
+            rf"|\s+עמוד\s*(?P<amud_word>[אב])"
+            rf"|\s+ע[\"״'׳]?\s*(?P<amud_abbr>[אב])"
+            rf"|(?P<colon>:)"
+            rf"|(?P<dot>\.)"
+            rf")?",
+            re.UNICODE
+        )
+    return _FULL_TALMUD_DAF_RE, _BARE_TALMUD_DAF_RE
+
+
+def _parse_talmud_daf_num(token: str) -> int | None:
+    from chavruta.intents.hebrew_refs import _GEMATRIA
+    core = "".join(ch for ch in token if ch not in "\"'״׳" and ch not in " .,;:?!/\\-_()[]{}")
+    if core.isdigit():
+        return int(core)
+    if core and all(ch in _GEMATRIA for ch in core):
+        return sum(_GEMATRIA[ch] for ch in core)
+    return None
+
+
+def misattributed_talmud_quotes(text: str, sources, min_len: int = 14) -> list[MisattributedTalmud]:
+    """Find verbatim quotes attributed to a specific Talmud daf (e.g. 'בדף לג,ב' or 'שבועות לג ע"ב')
+    where the quoted text does NOT appear on that daf, but appears in another retrieved daf of the same tractate.
+    """
+    if not text or not sources:
+        return []
+
+    from chavruta.intents.hebrew_refs import HE_TRACTATES
+
+    full_re, bare_re = _get_talmud_daf_regexes()
+
+    source_tractate_prefixes = set()
+    source_by_ref: dict[str, str] = {}
+    known_tractate_names = {v.replace(" ", "_").lower(): v for v in HE_TRACTATES.values()}
+    for s in sources:
+        ref = getattr(s, "ref", "") or ""
+        body = getattr(s, "text_he", "") or getattr(s, "text", "") or getattr(s, "quote", "") or ""
+        if ref and "." in ref:
+            prefix = ref.split(".")[0]
+            if prefix.replace(" ", "_").lower() in known_tractate_names:
+                source_tractate_prefixes.add(prefix)
+                source_by_ref[ref] = _quote_skeleton(body)
+
+    default_prefix = list(source_tractate_prefixes)[0] if len(source_tractate_prefixes) == 1 else None
+
+    findings: list[MisattributedTalmud] = []
+    masked = _protect_abbreviations(text)
+    for start, end in _quoted_spans(masked):
+        raw_quote = text[start:end]
+        q_skel = _quote_skeleton(raw_quote)
+        if len(q_skel) < min_len:
+            continue
+
+        found_refs = [r for r, content in source_by_ref.items() if q_skel[:min_len] in content]
+        if not found_refs:
+            continue
+        actual_ref = found_refs[0]
+
+        win_start = max(0, start - 120)
+        window = text[win_start:start]
+
+        m_full = list(full_re.finditer(window))
+        m_bare = list(bare_re.finditer(window))
+
+        stated_ref = None
+        matched_span = None
+
+        if m_full:
+            m = m_full[-1]
+            tr_he = m.group("tractate")
+            tr_en = HE_TRACTATES.get(tr_he)
+            daf = _parse_talmud_daf_num(m.group("daf"))
+            amud_raw = m.group("amud_comma") or m.group("amud_word") or m.group("amud_abbr") or m.group("colon") or ""
+            amud = "b" if ("ב" in amud_raw or ":" in amud_raw) else "a"
+            if tr_en and daf and (2 <= daf <= _MAX_SANE_DAF):
+                # Align prefix format with sources (underscore vs space)
+                tr_prefix = tr_en.replace(" ", "_")
+                for p in source_tractate_prefixes:
+                    if p.replace(" ", "_").lower() == tr_prefix.lower():
+                        tr_prefix = p
+                        break
+                stated_ref = f"{tr_prefix}.{daf}{amud}"
+                matched_span = (win_start + m.start(), win_start + m.end(), m.group(0))
+        elif m_bare and default_prefix:
+            m = m_bare[-1]
+            daf = _parse_talmud_daf_num(m.group("daf"))
+            amud_raw = m.group("amud_comma") or m.group("amud_word") or m.group("amud_abbr") or m.group("colon") or ""
+            amud = "b" if ("ב" in amud_raw or ":" in amud_raw) else "a"
+            if daf and (2 <= daf <= _MAX_SANE_DAF):
+                stated_ref = f"{default_prefix}.{daf}{amud}"
+                matched_span = (win_start + m.start(), win_start + m.end(), m.group(0))
+
+        if stated_ref and matched_span and stated_ref != actual_ref:
+            stated_content = source_by_ref.get(stated_ref, "")
+            if q_skel[:min_len] not in stated_content:
+                findings.append(MisattributedTalmud(
+                    quote=raw_quote,
+                    stated_ref=stated_ref,
+                    found_in_ref=actual_ref,
+                    span_stated=matched_span[2],
+                    start=matched_span[0],
+                    end=matched_span[1],
+                ))
+
+    return findings
+
+
+def _format_talmud_ref_replacement(orig_span: str, target_daf: int, target_amud: str) -> str:
+    from chavruta.corpus.refs import hebrew_numeral
+    heb_daf = hebrew_numeral(target_daf)
+    heb_amud = 'ע"ב' if target_amud == 'b' else 'ע"א'
+
+    if "," in orig_span:
+        amud_char = "ב" if target_amud == "b" else "א"
+        return re.sub(r'([א-ת\d]+)\s*,\s*[אב]', f'{heb_daf},{amud_char}', orig_span)
+    if "עמוד" in orig_span:
+        amud_char = "ב" if target_amud == "b" else "א"
+        return re.sub(r'([א-ת\d]+)\s+עמוד\s*[אב]', f'{heb_daf} עמוד {amud_char}', orig_span)
+    if "ע" in orig_span and ('"' in orig_span or '״' in orig_span or "\'" in orig_span or '׳' in orig_span):
+        return re.sub(r'([א-ת\d]+)\s+ע[\"״\'׳]?[אב]', f'{heb_daf} {heb_amud}', orig_span)
+    if ":" in orig_span:
+        colon = ":" if target_amud == "b" else "."
+        return re.sub(r'([א-ת\d]+)\s*[:.]', f'{heb_daf}{colon}', orig_span)
+    return orig_span
+
+
+def fix_misattributed_talmud_quotes(text: str, sources, min_len: int = 14) -> tuple[str, list[MisattributedTalmud]]:
+    """Detect and auto-correct Talmud daf citations that were attached to the wrong daf."""
+    findings = misattributed_talmud_quotes(text, sources, min_len=min_len)
+    if not findings:
+        return text, []
+
+    sorted_findings = sorted(findings, key=lambda f: f.start, reverse=True)
+    fixed_text = text
+    for f in sorted_findings:
+        ref_body = f.found_in_ref.split(".")[-1]
+        target_amud = ref_body[-1] if ref_body[-1] in ("a", "b") else "a"
+        target_daf_str = ref_body[:-1] if ref_body[-1] in ("a", "b") else ref_body
+        try:
+            target_daf = int(target_daf_str)
+        except ValueError:
+            continue
+
+        replacement = _format_talmud_ref_replacement(f.span_stated, target_daf, target_amud)
+        if replacement != f.span_stated:
+            fixed_text = fixed_text[:f.start] + replacement + fixed_text[f.end:]
+
+    return fixed_text, findings
 
 
 def misattribution_note(lang: str, findings: list[Misattribution]) -> str:

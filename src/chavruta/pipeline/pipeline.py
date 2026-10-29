@@ -639,6 +639,26 @@ class ChavrutaPipeline:
                               summary=f"«{c.phrase}» cited as both {c.correct_ref} and {c.wrong_ref}")
         except Exception:                   # noqa: BLE001
             _guard_log.exception("citation-mismatch check failed")
+        try:
+            fixed_text, talmud_fixes = grounded.fix_misattributed_talmud_quotes(
+                text, list(result.hits) + list(fetched or [])
+            )
+            if talmud_fixes:
+                text = fixed_text
+                answer = Answer(
+                    text=fixed_text,
+                    citations=answer.citations,
+                    intent=answer.intent,
+                    grounded=answer.grounded,
+                    source_note=getattr(answer, "source_note", ""),
+                    caveats=getattr(answer, "caveats", []),
+                )
+                for tf in talmud_fixes[:2]:
+                    guards.report("citation_mismatch", intent_name,
+                                  {"quote": tf.quote, "stated_ref": tf.stated_ref, "found_in_ref": tf.found_in_ref},
+                                  summary=f"Talmud quote misattributed to {tf.stated_ref}, found in {tf.found_in_ref}")
+        except Exception:                   # noqa: BLE001
+            _guard_log.exception("talmud citation-mismatch check failed")
         return grounded.maybe_halacha_caveat(answer, query.lang)
 
     def _lesson_answer(self, query, result, llm=None, *, history=None):

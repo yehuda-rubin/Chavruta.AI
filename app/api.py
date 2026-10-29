@@ -2205,6 +2205,12 @@ def _generate_chavruta_turn(question: str, hits, lang: str, he: bool, history, w
     # foreign-language pass.
     raw, note = _split_source_note(raw)
     clean = _strip_markers(_fix_bleeding_sentences(raw, he, llm), he=he)
+    try:
+        clean, talmud_fixes = grounded.fix_misattributed_talmud_quotes(clean, hits)
+        for tf in talmud_fixes:
+            _log.info("Fixed misattributed talmud quote: stated %s -> found in %s", tf.stated_ref, tf.found_in_ref)
+    except Exception:
+        _log.exception("fix_misattributed_talmud_quotes failed")
     # Citation-faithfulness: chavruta never ran this check at all until now, unlike every other
     # generation path (_qa_answer, lesson). The gap is exactly what let a learner's invented pasuk
     # ("לא ימיש השרימפ מתוך חלבו", a pun) get validated as if it were real — the reply said it
