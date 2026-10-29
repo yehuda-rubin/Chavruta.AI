@@ -8,7 +8,7 @@
 
 **Version 1.16 · Effective 29 October 2026**
 
-Changes in version 1.16: section 10 updated for the Business Plan v15 credit model — transition from daily question quotas to monthly credits (20 monthly free credits resetting on rolling account anniversary), personal subscription tiers (Personal, Plus, Pro), multi-seat institutional plans (Kollel, Regular Yeshiva, Large Yeshiva), non-expiring credit passes (50, 120, 280, 1,000 credits), action credit costs (standard question/exam, halacha/shut, file creation), and time-limited promotional/reward credit grants.
+Changes in version 1.16: section 10 updated for the Business Plan v15 credit model — transition from daily question quotas to monthly credits (20 monthly free credits resetting on rolling account anniversary), personal subscription tiers (Personal and Pro), multi-seat institutional plans (Kollel, Regular Yeshiva, Large Yeshiva), non-expiring credit passes (50, 120, 280, 1,000 credits), action credit costs (standard question/exam, halacha/shut, file creation), and time-limited promotional/reward credit grants.
 
 Changes in version 1.15: section 10 updated for the new products - **prepaid question cards that do not
 expire**, a monthly subscription, an annual plan billed in monthly instalments, and institutional packages - and a
@@ -233,7 +233,7 @@ received in it afterward**. See Privacy Policy sections 2, 5 and 12.
 The Service includes a free tier with a monthly credit allowance (resetting each month on the account creation anniversary), paid subscription tiers, and reloadable credit passes. The operator may update quotas and prices from time to time with reasonable advance notice. Displayed prices for individual users include VAT; institutional rates are plus VAT.
 
 - **Products and Plans:**
-  - **(a) Personal Subscriptions:** a monthly subscription or an annual plan (billed in twelve monthly instalments) across tiers: Personal (100 credits/month), Plus (280 credits/month), and Pro (600 credits/month).
+  - **(a) Personal Subscriptions:** a monthly subscription or an annual plan (billed in twelve monthly instalments) across tiers: Personal (100 credits/month) and Pro (300 credits/month).
   - **(b) Educational & Institutional Subscriptions:** specialized multi-seat tiers with scaled institutional credit allowances: Kollel / Beit Midrash (1,500 credits / 20 seats), Regular Yeshiva (3,500 credits / 50 seats), and Large Yeshiva (7,000 credits / 100 seats).
   - **(c) Prepaid Credit Passes:** advance credit purchases (Entry Pass - 50 credits; Learner Pass - 120 credits; Researcher Pass - 280 credits; Institutional Expansion - 1,000 credits). Individual single credits are not sold separately. The operator may change passes and prices on reasonable advance notice; a change does not affect a period or pass already paid for.
 - **Credit Costs per Action:** Credit consumption reflects computational complexity and resources required for each action:

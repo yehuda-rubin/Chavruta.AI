@@ -8,13 +8,14 @@ import { Icon } from "@/components/Icon";
 interface LimitTier {
   id: string;
   name: string;
-  price_ils: number;
-  annual_price_ils: number;
-  annual_monthly_ils: number;
+  price_ils: number | null;
+  annual_price_ils: number | null;
+  annual_monthly_ils: number | null;
   daily_tokens: number;
   weekly_tokens: number;
   weekly_lessons: number;
   monthly_credits?: number;
+  multiple?: number;
 }
 
 interface CreditPack {
@@ -130,29 +131,40 @@ export default function Limits() {
                       {tr(lang, "limitsTablePlan")}
                     </th>
                     <th className="py-2 px-3 font-semibold text-tekhelet">
-                      {lang === "he" ? "קרדיטים לחודש" : "Monthly credits"}
+                      {tr(lang, "limitsTableCredits")}
                     </th>
                     <th className="py-2 px-3 font-semibold text-tekhelet">
-                      {tr(lang, "limitsTableTokensDay")}
-                    </th>
-                    <th className="py-2 px-3 font-semibold text-tekhelet">
-                      {tr(lang, "limitsTableTokensWeek")}
+                      {tr(lang, "limitsTableMultiple")}
                     </th>
                     <th className="py-2 px-3 font-semibold text-tekhelet">
                       {tr(lang, "limitsTableMonthly")}
                     </th>
+                    <th className="py-2 px-3 font-semibold text-tekhelet">
+                      {tr(lang, "limitsTableAnnual")}
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {data.tiers.map((tier) => (
-                    <tr key={tier.id} className="border-b border-ink/5 last:border-0">
-                      <td className="py-2 px-3 font-medium">{tier.name}</td>
-                      <td className="py-2 px-3 text-ink/70">{tier.monthly_credits ?? (tier.id === "free" ? 20 : "—")}</td>
-                      <td className="py-2 px-3 text-ink/70">{formatNumber(tier.daily_tokens)}</td>
-                      <td className="py-2 px-3 text-ink/70">{formatNumber(tier.weekly_tokens)}</td>
-                      <td className="py-2 px-3 text-ink/70">₪{tier.price_ils}</td>
-                    </tr>
-                  ))}
+                  {data.tiers.map((tier) => {
+                    const multipleText = tier.multiple
+                      ? (lang === "he" ? `פי ${tier.multiple}` : `${tier.multiple}x`)
+                      : (tier.id === "free" ? (lang === "he" ? "בסיס (1x)" : "Baseline") : "—");
+                    const monthlyText = tier.price_ils !== null && tier.price_ils !== undefined
+                      ? `₪${tier.price_ils}`
+                      : (lang === "he" ? "בפנייה אישית" : "Contact us");
+                    const annualText = tier.annual_monthly_ils !== null && tier.annual_monthly_ils !== undefined
+                      ? `₪${tier.annual_monthly_ils}`
+                      : "—";
+                    return (
+                      <tr key={tier.id} className="border-b border-ink/5 last:border-0">
+                        <td className="py-2 px-3 font-medium">{tier.name}</td>
+                        <td className="py-2 px-3 text-ink/80 font-bold">{tier.monthly_credits ?? (tier.id === "free" ? 20 : "—")}</td>
+                        <td className="py-2 px-3 text-ink/70">{multipleText}</td>
+                        <td className="py-2 px-3 text-ink/70">{monthlyText}</td>
+                        <td className="py-2 px-3 text-ink/70">{annualText}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

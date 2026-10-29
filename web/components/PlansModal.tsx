@@ -46,15 +46,96 @@ export function PlansModal({
   return (
     <Modal open={open} title={tr(lang, "plansHeading")} onClose={onClose}>
       <div className="flex flex-col gap-4 overflow-y-auto">
-        {/* Credit costs banner */}
-        <div className="p-3 rounded-2xl glass border border-amber-500/20 bg-amber-500/5 text-xs text-ink/80 flex flex-col gap-1 leading-relaxed">
-          <p className="font-semibold text-amber-900 dark:text-amber-200">
-            {tr(lang, "freeMonthlyNote")}
-          </p>
-          <p className="text-ink/70">
-            {tr(lang, "creditCostExplainer")}
-          </p>
+        {/* Subscriptions heading & Monthly / annual switch */}
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <h3 className="font-bold text-sm text-ink">
+              {lang === "he" ? "מנויים חודשיים ושנתיים" : "Monthly & Annual Subscriptions"}
+            </h3>
+            <div className="flex items-center gap-1 p-1 rounded-2xl glass">
+              {(["monthly", "annual"] as const).map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setCycle(c)}
+                  aria-pressed={cycle === c}
+                  className={
+                    "px-3 py-1 rounded-xl text-xs font-semibold transition " +
+                    (cycle === c ? "grad text-white" : "text-ink/70 hover:bg-ink/5")
+                  }
+                >
+                  {tr(lang, c === "monthly" ? "cycleMonthly" : "cycleAnnual")}
+                  {c === "annual" && bestSaving > 0 && (
+                    <span className="ms-1 text-[10px] opacity-90">−{bestSaving}%</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
+
+        {cycle === "annual" && (
+          <p className="text-xs text-ink/60 text-center leading-relaxed">
+            {tr(lang, "annualNote")}
+          </p>
+        )}
+
+        {/* The 2 personal subscription tiers */}
+        <div className="grid gap-3 sm:grid-cols-2">
+          {paid.map((t) => {
+            const isCurrent = t.id === currentPlan;
+            const price = (cycle === "annual" ? t.annual_monthly_ils : t.price_ils) ?? 0;
+            const annualTotal = t.annual_price_ils ?? 0;
+            return (
+              <div
+                key={t.id}
+                className={
+                  "flex flex-col gap-2 p-4 rounded-2xl glass ring-1 " +
+                  (isCurrent ? "ring-brand/40 shadow-sm" : "ring-ink/10 hover:ring-tekhelet/30")
+                }
+              >
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-base text-ink">{t.name}</h3>
+                  {t.monthly_credits ? (
+                    <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-tekhelet/10 text-tekhelet">
+                      {t.monthly_credits} {tr(lang, "creditsLabel")}/{lang === "he" ? "חודש" : "mo"}
+                    </span>
+                  ) : null}
+                </div>
+                <p className="text-2xl font-bold text-ink">
+                  ₪{price}
+                  <span className="text-xs font-normal text-ink/50 ms-1">
+                    / {tr(lang, "perMonth")}
+                  </span>
+                </p>
+                {cycle === "annual" && (
+                  <p className="text-xs text-ink/50">
+                    ₪{annualTotal} {tr(lang, "perYear")}
+                  </p>
+                )}
+                <ul className="text-xs text-ink/70 flex flex-col gap-1.5 mt-1">
+                  <li>{tr(lang, "timesUsage").replace("{n}", String(t.multiple))}</li>
+                  <li className="text-[11px] text-ink/60">
+                    {lang === "he" ? "כולל צבירת קרדיטים חודשית שמתחדשת מדי חודש" : "Includes monthly credit refresh"}
+                  </li>
+                </ul>
+                <button
+                  onClick={() => onChoose(t.id, cycle)}
+                  disabled={isCurrent}
+                  className="mt-3 px-4 py-2 rounded-2xl grad text-white font-semibold text-sm
+                             hover:opacity-95 transition disabled:opacity-40"
+                >
+                  {isCurrent ? tr(lang, "currentPlan") : tr(lang, "choosePlan")}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+        {free && (
+          <p className="text-xs text-ink/50 text-center">{tr(lang, "freeBaseline")}</p>
+        )}
+
+        <hr className="border-ink/10 my-1" />
 
         {/* Credit Passes section */}
         <div className="flex flex-col gap-2">
@@ -94,93 +175,15 @@ export function PlansModal({
           </div>
         </div>
 
-        <hr className="border-ink/10 my-1" />
-
-        {/* Subscriptions heading & Monthly / annual switch */}
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <h3 className="font-bold text-sm text-ink">
-              {lang === "he" ? "מנויים חודשיים ושנתיים" : "Monthly & Annual Subscriptions"}
-            </h3>
-            <div className="flex items-center gap-1 p-1 rounded-2xl glass">
-              {(["monthly", "annual"] as const).map((c) => (
-                <button
-                  key={c}
-                  onClick={() => setCycle(c)}
-                  aria-pressed={cycle === c}
-                  className={
-                    "px-3 py-1 rounded-xl text-xs font-semibold transition " +
-                    (cycle === c ? "grad text-white" : "text-ink/70 hover:bg-ink/5")
-                  }
-                >
-                  {tr(lang, c === "monthly" ? "cycleMonthly" : "cycleAnnual")}
-                  {c === "annual" && bestSaving > 0 && (
-                    <span className="ms-1 text-[10px] opacity-90">−{bestSaving}%</span>
-                  )}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {cycle === "annual" && (
-          <p className="text-xs text-ink/60 text-center leading-relaxed">
-            {tr(lang, "annualNote")}
+        {/* Credit costs banner */}
+        <div className="p-3 rounded-2xl glass border border-amber-500/20 bg-amber-500/5 text-xs text-ink/80 flex flex-col gap-1 leading-relaxed">
+          <p className="font-semibold text-amber-900 dark:text-amber-200">
+            {tr(lang, "freeMonthlyNote")}
           </p>
-        )}
-
-        <div className="grid gap-3 sm:grid-cols-3">
-          {paid.map((t) => {
-            const isCurrent = t.id === currentPlan;
-            // Non-null: `paid` already filtered out institutional (contact-us / null-price) tiers.
-            const price = (cycle === "annual" ? t.annual_monthly_ils : t.price_ils) ?? 0;
-            const annualTotal = t.annual_price_ils ?? 0;
-            return (
-              <div
-                key={t.id}
-                className={
-                  "flex flex-col gap-2 p-4 rounded-2xl glass ring-1 " +
-                  (isCurrent ? "ring-brand/40" : "ring-transparent")
-                }
-              >
-                <h3 className="font-semibold">{t.name}</h3>
-                <p className="text-2xl font-bold">
-                  ₪{price}
-                  <span className="text-xs font-normal text-ink/50">
-                    {" "}
-                    / {tr(lang, "perMonth")}
-                  </span>
-                </p>
-                {cycle === "annual" && (
-                  <p className="text-xs text-ink/50">
-                    ₪{annualTotal} {tr(lang, "perYear")}
-                  </p>
-                )}
-                {/* A ratio, never a token or lesson count. See app/plans.py public_catalogue. */}
-                <ul className="text-xs text-ink/70 flex flex-col gap-1 mt-1">
-                  {t.monthly_credits ? (
-                    <li className="font-semibold text-tekhelet">
-                      {tr(lang, "creditsPerMonth").replace("{n}", String(t.monthly_credits))}
-                    </li>
-                  ) : null}
-                  <li>{tr(lang, "timesUsage").replace("{n}", String(t.multiple))}</li>
-                </ul>
-                <button
-                  onClick={() => onChoose(t.id, cycle)}
-                  disabled={isCurrent}
-                  className="mt-auto px-4 py-2 rounded-2xl grad text-white font-semibold text-sm
-                             hover:opacity-95 transition disabled:opacity-40"
-                >
-                  {isCurrent ? tr(lang, "currentPlan") : tr(lang, "choosePlan")}
-                </button>
-              </div>
-            );
-          })}
+          <p className="text-ink/70">
+            {tr(lang, "creditCostExplainer")}
+          </p>
         </div>
-
-        {free && (
-          <p className="text-xs text-ink/50 text-center">{tr(lang, "freeBaseline")}</p>
-        )}
 
         {/* Institutional tiers never show a price — see app/plans.py::public_catalogue for why a
             published number here would be a mistake, not just a design choice. */}

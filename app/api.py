@@ -4488,10 +4488,10 @@ def _quota_message(kind: str, lang: str, balance: int, cost: int) -> str:
     }
     head = heads.get(kind, heads["credits"])[0 if he else 1]
     tail = (f" נותרו לך {balance} קרדיטים (הפעולה הזו עולה {cost}). "
-            "אפשר לשדרג את התוכנית, לרכוש כרטיסיית קרדיטים ללא הגבלת זמן או להזין קוד קופון."
+            "המכסה מתחדשת מדי חודש במועד פתיחת החשבון. אפשר לשדרג את התוכנית, לרכוש כרטיסיית קרדיטים ללא הגבלת זמן או להזין קוד קופון."
             if he else
             f" You have {balance} credits (this action costs {cost}). "
-            "You can upgrade your plan, buy a credit pass, or redeem a coupon.")
+            "Monthly quotas renew on your account anniversary date. You can upgrade your plan, buy a credit pass, or redeem a coupon.")
     return head + tail
 
 
@@ -4641,35 +4641,17 @@ def _reserve_tokens(owner: str, lang: str, intent: str, user_key: str = "", acti
             return Reservation(0, day=day, credits_spent=cost)
         raise HTTPException(status_code=429, detail=_pool_quota_message(charge.refused, lang, ctx))
 
-    plan = _plan_for(owner)
-    daily, weekly = plans.daily_tokens(plan), plans.weekly_tokens(plan)
-    if daily <= 0 and weekly <= 0:
-        return Reservation(0)
-
-    allowed, _d, used_week = db.bump_usage(owner, daily, weekly_limit=weekly, units=estimate,
-                                           meter=db.TOKENS)
-    if allowed:
-        return Reservation(estimate, False, None, day)
-
-    weekly_hit = weekly > 0 and used_week + estimate > weekly
-
     if user_key and _byok_supported():
-        b_allowed, _bd, _bw = db.bump_usage(owner, daily, weekly_limit=weekly, units=estimate,
-                                            meter=db.BYOK_TOKENS)
-        if b_allowed:
-            return Reservation(estimate, True, None, day)
+        return Reservation(0, True, None, day)
 
     cost = plans.credit_cost(intent, action=action)
-    db.ensure_free_monthly_credits(owner)
+    db.ensure_monthly_credits(owner)
     spent, balance = db.spend_credits(owner, cost)
     if spent:
-        _log.info("owner=%s over %s token quota; spent %d credit(s), %d left",
-                  owner, "weekly" if weekly_hit else "daily", cost, balance)
-        # Nothing reserved, so nothing to settle — but the turn IS paid for, which the lesson charge
-        # needs to know so it does not take a second helping of credits for the same generation.
+        _log.info("owner=%s spent %d credit(s), %d left", owner, cost, balance)
         return Reservation(0, day=day, credits_spent=cost)
     raise HTTPException(status_code=429,
-                        detail=_quota_message("week" if weekly_hit else "day", lang, balance, cost))
+                        detail=_quota_message("credits", lang, balance, cost))
 
 
 def _pool_quota_message(refused: str, lang: str, ctx: dict) -> str:

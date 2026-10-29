@@ -674,23 +674,6 @@ export function SettingsModal({
               )}
             </div>}
 
-            {/* Three gauges because there are up to three independent pools: daily and weekly
-                conversation usage, and lessons (its own pool — running out of conversation usage
-                does not touch it, and a single combined bar would imply it does). Moved here from
-                the main header entirely — see Header.tsx. */}
-            {(typeof dayLeft === "number" || typeof weekLeft === "number" || typeof lessonsLeft === "number") && (
-              <div className="mt-2 flex flex-col gap-2.5">
-                {typeof dayLeft === "number" && (
-                  <Gauge label={tr(lang, "usageLeftDay")} value={dayLeft} caption={resetsIn("day", lang)} />
-                )}
-                {typeof weekLeft === "number" && (
-                  <Gauge label={tr(lang, "usageLeftWeek")} value={weekLeft} caption={resetsIn("week", lang)} />
-                )}
-                {typeof lessonsLeft === "number" && (
-                  <Gauge label={tr(lang, "lessonsLeft")} value={lessonsLeft} caption={resetsIn("week", lang)} />
-                )}
-              </div>
-            )}
 
             {/* Referral / Partner program — shown only when billing is active */}
             {billingEnabled && (

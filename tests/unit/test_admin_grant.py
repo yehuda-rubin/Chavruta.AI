@@ -66,7 +66,7 @@ def test_admin_grant_all_plan_tiers(clean_db):
     owner = "admin-tester"
     target = "user-abc-3"
 
-    for tier_id in ("basic", "plus", "pro", "institution", "institution_50", "institution_100"):
+    for tier_id in ("basic", "pro", "institution", "institution_50", "institution_100"):
         req = api.GrantIn(
             owner_id=target,
             kind="plan",

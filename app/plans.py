@@ -192,13 +192,12 @@ CREDIT_PACKS: tuple[CreditPack, ...] = (
 
 
 TIERS: tuple[Tier, ...] = (
-    Tier("free",             100_000,     270_000,   0,   1,    0.0,      0.0, "חינם",         "Free", 1, 20),
-    Tier("basic",            300_000,     810_000,   0,   3,   29.0,    240.0, "אישי",         "Personal", 1, 100),
-    Tier("plus",             500_000,   1_350_000,   0,   5,   69.0,    590.0, "מתקדם",       "Plus", 1, 280),
-    Tier("pro",            1_000_000,   2_700_000,   0,  10,  129.0,   1090.0, "מלא",          "Pro", 1, 600),
-    Tier("institution",    4_000_000,  10_800_000,   0,  40,  460.0,   4600.0, "כולל / בית מדרש", "Kollel / Beit Midrash", 20, 1500),
-    Tier("institution_50", 10_000_000,  27_000_000,   0, 100,  932.0,   9320.0, "ישיבה רגילה",    "Regular Yeshiva",     50, 3500),
-    Tier("institution_100", 20_000_000, 54_000_000,   0, 200, 1994.0,  19940.0, "ישיבה גדולה",    "Large Yeshiva",      100, 7000),
+    Tier("free",                    0,          0,   0,   1,    0.0,      0.0, "חינם",         "Free", 1, 20),
+    Tier("basic",                   0,          0,   0,   5,   29.0,    240.0, "אישי",         "Personal", 1, 100),
+    Tier("pro",                     0,          0,   0,  15,   69.0,    590.0, "מלא",          "Pro", 1, 300),
+    Tier("institution",             0,          0,   0,  75,  460.0,   4600.0, "כולל / בית מדרש", "Kollel / Beit Midrash", 20, 1500),
+    Tier("institution_50",          0,          0,   0, 175,  932.0,   9320.0, "ישיבה רגילה",    "Regular Yeshiva",     50, 3500),
+    Tier("institution_100",         0,          0,   0, 350, 1994.0,  19940.0, "ישיבה גדולה",    "Large Yeshiva",      100, 7000),
 )
 
 # Output costs several times input everywhere; 3x is the round figure that holds across the models
@@ -256,6 +255,7 @@ def billed_tokens_for_model(prompt_tokens: int, completion_tokens: int, model: s
 _BY_ID = {t.id: t for t in TIERS}
 _ALIASES = {
     "paid": "pro",
+    "plus": "pro",
     "personal": "basic",
     "kollel": "institution",
     "yeshiva": "institution_50",
@@ -675,6 +675,7 @@ def limits_catalogue(lang: str = "he") -> list[dict]:
             "daily_tokens": daily_tokens(t.id),
             "weekly_tokens": weekly_tokens(t.id),
             "weekly_lessons": weekly_lessons(t.id),
+            "multiple": t.multiple,
             "seats": t.seats,
             "monthly_credits": t.monthly_credits,
         })

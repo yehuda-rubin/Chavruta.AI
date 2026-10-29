@@ -142,23 +142,50 @@ def test_rolling_month_reset_from_account_creation(monkeypatch, tmp_path):
 
 
 def test_subscription_tiers_pricing_and_credits():
+    free = plans.tier("free")
+    assert free.monthly_credits == 20
+    assert free.multiple == 1
+
     basic = plans.tier("basic")
     assert basic.price_ils == 29.0
     assert basic.annual_price_ils == 240.0
     assert basic.monthly_credits == 100
+    assert basic.multiple == 5
     assert basic.weekly_lessons == 0
 
-    plus = plans.tier("plus")
-    assert plus.price_ils == 69.0
-    assert plus.annual_price_ils == 590.0
-    assert plus.monthly_credits == 280
-    assert plus.weekly_lessons == 0
-
     pro = plans.tier("pro")
-    assert pro.price_ils == 129.0
-    assert pro.annual_price_ils == 1090.0
-    assert pro.monthly_credits == 600
+    assert pro.price_ils == 69.0
+    assert pro.annual_price_ils == 590.0
+    assert pro.monthly_credits == 300
+    assert pro.multiple == 15
     assert pro.weekly_lessons == 0
+
+    # 'plus' is aliased to 'pro' for backward compatibility
+    assert plans.tier("plus").id == "pro"
+
+
+def test_paid_tier_monthly_credits_refresh(monkeypatch, tmp_path):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "paid_credits_test.db")
+    monkeypatch.setattr(db, "_conn", None)
+    db.init_db()
+
+    tz = ZoneInfo("Asia/Jerusalem")
+    t0 = datetime(2026, 10, 15, 14, 0, tzinfo=tz)
+    user = "user-pro-monthly"
+    db.set_plan(user, "pro")
+    db.ensure_monthly_credits(user, now_override=t0)
+    assert db.get_credits(user) == 300
+
+    # Spends 100 credits -> 200 left
+    db.spend_credits(user, 100)
+    assert db.get_credits(user) == 200
+
+    # 1 month later -> resets to 300
+    t1 = datetime(2026, 11, 15, 14, 5, tzinfo=tz)
+    bal = db.ensure_monthly_credits(user, now_override=t1)
+    assert bal == 300
 
 
 def test_no_standalone_lesson_quota():

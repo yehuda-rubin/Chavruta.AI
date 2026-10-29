@@ -2468,8 +2468,12 @@ def ensure_free_monthly_credits(owner_id: str, *, now_override: datetime | None 
 
         cycle_start = get_credit_cycle_start(created_dt, now_dt)
 
-        if plan == "free" and last_reset_dt < cycle_start:
-            new_balance = max(current_credits, FREE_MONTHLY_CREDITS)
+        from app import plans
+        t = plans.tier(plan)
+        monthly_quota = t.monthly_credits if t and t.monthly_credits > 0 else FREE_MONTHLY_CREDITS
+
+        if not reset_str or last_reset_dt < cycle_start:
+            new_balance = max(current_credits, monthly_quota)
             conn.execute(
                 "UPDATE accounts SET credits = ?, free_credits_reset_at = ? WHERE owner_id = ?",
                 (new_balance, cycle_start.isoformat(), owner_id)
@@ -2477,6 +2481,9 @@ def ensure_free_monthly_credits(owner_id: str, *, now_override: datetime | None 
             return new_balance
 
         return current_credits
+
+
+ensure_monthly_credits = ensure_free_monthly_credits
 
 
 def get_credits(owner_id: str) -> int:

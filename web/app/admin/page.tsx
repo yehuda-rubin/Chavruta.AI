@@ -50,8 +50,7 @@ const GUARD_LABELS: Record<string, string> = {
 
 const PLANS = [
   { id: "basic", label: "אישי (100 קרדיטים)" },
-  { id: "plus", label: "מתקדם (280 קרדיטים)" },
-  { id: "pro", label: "מלא (600 קרדיטים)" },
+  { id: "pro", label: "מלא (300 קרדיטים)" },
   { id: "institution", label: "כולל / בית מדרש (1,500 קרדיטים · 20 מושבים)" },
   { id: "institution_50", label: "ישיבה רגילה (3,500 קרדיטים · 50 מושבים)" },
   { id: "institution_100", label: "ישיבה גדולה (7,000 קרדיטים · 100 מושבים)" },
@@ -149,6 +148,46 @@ export default function AdminDashboard() {
   async function reviewFeedback(feedbackId: number) {
     await api.admin.reviewFeedback(feedbackId);
     setFeedback((cur) => (cur ? cur.filter((f) => f.id !== feedbackId) : cur));
+  }
+
+  const [rewardingKey, setRewardingKey] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  async function rewardUser(owner_id: string, options: { reportId?: number; feedbackId?: number }) {
+    const isFeedback = !!options.feedbackId;
+    const ok = confirm(`להעניק 3 קרדיטים (בתוקף ל-30 יום) ולשלוח הודעת תודה למשתמש?\n\nמזהה משתמש: ${owner_id}`);
+    if (!ok) return;
+
+    const opKey = options.reportId ? `report-${options.reportId}` : `fb-${options.feedbackId}`;
+    setRewardingKey(opKey);
+    try {
+      const noticeTitle = isFeedback ? "תודה על המשוב!" : "תודה על הדיווח!";
+      const noticeBody = isFeedback
+        ? "תודה רבה על המשוב החשוב שלך! כאות תודה הענקנו לך 3 קרדיטים בתוקף ל-30 יום. תודה שעזרת לנו לשפר את חברותא!"
+        : "ראינו את הדיווח שלך, בדקנו וטיפלנו בנושא. כאות תודה הענקנו לך 3 קרדיטים בתוקף ל-30 יום. תודה שעזרת לנו לשפר את חברותא!";
+
+      await api.admin.grant({
+        owner_id,
+        kind: "credits",
+        credits: 3,
+        expires_in_days: 30,
+        notice_title: noticeTitle,
+        notice_body: noticeBody,
+      });
+
+      if (options.reportId) {
+        await reviewMessage(options.reportId);
+      } else if (options.feedbackId) {
+        await reviewFeedback(options.feedbackId);
+      }
+
+      setToastMessage("🎁 הוענקו 3 קרדיטים (30 יום) ונשלחה הודעת תודה למשתמש!");
+      setTimeout(() => setToastMessage(null), 6000);
+    } catch (err) {
+      alert("הענקת הקרדיטים נכשלה: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setRewardingKey(null);
+    }
   }
 
   if (meLoading) {
@@ -479,6 +518,12 @@ export default function AdminDashboard() {
           {section === "inbox" && (
             <>
               <h2 className="font-serif text-2xl font-bold text-tekhelet">משוב ודיווחים</h2>
+              {toastMessage && (
+                <div className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-800 dark:text-emerald-300 text-xs font-semibold flex items-center justify-between">
+                  <span>{toastMessage}</span>
+                  <button onClick={() => setToastMessage(null)} className="opacity-60 hover:opacity-100">✕</button>
+                </div>
+              )}
               <section className="glass rounded-[24px] p-5 flex flex-col gap-3">
                 <h3 className="font-serif text-lg font-bold text-tekhelet">הודעות מסומנות לבדיקה</h3>
                 <div className="flex flex-col gap-2">
@@ -489,21 +534,12 @@ export default function AdminDashboard() {
                         <div className="flex items-center gap-1.5">
                           {f.owner_id && f.owner_id !== "local" && (
                             <button
-                              onClick={() => {
-                                setPresetGrant({
-                                  owner_id: f.owner_id,
-                                  kind: "credits",
-                                  credits: 3,
-                                  expires_in_days: "30",
-                                  notice_title: "תודה על הדיווח!",
-                                  notice_body: "ראינו את הדיווח שלך, בדקנו וטיפלנו בנושא. כאות תודה הענקנו לך 3 קרדיטים בתוקף ל-30 יום. תודה שעזרת לנו לשפר את חברותא!",
-                                });
-                                setSection("coupons");
-                              }}
-                              className="px-2.5 py-1 rounded-full glass text-tekhelet text-xs font-semibold hover:bg-tekhelet/10 cursor-pointer"
-                              title="הענק קרדיטים למשתמש זה"
+                              disabled={rewardingKey === `report-${f.id}`}
+                              onClick={() => rewardUser(f.owner_id, { reportId: f.id })}
+                              className="px-2.5 py-1 rounded-full glass text-tekhelet text-xs font-semibold hover:bg-tekhelet/10 cursor-pointer disabled:opacity-50"
+                              title="הענק 3 קרדיטים, שלח הודעת תודה וסמן כנבדק"
                             >
-                              🎁 צ'פר בקרדיטים
+                              {rewardingKey === `report-${f.id}` ? "מעניק…" : "🎁 צ'פר בקרדיטים"}
                             </button>
                           )}
                           <button
@@ -543,21 +579,12 @@ export default function AdminDashboard() {
                         <div className="flex items-center gap-1.5">
                           {f.owner_id && f.owner_id !== "local" && (
                             <button
-                              onClick={() => {
-                                setPresetGrant({
-                                  owner_id: f.owner_id,
-                                  kind: "credits",
-                                  credits: 3,
-                                  expires_in_days: "30",
-                                  notice_title: "תודה על המשוב!",
-                                  notice_body: "תודה רבה על המשוב החשוב שלך! כאות תודה הענקנו לך 3 קרדיטים בתוקף ל-30 יום.",
-                                });
-                                setSection("coupons");
-                              }}
-                              className="px-2.5 py-1 rounded-full glass text-tekhelet text-xs font-semibold hover:bg-tekhelet/10 cursor-pointer"
-                              title="הענק קרדיטים למשתמש זה"
+                              disabled={rewardingKey === `fb-${f.id}`}
+                              onClick={() => rewardUser(f.owner_id, { feedbackId: f.id })}
+                              className="px-2.5 py-1 rounded-full glass text-tekhelet text-xs font-semibold hover:bg-tekhelet/10 cursor-pointer disabled:opacity-50"
+                              title="הענק 3 קרדיטים, שלח הודעת תודה וסמן כנבדק"
                             >
-                              🎁 צ'פר בקרדיטים
+                              {rewardingKey === `fb-${f.id}` ? "מעניק…" : "🎁 צ'פר בקרדיטים"}
                             </button>
                           )}
                           <button
