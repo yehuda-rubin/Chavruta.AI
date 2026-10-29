@@ -6,7 +6,9 @@
 
 # Terms of Use — Chavruta AI
 
-**Version 1.15 · Effective 18 October 2026**
+**Version 1.16 · Effective 29 October 2026**
+
+Changes in version 1.16: section 10 updated for the Business Plan v15 credit model — transition from daily question quotas to monthly credits (20 monthly free credits resetting on rolling account anniversary), personal subscription tiers (Personal, Plus, Pro), multi-seat institutional plans (Kollel, Regular Yeshiva, Large Yeshiva), non-expiring credit passes (50, 120, 280, 1,000 credits), action credit costs (standard question/exam, halacha/shut, file creation), and time-limited promotional/reward credit grants.
 
 Changes in version 1.15: section 10 updated for the new products - **prepaid question cards that do not
 expire**, a monthly subscription, an annual plan billed in monthly instalments, and institutional packages - and a
@@ -228,36 +230,24 @@ created before that date **remains permanently excluded from this use — even i
 received in it afterward**. See Privacy Policy sections 2, 5 and 12.
 
 ## 10. Quotas, Paid Plans and Cancellation
-The Service includes a free tier with a daily quota and paid subscription tiers. The operator may update
-quotas and prices from time to time with reasonable advance notice. Displayed prices include VAT.
+The Service includes a free tier with a monthly credit allowance (resetting each month on the account creation anniversary), paid subscription tiers, and reloadable credit passes. The operator may update quotas and prices from time to time with reasonable advance notice. Displayed prices for individual users include VAT; institutional rates are plus VAT.
 
-- **Products:** (a) a monthly subscription, renewing each month; (b) an annual plan at an annual rate, billed in twelve
-  monthly instalments; (c) prepaid question cards in packs of 50, 120 or 280 questions; (d) monthly
-  packages for institutions (price plus VAT). The operator may change packs and prices on reasonable
-  advance notice; a change does not affect a period already paid for.
-- **Question cards do not expire:** the remaining balance on a card is not time-limited and stays in
-  the account for as long as the account is active. A card is non-transferable and has no cash value.
-  Deleting the account forfeits the balance (see below).
-- **Cancellation at any time:** you may cancel a monthly or annual subscription at any time with one
-  click in account settings. Cancelling prevents renewal and further charges and operates in line with
-  section 13D of the Consumer Protection Law (continuing transaction); you may choose to keep access
-  until the end of the period already paid for.
-- **14-day statutory cancellation right:** on a distance contract, you may cancel within 14 days of the
-  transaction (or of receiving the transaction details document, if later) for a refund, less the
-  statutory fee (5% or ₪100, whichever is lower), refunded to the payment method within 14 days of
-  receiving notice. Questions actually used before cancellation (from a card or plan) and service
-  actually provided until then are not refunded, to the extent the law permits.
-- **No refunds beyond what the law requires:** except as stated above, and except where the law requires
-  a refund (for example a defect or our breach, or the extended cancellation rights of senior
-  citizens, people with disabilities and new immigrants), payments made are non-refundable -
-  including unused question-card balance after the 14 days have passed, and a paid period of a
-  cancelled subscription or annual plan. Nothing here limits rights that cannot be waived under the
-  Consumer Protection Law.
-- **Account deletion stops subscriptions:** requesting account deletion halts recurring billing at once
-  and forfeits any unused question-card balance, subject to the 14-day cancellation right and any right
-  that cannot be waived.
-- **Stop Generation:** stopping an in-progress response does not entitle you to a quota or credit
-  refund, as model processing is consumed at the initiation of the request.
+- **Products and Plans:**
+  - **(a) Personal Subscriptions:** a monthly subscription or an annual plan (billed in twelve monthly instalments) across tiers: Personal (100 credits/month), Plus (280 credits/month), and Pro (600 credits/month).
+  - **(b) Educational & Institutional Subscriptions:** specialized multi-seat tiers with scaled institutional credit allowances: Kollel / Beit Midrash (1,500 credits / 20 seats), Regular Yeshiva (3,500 credits / 50 seats), and Large Yeshiva (7,000 credits / 100 seats).
+  - **(c) Prepaid Credit Passes:** advance credit purchases (Entry Pass - 50 credits; Learner Pass - 120 credits; Researcher Pass - 280 credits; Institutional Expansion - 1,000 credits). Individual single credits are not sold separately. The operator may change passes and prices on reasonable advance notice; a change does not affect a period or pass already paid for.
+- **Credit Costs per Action:** Credit consumption reflects computational complexity and resources required for each action:
+  - Standard question, exam/mock exam practice and solution, or learning content building: 1 credit.
+  - Halachic query / Responsa (Shut): 2 credits.
+  - File creation (lesson plan, sourcesheet, comprehensive Bagrut summary/exam): 5 credits (discounted to 3 credits during launch promotion).
+- **Validity of Credits & Special Grants:**
+  - **Credit Passes Do Not Expire:** Credits purchased via credit passes are non-expiring and remain available for as long as the account is active. Credits are non-transferable and have no cash value. Account deletion forfeits any remaining balance (see below).
+  - **Time-Limited Credit Grants:** Credits awarded as promotional gifts, feedback rewards, bug report thank-you gestures, or coupons may carry an explicit validity period (e.g., 30 days). Expiring grants are consumed first before non-expiring card balances; unused granted credits automatically expire upon the due date.
+- **Cancellation at Any Time:** You may cancel a monthly or annual subscription at any time with one click in account settings. Cancelling prevents renewal and further charges and operates in line with section 13D of the Consumer Protection Law (continuing transaction); you may choose to keep access until the end of the period already paid for.
+- **14-Day Statutory Cancellation Right:** On a distance contract, you may cancel within 14 days of the transaction (or of receiving the transaction details document, if later) for a refund, less the statutory fee (5% or ₪100, whichever is lower), refunded to the payment method within 14 days of receiving notice. Credits actually used before cancellation (from a pass or plan) and service actually provided until then are not refunded, to the extent the law permits.
+- **No Refunds Beyond What the Law Requires:** Except as stated above, and except where the law requires a refund (for example a defect or our breach, or the extended cancellation rights of senior citizens, people with disabilities and new immigrants), payments made are non-refundable — including unused credit pass balance after the 14 days have passed, and a paid period of a cancelled subscription or annual plan. Nothing here limits rights that cannot be waived under the Consumer Protection Law.
+- **Account Deletion Stops Subscriptions:** Requesting account deletion halts recurring billing at once and forfeits any unused credit balance, subject to the 14-day cancellation right and any right that cannot be waived.
+- **Stop Generation:** Stopping an in-progress response does not entitle you to a quota or credit refund, as model processing is consumed at the initiation of the request.
 
 ## 11. Coupons
 Coupons granted from time to time provide a specific time-limited benefit. Coupons have no cash value,
