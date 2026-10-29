@@ -56,7 +56,14 @@ const PLANS = [
   { id: "institution_100", label: "ישיבה גדולה (7,000 קרדיטים · 100 מושבים)" },
 ];
 
-const CREDIT_PRESETS = [3, 10, 20, 50, 120, 280, 1000];
+const CREDIT_PACKS = [
+  { id: "entry", name: "כרטיסיית כניסה", credits: 50, price_ils: 19 },
+  { id: "learner", name: "כרטיסיית לומד", credits: 120, price_ils: 39 },
+  { id: "researcher", name: "כרטיסיית חוקר", credits: 280, price_ils: 79 },
+  { id: "institution_expansion", name: "חבילת הרחבה מוסדית", credits: 1000, price_ils: 295 },
+];
+
+const CREDIT_PRESETS = [3, 10, 20, 50, 100, 120, 280, 500, 1000];
 
 interface QuickGrantPreset {
   owner_id: string;
@@ -938,7 +945,8 @@ function CouponsSection({ initialGrant }: { initialGrant?: QuickGrantPreset | nu
   const [loadError, setLoadError] = useState(false);
 
   // create-coupon form
-  const [kind, setKind] = useState<"plan" | "credits">("plan");
+  const [kind, setKind] = useState<"plan" | "pack" | "credits">("plan");
+  const [selectedPack, setSelectedPack] = useState("entry");
   const [plan, setPlan] = useState("pro");
   const [days, setDays] = useState(30);
   const [credits, setCredits] = useState(50);
@@ -952,7 +960,8 @@ function CouponsSection({ initialGrant }: { initialGrant?: QuickGrantPreset | nu
 
   // grant-to-user form
   const [grantOwner, setGrantOwner] = useState("");
-  const [grantKind, setGrantKind] = useState<"plan" | "credits">("plan");
+  const [grantKind, setGrantKind] = useState<"plan" | "pack" | "credits">("plan");
+  const [grantSelectedPack, setGrantSelectedPack] = useState("entry");
   const [grantPlan, setGrantPlan] = useState("pro");
   const [grantDays, setGrantDays] = useState(30);
   const [grantCredits, setGrantCredits] = useState(50);
@@ -1005,10 +1014,19 @@ function CouponsSection({ initialGrant }: { initialGrant?: QuickGrantPreset | nu
     e.preventDefault();
     setCreating(true); setCreateErr(""); setCreated("");
     try {
+      const apiKind = kind === "plan" ? "plan" : "credits";
+      const actualCredits = kind === "pack"
+        ? (CREDIT_PACKS.find((p) => p.id === selectedPack)?.credits ?? 50)
+        : credits;
       const res = await api.admin.createCoupon({
-        kind, plan, days, credits, code: code.trim(), max_redemptions: maxRedemptions,
+        kind: apiKind,
+        plan: kind === "plan" ? plan : undefined,
+        days: kind === "plan" ? days : undefined,
+        credits: kind !== "plan" ? actualCredits : undefined,
+        code: code.trim(),
+        max_redemptions: maxRedemptions,
         expires_in_days: expiresInDays.trim() ? Number(expiresInDays) : null,
-        note: note.trim(),
+        note: note.trim() || (kind === "pack" ? `כרטיסייה: ${CREDIT_PACKS.find((p) => p.id === selectedPack)?.name}` : ""),
       });
       setCreated(res.code);
       setCode(""); setNote("");
@@ -1024,9 +1042,16 @@ function CouponsSection({ initialGrant }: { initialGrant?: QuickGrantPreset | nu
     e.preventDefault();
     setGranting(true); setGrantErr(""); setGrantRes(null);
     try {
+      const apiKind = grantKind === "plan" ? "plan" : "credits";
+      const actualCredits = grantKind === "pack"
+        ? (CREDIT_PACKS.find((p) => p.id === grantSelectedPack)?.credits ?? 50)
+        : grantCredits;
       const res = await api.admin.grant({
-        owner_id: grantOwner.trim(), kind: grantKind, plan: grantPlan,
-        days: grantDays, credits: grantCredits,
+        owner_id: grantOwner.trim(),
+        kind: apiKind,
+        plan: grantKind === "plan" ? grantPlan : undefined,
+        days: grantKind === "plan" ? grantDays : undefined,
+        credits: grantKind !== "plan" ? actualCredits : undefined,
         expires_in_days: grantExpiresDays.trim() ? Number(grantExpiresDays) : null,
         notice_title: grantWithNotice ? grantNoticeTitle.trim() : undefined,
         notice_body: grantWithNotice ? grantNoticeBody.trim() : undefined,
@@ -1056,18 +1081,73 @@ function CouponsSection({ initialGrant }: { initialGrant?: QuickGrantPreset | nu
     <>
       <h2 className="font-serif text-2xl font-bold text-tekhelet">קופונים והרשאות</h2>
 
+      {/* כרטיסיות קרדיטים במערכת */}
       <section className="glass rounded-[24px] p-5 flex flex-col gap-3">
+        <div>
+          <h3 className="font-serif text-lg font-bold text-tekhelet">כרטיסיות קרדיטים במערכת (ללא הגבלת זמן)</h3>
+          <p className="text-xs text-ink/60">חבילות קרדיטים קבועות הנרכשות על ידי המשתמשים או מוענקות ישירות. לחץ לפעולה מהירה.</p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {CREDIT_PACKS.map((pack) => (
+            <div key={pack.id} className="p-3.5 rounded-2xl glass border border-emerald-500/20 bg-emerald-500/5 flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-sm text-ink">{pack.name}</span>
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-800 dark:text-emerald-300">
+                  {pack.credits} קרדיטים
+                </span>
+              </div>
+              <p className="text-lg font-bold text-ink">
+                ₪{pack.price_ils}
+                <span className="text-xs font-normal text-ink/50 ms-1">
+                  ({(pack.price_ils / pack.credits).toFixed(2)} ₪/קרדיט)
+                </span>
+              </p>
+              <div className="flex items-center gap-1.5 mt-auto pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setKind("pack");
+                    setSelectedPack(pack.id);
+                    setNote(`כרטיסייה: ${pack.name}`);
+                    const el = document.getElementById("coupon-form-section");
+                    el?.scrollIntoView({ behavior: "smooth" });
+                  }}
+                  className="flex-1 px-2.5 py-1.5 rounded-xl border border-emerald-600/30 text-emerald-800 dark:text-emerald-300 text-xs font-semibold hover:bg-emerald-500/10 transition text-center"
+                >
+                  הנפק קופון
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGrantKind("pack");
+                    setGrantSelectedPack(pack.id);
+                    setGrantExpiresDays("");
+                    const el = document.getElementById("grant-form-section");
+                    el?.scrollIntoView({ behavior: "smooth" });
+                  }}
+                  className="flex-1 px-2.5 py-1.5 rounded-xl grad text-white text-xs font-semibold hover:opacity-90 transition text-center"
+                >
+                  הענק למשתמש
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section id="coupon-form-section" className="glass rounded-[24px] p-5 flex flex-col gap-3">
         <h3 className="font-serif text-lg font-bold text-tekhelet">יצירת קוד קופון</h3>
         <form onSubmit={create} className="flex flex-col gap-3">
           <div className="flex flex-wrap gap-3">
             <label className="flex flex-col gap-1">
               <span className="text-xs text-ink/55">סוג</span>
-              <select value={kind} onChange={(e) => setKind(e.target.value as "plan" | "credits")} className={field}>
+              <select value={kind} onChange={(e) => setKind(e.target.value as "plan" | "pack" | "credits")} className={field}>
                 <option value="plan">מנוי</option>
-                <option value="credits">קרדיטים</option>
+                <option value="pack">כרטיסיית קרדיטים</option>
+                <option value="credits">קרדיטים (בחירה חופשית)</option>
               </select>
             </label>
-            {kind === "plan" ? (
+            {kind === "plan" && (
               <>
                 <label className="flex flex-col gap-1">
                   <span className="text-xs text-ink/55">תוכנית</span>
@@ -1081,9 +1161,26 @@ function CouponsSection({ initialGrant }: { initialGrant?: QuickGrantPreset | nu
                          className={`${field} w-24`} />
                 </label>
               </>
-            ) : (
+            )}
+            {kind === "pack" && (
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-ink/55">בחר כרטיסייה</span>
+                <select value={selectedPack} onChange={(e) => {
+                  setSelectedPack(e.target.value);
+                  const p = CREDIT_PACKS.find((x) => x.id === e.target.value);
+                  if (p) setNote(`כרטיסייה: ${p.name}`);
+                }} className={field}>
+                  {CREDIT_PACKS.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.credits} קרדיטים · ₪{p.price_ils})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {kind === "credits" && (
               <div className="flex flex-col gap-1">
-                <span className="text-xs text-ink/55">כמות קרדיטים</span>
+                <span className="text-xs text-ink/55">כמות קרדיטים (בחירה אישית)</span>
                 <div className="flex items-center gap-2">
                   <input type="number" min={1} value={credits} onChange={(e) => setCredits(Number(e.target.value))}
                          className={`${field} w-28`} />
@@ -1136,7 +1233,7 @@ function CouponsSection({ initialGrant }: { initialGrant?: QuickGrantPreset | nu
         </form>
       </section>
 
-      <section className="glass rounded-[24px] p-5 flex flex-col gap-3">
+      <section id="grant-form-section" className="glass rounded-[24px] p-5 flex flex-col gap-3">
         <h3 className="font-serif text-lg font-bold text-tekhelet">הענקה ישירה לפי מזהה משתמש</h3>
         <p className="text-xs text-ink/55 leading-relaxed">
           מנפיק קוד חד-פעמי ומממש אותו עבור המשתמש — כך ההענקה עוברת באותו מסלול בדוק שלא דורס מנוי
@@ -1151,12 +1248,13 @@ function CouponsSection({ initialGrant }: { initialGrant?: QuickGrantPreset | nu
             </label>
             <label className="flex flex-col gap-1">
               <span className="text-xs text-ink/55">סוג</span>
-              <select value={grantKind} onChange={(e) => setGrantKind(e.target.value as "plan" | "credits")} className={field}>
+              <select value={grantKind} onChange={(e) => setGrantKind(e.target.value as "plan" | "pack" | "credits")} className={field}>
                 <option value="plan">מנוי</option>
-                <option value="credits">קרדיטים</option>
+                <option value="pack">כרטיסיית קרדיטים</option>
+                <option value="credits">קרדיטים (בחירה חופשית)</option>
               </select>
             </label>
-            {grantKind === "plan" ? (
+            {grantKind === "plan" && (
               <>
                 <label className="flex flex-col gap-1">
                   <span className="text-xs text-ink/55">תוכנית</span>
@@ -1170,9 +1268,22 @@ function CouponsSection({ initialGrant }: { initialGrant?: QuickGrantPreset | nu
                          className={`${field} w-24`} />
                 </label>
               </>
-            ) : (
+            )}
+            {grantKind === "pack" && (
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-ink/55">בחר כרטיסייה</span>
+                <select value={grantSelectedPack} onChange={(e) => setGrantSelectedPack(e.target.value)} className={field}>
+                  {CREDIT_PACKS.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.credits} קרדיטים · ₪{p.price_ils})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {grantKind === "credits" && (
               <div className="flex flex-col gap-1">
-                <span className="text-xs text-ink/55">כמות קרדיטים</span>
+                <span className="text-xs text-ink/55">כמות קרדיטים (בחירה אישית)</span>
                 <div className="flex items-center gap-2">
                   <input type="number" min={1} value={grantCredits}
                          onChange={(e) => setGrantCredits(Number(e.target.value))} className={`${field} w-28`} />
