@@ -4477,13 +4477,15 @@ def _quota_message(kind: str, lang: str, balance: int, cost: int) -> str:
                  "You've reached this week's usage limit. It resets on Sunday."),
         "day": ("הגעת למכסת השימוש היומית. היא מתאפסת מחר.",
                 "You've reached today's usage limit. It resets tomorrow."),
+        "credits": ("נגמרו לך הקרדיטים החודשיים.",
+                    "You've run out of monthly credits."),
     }
-    head = heads[kind][0 if he else 1]
+    head = heads.get(kind, heads["credits"])[0 if he else 1]
     tail = (f" נותרו לך {balance} קרדיטים (הפעולה הזו עולה {cost}). "
-            "אפשר לשדרג את התוכנית או להזין קוד קופון."
+            "אפשר לשדרג את התוכנית, לרכוש כרטיסיית קרדיטים ללא הגבלת זמן או להזין קוד קופון."
             if he else
             f" You have {balance} credits (this action costs {cost}). "
-            "You can upgrade your plan or redeem a coupon.")
+            "You can upgrade your plan, buy a credit pass, or redeem a coupon.")
     return head + tail
 
 
@@ -4516,6 +4518,8 @@ def _charge_lesson_unit(owner: str, res: Reservation, used_byok: bool) -> bool:
     day = res.day or None      # the day the turn was ADMITTED, so a lesson finished after midnight
                                # on Saturday night lands in the week it was actually built in
     if ctx:
+        if ctx.get("weekly_lessons", 0) <= 0:
+            return False
         # BOTH counters, and a per-member weekly share as well as the school's. A lesson used to be
         # charged only to the pool while its token reservation was refunded in full — so it cost the
         # member nothing at all, and one student could take every lesson a 20-seat school gets in a
@@ -4590,7 +4594,7 @@ class Reservation(NamedTuple):
         return self.credits_spent > 0
 
 
-def _reserve_tokens(owner: str, lang: str, intent: str, user_key: str = "") -> Reservation:
+def _reserve_tokens(owner: str, lang: str, intent: str, user_key: str = "", action: str = "") -> Reservation:
     """Admit a conversation turn against an ESTIMATE of its token cost.
 
     The quota is denominated in tokens but they are only known after the call, so the turn is
@@ -4623,7 +4627,7 @@ def _reserve_tokens(owner: str, lang: str, intent: str, user_key: str = "") -> R
         # with their own card, so hitting the school's cap or the shared pool's limit stops the FREE
         # ride, not the person — they can keep going on their own money. Mirrors the non-member path
         # below exactly; nothing was reserved against the pool, so there is nothing to settle there.
-        cost = plans.credit_cost(intent)
+        cost = plans.credit_cost(intent, action=action)
         spent, balance = db.spend_credits(owner, cost)
         if spent:
             _log.info("owner=%s hit org pool (%s); spent %d credit(s), %d left",
@@ -4649,7 +4653,8 @@ def _reserve_tokens(owner: str, lang: str, intent: str, user_key: str = "") -> R
         if b_allowed:
             return Reservation(estimate, True, None, day)
 
-    cost = plans.credit_cost(intent)
+    cost = plans.credit_cost(intent, action=action)
+    db.ensure_free_monthly_credits(owner)
     spent, balance = db.spend_credits(owner, cost)
     if spent:
         _log.info("owner=%s over %s token quota; spent %d credit(s), %d left",
@@ -4874,7 +4879,7 @@ def _record_event(owner: str, intent: str, req: QueryRequest | None, usage: dict
         _log.exception("failed to record usage telemetry")
 
 
-def _enforce_quota(owner: str, lang: str, intent: str = "", user_key: str = "") -> Reservation:
+def _enforce_quota(owner: str, lang: str, intent: str = "", user_key: str = "", action: str = "") -> Reservation:
     """Reserve against the conversation-token pool and admit the turn. Returns (tokens reserved,
     used_byok). Every intent goes through here the same way, lesson included — see _charge_lesson_unit
     for why a lesson's OWN weekly pool is charged separately, post-hoc, instead of gating entry here.
@@ -4885,7 +4890,7 @@ def _enforce_quota(owner: str, lang: str, intent: str = "", user_key: str = "") 
     """
     if owner == "local" or _is_admin(owner):
         return Reservation(0)
-    return _reserve_tokens(owner, lang, intent, user_key)
+    return _reserve_tokens(owner, lang, intent, user_key, action=action)
 
 
 def _hstr(v) -> str:
@@ -4976,7 +4981,7 @@ def _minor_only(llm):
 
 def _resolve_llm_for_request(owner: str, lang: str, intent: str, user_key: str | None,
                              base_url: str | None = None, model: str | None = None,
-                             preset: str | None = None):
+                             preset: str | None = None, action: str = ""):
     """One-stop call for every route below: enforce quota (with the BYOK fallback), and return
     (reserved, llm_override, meter) — llm_override is None (use the pipeline's own shared backend)
     unless the turn was actually admitted on the caller's own key, in which case it's a fresh
@@ -4988,10 +4993,10 @@ def _resolve_llm_for_request(owner: str, lang: str, intent: str, user_key: str |
     default backend. They get a CloudLLM on CHAVRUTA_MINOR_LLM_PRESET, or a _MinorBackendUnavailable
     marker that the route turns into a 503 once the crisis screen has had its say."""
     if minors.is_minor(owner):
-        res = _enforce_quota(owner, lang, intent, user_key="")
+        res = _enforce_quota(owner, lang, intent, user_key="", action=action)
         return res, _minor_llm_or_unavailable(lang, owner), db.TOKENS
     key = _hstr(user_key)
-    res = _enforce_quota(owner, lang, intent, user_key=key)
+    res = _enforce_quota(owner, lang, intent, user_key=key, action=action)
     if res.used_byok:
         return res, _byok_llm(key, _hstr(base_url), _hstr(model)), db.BYOK_TOKENS
 
@@ -5047,7 +5052,8 @@ def query(req: QueryRequest, owner: str = Depends(current_owner),
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
     reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key,
-                                                    x_user_llm_base_url, x_user_llm_model, x_user_llm_preset)
+                                                    x_user_llm_base_url, x_user_llm_model, x_user_llm_preset,
+                                                    action=req.bagrut_action)
     # The gate lives in _run_query, which every generation path goes through — see there.
     return _metered(owner, reserved, req.intent, lambda: _run_query(
         _augment_question(req.question, req.attachments), req.lang, req.intent, [],
@@ -5067,7 +5073,8 @@ def query_stream(req: QueryRequest, owner: str = Depends(current_owner),
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
     reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key,
-                                                    x_user_llm_base_url, x_user_llm_model, x_user_llm_preset)
+                                                    x_user_llm_base_url, x_user_llm_model, x_user_llm_preset,
+                                                    action=req.bagrut_action)
 
     def _gen():
         augmented_q = _augment_question(req.question, req.attachments)
@@ -5169,6 +5176,7 @@ class MeOut(BaseModel):
     byok_week_left: float | None = None
     byok_lessons_left: float | None = None
     credits: int = 0                   # prepaid generations, spent once a cap is hit
+    credits_reset_at: str | None = None  # ISO ts when monthly free credits reset (rolling month)
     plan_until: str | None = None    # ISO ts the paid/coupon period ends
     cycle: str = "monthly"           # 'monthly' | 'annual' | 'coupon'
     cancel_at_period_end: bool = False   # true ⇒ cancelled, access runs to plan_until then lapses
@@ -5292,7 +5300,8 @@ def me(request: Request, owner: str = Depends(current_owner)):
         byok_day_left=byok_day_left,
         byok_week_left=byok_week_left,
         byok_lessons_left=byok_lessons_left,
-        credits=0 if is_local else db.get_credits(owner),
+        credits=0 if is_local else db.ensure_free_monthly_credits(owner),
+        credits_reset_at=None if is_local else db.get_free_credits_next_reset(owner),
         # A member has no subscription of their own; the school's belongs to its owner.
         plan_until=None if ctx else (sub.get("current_period_end") if plan != "free" else None),
         cycle=sub.get("cycle") or "monthly",
@@ -5740,7 +5749,18 @@ class CheckoutOut(BaseModel):
 def billing_config(lang: str = "he"):
     """Whether billing is available (so the UI can show/hide the upgrade button), plus the tier
     catalogue so prices are never hardcoded in the frontend."""
-    return {"enabled": billing.enabled(), "tiers": plans.public_catalogue(lang)}
+    return {
+        "enabled": billing.enabled(),
+        "tiers": plans.public_catalogue(lang),
+        "credit_packs": plans.public_credit_packs(lang),
+        "credit_costs": {
+            "question": plans.QUESTION_CREDITS,
+            "file_creation": plans.file_creation_credit_cost(),
+            "file_creation_standard": plans.FILE_CREATION_STANDARD_CREDITS,
+            "launch_discount": plans.is_launch_discount_active(),
+            "free_monthly_credits": db.FREE_MONTHLY_CREDITS,
+        },
+    }
 
 
 @app.get("/billing/limits")
@@ -5752,7 +5772,17 @@ def billing_limits(lang: str = "he"):
     numbers (daily_tokens, weekly_tokens, weekly_lessons) that a customer needs to know what they
     are actually purchasing. See plans.limits_catalogue() for the rationale.
     """
-    return {"tiers": plans.limits_catalogue(lang)}
+    return {
+        "tiers": plans.limits_catalogue(lang),
+        "credit_packs": plans.public_credit_packs(lang),
+        "credit_costs": {
+            "question": plans.QUESTION_CREDITS,
+            "file_creation": plans.file_creation_credit_cost(),
+            "file_creation_standard": plans.FILE_CREATION_STANDARD_CREDITS,
+            "launch_discount": plans.is_launch_discount_active(),
+            "free_monthly_credits": db.FREE_MONTHLY_CREDITS,
+        },
+    }
 
 
 # ── Coupons ───────────────────────────────────────────────────────────────────
@@ -6404,7 +6434,8 @@ def create_session(req: QueryRequest, owner: str = Depends(current_owner),
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
     reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key,
-                                                    x_user_llm_base_url, x_user_llm_model, x_user_llm_preset)
+                                                    x_user_llm_base_url, x_user_llm_model, x_user_llm_preset,
+                                                    action=req.bagrut_action)
 
     # Lock the chat's mode to the intent chosen on this first turn; every follow-up stays in it.
     with _release_on_error(owner, reserved, req.intent, meter):
@@ -6425,7 +6456,8 @@ def session_query(session_id: str, req: QueryRequest, owner: str = Depends(curre
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
     reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key,
-                                                    x_user_llm_base_url, x_user_llm_model, x_user_llm_preset)
+                                                    x_user_llm_base_url, x_user_llm_model, x_user_llm_preset,
+                                                    action=req.bagrut_action)
     with _release_on_error(owner, reserved, req.intent, meter):
         history, intent = _prepare_continue(session_id, req, owner)
     return _metered(owner, reserved, req.intent,
@@ -6568,7 +6600,8 @@ def session_query_stream(session_id: str, req: QueryRequest, owner: str = Depend
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
     reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key,
-                                                    x_user_llm_base_url, x_user_llm_model, x_user_llm_preset)
+                                                    x_user_llm_base_url, x_user_llm_model, x_user_llm_preset,
+                                                    action=req.bagrut_action)
     with _release_on_error(owner, reserved, req.intent, meter):
         history, intent = _prepare_continue(session_id, req, owner)
 
@@ -6590,7 +6623,8 @@ def session_create_stream(req: QueryRequest, owner: str = Depends(current_owner)
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
     reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key,
-                                                    x_user_llm_base_url, x_user_llm_model, x_user_llm_preset)
+                                                    x_user_llm_base_url, x_user_llm_model, x_user_llm_preset,
+                                                    action=req.bagrut_action)
     with _release_on_error(owner, reserved, req.intent, meter):
         sid = db.create_session(req.question.strip(), mode=req.intent or None, owner_id=owner)
         user_files = [{"name": a.name, "content": ""} for a in (req.attachments or []) if a.name]
@@ -6616,7 +6650,8 @@ def query_async(req: QueryRequest, owner: str = Depends(current_owner),
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
     reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key,
-                                                    x_user_llm_base_url, x_user_llm_model)
+                                                    x_user_llm_base_url, x_user_llm_model,
+                                                    action=req.bagrut_action)
     with _release_on_error(owner, reserved, req.intent, meter):
         llm = _prescreen_unavailable_minor(owner, req, llm)       # 503 at submit (T050)
         q = _augment_question(req.question, req.attachments)
@@ -6639,7 +6674,8 @@ def create_session_async(req: QueryRequest, owner: str = Depends(current_owner),
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
     reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key,
-                                                    x_user_llm_base_url, x_user_llm_model)
+                                                    x_user_llm_base_url, x_user_llm_model,
+                                                    action=req.bagrut_action)
     with _release_on_error(owner, reserved, req.intent, meter):
         llm = _prescreen_unavailable_minor(owner, req, llm)       # 503 at submit (T050)
         sid = db.create_session(req.question.strip(), mode=req.intent or None, owner_id=owner)
@@ -6660,7 +6696,8 @@ def session_query_async(session_id: str, req: QueryRequest, owner: str = Depends
     if not req.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
     reserved, llm, meter = _resolve_llm_for_request(owner, req.lang, req.intent, x_user_llm_key,
-                                                    x_user_llm_base_url, x_user_llm_model)
+                                                    x_user_llm_base_url, x_user_llm_model,
+                                                    action=req.bagrut_action)
     # The ownership gate + user-turn save happen NOW (before returning) so an unauthorized caller
     # gets a synchronous 404 and the user message is durable even if generation later fails.
     with _release_on_error(owner, reserved, req.intent, meter):

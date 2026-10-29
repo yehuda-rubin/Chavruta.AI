@@ -450,6 +450,7 @@ export function SettingsModal({
   planName,
   planUntil,
   credits,
+  creditsResetAt,
   cycle,
   cancelAtPeriodEnd,
   dayLeft,
@@ -483,6 +484,7 @@ export function SettingsModal({
   planName?: string;                       // localized tier name from /me
   planUntil?: string | null;               // ISO ts a coupon-granted plan lapses
   credits?: number;                        // prepaid generations left
+  creditsResetAt?: string | null;          // ISO ts when free monthly credits reset
   cycle?: string;                          // 'monthly' | 'annual' | 'coupon'
   cancelAtPeriodEnd?: boolean;             // cancelled: access runs to planUntil, then lapses
   dayLeft?: number | null;                 // fraction of today's conversation allowance left
@@ -637,7 +639,13 @@ export function SettingsModal({
                 {tr(lang, "planLabel")}: {planName || tr(lang, "planFree")}
                 {cycle === "annual" && <> ({tr(lang, "cycleAnnual")})</>}
                 {planUntil && <> · {tr(lang, "planUntil")} {fmtDate(planUntil)}</>}
-                {!!credits && <> · {credits} {tr(lang, "creditsLabel")}</>}
+                {typeof credits === "number" && (
+                  <> · {credits} {tr(lang, "creditsLabel")}
+                    {creditsResetAt && (
+                      <span className="text-[11px] text-ink/40"> ({lang === "he" ? "מתאפס ב-" : "resets "}{fmtDate(creditsResetAt)})</span>
+                    )}
+                  </>
+                )}
               </span>
               {/* Already cancelled: there is nothing left to cancel, and offering the button again
                   would suggest access is still being billed for. State the end date instead. */}

@@ -303,7 +303,7 @@ export const api = {
   cancelAccountDeletion: () => req<Deletion>("/account/delete/cancel", { method: "POST" }),
 
   // Billing: is it available, start a checkout (returns a hosted payment URL), cancel the subscription.
-  billingConfig: () => req<{ enabled: boolean; tiers: Tier[] }>("/billing/config"),
+  billingConfig: () => req<{ enabled: boolean; tiers: Tier[]; credit_packs?: CreditPack[]; credit_costs?: Record<string, any> }>("/billing/config"),
 
   // Coupons: the user-facing half. Issuing is operator-only (scripts/manage_coupons.py).
   redeemCoupon: (code: string) =>
@@ -610,6 +610,7 @@ export interface Me {
   lessons_exhausted: boolean;
   multiple: number;                         // usage relative to free: the only allowance figure shown
   credits: number;                          // prepaid generations, spent once a cap is hit
+  credits_reset_at?: string | null;         // ISO ts when free monthly credits reset (rolling month)
   // BYOK (bring-your-own-key): whether this deployment's backend even accepts a provider key (false
   // for the bridge backend), and — once the pools above are exhausted — a SECOND allowance the same
   // size as the plan's own, spent only when the user has entered their own key in Settings.
@@ -697,6 +698,14 @@ export interface OrgPanel {
   topics: { intent: string; requests: number; tokens: number }[];
 }
 
+export interface CreditPack {
+  id: string;
+  credits: number;
+  price_ils: number;
+  name: string;
+  is_institutional?: boolean;
+}
+
 export interface Tier {
   id: string;
   name: string;
@@ -708,6 +717,7 @@ export interface Tier {
   annual_saving_pct: number;
   multiple: number;               // "3x the free tier" — no absolute allowance is published
   seats: number;                  // > 1 marks an institutional tier — drives "contact us" in the UI
+  monthly_credits?: number;
 }
 
 export interface Redeemed {

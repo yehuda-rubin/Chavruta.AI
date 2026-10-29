@@ -75,6 +75,7 @@ class Tier:
     # constant — split a fixed pool three ways and the biggest school gets the least per person,
     # which is how the first cut of this was wrong (see specs/004-school-accounts/plan.md).
     seats: int = 1
+    monthly_credits: int = 0
 
 
 # Order matters: rank() uses it to decide whether a coupon is an upgrade or a downgrade.
@@ -171,14 +172,33 @@ PROFIT_TARGET = 0.30
 # rather than sitting a few agorot over it as before — that also fixes a real inversion where basic
 # was cheaper per normalized token than pro (backwards volume logic). Nothing is grandfathered: billing
 # is still off (no PAYPLUS_* keys), so none of this is charged to anyone yet.
+@dataclass(frozen=True)
+class CreditPack:
+    id: str
+    credits: int
+    price_ils: float
+    name_he: str
+    name_en: str
+    is_institutional: bool = False
+
+
+# Business Plan Credit Passes / Packs (כרטיסיות קרדיטים ללא הגבלת זמן)
+CREDIT_PACKS: tuple[CreditPack, ...] = (
+    CreditPack("entry", 50, 19.0, "כרטיסיית כניסה (50 קרדיטים)", "Entry Pass (50 credits)"),
+    CreditPack("learner", 120, 39.0, "כרטיסיית לומד (120 קרדיטים)", "Learner Pass (120 credits)"),
+    CreditPack("researcher", 280, 79.0, "כרטיסיית חוקר (280 קרדיטים)", "Researcher Pass (280 credits)"),
+    CreditPack("institution_expansion", 1000, 295.0, "חבילת הרחבה מוסדית (1,000 קרדיטים)", "Institutional Expansion (1,000 credits)", is_institutional=True),
+)
+
+
 TIERS: tuple[Tier, ...] = (
-    Tier("free",             100_000,     270_000,   1,   1,    0.0,      0.0, "חינם",         "Free"),
-    Tier("basic",            300_000,     810_000,   3,   3,   75.0,    750.0, "בסיסי",        "Basic"),
-    Tier("plus",             500_000,   1_350_000,   5,   5,  129.0,   1290.0, "מתקדם",       "Plus"),
-    Tier("pro",            1_000_000,   2_700_000,  10,  10,  200.0,   2000.0, "מלא",          "Pro"),
-    Tier("institution",    4_000_000,  10_800_000,  40,  40, 1000.0,  10000.0, "מוסדי 20",     "Institution 20", 20),
-    Tier("institution_50", 10_000_000,  27_000_000, 100, 100, 2000.0, 20000.0, "מוסדי 50",    "Institution 50", 50),
-    Tier("institution_100", 20_000_000, 54_000_000, 200, 200, 4000.0, 40000.0, "מוסדי 100",  "Institution 100", 100),
+    Tier("free",             100_000,     270_000,   0,   1,    0.0,      0.0, "חינם",         "Free", 1, 20),
+    Tier("basic",            300_000,     810_000,   0,   3,   29.0,    240.0, "אישי",         "Personal", 1, 100),
+    Tier("plus",             500_000,   1_350_000,   0,   5,   69.0,    590.0, "מתקדם",       "Plus", 1, 280),
+    Tier("pro",            1_000_000,   2_700_000,   0,  10,  129.0,   1090.0, "מלא",          "Pro", 1, 600),
+    Tier("institution",    4_000_000,  10_800_000,   0,  40,  460.0,   4600.0, "כולל / בית מדרש", "Kollel / Beit Midrash", 20, 1500),
+    Tier("institution_50", 10_000_000,  27_000_000,   0, 100,  932.0,   9320.0, "ישיבה רגילה",    "Regular Yeshiva",     50, 3500),
+    Tier("institution_100", 20_000_000, 54_000_000,   0, 200, 1994.0,  19940.0, "ישיבה גדולה",    "Large Yeshiva",      100, 7000),
 )
 
 # Output costs several times input everywhere; 3x is the round figure that holds across the models
@@ -234,7 +254,13 @@ def billed_tokens_for_model(prompt_tokens: int, completion_tokens: int, model: s
     return normalized_tokens(prompt_tokens, completion_tokens, model=model)
 
 _BY_ID = {t.id: t for t in TIERS}
-_ALIASES = {"paid": "pro"}          # pre-tier billing wrote 'paid'; it means the standard paid tier
+_ALIASES = {
+    "paid": "pro",
+    "personal": "basic",
+    "kollel": "institution",
+    "yeshiva": "institution_50",
+    "yeshiva_large": "institution_100",
+}
 
 
 def canonical(plan: str | None) -> str:
@@ -484,32 +510,98 @@ def refund_quote(amount: float, *, days_used: int = 0, cycle: str | None = MONTH
 # subscription rate ~₪0.275/turn), ₪1.20 sits ~4.4x above the cheapest subscription rate and ~8.4x
 # marginal cost, which is what makes it worth topping up in a pinch and never worth living on.
 #
-# Not yet sold: credits are granted by coupon today (db.add_credits), and a pack purchase would
-# write the same column. This constant is here so the first person to build that flow inherits the
-# reasoning rather than picking a round number.
+# Individual single credits are NOT offered for purchase.
+# Credits are acquired exclusively through CREDIT_PACKS (cards of 50, 120, 280, 1000) or monthly subscription tiers.
+# CREDIT_PRICE_ILS ensures that any unit credit conversion rate never undercuts subscriptions.
 CREDIT_PRICE_ILS = 1.20
 
-# A credit costs more for the expensive intents. Measured: a lesson averages ~58,000 normalized
-# tokens against ~23,512 for a question — 2.5x. It is charged 5x, deliberately above the measured
-# ratio, because a lesson also runs the agentic loop over a much larger source pool and its variance
-# is far wider than a question's.
-_DEFAULT_COSTS = {"lesson": 5, "halacha": 2, "shut": 2}
-_FALLBACK_COST = 1
+# File creation: standard 5 credits, launch discount 3 credits
+FILE_CREATION_STANDARD_CREDITS = 5
+FILE_CREATION_LAUNCH_CREDITS = 3
+QUESTION_CREDITS = 1
 
 
-def credit_cost(intent: str | None) -> int:
-    """Credits one generation of this intent costs. CHAVRUTA_CREDIT_COSTS overrides as
-    "lesson=5,halacha=2"; setting it to an empty string charges 1 for everything."""
+def is_launch_discount_active() -> bool:
+    env = os.environ.get("CHAVRUTA_LAUNCH_DISCOUNT", "1").strip().lower()
+    return env in {"1", "true", "yes", "on"}
+
+
+def file_creation_credit_cost() -> int:
+    return FILE_CREATION_LAUNCH_CREDITS if is_launch_discount_active() else FILE_CREATION_STANDARD_CREDITS
+
+
+_DEFAULT_COSTS = {
+    # File creation: 5 credits standard, 3 credits with launch discount
+    "lesson": FILE_CREATION_LAUNCH_CREDITS,
+    "file": FILE_CREATION_LAUNCH_CREDITS,
+    "file_creation": FILE_CREATION_LAUNCH_CREDITS,
+    "bagrut_summary": FILE_CREATION_LAUNCH_CREDITS,
+    "bagrut_exam": FILE_CREATION_LAUNCH_CREDITS,
+    "bagrut_solution": FILE_CREATION_LAUNCH_CREDITS,
+    "sourcesheet_guide": FILE_CREATION_LAUNCH_CREDITS,
+    # Solving exams / mock exams / building / standard questions: 1 credit
+    "bagrut_practice": QUESTION_CREDITS,
+    "bagrut_check": QUESTION_CREDITS,
+    "bagrut_solve": QUESTION_CREDITS,
+    "exam_solve": QUESTION_CREDITS,
+    "mock_exam_solve": QUESTION_CREDITS,
+    "build": QUESTION_CREDITS,
+    "qa": QUESTION_CREDITS,
+    "explain": QUESTION_CREDITS,
+    "compare": QUESTION_CREDITS,
+    "chavruta": QUESTION_CREDITS,
+    "halacha": 2,
+    "shut": 2,
+}
+_FALLBACK_COST = QUESTION_CREDITS
+
+
+def credit_cost(intent: str | None, *, has_files: bool = False, action: str | None = None) -> int:
+    """Credits one generation of this intent/action costs.
+    - File creation: standard 5 credits, launch discount 3 credits.
+    - Solving mock exams / exams / building / question: 1 question credit.
+    CHAVRUTA_CREDIT_COSTS overrides as 'lesson=3,qa=1'; setting it to an empty string charges 1 for everything.
+    """
     raw = os.environ.get("CHAVRUTA_CREDIT_COSTS")
     if raw is None:
-        costs = _DEFAULT_COSTS
+        costs = dict(_DEFAULT_COSTS)
+        file_cost = file_creation_credit_cost()
+        for k in ("lesson", "file", "file_creation", "bagrut_summary", "bagrut_exam", "bagrut_solution", "sourcesheet_guide"):
+            costs[k] = file_cost
     else:
         costs = {}
         for part in raw.split(","):
             k, _, v = part.partition("=")
             if k.strip() and v.strip().isdigit():
                 costs[k.strip().lower()] = int(v)
-    return max(1, costs.get((intent or "").strip().lower(), _FALLBACK_COST))
+
+    if has_files:
+        return costs.get("file_creation", file_creation_credit_cost())
+
+    key = (intent or "").strip().lower()
+    if action:
+        act = action.strip().lower()
+        if act in ("summary", "exam", "solution"):
+            return costs.get(f"{key}_{act}", costs.get("file_creation", file_creation_credit_cost()))
+        if act in ("practice", "check", "solve", "build"):
+            return QUESTION_CREDITS
+
+    return max(1, costs.get(key, _FALLBACK_COST))
+
+
+def public_credit_packs(lang: str = "he") -> list[dict]:
+    """The credit passes / packs list for the UI."""
+    he = (lang or "he").startswith("he")
+    return [
+        {
+            "id": p.id,
+            "credits": p.credits,
+            "price_ils": p.price_ils,
+            "name": p.name_he if he else p.name_en,
+            "is_institutional": p.is_institutional,
+        }
+        for p in CREDIT_PACKS
+    ]
 
 
 def public_catalogue(lang: str = "he") -> list[dict]:
@@ -542,6 +634,7 @@ def public_catalogue(lang: str = "he") -> list[dict]:
             "annual_saving_pct": 0 if institutional else annual_saving_pct(t.id),
             "multiple": t.multiple,          # "3x the free tier" — the only allowance figure shown
             "seats": t.seats,                # > 1 is what the frontend uses to render "contact us"
+            "monthly_credits": t.monthly_credits,
         })
     return out
 
@@ -583,5 +676,6 @@ def limits_catalogue(lang: str = "he") -> list[dict]:
             "weekly_tokens": weekly_tokens(t.id),
             "weekly_lessons": weekly_lessons(t.id),
             "seats": t.seats,
+            "monthly_credits": t.monthly_credits,
         })
     return out

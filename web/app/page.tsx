@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Attachment, CrisisPayload, FileOut, Lang, Message, SavedLesson, Session } from "@/lib/types";
-import { api, LessonExtras, Me, Tier } from "@/lib/api";
+import { api, CreditPack, LessonExtras, Me, Tier } from "@/lib/api";
 import { IntentId } from "@/lib/i18n";
 import { tr } from "@/lib/i18n";
 import { LessonFields } from "@/components/LessonOptions";
@@ -85,6 +85,7 @@ export default function Home() {
   const [me, setMe] = useState<Me | null>(null);
   const [billingEnabled, setBillingEnabled] = useState(false);
   const [tiers, setTiers] = useState<Tier[]>([]);
+  const [creditPacks, setCreditPacks] = useState<CreditPack[]>([]);
   const [plansOpen, setPlansOpen] = useState(false);
 
   // Preferences (persisted)
@@ -457,8 +458,12 @@ export default function Home() {
 
   useEffect(() => {
     api.billingConfig()
-      .then((c) => { setBillingEnabled(c.enabled); setTiers(c.tiers || []); })
-      .catch(() => { setBillingEnabled(false); setTiers([]); });
+      .then((c) => {
+        setBillingEnabled(c.enabled);
+        setTiers(c.tiers || []);
+        setCreditPacks(c.credit_packs || []);
+      })
+      .catch(() => { setBillingEnabled(false); setTiers([]); setCreditPacks([]); });
   }, [auth.user?.id]);
 
   // Esc closes an open mobile drawer (keyboard accessibility).
@@ -888,7 +893,9 @@ export default function Home() {
         open={plansOpen}
         lang={lang}
         tiers={tiers}
+        creditPacks={creditPacks}
         currentPlan={me?.plan}
+        credits={me?.credits}
         onClose={() => setPlansOpen(false)}
         onChoose={choosePlan}
       />}
@@ -913,6 +920,7 @@ export default function Home() {
         planName={me?.plan_name}
         planUntil={me?.plan_until}
         credits={me?.credits}
+        creditsResetAt={me?.credits_reset_at}
         cycle={me?.cycle}
         cancelAtPeriodEnd={me?.cancel_at_period_end}
         dayLeft={me?.day_left ?? null}

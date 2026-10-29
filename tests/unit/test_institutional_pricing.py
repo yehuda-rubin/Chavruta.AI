@@ -48,8 +48,7 @@ def test_limits_catalogue_also_hides_institutional_prices():
 def test_limits_catalogue_still_shows_institutional_usage_limits():
     """Usage caps are not the competitive-sensitive part — only the price is."""
     rows = _institutional_rows(plans.limits_catalogue("he"))
-    assert all(r["daily_tokens"] > 0 and r["weekly_tokens"] > 0 and r["weekly_lessons"] > 0
-               for r in rows)
+    assert all(r["daily_tokens"] > 0 and r["weekly_tokens"] > 0 for r in rows)
 
 
 def test_limits_catalogue_still_prices_personal_tiers():

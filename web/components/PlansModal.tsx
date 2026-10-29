@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
-import type { Tier } from "@/lib/api";
+import type { Tier, CreditPack } from "@/lib/api";
 import { tr } from "@/lib/i18n";
 import type { Lang } from "@/lib/types";
 import { Modal } from "./Modal";
@@ -9,25 +9,22 @@ import { Modal } from "./Modal";
 // Same address used by SupportModal and Blocked — one contact channel, not a new one per feature.
 const CONTACT_EMAIL = "partners@chavrutaai.org";
 
-/**
- * Plan picker. Shows both usage caps, not just the price — the daily one is what a user feels day
- * to day, and the weekly one is the number that actually decides whether a plan fits them, so
- * hiding it until they hit it would be a nasty surprise rather than a limit they chose.
- *
- * No tier is unlimited, and the UI never implies otherwise.
- */
 export function PlansModal({
   open,
   lang,
   tiers,
+  creditPacks,
   currentPlan,
+  credits,
   onClose,
   onChoose,
 }: {
   open: boolean;
   lang: Lang;
   tiers: Tier[];
+  creditPacks?: CreditPack[];
   currentPlan?: string;
+  credits?: number;
   onClose: () => void;
   onChoose: (plan: string, cycle: "monthly" | "annual") => void;
 }) {
@@ -40,27 +37,90 @@ export function PlansModal({
   const free = tiers.find((t) => t.seats === 1 && t.price_ils === 0);
   const bestSaving = Math.max(0, ...paid.map((t) => t.annual_saving_pct));
 
+  const packs = creditPacks || [
+    { id: "entry", credits: 50, price_ils: 19.0, name: lang === "he" ? "כרטיסיית כניסה" : "Entry Pass" },
+    { id: "learner", credits: 120, price_ils: 39.0, name: lang === "he" ? "כרטיסיית לומד" : "Learner Pass" },
+    { id: "researcher", credits: 280, price_ils: 79.0, name: lang === "he" ? "כרטיסיית חוקר" : "Researcher Pass" },
+  ];
+
   return (
     <Modal open={open} title={tr(lang, "plansHeading")} onClose={onClose}>
       <div className="flex flex-col gap-4 overflow-y-auto">
-        {/* Monthly / annual switch — the discount is stated, not implied. */}
-        <div className="flex items-center justify-center gap-1 p-1 rounded-2xl glass self-center">
-          {(["monthly", "annual"] as const).map((c) => (
-            <button
-              key={c}
-              onClick={() => setCycle(c)}
-              aria-pressed={cycle === c}
-              className={
-                "px-4 py-2 rounded-xl text-sm font-semibold transition " +
-                (cycle === c ? "grad text-white" : "text-ink/70 hover:bg-ink/5")
-              }
-            >
-              {tr(lang, c === "monthly" ? "cycleMonthly" : "cycleAnnual")}
-              {c === "annual" && bestSaving > 0 && (
-                <span className="ms-1 text-[11px] opacity-90">−{bestSaving}%</span>
-              )}
-            </button>
-          ))}
+        {/* Credit costs banner */}
+        <div className="p-3 rounded-2xl glass border border-amber-500/20 bg-amber-500/5 text-xs text-ink/80 flex flex-col gap-1 leading-relaxed">
+          <p className="font-semibold text-amber-900 dark:text-amber-200">
+            {tr(lang, "freeMonthlyNote")}
+          </p>
+          <p className="text-ink/70">
+            {tr(lang, "creditCostExplainer")}
+          </p>
+        </div>
+
+        {/* Credit Passes section */}
+        <div className="flex flex-col gap-2">
+          <div>
+            <h3 className="font-bold text-sm text-ink">{tr(lang, "creditPacksHeading")}</h3>
+            <p className="text-xs text-ink/60">{tr(lang, "creditPacksSub")}</p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {packs.filter((p) => !p.is_institutional).map((p) => (
+              <div
+                key={p.id}
+                className="flex flex-col gap-2 p-3.5 rounded-2xl glass ring-1 ring-emerald-500/20 hover:ring-emerald-500/40 transition"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-sm">{p.name}</span>
+                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-800 dark:text-emerald-300">
+                    {p.credits} {tr(lang, "creditsLabel")}
+                  </span>
+                </div>
+                <p className="text-xl font-bold">
+                  ₪{p.price_ils}
+                  <span className="text-xs font-normal text-ink/50 ms-1">
+                    ({(p.price_ils / p.credits).toFixed(2)} ₪/{tr(lang, "creditsLabel")})
+                  </span>
+                </p>
+                <p className="text-[11px] text-ink/60">
+                  {lang === "he" ? "ללא הגבלת זמן · צבירה לחשבון" : "No expiration · Rollover"}
+                </p>
+                <button
+                  onClick={() => onChoose(`pack_${p.id}`, "monthly")}
+                  className="mt-auto px-3 py-1.5 rounded-xl border border-emerald-600/30 text-emerald-800 dark:text-emerald-300 font-semibold text-xs hover:bg-emerald-500/10 transition"
+                >
+                  {tr(lang, "choosePlan")}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <hr className="border-ink/10 my-1" />
+
+        {/* Subscriptions heading & Monthly / annual switch */}
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <h3 className="font-bold text-sm text-ink">
+              {lang === "he" ? "מנויים חודשיים ושנתיים" : "Monthly & Annual Subscriptions"}
+            </h3>
+            <div className="flex items-center gap-1 p-1 rounded-2xl glass">
+              {(["monthly", "annual"] as const).map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setCycle(c)}
+                  aria-pressed={cycle === c}
+                  className={
+                    "px-3 py-1 rounded-xl text-xs font-semibold transition " +
+                    (cycle === c ? "grad text-white" : "text-ink/70 hover:bg-ink/5")
+                  }
+                >
+                  {tr(lang, c === "monthly" ? "cycleMonthly" : "cycleAnnual")}
+                  {c === "annual" && bestSaving > 0 && (
+                    <span className="ms-1 text-[10px] opacity-90">−{bestSaving}%</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {cycle === "annual" && (
@@ -98,8 +158,12 @@ export function PlansModal({
                 )}
                 {/* A ratio, never a token or lesson count. See app/plans.py public_catalogue. */}
                 <ul className="text-xs text-ink/70 flex flex-col gap-1 mt-1">
+                  {t.monthly_credits ? (
+                    <li className="font-semibold text-tekhelet">
+                      {tr(lang, "creditsPerMonth").replace("{n}", String(t.monthly_credits))}
+                    </li>
+                  ) : null}
                   <li>{tr(lang, "timesUsage").replace("{n}", String(t.multiple))}</li>
-                  <li>{tr(lang, "timesLessons").replace("{n}", String(t.multiple))}</li>
                 </ul>
                 <button
                   onClick={() => onChoose(t.id, cycle)}

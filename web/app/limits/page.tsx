@@ -14,10 +14,28 @@ interface LimitTier {
   daily_tokens: number;
   weekly_tokens: number;
   weekly_lessons: number;
+  monthly_credits?: number;
+}
+
+interface CreditPack {
+  id: string;
+  name: string;
+  credits: number;
+  price_ils: number;
+}
+
+interface CreditCosts {
+  question: number;
+  file_creation: number;
+  file_creation_standard: number;
+  launch_discount: boolean;
+  free_monthly_credits: number;
 }
 
 interface LimitsResponse {
   tiers: LimitTier[];
+  credit_packs?: CreditPack[];
+  credit_costs?: CreditCosts;
 }
 
 // No `metadata` export here: this is a Client Component (needs useState/useEffect for the live
@@ -112,13 +130,13 @@ export default function Limits() {
                       {tr(lang, "limitsTablePlan")}
                     </th>
                     <th className="py-2 px-3 font-semibold text-tekhelet">
+                      {lang === "he" ? "קרדיטים לחודש" : "Monthly credits"}
+                    </th>
+                    <th className="py-2 px-3 font-semibold text-tekhelet">
                       {tr(lang, "limitsTableTokensDay")}
                     </th>
                     <th className="py-2 px-3 font-semibold text-tekhelet">
                       {tr(lang, "limitsTableTokensWeek")}
-                    </th>
-                    <th className="py-2 px-3 font-semibold text-tekhelet">
-                      {tr(lang, "limitsTableLessonsWeek")}
                     </th>
                     <th className="py-2 px-3 font-semibold text-tekhelet">
                       {tr(lang, "limitsTableMonthly")}
@@ -129,14 +147,46 @@ export default function Limits() {
                   {data.tiers.map((tier) => (
                     <tr key={tier.id} className="border-b border-ink/5 last:border-0">
                       <td className="py-2 px-3 font-medium">{tier.name}</td>
+                      <td className="py-2 px-3 text-ink/70">{tier.monthly_credits ?? (tier.id === "free" ? 20 : "—")}</td>
                       <td className="py-2 px-3 text-ink/70">{formatNumber(tier.daily_tokens)}</td>
                       <td className="py-2 px-3 text-ink/70">{formatNumber(tier.weekly_tokens)}</td>
-                      <td className="py-2 px-3 text-ink/70">{tier.weekly_lessons}</td>
                       <td className="py-2 px-3 text-ink/70">₪{tier.price_ils}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
+
+            {data.credit_packs && data.credit_packs.length > 0 && (
+              <div className="flex flex-col gap-2 pt-2 border-t border-ink/10">
+                <h2 className="font-semibold text-tekhelet text-base">
+                  {tr(lang, "creditPacksHeading")}
+                </h2>
+                <p className="text-xs text-ink/70">
+                  {tr(lang, "creditPacksSub")}
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mt-1">
+                  {data.credit_packs.map((pack) => (
+                    <div key={pack.id} className="p-3 rounded-2xl border border-ink/10 bg-white/40 flex flex-col gap-1 text-center">
+                      <span className="font-semibold text-sm text-ink">{pack.name}</span>
+                      <span className="text-xs text-tekhelet font-medium">{pack.credits} {tr(lang, "creditsLabel")}</span>
+                      <span className="text-sm font-bold text-ink/80 mt-1">₪{pack.price_ils}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="p-3.5 rounded-2xl bg-tekhelet/[0.04] border border-tekhelet/15 flex flex-col gap-1.5 text-xs text-ink/80 leading-relaxed">
+              <span className="font-semibold text-tekhelet text-sm">
+                {lang === "he" ? "שיטת הקרדיטים והאיפוס החודשי" : "Credits and Reset Policy"}
+              </span>
+              <p>{tr(lang, "creditCostExplainer")}</p>
+              <p>
+                {lang === "he"
+                  ? "• מכסת 20 הקרדיטים החינמיים מתאפסת בכל חודש בתאריך פתיחת החשבון (Rolling Month), ולא ב-1 לחודש הקלנדרי."
+                  : "• The 20 free monthly credits reset each month on the anniversary date of account opening, not on the 1st of the calendar month."}
+              </p>
             </div>
 
             <section className="flex flex-col gap-2 text-sm text-ink/70 leading-relaxed">

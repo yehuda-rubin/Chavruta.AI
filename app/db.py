@@ -15,6 +15,7 @@ from pathlib import Path
 from collections.abc import Collection, Mapping
 from typing import Any, NamedTuple
 from zoneinfo import ZoneInfo
+from dateutil.relativedelta import relativedelta
 
 from app import moderation
 
@@ -107,7 +108,8 @@ def get_conn() -> sqlite3.Connection:
 #   17  coupons                                                   2026-07-26
 #   ≤16 subscriptions, bans, deletion scheduling, per-owner scoping — see git log -G'^SCHEMA_VERSION'
 #   39  messages.rating (1: like, -1: dislike, None: unrated)      2026-10-28
-SCHEMA_VERSION = 39
+#   40  accounts.free_credits_month (20 monthly credits for free users) 2026-10-29
+SCHEMA_VERSION = 40
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -322,6 +324,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         -- coerced click is recoverable. NULL scheduled_for = no pending deletion.
         CREATE TABLE IF NOT EXISTS accounts (
             owner_id               TEXT PRIMARY KEY,
+            created_at             TEXT DEFAULT '',   -- ISO ts when the account was opened
+            free_credits_reset_at  TEXT DEFAULT '',   -- ISO ts of the start of the current rolling month cycle
             deletion_requested_at  TEXT,      -- ISO ts when the user asked to delete (NULL = not asked)
             deletion_scheduled_for TEXT,      -- ISO ts when the purge runs (NULL = nothing scheduled)
             plan                   TEXT NOT NULL DEFAULT 'free',  -- see app/plans.py; flipped by billing
@@ -931,6 +935,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
         mcols = {r[1] for r in conn.execute("PRAGMA table_info(messages)")}
         if "rating" not in mcols:
             conn.execute("ALTER TABLE messages ADD COLUMN rating INTEGER DEFAULT NULL")
+
+    if version < 40:
+        acols = {r[1] for r in conn.execute("PRAGMA table_info(accounts)")}
+        if "created_at" not in acols:
+            conn.execute("ALTER TABLE accounts ADD COLUMN created_at TEXT DEFAULT ''")
+        if "free_credits_reset_at" not in acols:
+            conn.execute("ALTER TABLE accounts ADD COLUMN free_credits_reset_at TEXT DEFAULT ''")
+        if "free_credits_month" not in acols:
+            conn.execute("ALTER TABLE accounts ADD COLUMN free_credits_month TEXT DEFAULT ''")
 
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
@@ -2269,7 +2282,7 @@ def get_account(owner_id: str) -> dict[str, Any] | None:
     conn = get_conn()
     with _LOCK:
         row = conn.execute(
-            "SELECT owner_id, deletion_requested_at, deletion_scheduled_for, plan FROM accounts "
+            "SELECT owner_id, created_at, free_credits_reset_at, deletion_requested_at, deletion_scheduled_for, plan, credits FROM accounts "
             "WHERE owner_id=?", (owner_id,)).fetchone()
     return dict(row) if row else None
 
@@ -2294,6 +2307,126 @@ def set_plan(owner_id: str, plan: str) -> None:
 
 
 # ── Credits ───────────────────────────────────────────────────────────────────
+FREE_MONTHLY_CREDITS = 20
+
+
+def _parse_iso(val: str | None, fallback: datetime) -> datetime:
+    if not val:
+        return fallback
+    try:
+        dt = datetime.fromisoformat(val)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=fallback.tzinfo)
+        return dt
+    except Exception:
+        return fallback
+
+
+def get_credit_cycle_start(created_at: datetime, now_dt: datetime) -> datetime:
+    """Calculate the start of the current monthly credit cycle based on account opening anniversary."""
+    if now_dt <= created_at:
+        return created_at
+    k = (now_dt.year - created_at.year) * 12 + (now_dt.month - created_at.month)
+    while k > 0 and created_at + relativedelta(months=k) > now_dt:
+        k -= 1
+    while created_at + relativedelta(months=k + 1) <= now_dt:
+        k += 1
+    return created_at + relativedelta(months=k)
+
+
+def get_free_credits_next_reset(owner_id: str, *, now_override: datetime | None = None) -> str | None:
+    """Return the ISO timestamp of the next free credits reset (anniversary of account opening)."""
+    if not owner_id or owner_id == "local":
+        return None
+    if now_override is not None:
+        now_dt = now_override
+    else:
+        try:
+            tz = ZoneInfo(os.environ.get("CHAVRUTA_TZ", "Asia/Jerusalem"))
+            now_dt = datetime.now(tz)
+        except Exception:
+            now_dt = datetime.now(UTC)
+    conn = get_conn()
+    with _LOCK:
+        row = conn.execute(
+            "SELECT created_at FROM accounts WHERE owner_id=?", (owner_id,)
+        ).fetchone()
+        if not row or not row["created_at"]:
+            return None
+        created_dt = _parse_iso(row["created_at"], now_dt)
+        cycle_start = get_credit_cycle_start(created_dt, now_dt)
+        next_reset = cycle_start + relativedelta(months=1)
+        return next_reset.isoformat()
+
+
+def ensure_free_monthly_credits(owner_id: str, *, now_override: datetime | None = None) -> int:
+    """Ensure a free account receives its 20 credits per month from account opening date.
+
+    Quotas reset each rolling month from the date of account creation (not calendar month).
+    Returns current balance.
+    """
+    if not owner_id or owner_id == "local":
+        return 0
+    if now_override is not None:
+        now_dt = now_override
+    else:
+        try:
+            tz = ZoneInfo(os.environ.get("CHAVRUTA_TZ", "Asia/Jerusalem"))
+            now_dt = datetime.now(tz)
+        except Exception:
+            now_dt = datetime.now(UTC)
+    now_iso = now_dt.isoformat()
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        row = conn.execute(
+            "SELECT plan, credits, created_at, free_credits_reset_at FROM accounts WHERE owner_id=?",
+            (owner_id,)
+        ).fetchone()
+        if not row:
+            conn.execute(
+                "INSERT INTO accounts (owner_id, plan, credits, created_at, free_credits_reset_at) "
+                "VALUES (?, 'free', ?, ?, ?) "
+                "ON CONFLICT(owner_id) DO UPDATE SET "
+                "credits = max(credits, excluded.credits), "
+                "created_at = CASE WHEN accounts.created_at IS NULL OR accounts.created_at = '' THEN excluded.created_at ELSE accounts.created_at END, "
+                "free_credits_reset_at = excluded.free_credits_reset_at",
+                (owner_id, FREE_MONTHLY_CREDITS, now_iso, now_iso)
+            )
+            return FREE_MONTHLY_CREDITS
+
+        plan = (row["plan"] or "free").strip().lower()
+        current_credits = int(row["credits"] or 0)
+
+        # Retrieve or backfill created_at
+        created_str = (row["created_at"] or "").strip()
+        if not created_str:
+            s_row = conn.execute(
+                "SELECT MIN(created_at) AS earliest FROM sessions WHERE owner_id=?", (owner_id,)
+            ).fetchone()
+            created_str = (s_row["earliest"] if s_row and s_row["earliest"] else now_iso).strip()
+            conn.execute("UPDATE accounts SET created_at = ? WHERE owner_id = ?", (created_str, owner_id))
+        created_dt = _parse_iso(created_str, now_dt)
+
+        # Retrieve or initialize free_credits_reset_at
+        reset_str = (row["free_credits_reset_at"] or "").strip()
+        if not reset_str:
+            last_reset_dt = created_dt
+        else:
+            last_reset_dt = _parse_iso(reset_str, created_dt)
+
+        cycle_start = get_credit_cycle_start(created_dt, now_dt)
+
+        if plan == "free" and last_reset_dt < cycle_start:
+            new_balance = max(current_credits, FREE_MONTHLY_CREDITS)
+            conn.execute(
+                "UPDATE accounts SET credits = ?, free_credits_reset_at = ? WHERE owner_id = ?",
+                (new_balance, cycle_start.isoformat(), owner_id)
+            )
+            return new_balance
+
+        return current_credits
+
+
 def get_credits(owner_id: str) -> int:
     conn = get_conn()
     with _LOCK:
@@ -2314,6 +2447,7 @@ def add_credits(owner_id: str, amount: int) -> int:
 
 
 REFERRAL_REWARD_VALIDITY_DAYS = 90
+# Individual single credits are not sold.
 CREDIT_PRICE_ILS = 1.20
 
 
