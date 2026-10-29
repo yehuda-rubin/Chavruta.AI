@@ -548,7 +548,20 @@ export const api = {
     decline: () => req<HelperStatus>("/helper/decline", { method: "POST" }),
     markRead: (id: number) => req<{ read: boolean }>(`/helper/messages/${id}/read`, { method: "POST" }),
   },
+
+  userNotices: {
+    list: () => req<{ notices: UserNotice[] }>("/account/notices"),
+    markRead: (id: number) => req<{ ok: boolean }>(`/account/notices/${id}/read`, { method: "POST" }),
+  },
 };
+
+export interface UserNotice {
+  id: number;
+  title: string;
+  body: string;
+  created_at: string;
+  kind: "modal" | "banner";
+}
 
 export interface Coupon {
   code: string;

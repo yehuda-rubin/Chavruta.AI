@@ -7083,6 +7083,26 @@ def helper_decline(owner: str = Depends(current_owner)):
 def helper_message_read(message_id: int, owner: str = Depends(current_owner)):
     return {"read": devhelpers.mark_read(owner, message_id)}
 
+# ── User Notices / Modals ─────────────────────────────────────────────────────
+@app.get("/account/notices")
+def get_user_notices(owner: str = Depends(current_owner)):
+    """Return unread in-app notices for the signed-in user."""
+    if owner == "local":
+        return {"notices": []}
+    db.expire_due_credit_grants(owner)
+    return {"notices": db.get_unread_user_notices(owner)}
+
+
+@app.post("/account/notices/{notice_id}/read")
+def read_user_notice(notice_id: int, owner: str = Depends(current_owner)):
+    """Mark a user notice as read."""
+    if owner == "local":
+        return {"ok": True}
+    ok = db.mark_user_notice_read(owner, notice_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="not found")
+    return {"ok": True}
+
 
 # ── The sugya game (beta — see docs/SUGYA_GAME.md) ───────────────────────────
 # A guided path through one sugya, one source per level, checked mechanically on PROVENANCE only:

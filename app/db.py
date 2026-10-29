@@ -109,7 +109,8 @@ def get_conn() -> sqlite3.Connection:
 #   ≤16 subscriptions, bans, deletion scheduling, per-owner scoping — see git log -G'^SCHEMA_VERSION'
 #   39  messages.rating (1: like, -1: dislike, None: unrated)      2026-10-28
 #   40  accounts.free_credits_month (20 monthly credits for free users) 2026-10-29
-SCHEMA_VERSION = 40
+#   41  user_notices, credit_grants (in-app notices and timed bonus credits) 2026-10-29
+SCHEMA_VERSION = 41
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -439,6 +440,32 @@ def _migrate(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_helper_messages_owner
             ON helper_messages(owner_id, read_at);
+
+        -- In-app notices / dialogs delivered to specific accounts (bug report acknowledgments, notices)
+        CREATE TABLE IF NOT EXISTS user_notices (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id    TEXT NOT NULL,
+            title       TEXT NOT NULL DEFAULT '',
+            body        TEXT NOT NULL,
+            created_at  TEXT NOT NULL,
+            read_at     TEXT,
+            kind        TEXT NOT NULL DEFAULT 'modal'
+        );
+        CREATE INDEX IF NOT EXISTS idx_user_notices_owner
+            ON user_notices(owner_id, read_at);
+
+        -- Timed credit grants (e.g. bonus credits with an expiry date)
+        CREATE TABLE IF NOT EXISTS credit_grants (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id   TEXT NOT NULL,
+            amount     INTEGER NOT NULL,
+            remaining  INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            reason     TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_credit_grants_owner
+            ON credit_grants(owner_id, expires_at);
 
         -- Accounting ledger. Deliberately has NO owner_id and is NEVER purged: tax law requires
         -- keeping records of what was charged for ~7 years, while a user may ask to be forgotten
@@ -944,6 +971,31 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute("ALTER TABLE accounts ADD COLUMN free_credits_reset_at TEXT DEFAULT ''")
         if "free_credits_month" not in acols:
             conn.execute("ALTER TABLE accounts ADD COLUMN free_credits_month TEXT DEFAULT ''")
+
+    if version < 41:
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS user_notices (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_id    TEXT NOT NULL,
+                title       TEXT NOT NULL DEFAULT '',
+                body        TEXT NOT NULL,
+                created_at  TEXT NOT NULL,
+                read_at     TEXT,
+                kind        TEXT NOT NULL DEFAULT 'modal'
+            );
+            CREATE INDEX IF NOT EXISTS idx_user_notices_owner ON user_notices(owner_id, read_at);
+
+            CREATE TABLE IF NOT EXISTS credit_grants (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_id   TEXT NOT NULL,
+                amount     INTEGER NOT NULL,
+                remaining  INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                reason     TEXT NOT NULL DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS idx_credit_grants_owner ON credit_grants(owner_id, expires_at);
+        """)
 
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
@@ -2446,6 +2498,62 @@ def add_credits(owner_id: str, amount: int) -> int:
     return int(row["credits"]) if row else 0
 
 
+def grant_credits_with_expiry(owner_id: str, amount: int, days: int = 30, reason: str = "") -> int:
+    """Grant credits with a specified expiry in days (default 30). Returns new total credit balance."""
+    amount = max(0, int(amount))
+    if amount == 0:
+        return get_credits(owner_id)
+    now_dt = datetime.now(UTC)
+    expires_dt = now_dt + timedelta(days=days)
+    now_iso = now_dt.isoformat()
+    expires_iso = expires_dt.isoformat()
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        conn.execute(
+            "INSERT INTO credit_grants (owner_id, amount, remaining, created_at, expires_at, reason) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (owner_id, amount, amount, now_iso, expires_iso, reason)
+        )
+        conn.execute(
+            "INSERT INTO accounts (owner_id, credits) VALUES (?, ?) "
+            "ON CONFLICT(owner_id) DO UPDATE SET credits = credits + excluded.credits",
+            (owner_id, amount)
+        )
+        row = conn.execute("SELECT credits FROM accounts WHERE owner_id=?", (owner_id,)).fetchone()
+    return int(row["credits"]) if row else 0
+
+
+def expire_due_credit_grants(owner_id: str | None = None) -> int:
+    """Check and expire any credit grants whose expiry date has passed. Deducts unspent remaining credits.
+    Returns total expired credits deducted."""
+    conn = get_conn()
+    now_iso = datetime.now(UTC).isoformat()
+    with _LOCK, _tx(conn):
+        if not _table_exists(conn, "credit_grants"):
+            return 0
+        sql = "SELECT id, owner_id, remaining FROM credit_grants WHERE expires_at <= ? AND remaining > 0"
+        params: list[Any] = [now_iso]
+        if owner_id:
+            sql += " AND owner_id = ?"
+            params.append(owner_id)
+        due = conn.execute(sql, tuple(params)).fetchall()
+        if not due:
+            return 0
+        total_deducted = 0
+        for r in due:
+            gid = r["id"]
+            oid = r["owner_id"]
+            rem = int(r["remaining"])
+            if rem > 0:
+                conn.execute(
+                    "UPDATE accounts SET credits = max(0, credits - ?) WHERE owner_id = ?",
+                    (rem, oid)
+                )
+                conn.execute("UPDATE credit_grants SET remaining = 0 WHERE id = ?", (gid,))
+                total_deducted += rem
+        return total_deducted
+
+
 REFERRAL_REWARD_VALIDITY_DAYS = 90
 # Individual single credits are not sold.
 CREDIT_PRICE_ILS = 1.20
@@ -2582,6 +2690,19 @@ def spend_credits(owner_id: str, amount: int) -> tuple[bool, int]:
         if have < amount:
             return False, have
         conn.execute("UPDATE accounts SET credits = credits - ? WHERE owner_id=?", (amount, owner_id))
+        if _table_exists(conn, "credit_grants"):
+            to_consume = amount
+            grants = conn.execute(
+                "SELECT id, remaining FROM credit_grants WHERE owner_id=? AND remaining > 0 ORDER BY expires_at ASC",
+                (owner_id,)
+            ).fetchall()
+            for g in grants:
+                rem = int(g["remaining"])
+                deduct = min(rem, to_consume)
+                conn.execute("UPDATE credit_grants SET remaining = remaining - ? WHERE id = ?", (deduct, g["id"]))
+                to_consume -= deduct
+                if to_consume <= 0:
+                    break
         return True, have - amount
 
 
@@ -2613,6 +2734,54 @@ def refund_stopped_credits(owner_id: str, credits_spent: int, max_weekly: int = 
             "ON CONFLICT(owner_id, day, meter) DO UPDATE SET count = excluded.count",
             (owner_id, target_day, CREDIT_STOP_REFUNDS, current + to_refund))
         return to_refund
+
+
+# ── User Notices ───────────────────────────────────────────────────────────────
+def add_user_notice(owner_id: str, body: str, title: str = "", kind: str = "modal") -> int:
+    """Send an in-app notice or dialog to a specific user. Returns the inserted row id."""
+    owner_id = (owner_id or "").strip()
+    body = (body or "").strip()
+    if not owner_id or not body:
+        return 0
+    now_iso = datetime.now(UTC).isoformat()
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        cur = conn.execute(
+            "INSERT INTO user_notices (owner_id, title, body, created_at, kind) VALUES (?, ?, ?, ?, ?)",
+            (owner_id, (title or "").strip(), body, now_iso, kind)
+        )
+        return cur.lastrowid or 0
+
+
+def get_unread_user_notices(owner_id: str) -> list[dict[str, Any]]:
+    """Return all unread notices for a user, newest first."""
+    if not owner_id or owner_id == "local":
+        return []
+    conn = get_conn()
+    with _LOCK:
+        if not _table_exists(conn, "user_notices"):
+            return []
+        rows = conn.execute(
+            "SELECT id, title, body, created_at, kind FROM user_notices WHERE owner_id = ? AND read_at IS NULL ORDER BY id DESC",
+            (owner_id,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def mark_user_notice_read(owner_id: str, notice_id: int) -> bool:
+    """Mark a user notice as read. Scoped strictly to owner_id."""
+    if not owner_id or owner_id == "local":
+        return False
+    now_iso = datetime.now(UTC).isoformat()
+    conn = get_conn()
+    with _LOCK, _tx(conn):
+        if not _table_exists(conn, "user_notices"):
+            return False
+        cur = conn.execute(
+            "UPDATE user_notices SET read_at = ? WHERE id = ? AND owner_id = ? AND read_at IS NULL",
+            (now_iso, int(notice_id), owner_id)
+        )
+        return cur.rowcount > 0
 
 
 # ── Coupons ───────────────────────────────────────────────────────────────────
@@ -3026,6 +3195,8 @@ def purge_owner(owner_id: str) -> None:
         # true, so keeping the rows would buy nothing and retain an identifier.
         conn.execute("DELETE FROM dev_helpers WHERE owner_id=?", (owner_id,))
         conn.execute("DELETE FROM helper_messages WHERE owner_id=?", (owner_id,))
+        conn.execute("DELETE FROM user_notices WHERE owner_id=?", (owner_id,))
+        conn.execute("DELETE FROM credit_grants WHERE owner_id=?", (owner_id,))
         # …and the operator's own trace on notices they sent, if it is the OPERATOR being deleted.
         conn.execute("UPDATE helper_messages SET sent_by=? WHERE sent_by=?",
                      (DELETED_OWNER, owner_id))

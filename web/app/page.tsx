@@ -17,6 +17,7 @@ import { SettingsModal, Theme } from "@/components/SettingsModal";
 import { PlansModal } from "@/components/PlansModal";
 import { SupportModal } from "@/components/SupportModal";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
+import { NoticeModal } from "@/components/NoticeModal";
 import { SignIn } from "@/components/SignIn";
 import { Landing } from "@/components/Landing";
 import { Blocked } from "@/components/Blocked";
@@ -937,6 +938,7 @@ export default function Home() {
       />
       <SupportModal open={showSupport} lang={lang} onClose={() => setShowSupport(false)} />
       <FilePreviewModal file={previewFile} lang={lang} onClose={() => setPreviewFile(null)} />
+      <NoticeModal lang={lang} />
     </div>
   );
 }

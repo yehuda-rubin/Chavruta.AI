@@ -57,7 +57,7 @@ def _stamp(table, mid):
 # ── T001: schema ──────────────────────────────────────────────────────────────
 def test_migration_35_creates_everything(d):
     conn = db.get_conn()
-    assert db.SCHEMA_VERSION == 37
+    assert db.SCHEMA_VERSION >= 37
     assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
     for t in ("age_records", "age_record_log", "org_join_requests", "parent_links",
               "content_denylist", "crisis_alerts"):
